@@ -5,7 +5,9 @@ const state = {
     selectedArtist: null,
     albums: [],
     selectedAlbum: null,
-    tracks: []
+    tracks: [],
+    playQueue: [],
+    playQueueIndex: -1
 };
 
 // DOM Elements
@@ -26,6 +28,14 @@ const artistHeroImageEl = document.getElementById('artist-hero-image');
 const topTracksListEl = document.getElementById('top-tracks-list');
 const similarArtistsGridEl = document.getElementById('similar-artists-grid');
 const artistAlbumsGridEl = document.getElementById('artist-albums-grid');
+const playAlbumBtn = document.getElementById('play-album-btn');
+const prevBtn = document.getElementById('prev-btn');
+const nextBtn = document.getElementById('next-btn');
+
+const queueIndicatorEl = document.getElementById('queue-indicator');
+const queueCountEl = document.getElementById('queue-count');
+const queueViewEl = document.getElementById('queue-view');
+const queueListEl = document.getElementById('queue-list');
 
 // Init
 async function init() {
@@ -246,8 +256,10 @@ function showAllArtists() {
     artistDetailsEl.style.display = 'none';
     albumGridEl.style.display = 'none';
     trackListEl.style.display = 'none';
+    queueViewEl.style.display = 'none'; // hide queue
     document.getElementById('refresh-meta-btn').style.display = 'none';
     state.selectedArtist = null;
+    state.selectedAlbum = null;
 }
 
 function selectArtist(artist) {
@@ -259,6 +271,7 @@ function showArtistDetails(artist, pushState = true) {
     if (!artist) return;
 
     state.selectedArtist = artist;
+    state.selectedAlbum = null; // Clear selected album when showing artist details
 
     if (pushState) {
         history.pushState({ view: 'artist-details', data: artist.name }, '', `#artist=${encodeURIComponent(artist.name)}`);
@@ -270,6 +283,7 @@ function showArtistDetails(artist, pushState = true) {
     artistDetailsEl.style.display = 'block';
     albumGridEl.style.display = 'none';
     trackListEl.style.display = 'none';
+    queueViewEl.style.display = 'none';
 
     // Show Refresh Button
     document.getElementById('refresh-meta-btn').style.display = 'inline-block';
@@ -514,7 +528,7 @@ function renderAlbums() {
         artWrapper.className = 'album-art-wrapper';
 
         const img = document.createElement('img');
-        img.src = album.art_id ? `/art/${album.art_id}` : 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzMzMyIvPjwvc3ZnPg==';
+        img.src = album.art_id ? `/art/${album.art_id}` : 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjMzMzIi8+PC9zdmc+';
         img.className = 'album-art';
 
         artWrapper.appendChild(img);
@@ -627,7 +641,7 @@ function renderTracks(album) {
     albumGenreEl.textContent = genre;
     albumMetaEl.textContent = `Released by ${label} • ${date} • ${totalTracks} Tracks • ${formatDurationLong(totalDuration)}`;
 
-    albumArtLargeEl.src = album.art_id ? `/art/${album.art_id}` : 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzMzMyIvPjwvc3ZnPg==';
+    albumArtLargeEl.src = album.art_id ? `/art/${album.art_id}` : 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiBmaWxsPSIjMzMzIi8+PC9zdmc+';
 
     // Check if any track is hi-res
     const isHires = state.tracks.some(t => (t.bit_depth > 16 || t.sample_rate_hz > 44100));
@@ -696,6 +710,7 @@ function renderTracks(album) {
     allArtistsGridEl.style.display = 'none';
     azHeaderEl.style.display = 'none';
     trackListEl.style.display = 'block';
+    queueViewEl.style.display = 'none'; // Ensure queue is hidden
     document.getElementById('refresh-meta-btn').style.display = 'none';
 }
 
@@ -704,6 +719,67 @@ let currentAudio = null;
 let currentBtn = null;
 let currentTrackData = null;
 let currentAlbumData = null;
+let isRemotePlaying = false;
+let remoteInterval = null;
+let remoteStartTime = 0;
+let remoteDuration = 0;
+
+async function fetchRenderers() {
+    try {
+        const res = await fetch('/api/renderers');
+        const list = await res.json();
+        console.log("Fetched Renderers:", list);
+        const select = document.getElementById('renderer-select');
+        select.innerHTML = '';
+        list.forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = r.udn;
+            opt.textContent = r.name;
+            select.appendChild(opt);
+        });
+
+        // Restore local state or keep default
+        if (!state.activeRenderer) state.activeRenderer = 'local';
+        select.value = state.activeRenderer;
+
+        select.onchange = async () => {
+            state.activeRenderer = select.value;
+            await fetch('/api/player/renderer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ udn: state.activeRenderer })
+            });
+            // If switching renderer, stop playback?
+            stopPlayback();
+        };
+
+    } catch (e) { console.error("Failed to fetch renderers", e); }
+}
+
+// Call init
+// Call init
+fetchRenderers();
+setInterval(fetchRenderers, 10000); // Poll every 10s
+
+document.getElementById('add-renderer-btn').onclick = async () => {
+    const ip = prompt("Enter Device IP (e.g. REDACTED_IP):");
+    if (ip) {
+        try {
+            const res = await fetch('/api/player/add_manual', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip })
+            });
+            if (res.ok) {
+                alert("Device Found!");
+                fetchRenderers();
+            } else {
+                alert("Device not found.");
+            }
+        } catch (e) { alert("Error adding device"); }
+    }
+};
+
 
 // Player Elements
 const playerBar = document.getElementById('player-bar');
@@ -730,20 +806,135 @@ playerTitle.addEventListener('click', goToCurrentAlbum);
 playerArtist.addEventListener('click', (e) => {
     if (e.target.classList.contains('link-artist')) goToCurrentArtist();
     else if (e.target.classList.contains('link-album')) goToCurrentAlbum();
+    if (e.target.classList.contains('link-artist')) goToCurrentArtist();
+    else if (e.target.classList.contains('link-album')) goToCurrentAlbum();
+});
+playAlbumBtn.addEventListener('click', playAlbum);
+prevBtn.addEventListener('click', playPrev);
+nextBtn.addEventListener('click', playNext);
+
+queueIndicatorEl.addEventListener('click', () => {
+    if (queueViewEl.style.display === 'block') {
+        history.back();
+    } else {
+        showQueue();
+    }
 });
 
-function playTrack(trackId, btn) {
-    // Find track data from state
-    currentTrackData = state.tracks.find(t => t.id === trackId);
+function updateQueueUI() {
+    if (queueCountEl) {
+        const total = state.playQueue ? state.playQueue.length : 0;
+        const current = state.playQueueIndex >= 0 ? state.playQueueIndex + 1 : 0;
+        queueCountEl.textContent = `${current} / ${total}`;
+    }
+}
+
+function showQueue(pushState = true) {
+    if (pushState) {
+        history.pushState({ view: 'queue', playQueue: state.playQueue, playQueueIndex: state.playQueueIndex }, '', '#queue');
+    }
+
+    allArtistsGridEl.style.display = 'none';
+    azHeaderEl.style.display = 'none';
+    artistDetailsEl.style.display = 'none';
+    albumGridEl.style.display = 'none';
+    trackListEl.style.display = 'none';
+    queueViewEl.style.display = 'block';
+    renderQueue();
+}
+
+function renderQueue() {
+    queueListEl.innerHTML = '';
+    if (!state.playQueue || state.playQueue.length === 0) {
+        queueListEl.innerHTML = '<li style="padding: 20px; color: #888;">Queue is empty</li>';
+        return;
+    }
+
+    state.playQueue.forEach((track, index) => {
+        const li = document.createElement('li');
+        li.className = `queue-item ${index === state.playQueueIndex ? 'current-track' : ''}`; // Use queue-item instead of top-track-item for base layout
+
+        // Artwork
+        let artHtml = '';
+        if (track.art_id) {
+            artHtml = `<img src="/art/${track.art_id}" class="top-track-art" alt="Art">`;
+        } else {
+            artHtml = `<div class="top-track-art-placeholder"></div>`;
+        }
+
+        // Play Button
+        let playHtml = `
+            <button class="play-btn small ${index === state.playQueueIndex ? 'playing' : ''}" onclick="playTrack(${track.id}, this, false)">
+                ${index === state.playQueueIndex
+                ? '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>'
+                : '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'}
+            </button>`;
+
+        // Tech Meta
+        let techHtml = `
+            <div class="track-tech-meta">
+                <span class="badge">${track.codec || 'FLAC'}</span>
+                <span class="badge">${track.bit_depth || 16}bit</span>
+                <span class="badge">${formatBitrate(track.bitrate)}</span>
+            </div>`;
+
+        li.innerHTML = `
+            <span class="track-number">${index + 1}</span>
+            ${artHtml}
+            ${playHtml}
+            <div class="track-info">
+                <div class="track-name">${track.title || track.name}</div>
+                <div class="track-meta">
+                    <span>${track.album}</span>
+                    ${track.date ? ` • ${track.date.substring(0, 4)}` : ''}
+                    ${(track.artist) ? ` • <span class="track-feat-artist inline">${track.artist}</span>` : ''}
+                </div>
+            </div>
+            ${techHtml}
+            <div class="track-duration">${formatDuration(track.duration_seconds || track.duration_ms / 1000)}</div>
+        `;
+
+        queueListEl.appendChild(li);
+    });
+}
+
+async function playTrack(trackId, btn, resetQueue = true) {
+    // Find track data from state - Check if in current tracks or fallback to queue if navigating
+    let currentTrackData = state.tracks.find(t => t.id === trackId);
+
+    // If not found in current view list, check the queue (case where we navigated away but Next/Prev still works)
+    if (!currentTrackData && state.playQueue.length > 0) {
+        currentTrackData = state.playQueue.find(t => t.id === trackId);
+    }
+
     if (!currentTrackData) return;
+
+    // Queue Logic
+    if (resetQueue) {
+        // New playback context initiated by user
+        if (state.tracks && state.tracks.length > 0) {
+            state.playQueue = [...state.tracks];
+            state.playQueueIndex = state.playQueue.findIndex(t => t.id === trackId);
+        } else {
+            // Fallback
+            state.playQueue = [currentTrackData];
+            state.playQueueIndex = 0;
+        }
+    } else {
+        // Navigating existing queue (Next/Prev)
+        // Ensure playQueueIndex matches current track just in case
+        const idx = state.playQueue.findIndex(t => t.id === trackId);
+        if (idx !== -1) state.playQueueIndex = idx;
+    }
 
     if (state.selectedAlbum) {
         currentAlbumData = state.selectedAlbum;
     }
 
-    if (currentAudio) {
-        // If clicking same button/track, just toggle pause
-        if (currentBtn === btn) {
+    // Toggle Logic
+    if (currentAudio || isRemotePlaying) {
+        // If clicking same button/track and it's the current one in the queue
+        if (currentBtn === btn && state.playQueue[state.playQueueIndex].id === trackId) {
             togglePlayPause();
             return;
         }
@@ -761,27 +952,65 @@ function playTrack(trackId, btn) {
     playerTechDetails.textContent = `${formatSampleRate(currentTrackData.sample_rate_hz)} • ${currentTrackData.bit_depth || 16}bit`;
 
     // Start Playback
-    currentAudio = new Audio(`${API_BASE}/stream/${trackId}`);
-    currentAudio.volume = volumeSlider.value;
+    if (state.activeRenderer && state.activeRenderer !== 'local') {
+        // Remote
+        try {
+            await fetch('/api/player/play', {
+                method: 'POST',
+                body: JSON.stringify({ track_id: trackId }),
+                headers: { 'Content-Type': 'application/json' }
+            });
+            isRemotePlaying = true;
+            updatePlayIcons(true);
 
-    currentAudio.play().then(() => {
-        updatePlayIcons(true);
-    }).catch(e => {
-        console.error("Playback failed", e);
-        updatePlayIcons(false);
-    });
+            // Start Progress Simulation
+            startRemoteProgress(currentTrackData.duration_seconds || 0);
 
-    // Audio Events
-    currentAudio.addEventListener('timeupdate', updateProgress);
-    currentAudio.addEventListener('loadedmetadata', () => {
-        timeTotal.textContent = formatDuration(currentAudio.duration);
-    });
-    currentAudio.addEventListener('ended', onTrackEnded);
+        } catch (e) {
+            console.error("Remote playback failed", e);
+            stopPlayback();
+        }
+    } else {
+        // Local
+        currentAudio = new Audio(`${API_BASE}/stream/${trackId}`);
+        currentAudio.volume = volumeSlider.value;
+
+        currentAudio.play().then(() => {
+            updatePlayIcons(true);
+        }).catch(e => {
+            console.error("Playback failed", e);
+            updatePlayIcons(false);
+        });
+
+        // Audio Events
+        currentAudio.addEventListener('timeupdate', updateProgress);
+        currentAudio.addEventListener('loadedmetadata', () => {
+            timeTotal.textContent = formatDuration(currentAudio.duration);
+        });
+        currentAudio.addEventListener('ended', onTrackEnded);
+    }
 
     updatePlayIcons(true);
+    updateQueueUI();
 }
 
-function togglePlayPause() {
+async function togglePlayPause() {
+    if (state.activeRenderer && state.activeRenderer !== 'local') {
+        if (isRemotePlaying) {
+            await fetch('/api/player/pause', { method: 'POST' });
+            isRemotePlaying = false;
+            updatePlayIcons(false);
+            clearInterval(remoteInterval);
+        } else {
+            await fetch('/api/player/resume', { method: 'POST' });
+            isRemotePlaying = true;
+            updatePlayIcons(true);
+            // Resume progress simulation
+            startRemoteProgress(remoteDuration, parseFloat(timeCurrent.textContent) || 0); // Hacky resume from UI text
+        }
+        return;
+    }
+
     if (!currentAudio) return;
 
     if (currentAudio.paused) {
@@ -794,12 +1023,61 @@ function togglePlayPause() {
 }
 
 function stopPlayback() {
+    if (remoteInterval) clearInterval(remoteInterval);
+    isRemotePlaying = false;
+
     if (currentAudio) {
         currentAudio.pause();
         currentAudio = null;
     }
     updatePlayIcons(false);
     currentBtn = null;
+}
+
+function startRemoteProgress(duration, startOffset = 0) {
+    clearInterval(remoteInterval);
+    remoteDuration = duration;
+    remoteStartTime = Date.now();
+    let initialOffset = (typeof startOffset === 'string') ? parseDuration(startOffset) : startOffset; // parseDuration needed?
+    // Actually, startOffset comes in as seconds from resume OR 0.
+    // parseDuration is not defined. I passed UI text in resume logic.
+    // Better: Helper function
+
+    // Simple resume logic for now: default to 0 if NaN.
+    if (isNaN(initialOffset)) initialOffset = 0;
+
+    timeTotal.textContent = formatDuration(duration);
+
+    remoteInterval = setInterval(() => {
+        if (!isRemotePlaying) return;
+        const diff = (Date.now() - remoteStartTime) / 1000;
+        const current = initialOffset + diff;
+
+        if (current >= duration) {
+            // End
+            clearInterval(remoteInterval);
+            isRemotePlaying = false;
+            updatePlayIcons(false);
+            playNext();
+            return;
+        }
+
+        const percent = (current / duration) * 100;
+        progressBar.style.width = `${percent}%`;
+        timeCurrent.textContent = formatDuration(current);
+    }, 1000);
+}
+
+// Helper for format reverse?
+function parseDuration(str) {
+    if (!str) return 0;
+    const p = str.split(':');
+    let s = 0, m = 1;
+    while (p.length > 0) {
+        s += m * parseInt(p.pop(), 10);
+        m *= 60;
+    }
+    return s;
 }
 
 function closePlayer() {
@@ -851,16 +1129,7 @@ function setVolume() {
 
 function onTrackEnded() {
     updatePlayIcons(false);
-    // Find next track
-    const currentIndex = state.tracks.findIndex(t => t.id === currentTrackData.id);
-    if (currentIndex !== -1 && currentIndex < state.tracks.length - 1) {
-        const nextTrack = state.tracks[currentIndex + 1];
-        // Find the button for this track
-        const nextBtn = document.querySelector(`li[data-track-id="${nextTrack.id}"] .play-btn`);
-        if (nextBtn) {
-            playTrack(nextTrack.id, nextBtn);
-        }
-    }
+    playNext();
 }
 
 function formatDuration(seconds) {
@@ -908,8 +1177,15 @@ function restoreView(viewState) {
                 const album = state.albums.find(a => a.album === viewState.album);
                 if (album) {
                     loadTracks(album, false); // Don't push state
+                } else {
+                    console.warn(`RestoreView: Album '${viewState.album}' not found for artist '${viewState.artist}'. Layout might act weird.`);
+                    // Fallback to artist view so we don't get stuck on queue
+                    showArtistDetails(artist, false);
                 }
             });
+        } else {
+            console.warn(`RestoreView: Artist '${viewState.artist}' not found.`);
+            showAllArtists();
         }
     }
 }
@@ -998,3 +1274,25 @@ init().then(() => {
     }
 });
 
+
+async function playAlbum() {
+    if (!state.tracks || state.tracks.length === 0) return;
+    // Start with first track
+    playTrack(state.tracks[0].id);
+}
+
+function playNext() {
+    if ((state.playQueueIndex + 1) < state.playQueue.length) {
+        state.playQueueIndex++;
+        const nextTrack = state.playQueue[state.playQueueIndex];
+        playTrack(nextTrack.id, null, false); // false = don't reset queue
+    }
+}
+
+function playPrev() {
+    if (state.playQueueIndex > 0) {
+        state.playQueueIndex--;
+        const prevTrack = state.playQueue[state.playQueueIndex];
+        playTrack(prevTrack.id, null, false); // false = don't reset queue
+    }
+}
