@@ -16,10 +16,11 @@ from app.scanner.scan import scan_library
 
 from fastapi.staticfiles import StaticFiles
 from app.media import art
-from app.api import library
+from app.api import library, stream
 
 app.include_router(art.router)
 app.include_router(library.router)
+app.include_router(stream.router)
 
 @app.post("/api/scan")
 async def trigger_scan(background_tasks: BackgroundTasks):

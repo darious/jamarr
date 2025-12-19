@@ -230,6 +230,41 @@ button:hover {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 15px;
+    /* Added gap */
+}
+
+.play-btn {
+    background: none;
+    border: 1px solid var(--accent-color);
+    color: var(--accent-color);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.play-btn:hover {
+    background: var(--accent-color);
+    color: var(--bg-color);
+}
+
+.play-btn svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+}
+
+.play-btn.playing {
+    background: var(--accent-color);
+    color: var(--bg-color);
+    box-shadow: 0 0 10px var(--accent-color);
 }
 
 #track-list li:hover {
@@ -597,8 +632,280 @@ button:hover {
     gap: 24px;
 }
 
+
 .album-card-meta {
     font-size: 0.8rem;
     color: #b3b3b3;
     margin-top: 4px;
+}
+
+/* Player Bar Styles */
+.player-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background-color: #0f0f10;
+    /* Darker background */
+    border-top: 1px solid #222;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.5);
+    height: 90px;
+}
+
+.player-progress-container {
+    width: 100%;
+    height: 4px;
+    background-color: #333;
+    cursor: pointer;
+    position: relative;
+    flex-shrink: 0;
+    /* Prevent shrinking */
+}
+
+.player-progress-bar {
+    height: 100%;
+    background-color: #00e5ff;
+    /* Blue accent */
+    width: 0%;
+    transition: width 0.1s linear;
+}
+
+.player-controls-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0;
+    flex: 1;
+    /* Take remaining height */
+}
+
+/* Left: Metadata */
+.player-meta {
+    display: flex;
+    align-items: center;
+    width: 30%;
+    height: 100%;
+    gap: 15px;
+}
+
+#player-art {
+    width: 90px;
+    height: 90px;
+    object-fit: cover;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+#player-art:hover {
+    opacity: 0.8;
+}
+
+.player-meta-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+    padding-right: 10px;
+}
+
+.player-title {
+    color: white;
+    font-weight: 700;
+    font-size: 1.1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.player-title:hover {
+    text-decoration: underline;
+}
+
+.player-artist {
+    color: #ccc;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: default;
+}
+
+.link-artist,
+.link-album {
+    cursor: pointer;
+    transition: color 0.1s;
+}
+
+.link-artist:hover,
+.link-album:hover {
+    color: white;
+    text-decoration: underline;
+}
+
+/* Center: Controls */
+.player-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 8px;
+}
+
+.player-time-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.95rem;
+    /* Bigger timer */
+    color: #ccc;
+    font-family: monospace;
+}
+
+.player-main-controls {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.player-icon-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    /* Round buttons */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    padding: 10px;
+}
+
+.player-icon-btn svg {
+    width: 100%;
+    height: 100%;
+    fill: #00e5ff;
+    /* Match logo/accent color */
+    filter: drop-shadow(0 0 2px rgba(0, 229, 255, 0.3));
+}
+
+.player-icon-btn:hover {
+    background: rgba(0, 229, 255, 0.1);
+    transform: scale(1.1);
+}
+
+.player-icon-btn.play-pause {
+    width: 64px;
+    height: 64px;
+    padding: 12px;
+    /* Remove background color to show SVG clearly, or keep circle */
+    background: transparent;
+    box-shadow: none;
+}
+
+.player-icon-btn.play-pause svg {
+    fill: #00e5ff;
+    width: 100%;
+    height: 100%;
+}
+
+.player-icon-btn.small {
+    width: 32px;
+    height: 32px;
+    padding: 6px;
+}
+
+.player-icon-btn.small svg {
+    fill: #888;
+}
+
+.player-icon-btn.small:hover svg {
+    fill: white;
+}
+
+/* Right: Volume/Tech */
+.player-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: 30%;
+    gap: 20px;
+}
+
+.player-tech-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background-color: #1a1a20;
+    padding: 5px 10px;
+    border-radius: 4px;
+    border: 1px solid #333;
+}
+
+.tech-icon {
+    color: #00e5ff;
+    font-size: 1.2rem;
+}
+
+.tech-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    font-size: 0.7rem;
+    line-height: 1.2;
+}
+
+#player-tech-format {
+    color: white;
+    font-weight: bold;
+}
+
+#player-tech-details {
+    color: #aaa;
+}
+
+.volume-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#volume-slider {
+    width: 80px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #333;
+    border-radius: 2px;
+    outline: none;
+}
+
+#volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: white;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.close-btn {
+    margin-left: 10px;
+    color: #888;
+}
+
+.close-btn:hover {
+    color: #ff4444;
+}
+
+/* Adjust main container to valid content hiding */
+#content {
+    padding-bottom: 100px;
+    /* Space for player bar */
 }
