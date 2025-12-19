@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS artists (
     sort_name TEXT,
     bio TEXT,
     image_url TEXT,
+    art_id INTEGER,
     spotify_url TEXT,
     homepage TEXT,
     similar_artists TEXT,
@@ -52,12 +53,14 @@ CREATE TABLE IF NOT EXISTS artists (
     last_updated REAL,
     wikipedia_url TEXT,
     qobuz_url TEXT,
-    musicbrainz_url TEXT
+    musicbrainz_url TEXT,
+    FOREIGN KEY(art_id) REFERENCES artwork(id)
 );
 
 CREATE TABLE IF NOT EXISTS artwork (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sha1 TEXT UNIQUE NOT NULL,
+    type TEXT,
     mime TEXT,
     width INTEGER,
     height INTEGER,
@@ -88,7 +91,13 @@ async def init_db():
              await db.execute("ALTER TABLE artists ADD COLUMN wikipedia_url TEXT")
              await db.execute("ALTER TABLE artists ADD COLUMN qobuz_url TEXT")
              await db.execute("ALTER TABLE artists ADD COLUMN musicbrainz_url TEXT")
+             await db.execute("ALTER TABLE artists ADD COLUMN art_id INTEGER REFERENCES artwork(id)")
         except Exception:
             pass # Columns likely exist
+            
+        try:
+             await db.execute("ALTER TABLE artwork ADD COLUMN type TEXT")
+        except Exception:
+            pass # Column likely exists
 
         await db.commit()
