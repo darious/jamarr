@@ -5,7 +5,7 @@
   import { addToQueue, loadQueueFromServer, setQueue } from '$stores/player';
   import { browser } from '$app/environment';
 
-  export let data: { name: string; canonicalName: string; artist?: Artist; albums: Album[]; similarArtists: { name: string; image_url?: string | null }[] };
+  export let data: { name: string; canonicalName: string; artist?: Artist; albums: Album[]; similarArtists: { name: string; art_id?: number | null }[] };
 
   let artist: Artist | undefined = data.artist;
   let tracks: Track[] = [];
@@ -136,7 +136,7 @@
   <div class="glass-panel overflow-hidden p-0 shadow-2xl">
     <div
       class="hero-gradient relative h-56 w-full bg-cover bg-center"
-      style={`background-image:url('${artist?.image_url || '/assets/default-artist.svg'}')`}
+      style={`background-image:url('${artist?.art_id ? `/art/${artist.art_id}` : '/assets/default-artist.svg'}')`}
     >
       <div class="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent"></div>
       <div class="absolute bottom-0 left-0 right-0 px-8 pb-8">
@@ -257,8 +257,8 @@
               class="grid-card flex items-center gap-3 px-4 py-3 text-left"
               on:click={() => goto(`/artist/${encodeURIComponent(sim.name)}`)}
             >
-              {#if sim.image_url}
-                <img src={sim.image_url} alt={sim.name} class="h-12 w-12 rounded-full object-cover" />
+              {#if sim.art_id}
+                <img src={`/art/${sim.art_id}`} alt={sim.name} class="h-12 w-12 rounded-full object-cover" />
               {:else}
                 <div class="h-12 w-12 rounded-full bg-white/10 text-center text-sm font-semibold leading-[3rem]">
                   {sim.name.charAt(0).toUpperCase()}

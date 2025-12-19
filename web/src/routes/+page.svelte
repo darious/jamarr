@@ -52,9 +52,9 @@
             <a class="grid-card block cursor-pointer overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary-400" href={`/artist/${encodeURIComponent(artist.name)}`}>
               <div class="aspect-square overflow-hidden rounded-xl">
                 <img
-                  class="h-full w-full object-cover transition-transform hover:scale-105"
-                  src={artist.image_url || '/assets/default-artist.svg'}
+                  src={artist.art_id ? `/art/${artist.art_id}` : '/assets/default-artist.svg'}
                   alt={artist.name}
+                  class="aspect-square w-full rounded-2xl object-cover transition-transform duration-200 group-hover:scale-[1.03]"
                 />
               </div>
               <div class="mt-3 space-y-1">
