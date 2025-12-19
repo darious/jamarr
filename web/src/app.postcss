@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-surface-50 text-surface-900;
+  background-image: radial-gradient(circle at 20% 20%, rgba(80, 122, 255, 0.15), transparent 25%),
+    radial-gradient(circle at 80% 10%, rgba(139, 92, 246, 0.18), transparent 25%),
+    radial-gradient(circle at 50% 70%, rgba(32, 206, 188, 0.12), transparent 28%);
+  background-attachment: fixed;
+}
+
+.glass-panel {
+  @apply bg-surface-200/60 backdrop-blur-xl border border-white/5 rounded-2xl shadow-glow;
+}
+
+.pill {
+  @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-white/5 border border-white/10;
+}
+
+.section-head {
+  @apply flex items-center justify-between gap-4 mb-4;
+}
+
+.grid-card {
+  @apply glass-panel p-4 transition-transform hover:-translate-y-1 hover:shadow-2xl;
+}
+
+.hero-gradient {
+  background: radial-gradient(120% 120% at 10% 20%, rgba(80, 122, 255, 0.18), transparent 40%),
+    radial-gradient(120% 120% at 80% 0%, rgba(139, 92, 246, 0.25), transparent 40%),
+    linear-gradient(135deg, rgba(28, 31, 46, 0.95), rgba(18, 20, 34, 0.95));
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition;
+  }
+  .btn-primary {
+    @apply bg-primary-500 text-black hover:bg-primary-400;
+  }
+  .btn-outline {
+    @apply border border-white/20 bg-transparent text-white hover:bg-white/5;
+  }
+  .btn-ghost {
+    @apply text-white hover:bg-white/5;
+  }
+  .btn-xs {
+    @apply text-xs px-3 py-1 rounded-lg;
+  }
+  .btn-sm {
+    @apply text-sm px-3 py-1.5 rounded-lg;
+  }
+  .input,
+  .select,
+  .range {
+    @apply rounded-xl border border-white/10 bg-white/5 text-white placeholder:text-white/50 focus:border-primary-400 focus:outline-none;
+  }
+  .select {
+    @apply px-3 py-2;
+  }
+}
