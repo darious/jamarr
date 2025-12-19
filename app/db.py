@@ -74,6 +74,44 @@ CREATE TABLE IF NOT EXISTS renderers (
     location_url TEXT,
     last_seen REAL
 );
+
+-- Indexes for integrity & joins
+CREATE INDEX IF NOT EXISTS idx_tracks_art_id ON tracks(art_id);
+CREATE INDEX IF NOT EXISTS idx_tracks_mb_artist_id ON tracks(mb_artist_id);
+
+-- Indexes for browsing (artist → album → tracks)
+CREATE INDEX IF NOT EXISTS idx_tracks_artist_album ON tracks(artist COLLATE NOCASE, album COLLATE NOCASE, disc_no, track_no);
+CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album COLLATE NOCASE, disc_no, track_no);
+CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name COLLATE NOCASE);
+
+-- Index for maintenance / library updates
+CREATE INDEX IF NOT EXISTS idx_tracks_mtime ON tracks(mtime);
+
+-- FTS5 virtual table for full-text search
+CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
+    title,
+    artist,
+    album,
+    album_artist,
+    content=tracks,
+    content_rowid=id
+);
+
+-- Triggers to keep FTS5 in sync with tracks table
+CREATE TRIGGER IF NOT EXISTS tracks_fts_insert AFTER INSERT ON tracks BEGIN
+    INSERT INTO tracks_fts(rowid, title, artist, album, album_artist)
+    VALUES (new.id, new.title, new.artist, new.album, new.album_artist);
+END;
+
+CREATE TRIGGER IF NOT EXISTS tracks_fts_delete AFTER DELETE ON tracks BEGIN
+    DELETE FROM tracks_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS tracks_fts_update AFTER UPDATE ON tracks BEGIN
+    DELETE FROM tracks_fts WHERE rowid = old.id;
+    INSERT INTO tracks_fts(rowid, title, artist, album, album_artist)
+    VALUES (new.id, new.title, new.artist, new.album, new.album_artist);
+END;
 """
 
 async def get_db():
@@ -84,6 +122,9 @@ async def get_db():
 async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
+        # Enable WAL mode for better concurrency
+        await db.execute("PRAGMA journal_mode=WAL")
+        
         await db.executescript(INIT_SCRIPT)
         
         # Migrations for existing DBs
