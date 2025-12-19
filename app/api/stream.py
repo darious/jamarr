@@ -8,7 +8,7 @@ router = APIRouter()
 
 import mimetypes
 
-@router.get("/api/stream/{track_id}")
+@router.api_route("/api/stream/{track_id}", methods=["GET", "HEAD"])
 async def stream_track(track_id: int, db: aiosqlite.Connection = Depends(get_db)):
     async with db.execute("SELECT path FROM tracks WHERE id = ?", (track_id,)) as cursor:
         row = await cursor.fetchone()

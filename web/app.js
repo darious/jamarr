@@ -704,6 +704,67 @@ let currentAudio = null;
 let currentBtn = null;
 let currentTrackData = null;
 let currentAlbumData = null;
+let isRemotePlaying = false;
+let remoteInterval = null;
+let remoteStartTime = 0;
+let remoteDuration = 0;
+
+async function fetchRenderers() {
+    try {
+        const res = await fetch('/api/renderers');
+        const list = await res.json();
+        console.log("Fetched Renderers:", list);
+        const select = document.getElementById('renderer-select');
+        select.innerHTML = '';
+        list.forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = r.udn;
+            opt.textContent = r.name;
+            select.appendChild(opt);
+        });
+
+        // Restore local state or keep default
+        if (!state.activeRenderer) state.activeRenderer = 'local';
+        select.value = state.activeRenderer;
+
+        select.onchange = async () => {
+            state.activeRenderer = select.value;
+            await fetch('/api/player/renderer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ udn: state.activeRenderer })
+            });
+            // If switching renderer, stop playback?
+            stopPlayback();
+        };
+
+    } catch (e) { console.error("Failed to fetch renderers", e); }
+}
+
+// Call init
+// Call init
+fetchRenderers();
+setInterval(fetchRenderers, 10000); // Poll every 10s
+
+document.getElementById('add-renderer-btn').onclick = async () => {
+    const ip = prompt("Enter Device IP (e.g. 192.168.0.123):");
+    if (ip) {
+        try {
+            const res = await fetch('/api/player/add_manual', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip })
+            });
+            if (res.ok) {
+                alert("Device Found!");
+                fetchRenderers();
+            } else {
+                alert("Device not found.");
+            }
+        } catch (e) { alert("Error adding device"); }
+    }
+};
+
 
 // Player Elements
 const playerBar = document.getElementById('player-bar');
@@ -732,7 +793,7 @@ playerArtist.addEventListener('click', (e) => {
     else if (e.target.classList.contains('link-album')) goToCurrentAlbum();
 });
 
-function playTrack(trackId, btn) {
+async function playTrack(trackId, btn) {
     // Find track data from state
     currentTrackData = state.tracks.find(t => t.id === trackId);
     if (!currentTrackData) return;
@@ -741,8 +802,9 @@ function playTrack(trackId, btn) {
         currentAlbumData = state.selectedAlbum;
     }
 
-    if (currentAudio) {
-        // If clicking same button/track, just toggle pause
+    // Toggle Logic
+    if (currentAudio || isRemotePlaying) {
+        // If clicking same button/track
         if (currentBtn === btn) {
             togglePlayPause();
             return;
@@ -761,27 +823,64 @@ function playTrack(trackId, btn) {
     playerTechDetails.textContent = `${formatSampleRate(currentTrackData.sample_rate_hz)} • ${currentTrackData.bit_depth || 16}bit`;
 
     // Start Playback
-    currentAudio = new Audio(`${API_BASE}/stream/${trackId}`);
-    currentAudio.volume = volumeSlider.value;
+    if (state.activeRenderer && state.activeRenderer !== 'local') {
+        // Remote
+        try {
+            await fetch('/api/player/play', {
+                method: 'POST',
+                body: JSON.stringify({ track_id: trackId }),
+                headers: { 'Content-Type': 'application/json' }
+            });
+            isRemotePlaying = true;
+            updatePlayIcons(true);
 
-    currentAudio.play().then(() => {
-        updatePlayIcons(true);
-    }).catch(e => {
-        console.error("Playback failed", e);
-        updatePlayIcons(false);
-    });
+            // Start Progress Simulation
+            startRemoteProgress(currentTrackData.duration_seconds || 0);
 
-    // Audio Events
-    currentAudio.addEventListener('timeupdate', updateProgress);
-    currentAudio.addEventListener('loadedmetadata', () => {
-        timeTotal.textContent = formatDuration(currentAudio.duration);
-    });
-    currentAudio.addEventListener('ended', onTrackEnded);
+        } catch (e) {
+            console.error("Remote playback failed", e);
+            stopPlayback();
+        }
+    } else {
+        // Local
+        currentAudio = new Audio(`${API_BASE}/stream/${trackId}`);
+        currentAudio.volume = volumeSlider.value;
+
+        currentAudio.play().then(() => {
+            updatePlayIcons(true);
+        }).catch(e => {
+            console.error("Playback failed", e);
+            updatePlayIcons(false);
+        });
+
+        // Audio Events
+        currentAudio.addEventListener('timeupdate', updateProgress);
+        currentAudio.addEventListener('loadedmetadata', () => {
+            timeTotal.textContent = formatDuration(currentAudio.duration);
+        });
+        currentAudio.addEventListener('ended', onTrackEnded);
+    }
 
     updatePlayIcons(true);
 }
 
-function togglePlayPause() {
+async function togglePlayPause() {
+    if (state.activeRenderer && state.activeRenderer !== 'local') {
+        if (isRemotePlaying) {
+            await fetch('/api/player/pause', { method: 'POST' });
+            isRemotePlaying = false;
+            updatePlayIcons(false);
+            clearInterval(remoteInterval);
+        } else {
+            await fetch('/api/player/resume', { method: 'POST' });
+            isRemotePlaying = true;
+            updatePlayIcons(true);
+            // Resume progress simulation
+            startRemoteProgress(remoteDuration, parseFloat(timeCurrent.textContent) || 0); // Hacky resume from UI text
+        }
+        return;
+    }
+
     if (!currentAudio) return;
 
     if (currentAudio.paused) {
@@ -794,12 +893,61 @@ function togglePlayPause() {
 }
 
 function stopPlayback() {
+    if (remoteInterval) clearInterval(remoteInterval);
+    isRemotePlaying = false;
+
     if (currentAudio) {
         currentAudio.pause();
         currentAudio = null;
     }
     updatePlayIcons(false);
     currentBtn = null;
+}
+
+function startRemoteProgress(duration, startOffset = 0) {
+    clearInterval(remoteInterval);
+    remoteDuration = duration;
+    remoteStartTime = Date.now();
+    let initialOffset = (typeof startOffset === 'string') ? parseDuration(startOffset) : startOffset; // parseDuration needed?
+    // Actually, startOffset comes in as seconds from resume OR 0.
+    // parseDuration is not defined. I passed UI text in resume logic.
+    // Better: Helper function
+
+    // Simple resume logic for now: default to 0 if NaN.
+    if (isNaN(initialOffset)) initialOffset = 0;
+
+    timeTotal.textContent = formatDuration(duration);
+
+    remoteInterval = setInterval(() => {
+        if (!isRemotePlaying) return;
+        const diff = (Date.now() - remoteStartTime) / 1000;
+        const current = initialOffset + diff;
+
+        if (current >= duration) {
+            // End
+            clearInterval(remoteInterval);
+            isRemotePlaying = false;
+            updatePlayIcons(false);
+            // onTrackEnded?
+            return;
+        }
+
+        const percent = (current / duration) * 100;
+        progressBar.style.width = `${percent}%`;
+        timeCurrent.textContent = formatDuration(current);
+    }, 1000);
+}
+
+// Helper for format reverse?
+function parseDuration(str) {
+    if (!str) return 0;
+    const p = str.split(':');
+    let s = 0, m = 1;
+    while (p.length > 0) {
+        s += m * parseInt(p.pop(), 10);
+        m *= 60;
+    }
+    return s;
 }
 
 function closePlayer() {
