@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Album, Artist, Track } from '$api';
-  import { fetchTracks, refreshArtistMetadata } from '$api';
+  import type { Album, Artist, Track } from '$lib/api';
+  import { fetchTracks, refreshArtistMetadata } from '$lib/api';
   import { goto } from '$app/navigation';
   import { addToQueue, loadQueueFromServer, setQueue } from '$stores/player';
   import { browser } from '$app/environment';
@@ -13,6 +13,8 @@
   let refreshing = false;
   let message = '';
   let lastKey = '';
+  let showAllTracks = false;
+  let showAllSimilar = false;
 
   // Update artist when route data changes (client nav)
   $: if (data.artist !== artist) {
@@ -56,9 +58,9 @@
     return `${mins}:${secs}`;
   };
 
-  const topTracks = () => {
+  $: displayedTopTracks = (() => {
     const fromMeta = artist?.top_tracks || [];
-    return fromMeta.slice(0, 8).map((t) => {
+    const allTracks = fromMeta.slice(0, 8).map((t) => {
       const local = tracks.find((lt) => lt.title.toLowerCase() === (t.name || '').toLowerCase());
       return local || {
         id: -1,
@@ -68,6 +70,20 @@
         duration_seconds: t.duration_ms ? Math.round(t.duration_ms / 1000) : null
       };
     });
+    return showAllTracks ? allTracks : allTracks.slice(0, 5);
+  })();
+
+  $: displayedSimilarArtists = (() => {
+    const all = data.similarArtists || [];
+    return showAllSimilar ? all : all.slice(0, 5);
+  })();
+
+  const mainAlbums = () => {
+    return data.albums.filter((a) => !a.type || a.type === 'main');
+  };
+
+  const appearsOnAlbums = () => {
+    return data.albums.filter((a) => a.type === 'appears_on');
   };
 
   async function refreshMeta() {
@@ -89,6 +105,15 @@
       await setQueue(albumTracks, 0);
     } else {
       goto(`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`);
+    }
+  }
+
+  async function addAlbumToQueue(album: Album) {
+    const albumTracks = tracks.filter((t) => t.album === album.album);
+    if (albumTracks.length) {
+      for (const track of albumTracks) {
+        await addToQueue(track);
+      }
     }
   }
 
@@ -179,12 +204,22 @@
       <div class="space-y-2">
         {#if loadingTracks}
           <div class="glass-panel h-24 animate-pulse"></div>
-        {:else if topTracks().length === 0}
+        {:else if displayedTopTracks.length === 0}
           <p class="text-white/60">No tracks yet.</p>
         {:else}
-          {#each topTracks() as track}
-            <div class="glass-panel flex items-center justify-between gap-3 px-4 py-3">
-              <div class="min-w-0">
+          {#each displayedTopTracks as track}
+            <div class="glass-panel flex items-center gap-3 px-4 py-3">
+              {#if track.id && track.id > 0}
+                <img
+                  src={`/art/${data.albums.find(a => a.album === track.album)?.art_id || 'default'}`}
+                  alt={track.album}
+                  class="h-12 w-12 rounded-lg object-cover"
+                  on:error={(e) => { e.currentTarget.src = '/assets/logo.png'; }}
+                />
+              {:else}
+                <div class="h-12 w-12 rounded-lg bg-white/10"></div>
+              {/if}
+              <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-semibold">{track.title}</p>
                 <p class="text-xs text-white/60">{track.album}</p>
               </div>
@@ -199,6 +234,11 @@
               </div>
             </div>
           {/each}
+          {#if artist?.top_tracks && artist.top_tracks.length > 5}
+            <button class="btn btn-ghost btn-sm w-full" on:click={() => { showAllTracks = !showAllTracks; }}>
+              {showAllTracks ? 'Show less' : `Show more (${artist.top_tracks.length - 5} more)`}
+            </button>
+          {/if}
         {/if}
       </div>
     </div>
@@ -212,21 +252,26 @@
       </div>
       <div class="grid gap-3">
         {#if data.similarArtists?.length}
-          {#each data.similarArtists.slice(0, 8) as sim}
+          {#each displayedSimilarArtists as sim}
             <button
-              class="grid-card flex items-center gap-3 text-left"
+              class="grid-card flex items-center gap-3 px-4 py-3 text-left"
               on:click={() => goto(`/artist/${encodeURIComponent(sim.name)}`)}
             >
               {#if sim.image_url}
-                <img src={sim.image_url} alt={sim.name} class="h-10 w-10 rounded-full object-cover" />
+                <img src={sim.image_url} alt={sim.name} class="h-12 w-12 rounded-full object-cover" />
               {:else}
-                <div class="h-10 w-10 rounded-full bg-white/10 text-center text-sm font-semibold leading-10">
+                <div class="h-12 w-12 rounded-full bg-white/10 text-center text-sm font-semibold leading-[3rem]">
                   {sim.name.charAt(0).toUpperCase()}
                 </div>
               {/if}
               <div class="truncate text-sm font-semibold">{sim.name}</div>
             </button>
           {/each}
+          {#if data.similarArtists.length > 5}
+            <button class="btn btn-ghost btn-sm w-full" on:click={() => { showAllSimilar = !showAllSimilar; }}>
+              {showAllSimilar ? 'Show less' : `Show more (${data.similarArtists.length - 5} more)`}
+            </button>
+          {/if}
         {:else}
           <p class="text-white/60">No similar artists recorded.</p>
         {/if}
@@ -234,39 +279,104 @@
     </div>
   </div>
 
-  <div class="section-head">
-    <div>
-      <p class="text-sm uppercase tracking-wide text-white/60">Library</p>
-      <h3 class="text-xl font-semibold">Albums</h3>
+  {#if mainAlbums().length > 0}
+    <div class="section-head">
+      <div>
+        <p class="text-sm uppercase tracking-wide text-white/60">Library</p>
+        <h3 class="text-xl font-semibold">Albums</h3>
+      </div>
     </div>
-  </div>
-  <div class="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
-    {#each data.albums as album}
-      <article class="grid-card flex flex-col gap-3">
-        <button
-          class="relative aspect-square overflow-hidden rounded-2xl"
-          on:click={() => goto(`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`)}
-        >
-          <img
-            src={album.art_id ? `/art/${album.art_id}` : '/assets/logo.png'}
-            alt={album.album}
-            class="h-full w-full object-cover transition-transform duration-200 hover:scale-[1.03]"
-          />
-          {#if album.is_hires}
-            <img src="/assets/logo-hires.png" class="absolute right-3 top-3 h-10 w-10" alt="Hi-res" />
-          {/if}
-        </button>
-        <div class="space-y-1">
-          <p class="text-lg font-semibold">{album.album}</p>
-          <p class="text-sm text-white/60">{album.artist_name}</p>
-          <p class="text-xs text-white/60">
-            {album.year ? album.year.substring(0, 4) : '—'} • {album.track_count || 0} tracks
-          </p>
-        </div>
-        <div class="mt-auto flex gap-2">
-          <button class="btn btn-primary btn-sm flex-1" on:click={() => playAlbum(album)}>Play</button>
-        </div>
-      </article>
-    {/each}
-  </div>
+    <div class="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
+      {#each mainAlbums() as album}
+        <article class="grid-card flex flex-col gap-3">
+          <button
+            class="group relative aspect-square overflow-hidden rounded-2xl"
+            on:click={() => goto(`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`)}
+          >
+            <img
+              src={album.art_id ? `/art/${album.art_id}` : '/assets/logo.png'}
+              alt={album.album}
+              class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+            />
+            {#if album.is_hires}
+              <img src="/assets/logo-hires.png" class="absolute bottom-2 right-2 h-8 w-8" alt="Hi-res" />
+            {/if}
+            <div class="absolute right-2 top-2 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+              <button
+                class="btn btn-primary btn-sm h-11 w-11 p-0 text-base"
+                title="Play"
+                on:click|stopPropagation={() => playAlbum(album)}
+              >
+                ▶
+              </button>
+              <button
+                class="btn btn-ghost btn-sm h-11 w-11 bg-black/50 p-0 text-lg"
+                title="Add to queue"
+                on:click|stopPropagation={() => addAlbumToQueue(album)}
+              >
+                ＋
+              </button>
+            </div>
+          </button>
+          <div class="space-y-1">
+            <p class="text-base font-semibold line-clamp-1">{album.album}</p>
+            <p class="text-xs text-white/60">
+              {album.year ? album.year.substring(0, 4) : '—'} • {album.track_count || 0} tracks
+            </p>
+          </div>
+        </article>
+      {/each}
+    </div>
+  {/if}
+
+  {#if appearsOnAlbums().length > 0}
+    <div class="section-head mt-10">
+      <div>
+        <p class="text-sm uppercase tracking-wide text-white/60">Features</p>
+        <h3 class="text-xl font-semibold">Appears On</h3>
+      </div>
+    </div>
+    <div class="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
+      {#each appearsOnAlbums() as album}
+        <article class="grid-card flex flex-col gap-3">
+          <button
+            class="group relative aspect-square overflow-hidden rounded-2xl"
+            on:click={() => goto(`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`)}
+          >
+            <img
+              src={album.art_id ? `/art/${album.art_id}` : '/assets/logo.png'}
+              alt={album.album}
+              class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+            />
+            {#if album.is_hires}
+              <img src="/assets/logo-hires.png" class="absolute bottom-2 right-2 h-8 w-8" alt="Hi-res" />
+            {/if}
+            <div class="absolute right-2 top-2 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+              <button
+                class="btn btn-primary btn-sm h-11 w-11 p-0 text-base"
+                title="Play"
+                on:click|stopPropagation={() => playAlbum(album)}
+              >
+                ▶
+              </button>
+              <button
+                class="btn btn-ghost btn-sm h-11 w-11 bg-black/50 p-0 text-lg"
+                title="Add to queue"
+                on:click|stopPropagation={() => addAlbumToQueue(album)}
+              >
+                ＋
+              </button>
+            </div>
+          </button>
+          <div class="space-y-1">
+            <p class="text-base font-semibold line-clamp-1">{album.album}</p>
+            <p class="text-xs text-white/60 line-clamp-1">{album.artist_name}</p>
+            <p class="text-xs text-white/60">
+              {album.year ? album.year.substring(0, 4) : '—'} • {album.track_count || 0} tracks
+            </p>
+          </div>
+        </article>
+      {/each}
+    </div>
+  {/if}
 </section>
