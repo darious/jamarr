@@ -30,11 +30,21 @@ async def scan_library(root_path: str = None, force_metadata: bool = False):
         
         logger.info("File scan complete. Updating artist metadata...")
 
-        # Get all MBIDs from DB
-        async with db.execute("SELECT DISTINCT mb_artist_id, artist FROM tracks WHERE mb_artist_id IS NOT NULL") as cursor:
+        # Get all MBIDs from DB (Track Artists AND Album Artists)
+        # Get all MBIDs from DB (Track Artists AND Album Artists)
+        # We need to process them to handle splits (id1; id2)
+        async with db.execute("SELECT DISTINCT mb_artist_id, artist FROM tracks WHERE mb_artist_id IS NOT NULL UNION SELECT DISTINCT mb_album_artist_id, album_artist FROM tracks WHERE mb_album_artist_id IS NOT NULL") as cursor:
             rows = await cursor.fetchall()
             for row in rows:
-                artist_mbids.add((row[0], row[1]))
+                raw_mbids = row[0]
+                # Same splitting logic as in _process_file
+                if raw_mbids:
+                   mbids = raw_mbids.replace("/", ";").replace("&", ";").split(";")
+                   for mbid in mbids:
+                       mbid = mbid.strip()
+                       if mbid:
+                           # Pass None for name to force canonical lookup, avoiding "A & B" poisoning
+                           artist_mbids.add((mbid, None))
     
         logger.info(f"Found {len(artist_mbids)} artists with MBIDs.")
     
@@ -55,8 +65,12 @@ async def scan_library(root_path: str = None, force_metadata: bool = False):
             
             # Save to DB
             await db.execute("""
-                INSERT INTO artists (mbid, name, sort_name, bio, image_url, spotify_url, homepage, similar_artists, top_tracks, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO artists (
+                    mbid, name, sort_name, bio, image_url, spotify_url, homepage, 
+                    wikipedia_url, qobuz_url, musicbrainz_url,
+                    similar_artists, top_tracks, last_updated
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mbid) DO UPDATE SET
                     name=excluded.name,
                     sort_name=excluded.sort_name,
@@ -64,18 +78,71 @@ async def scan_library(root_path: str = None, force_metadata: bool = False):
                     image_url=excluded.image_url,
                     spotify_url=excluded.spotify_url,
                     homepage=excluded.homepage,
+                    wikipedia_url=excluded.wikipedia_url,
+                    qobuz_url=excluded.qobuz_url,
+                    musicbrainz_url=excluded.musicbrainz_url,
                     similar_artists=excluded.similar_artists,
                     top_tracks=excluded.top_tracks,
                     last_updated=excluded.last_updated
             """, (
                 meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], 
                 meta["spotify_url"], meta["homepage"], 
+                meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
                 json.dumps(meta["similar_artists"]), 
                 json.dumps(meta["top_tracks"]),
                 meta["last_updated"]
             ))
             await db.commit()
+            await db.commit()
         break
+
+async def refresh_artist_metadata(artist_name: str):
+    logger.info(f"Forced metadata refresh for {artist_name}")
+    async for db in get_db():
+        # Find MBID for artist
+        async with db.execute("SELECT mb_artist_id FROM tracks WHERE artist = ? AND mb_artist_id IS NOT NULL LIMIT 1", (artist_name,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                logger.warning(f"No MBID found for artist {artist_name}, assuming not local or not tagged properly.")
+                # We could try to fetch by name, but for now strict MBID match is safer
+                return
+
+            mbid = row[0]
+            logger.info(f"Found MBID {mbid} for {artist_name}. Fetching fresh metadata...")
+            
+            meta = await fetch_artist_metadata(mbid, artist_name)
+            
+            # Save to DB (Update existing)
+            await db.execute("""
+                INSERT INTO artists (
+                    mbid, name, sort_name, bio, image_url, spotify_url, homepage, 
+                    wikipedia_url, qobuz_url, musicbrainz_url,
+                    similar_artists, top_tracks, last_updated
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(mbid) DO UPDATE SET
+                    name=excluded.name,
+                    sort_name=excluded.sort_name,
+                    bio=excluded.bio,
+                    image_url=excluded.image_url,
+                    spotify_url=excluded.spotify_url,
+                    homepage=excluded.homepage,
+                    wikipedia_url=excluded.wikipedia_url,
+                    qobuz_url=excluded.qobuz_url,
+                    musicbrainz_url=excluded.musicbrainz_url,
+                    similar_artists=excluded.similar_artists,
+                    top_tracks=excluded.top_tracks,
+                    last_updated=excluded.last_updated
+            """, (
+                meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], 
+                meta["spotify_url"], meta["homepage"], 
+                meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
+                json.dumps(meta["similar_artists"]), 
+                json.dumps(meta["top_tracks"]),
+                meta["last_updated"]
+            ))
+            await db.commit()
+            logger.info(f"Metadata updated for {artist_name}")
 
 async def _scan_recursive(root, db, artist_mbids):
     for entry in os.scandir(root):
@@ -117,9 +184,7 @@ async def _process_file(path, db, artist_mbids):
                     async with db.execute("SELECT last_insert_rowid()") as id_cursor:
                         art_id = (await id_cursor.fetchone())[0]
 
-        # Collect MBID
-        if tags.get("mb_artist_id"):
-            artist_mbids.add((tags["mb_artist_id"], tags.get("artist")))
+
 
         # Insert/Update track
         keys = ["path", "mtime", "title", "artist", "album", "album_artist", 
@@ -141,8 +206,45 @@ async def _process_file(path, db, artist_mbids):
         
         sql = f"INSERT OR REPLACE INTO tracks ({columns}) VALUES ({placeholders})"
         
-        await db.execute(sql, values)
+        cursor = await db.execute(sql, values)
+        track_id = cursor.lastrowid
         await db.commit()
+        
+        # Handle Multi-Artist (Split MBIDs)
+        # We manually manage track_artists so we can query individual artists later
+        if track_id:
+            # 1. Clear existing
+            await db.execute("DELETE FROM track_artists WHERE track_id = ?", (track_id,))
+            
+            # 2. Parse and Insert
+            mbids_to_process = set()
+            
+            # Helper to extract IDs
+            def extract_ids(raw):
+                if not raw: return []
+                # Replace common separators with semicolon
+                cleaned = raw.replace("/", ";").replace("&", ";") 
+                # Note: '&' might be dangerous if it's part of a name but usually MBIDs are strict
+                # MBIDs are UUIDs, so '&' is safe to split on if it somehow got in there, 
+                # but standard is slash or semicolon.
+                cleaned = raw.replace("/", ";")
+                return [x.strip() for x in cleaned.split(";") if x.strip()]
+
+            # Track Artists
+            if tags.get("mb_artist_id"):
+                ids = extract_ids(tags["mb_artist_id"])
+                for mbid in ids:
+                    await db.execute("INSERT INTO track_artists (track_id, mbid) VALUES (?, ?)", (track_id, mbid))
+                    # Pass None for name so we fetch canonical name from MB instead of using the compound track artist string
+                    artist_mbids.add((mbid, None)) 
+            
+            # Album Artists
+            if tags.get("mb_album_artist_id"):
+                ids = extract_ids(tags["mb_album_artist_id"])
+                for mbid in ids:
+                    # Pass None for name here too just to be safe, or use album_artist if we trust it (often better than track artist)
+                    # But if album artist is "A & B", we have the same problem.
+                    artist_mbids.add((mbid, None))
 
     except Exception as e:
         logger.error(f"Error processing {path}: {e}")

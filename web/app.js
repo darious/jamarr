@@ -32,6 +32,7 @@ async function init() {
     await loadArtists();
 
     scanBtn.addEventListener('click', triggerScan);
+    document.getElementById('refresh-meta-btn').addEventListener('click', triggerArtistRefresh);
 
 
     // Logo click -> All Artists
@@ -68,7 +69,7 @@ async function init() {
 
 // API Calls
 async function loadArtists() {
-    const res = await fetch(`${API_BASE}/artists`);
+    const res = await fetch(`${API_BASE}/artists?_=${new Date().getTime()}`);
     state.artists = await res.json();
     renderArtists();
 }
@@ -118,6 +119,40 @@ async function triggerScan() {
         console.error(e);
         scanBtn.disabled = false;
         scanBtn.textContent = 'Scan Failed';
+    }
+}
+
+async function triggerArtistRefresh() {
+    if (!state.selectedArtist) return;
+
+    const refreshBtn = document.getElementById('refresh-meta-btn');
+    const originalText = refreshBtn.textContent;
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = 'Refreshing...';
+
+    try {
+        await fetch(`${API_BASE}/scan_artist?artist_name=${encodeURIComponent(state.selectedArtist.name)}`, { method: 'POST' });
+
+        // Poll/Wait for update (simulated by timeout for now, or just reload after a few seconds)
+        // In a real app we might get a job ID and poll
+        setTimeout(async () => {
+            // Reload artist logic
+            const res = await fetch(`${API_BASE}/artists?_=${new Date().getTime()}`);
+            state.artists = await res.json(); // refresh all artists to get updated one
+
+            const updatedArtist = state.artists.find(a => a.name === state.selectedArtist.name);
+            if (updatedArtist) {
+                showArtistDetails(updatedArtist, false); // Don't push state again
+            }
+
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = originalText;
+        }, 3000); // 3 seconds should be enough for single artist fetch
+    } catch (e) {
+        console.error("Refresh failed", e);
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = 'Failed';
+        setTimeout(() => refreshBtn.textContent = originalText, 2000);
     }
 }
 
@@ -211,6 +246,7 @@ function showAllArtists() {
     artistDetailsEl.style.display = 'none';
     albumGridEl.style.display = 'none';
     trackListEl.style.display = 'none';
+    document.getElementById('refresh-meta-btn').style.display = 'none';
     state.selectedArtist = null;
 }
 
@@ -219,7 +255,10 @@ function selectArtist(artist) {
 }
 
 function showArtistDetails(artist, pushState = true) {
+    console.log("Showing Artist Details:", artist);
     if (!artist) return;
+
+    state.selectedArtist = artist;
 
     if (pushState) {
         history.pushState({ view: 'artist-details', data: artist.name }, '', `#artist=${encodeURIComponent(artist.name)}`);
@@ -232,6 +271,9 @@ function showArtistDetails(artist, pushState = true) {
     albumGridEl.style.display = 'none';
     trackListEl.style.display = 'none';
 
+    // Show Refresh Button
+    document.getElementById('refresh-meta-btn').style.display = 'inline-block';
+
     // Hero
     if (artistHeroNameEl) artistHeroNameEl.textContent = artist.name || 'Unknown Artist';
     if (artistHeroBioEl) artistHeroBioEl.textContent = artist.bio || 'No biography available.';
@@ -243,8 +285,51 @@ function showArtistDetails(artist, pushState = true) {
         bgEl.style.backgroundImage = `url('${artist.image_url || 'assets/default-artist.png'}')`;
     }
 
-    // Top Tracks
-    renderTopTracks(artist.top_tracks || []);
+    // Render External Links
+    let linksEl = document.getElementById('artist-hero-links');
+    if (!linksEl) {
+        // Fallback for cached HTML: Create the container dynamically
+        const infoEl = document.querySelector('.artist-hero-info');
+        if (infoEl) {
+            linksEl = document.createElement('div');
+            linksEl.id = 'artist-hero-links';
+            linksEl.className = 'artist-links';
+            infoEl.appendChild(linksEl);
+        }
+    }
+
+    if (linksEl) {
+        linksEl.innerHTML = '';
+
+        // Helper to create link
+        const addLink = (url, type, iconFile) => {
+            if (!url) return;
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.title = type; // Tooltip
+            const img = document.createElement('img');
+            img.src = `assets/${iconFile}`;
+            img.alt = type;
+            img.className = 'artist-link-icon';
+            a.appendChild(img);
+            linksEl.appendChild(a);
+        };
+
+        addLink(artist.musicbrainz_url, 'MusicBrainz', 'logo-musicbrainz.svg');
+        addLink(artist.wikipedia_url, 'Wikipedia', 'logo-wikipedia.svg');
+        addLink(artist.qobuz_url, 'Qobuz', 'logo-qobuz.png');
+        addLink(artist.spotify_url, 'Spotify', 'logo-spotify.svg');
+    }
+
+    // Top Tracks - Fetch all artist tracks first to check availability without switching view
+    fetch(`${API_BASE}/tracks?artist=${encodeURIComponent(artist.name)}`)
+        .then(res => res.json())
+        .then(tracks => {
+            // Update state.tracks so playTrack works, but DO NOT call renderTracks
+            state.tracks = tracks;
+            renderTopTracks(artist.top_tracks || []);
+        });
 
     // Similar Artists
     renderSimilarArtists(artist.similar_artists || []);
@@ -265,14 +350,60 @@ function renderTopTracks(tracks, showAll = false) {
     const tracksToShow = showAll ? tracks : tracks.slice(0, initialCount);
 
     tracksToShow.forEach((track, index) => {
+        // Try to find matching track in local library (state.tracks loaded in showArtistDetails)
+        // Match by title (case-insensitive)
+        const localTrack = state.tracks.find(t => t.title.toLowerCase() === track.name.toLowerCase());
+        const isAvailable = !!localTrack;
+
         const li = document.createElement('li');
-        li.className = 'top-track-item';
+        li.className = `top-track-item ${isAvailable ? '' : 'track-unavailable'}`;
+
+        // Artwork
+        let artHtml = '';
+        if (isAvailable && localTrack.art_id) {
+            artHtml = `<img src="/art/${localTrack.art_id}" class="top-track-art link-album" alt="Art" onclick="goToAlbum('${localTrack.album}')">`;
+        } else {
+            artHtml = `<div class="top-track-art-placeholder"></div>`;
+        }
+
+        // Play Button
+        let playHtml = '';
+        if (isAvailable) {
+            playHtml = `
+                <button class="play-btn small" onclick="playTrack(${localTrack.id}, this)">
+                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </button>`;
+        } else {
+            playHtml = `<div class="play-btn-placeholder"></div>`;
+        }
+
+        // Tech Meta
+        let techHtml = '';
+        if (isAvailable) {
+            techHtml = `
+            <div class="track-tech-meta">
+                <span class="badge">${localTrack.codec}</span>
+                <span class="badge">${formatSampleRate(localTrack.sample_rate_hz)}</span>
+                <span class="badge">${localTrack.bit_depth}bit</span>
+                <span class="badge">${formatBitrate(localTrack.bitrate)}</span>
+            </div>`;
+        }
+
         li.innerHTML = `
-            <div class="track-number">${index + 1}</div>
+            ${artHtml}
+            ${playHtml}
             <div class="track-info">
-                <div class="track-name">${track.name}</div>
-                <div class="track-meta">${track.album} • ${track.date ? track.date.substring(0, 4) : ''}</div>
+                <div class="track-name ${isAvailable ? 'link-album' : ''}" ${isAvailable ? `onclick="goToAlbum('${localTrack.album}')"` : ''}>
+                    ${track.name}
+                </div>
+                <div class="track-meta">
+                    <span class="${isAvailable ? 'link-album' : ''}" ${isAvailable ? `onclick="goToAlbum('${localTrack.album}')"` : ''}>
+                        ${track.album}
+                    </span>
+                    ${track.date ? ` • ${track.date.substring(0, 4)}` : ''}
+                </div>
             </div>
+            ${techHtml}
             <div class="track-duration">${formatDuration(track.duration_ms / 1000)}</div>
         `;
         topTracksListEl.appendChild(li);
@@ -287,6 +418,20 @@ function renderTopTracks(tracks, showAll = false) {
         };
         topTracksListEl.appendChild(toggleLi);
     }
+}
+
+function goToAlbum(albumName) {
+    if (!state.selectedArtist) return;
+
+    // Find album object
+    loadAlbums(state.selectedArtist.name).then(() => {
+        const album = state.albums.find(a => a.album === albumName);
+        if (album) {
+            loadTracks(album);
+        } else {
+            console.warn("Album not found:", albumName);
+        }
+    });
 }
 
 function renderSimilarArtists(similarArtists, showAll = false) {
@@ -415,6 +560,25 @@ function renderTracks(album) {
     state.selectedAlbum = album;
     albumTitleEl.textContent = album.album;
     albumArtistEl.textContent = album.artist_name;
+    albumArtistEl.onclick = () => showArtistDetails({ name: album.artist_name }); // Use object mock for now or fetch?
+    // Actually showArtistDetails expects an object with .name, .bio etc.
+    // Ideally we should find the artist object first.
+
+    albumArtistEl.onclick = async () => {
+        const artist = state.artists.find(a => a.name === album.artist_name);
+        if (artist) {
+            selectArtist(artist);
+            showArtistDetails(artist);
+        } else {
+            // Fallback if not loaded (should be loaded usually)
+            // or just try to show details with minimal info then fetch?
+            // showArtistDetails({name: album.artist_name});
+            // But showArtistDetails calls top_tracks which might fail if not fully populated.
+            // Best to rely on it being in state.artists as we load all on init.
+            console.warn("Artist object not found for interaction");
+        }
+    };
+    albumArtistEl.style.cursor = 'pointer';
 
     // Calculate stats
     const totalTracks = state.tracks.length;
@@ -495,6 +659,7 @@ function renderTracks(album) {
     allArtistsGridEl.style.display = 'none';
     azHeaderEl.style.display = 'none';
     trackListEl.style.display = 'block';
+    document.getElementById('refresh-meta-btn').style.display = 'none';
 }
 
 // Audio Player Logic
