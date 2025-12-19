@@ -12,6 +12,7 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
         SELECT DISTINCT 
             a.name,
             a.image_url, 
+            a.art_id,
             a.bio, 
             a.similar_artists,
             a.top_tracks,
@@ -20,7 +21,8 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             a.spotify_url,
             a.wikipedia_url,
             a.qobuz_url,
-            a.musicbrainz_url
+            a.musicbrainz_url,
+            a.singles
         FROM artists a
         JOIN track_artists ta ON a.mbid = ta.mbid
         WHERE a.name IS NOT NULL 
@@ -32,15 +34,17 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             {
                 "name": row[0], 
                 "image_url": row[1], 
-                "bio": row[2], 
-                "similar_artists": json.loads(row[3]) if row[3] else [],
-                "top_tracks": json.loads(row[4]) if row[4] else [],
-                "sort_name": row[5] or row[0], # Fallback to name
-                "homepage": row[6],
-                "spotify_url": row[7],
-                "wikipedia_url": row[8],
-                "qobuz_url": row[9],
-                "musicbrainz_url": row[10]
+                "art_id": row[2],
+                "bio": row[3], 
+                "similar_artists": json.loads(row[4]) if row[4] else [],
+                "top_tracks": json.loads(row[5]) if row[5] else [],
+                "sort_name": row[6] or row[0], # Fallback to name
+                "homepage": row[7],
+                "spotify_url": row[8],
+                "wikipedia_url": row[9],
+                "qobuz_url": row[10],
+                "musicbrainz_url": row[11],
+                "singles": json.loads(row[12]) if row[12] else []
             } 
             for row in rows
         ]

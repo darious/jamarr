@@ -4,7 +4,7 @@ import logging
 import json
 from app.db import get_db
 from app.scanner.tags import extract_tags
-from app.scanner.artwork import extract_and_save_artwork
+from app.scanner.artwork import extract_and_save_artwork, download_and_save_artwork
 from app.config import get_music_path
 from app.scanner.metadata import fetch_artist_metadata, fetch_track_credits
 
@@ -63,19 +63,36 @@ async def scan_library(root_path: str = None, force_metadata: bool = False):
             logger.info(f"Fetching metadata for {artist_name} ({mbid})...")
             meta = await fetch_artist_metadata(mbid, artist_name)
             
+            # Download and cache artist image if available
+            art_id = None
+            if meta.get("image_url"):
+                art_hash = await download_and_save_artwork(meta["image_url"], art_type='artist')
+                if art_hash:
+                    # Get or create artwork record
+                    async with db.execute("SELECT id FROM artwork WHERE sha1 = ?", (art_hash,)) as cursor:
+                        art_row = await cursor.fetchone()
+                        if art_row:
+                            art_id = art_row[0]
+                        else:
+                            await db.execute("INSERT INTO artwork (sha1, type) VALUES (?, ?)", (art_hash, 'artist'))
+                            await db.commit()
+                            async with db.execute("SELECT last_insert_rowid()") as id_cursor:
+                                art_id = (await id_cursor.fetchone())[0]
+            
             # Save to DB
             await db.execute("""
                 INSERT INTO artists (
-                    mbid, name, sort_name, bio, image_url, spotify_url, homepage, 
+                    mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
                     wikipedia_url, qobuz_url, musicbrainz_url,
-                    similar_artists, top_tracks, last_updated
+                    similar_artists, top_tracks, singles, last_updated
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mbid) DO UPDATE SET
                     name=excluded.name,
                     sort_name=excluded.sort_name,
                     bio=excluded.bio,
                     image_url=excluded.image_url,
+                    art_id=excluded.art_id,
                     spotify_url=excluded.spotify_url,
                     homepage=excluded.homepage,
                     wikipedia_url=excluded.wikipedia_url,
@@ -83,13 +100,15 @@ async def scan_library(root_path: str = None, force_metadata: bool = False):
                     musicbrainz_url=excluded.musicbrainz_url,
                     similar_artists=excluded.similar_artists,
                     top_tracks=excluded.top_tracks,
+                    singles=excluded.singles,
                     last_updated=excluded.last_updated
             """, (
-                meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], 
+                meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
                 meta["spotify_url"], meta["homepage"], 
                 meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
                 json.dumps(meta["similar_artists"]), 
                 json.dumps(meta["top_tracks"]),
+                json.dumps(meta.get("singles", [])),
                 meta["last_updated"]
             ))
             await db.commit()
@@ -112,19 +131,36 @@ async def refresh_artist_metadata(artist_name: str):
             
             meta = await fetch_artist_metadata(mbid, artist_name)
             
+            # Download and cache artist image if available
+            art_id = None
+            if meta.get("image_url"):
+                art_hash = await download_and_save_artwork(meta["image_url"], art_type='artist')
+                if art_hash:
+                    # Get or create artwork record
+                    async with db.execute("SELECT id FROM artwork WHERE sha1 = ?", (art_hash,)) as cursor:
+                        art_row = await cursor.fetchone()
+                        if art_row:
+                            art_id = art_row[0]
+                        else:
+                            await db.execute("INSERT INTO artwork (sha1, type) VALUES (?, ?)", (art_hash, 'artist'))
+                            await db.commit()
+                            async with db.execute("SELECT last_insert_rowid()") as id_cursor:
+                                art_id = (await id_cursor.fetchone())[0]
+            
             # Save to DB (Update existing)
             await db.execute("""
                 INSERT INTO artists (
-                    mbid, name, sort_name, bio, image_url, spotify_url, homepage, 
+                    mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
                     wikipedia_url, qobuz_url, musicbrainz_url,
-                    similar_artists, top_tracks, last_updated
+                    similar_artists, top_tracks, singles, last_updated
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mbid) DO UPDATE SET
                     name=excluded.name,
                     sort_name=excluded.sort_name,
                     bio=excluded.bio,
                     image_url=excluded.image_url,
+                    art_id=excluded.art_id,
                     spotify_url=excluded.spotify_url,
                     homepage=excluded.homepage,
                     wikipedia_url=excluded.wikipedia_url,
@@ -132,17 +168,40 @@ async def refresh_artist_metadata(artist_name: str):
                     musicbrainz_url=excluded.musicbrainz_url,
                     similar_artists=excluded.similar_artists,
                     top_tracks=excluded.top_tracks,
+                    singles=excluded.singles,
                     last_updated=excluded.last_updated
             """, (
-                meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], 
+                meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
                 meta["spotify_url"], meta["homepage"], 
                 meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
                 json.dumps(meta["similar_artists"]), 
                 json.dumps(meta["top_tracks"]),
+                json.dumps(meta.get("singles", [])),
                 meta["last_updated"]
             ))
             await db.commit()
             logger.info(f"Metadata updated for {artist_name}")
+
+async def refresh_artist_singles_only(artist_name: str):
+    logger.info(f"Refreshing singles only for {artist_name}")
+    from app.scanner.metadata import fetch_artist_singles
+    
+    async for db in get_db():
+        # Find MBID for artist
+        async with db.execute("SELECT mbid FROM artists WHERE name = ? COLLATE NOCASE", (artist_name,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                logger.warning(f"Artist {artist_name} not found in DB (must be scanned first).")
+                return
+
+            mbid = row[0]
+            logger.info(f"Found MBID {mbid} for {artist_name}. Fetching singles...")
+            
+            singles = await fetch_artist_singles(mbid)
+            
+            await db.execute("UPDATE artists SET singles = ? WHERE mbid = ?", (json.dumps(singles), mbid))
+            await db.commit()
+            logger.info(f"Singles updated for {artist_name}")
 
 async def _scan_recursive(root, db, artist_mbids):
     for entry in os.scandir(root):
@@ -179,7 +238,7 @@ async def _process_file(path, db, artist_mbids):
                 if art_row:
                     art_id = art_row[0]
                 else:
-                    await db.execute("INSERT INTO artwork (sha1) VALUES (?)", (art_hash,))
+                    await db.execute("INSERT INTO artwork (sha1, type) VALUES (?, ?)", (art_hash, 'album'))
                     await db.commit()
                     async with db.execute("SELECT last_insert_rowid()") as id_cursor:
                         art_id = (await id_cursor.fetchone())[0]
@@ -275,3 +334,28 @@ async def _process_file(path, db, artist_mbids):
 
     except Exception as e:
         logger.error(f"Error processing {path}: {e}")
+
+async def refresh_all_artist_singles():
+    logger.info("Refreshing singles for ALL artists...")
+    async for db in get_db():
+        async with db.execute("SELECT name FROM artists") as cursor:
+            rows = await cursor.fetchall()
+            
+    if not rows:
+        logger.warning("No artists found in database.")
+        return
+
+    total = len(rows)
+    logger.info(f"Found {total} artists. Starting batch refresh...")
+    
+    for i, row in enumerate(rows):
+        artist_name = row[0]
+        logger.info(f"[{i+1}/{total}] Processing {artist_name}...")
+        try:
+            await refresh_artist_singles_only(artist_name)
+            # Be nice to the API
+            await asyncio.sleep(1.1) 
+        except Exception as e:
+            logger.error(f"Failed to refresh singles for {artist_name}: {e}")
+            
+    logger.info("Finished refreshing singles for all artists.")

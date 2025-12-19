@@ -45,19 +45,23 @@ CREATE TABLE IF NOT EXISTS artists (
     sort_name TEXT,
     bio TEXT,
     image_url TEXT,
+    art_id INTEGER,
     spotify_url TEXT,
     homepage TEXT,
     similar_artists TEXT,
     top_tracks TEXT,
+    singles TEXT,
     last_updated REAL,
     wikipedia_url TEXT,
     qobuz_url TEXT,
-    musicbrainz_url TEXT
+    musicbrainz_url TEXT,
+    FOREIGN KEY(art_id) REFERENCES artwork(id)
 );
 
 CREATE TABLE IF NOT EXISTS artwork (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sha1 TEXT UNIQUE NOT NULL,
+    type TEXT,
     mime TEXT,
     width INTEGER,
     height INTEGER,
@@ -71,6 +75,44 @@ CREATE TABLE IF NOT EXISTS renderers (
     location_url TEXT,
     last_seen REAL
 );
+
+-- Indexes for integrity & joins
+CREATE INDEX IF NOT EXISTS idx_tracks_art_id ON tracks(art_id);
+CREATE INDEX IF NOT EXISTS idx_tracks_mb_artist_id ON tracks(mb_artist_id);
+
+-- Indexes for browsing (artist → album → tracks)
+CREATE INDEX IF NOT EXISTS idx_tracks_artist_album ON tracks(artist COLLATE NOCASE, album COLLATE NOCASE, disc_no, track_no);
+CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album COLLATE NOCASE, disc_no, track_no);
+CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name COLLATE NOCASE);
+
+-- Index for maintenance / library updates
+CREATE INDEX IF NOT EXISTS idx_tracks_mtime ON tracks(mtime);
+
+-- FTS5 virtual table for full-text search
+CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
+    title,
+    artist,
+    album,
+    album_artist,
+    content=tracks,
+    content_rowid=id
+);
+
+-- Triggers to keep FTS5 in sync with tracks table
+CREATE TRIGGER IF NOT EXISTS tracks_fts_insert AFTER INSERT ON tracks BEGIN
+    INSERT INTO tracks_fts(rowid, title, artist, album, album_artist)
+    VALUES (new.id, new.title, new.artist, new.album, new.album_artist);
+END;
+
+CREATE TRIGGER IF NOT EXISTS tracks_fts_delete AFTER DELETE ON tracks BEGIN
+    DELETE FROM tracks_fts WHERE rowid = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS tracks_fts_update AFTER UPDATE ON tracks BEGIN
+    DELETE FROM tracks_fts WHERE rowid = old.id;
+    INSERT INTO tracks_fts(rowid, title, artist, album, album_artist)
+    VALUES (new.id, new.title, new.artist, new.album, new.album_artist);
+END;
 """
 
 async def get_db():
@@ -81,14 +123,62 @@ async def get_db():
 async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
+        # Enable WAL mode for better concurrency
+        await db.execute("PRAGMA journal_mode=WAL")
+        
         await db.executescript(INIT_SCRIPT)
         
         # Migrations for existing DBs
+        migrations = [
+            "ALTER TABLE artists ADD COLUMN wikipedia_url TEXT",
+            "ALTER TABLE artists ADD COLUMN qobuz_url TEXT",
+            "ALTER TABLE artists ADD COLUMN musicbrainz_url TEXT",
+            "ALTER TABLE artists ADD COLUMN art_id INTEGER REFERENCES artwork(id)",
+            "ALTER TABLE artists ADD COLUMN singles TEXT"
+        ]
+        
+        for sql in migrations:
+            try:
+                await db.execute(sql)
+            except Exception:
+                pass # Column likely exists
+            
         try:
-             await db.execute("ALTER TABLE artists ADD COLUMN wikipedia_url TEXT")
-             await db.execute("ALTER TABLE artists ADD COLUMN qobuz_url TEXT")
-             await db.execute("ALTER TABLE artists ADD COLUMN musicbrainz_url TEXT")
+             await db.execute("ALTER TABLE artwork ADD COLUMN type TEXT")
         except Exception:
-            pass # Columns likely exist
+            pass # Column likely exists
+
+        # Playback State (Single row enforced)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS playback_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                queue TEXT DEFAULT '[]',
+                current_index INTEGER DEFAULT 0,
+                position_seconds REAL DEFAULT 0,
+                is_playing BOOLEAN DEFAULT 0
+            )
+        """)
+        
+        # Ensure the single row exists
+        await db.execute("INSERT OR IGNORE INTO playback_state (id) VALUES (1)")
+
+        # Playback History
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS playback_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                client_ip TEXT,
+                hostname TEXT,
+                FOREIGN KEY(track_id) REFERENCES tracks(id)
+            )
+        """)
+        
+        # Migration: Add hostname column if it doesn't exist
+        try:
+            await db.execute("ALTER TABLE playback_history ADD COLUMN hostname TEXT")
+            await db.commit()
+        except Exception:
+            pass  # Column likely exists
 
         await db.commit()

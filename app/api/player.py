@@ -4,9 +4,245 @@ import aiosqlite
 from app.upnp import UPnPManager
 import mimetypes
 import httpx
+from typing import Dict, Any, List, Optional
+from pydantic import BaseModel
+import json
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 upnp = UPnPManager.get_instance()
+
+# --- Pydantic Models ---
+
+class Track(BaseModel):
+    id: int
+    title: str
+    artist: str
+    album: str
+    duration_seconds: float
+    art_id: Optional[int] = None  # Changed from str to int to match frontend
+    codec: Optional[str] = None
+    bit_depth: Optional[int] = None
+    sample_rate_hz: Optional[int] = None
+    path: Optional[str] = None
+    # Add other optional fields from frontend
+    album_artist: Optional[str] = None
+    track_no: Optional[int] = None
+    disc_no: Optional[int] = None
+    date: Optional[str] = None
+    bitrate: Optional[int] = None
+
+class PlayerState(BaseModel):
+    queue: List[Track]
+    current_index: int
+    position_seconds: float
+    is_playing: bool
+
+class QueueUpdate(BaseModel):
+    queue: List[Track]
+    start_index: int = 0
+    hostname: Optional[str] = None
+    client_ip: Optional[str] = None  # Frontend can send its own IP
+
+class AppendQueue(BaseModel):
+    tracks: List[Track]
+
+class IndexUpdate(BaseModel):
+    index: int
+    hostname: Optional[str] = None
+    client_ip: Optional[str] = None  # Frontend can send its own IP
+
+class ProgressUpdate(BaseModel):
+    position_seconds: float
+    is_playing: bool
+
+# --- Helper Functions ---
+
+# --- Helper Functions ---
+
+def get_client_ip(request: Request) -> str:
+    """Get the real client IP, accounting for proxies."""
+    # Debug: log all headers
+    logger.warning(f"[IP Debug] Request headers: {dict(request.headers)}")
+    logger.warning(f"[IP Debug] Request client: {request.client}")
+    
+    # Check X-Forwarded-For header first (for reverse proxies)
+    forwarded_for = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        # X-Forwarded-For can be a comma-separated list, take the first (original client)
+        client_ip = forwarded_for.split(",")[0].strip()
+        logger.warning(f"[IP Debug] Using X-Forwarded-For: {client_ip}")
+        return client_ip
+    
+    # Check X-Real-IP header (alternative proxy header)
+    real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
+    if real_ip:
+        logger.warning(f"[IP Debug] Using X-Real-IP: {real_ip}")
+        return real_ip.strip()
+    
+    # Fallback to direct connection IP
+    fallback = request.client.host if request.client else "unknown"
+    logger.warning(f"[IP Debug] Using fallback client.host: {fallback}")
+    return fallback
+
+async def log_history(db: aiosqlite.Connection, track_id: int, client_ip: str, hostname: str = None):
+    if track_id and track_id > 0:
+        try:
+            await db.execute(
+                "INSERT INTO playback_history (track_id, client_ip, hostname) VALUES (?, ?, ?)",
+                (track_id, client_ip, hostname)
+            )
+            await db.commit()
+        except Exception as e:
+            logger.error(f"Failed to log history: {e}")
+
+# --- Endpoints ---
+
+@router.get("/api/client-ip")
+async def get_client_ip_endpoint(request: Request):
+    """Return the client's IP address."""
+    client_ip = get_client_ip(request)
+    return {"ip": client_ip}
+
+@router.get("/api/player/history")
+async def get_playback_history():
+    """Get playback history with track details."""
+    async for db in get_db():
+        query = """
+            SELECT 
+                h.id,
+                h.timestamp,
+                h.client_ip,
+                h.hostname,
+                t.id as track_id,
+                t.title,
+                t.artist,
+                t.album,
+                t.art_id,
+                t.duration_seconds,
+                t.codec,
+                t.bit_depth,
+                t.sample_rate_hz,
+                t.date
+            FROM playback_history h
+            JOIN tracks t ON h.track_id = t.id
+            ORDER BY h.timestamp DESC
+        """
+        async with db.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            history = []
+            for row in rows:
+                history.append({
+                    "id": row[0],
+                    "timestamp": row[1],
+                    "client_ip": row[2],
+                    "hostname": row[3],
+                    "track": {
+                        "id": row[4],
+                        "title": row[5],
+                        "artist": row[6],
+                        "album": row[7],
+                        "art_id": row[8],
+                        "duration_seconds": row[9],
+                        "codec": row[10],
+                        "bit_depth": row[11],
+                        "sample_rate_hz": row[12],
+                        "date": row[13]
+                    }
+                })
+            return history
+    return []
+
+@router.get("/api/player/state", response_model=PlayerState)
+async def get_player_state():
+    async for db in get_db():
+        async with db.execute("SELECT queue, current_index, position_seconds, is_playing FROM playback_state WHERE id = 1") as cursor:
+            row = await cursor.fetchone()
+            if row:
+                queue_json, idx, pos, playing = row
+                try:
+                    queue = json.loads(queue_json)
+                except:
+                    queue = []
+                return {
+                    "queue": queue,
+                    "current_index": idx,
+                    "position_seconds": pos,
+                    "is_playing": bool(playing)
+                }
+    return {"queue": [], "current_index": 0, "position_seconds": 0, "is_playing": False}
+
+@router.post("/api/player/queue")
+async def set_queue(update: QueueUpdate, request: Request):
+    # Prefer client_ip from request body (sent by frontend), fallback to headers
+    client_ip = update.client_ip or get_client_ip(request)
+    async for db in get_db():
+        queue_json = json.dumps([t.dict() for t in update.queue])
+        await db.execute(
+            "UPDATE playback_state SET queue = ?, current_index = ?, position_seconds = 0, is_playing = 1 WHERE id = 1",
+            (queue_json, update.start_index)
+        )
+        await db.commit()
+        # Note: History logging moved to /api/player/log-play endpoint
+            
+    return {"status": "ok"}
+
+@router.post("/api/player/queue/append")
+async def append_queue(update: AppendQueue):
+    async for db in get_db():
+        # Get current queue
+        async with db.execute("SELECT queue FROM playback_state WHERE id = 1") as cursor:
+            row = await cursor.fetchone()
+            current_queue = json.loads(row[0]) if row else []
+            
+        new_tracks = [t.dict() for t in update.tracks]
+        updated_queue = current_queue + new_tracks
+        
+        await db.execute(
+            "UPDATE playback_state SET queue = ? WHERE id = 1",
+            (json.dumps(updated_queue),)
+        )
+        await db.commit()
+    return {"status": "ok"}
+
+@router.post("/api/player/index")
+async def set_index(update: IndexUpdate, request: Request):
+    # Prefer client_ip from request body (sent by frontend), fallback to headers
+    client_ip = update.client_ip or get_client_ip(request)
+    async for db in get_db():
+        # Note: History logging moved to /api/player/log-play endpoint
+        await db.execute(
+            "UPDATE playback_state SET current_index = ?, position_seconds = 0 WHERE id = 1",
+            (update.index,)
+        )
+        await db.commit()
+    return {"status": "ok"}
+
+class LogPlayRequest(BaseModel):
+    track_id: int
+    client_ip: Optional[str] = None
+    hostname: Optional[str] = None
+
+@router.post("/api/player/log-play")
+async def log_play(update: LogPlayRequest, request: Request):
+    """Log a track play to history after threshold is met."""
+    client_ip = update.client_ip or get_client_ip(request)
+    async for db in get_db():
+        await log_history(db, update.track_id, client_ip, update.hostname)
+    return {"status": "ok"}
+
+@router.post("/api/player/progress")
+async def update_progress(update: ProgressUpdate):
+    async for db in get_db():
+        await db.execute(
+            "UPDATE playback_state SET position_seconds = ?, is_playing = ? WHERE id = 1",
+            (update.position_seconds, update.is_playing)
+        )
+        await db.commit()
+    return {"status": "ok"}
+
+# --- UPnP & Debug Endpoints (Preserved) ---
 
 @router.get("/api/player/debug")
 async def debug_info():
@@ -101,20 +337,9 @@ async def play_track(data: dict, request: Request, db: aiosqlite.Connection = De
         track['mime'] = mime or "audio/flac"
 
         # Update UPnP manager's base URL knowledge from this request
-        # (e.g. http://192.168.0.x:8000/)
         base_url = str(request.base_url).rstrip('/')
-        # Override IP in base_url with local network IP if request came from localhost?
-        # Naim needs an IP it can reach.
-        # If user accessed via localhost:8000, base_url is localhost:8000. Naim can't reach localhost.
-        # So we should rely on upnp.local_ip but use the port from request.
         port = request.url.port or 80
-        upnp.base_url = f"http://{upnp.local_ip}:{port}" # Update logic in upnp.py to use this
-
-        # If active renderer is local, we don't do anything here (Frontend handles it)
-        # But frontend calls this ONLY if remote?
-        # Actually frontend should probably call this regardless for consistent API?
-        # NO. If local, frontend sets <audio src>.
-        # If remote, frontend calls this.
+        upnp.base_url = f"http://{upnp.local_ip}:{port}" 
         
         if upnp.active_renderer:
             await upnp.play_track(track['id'], track['path'], track)

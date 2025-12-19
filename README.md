@@ -4,11 +4,12 @@
 
 Jamarr is an open-source, web-based music controller designed to scan a local music library, cache rich metadata, and play music to a Naim Uniti Atom (or other UPnP renderers) via a fast, responsive web UI.
 
-## Features (Planned)
+## Features
 - Fast library scanning and metadata extraction (mutagen).
 - Local SQLite cache for instant browsing.
-- High-quality artwork support.
-- UPnP Control Point for Naim Atom.
+- **Organized artwork cache**: Separate subdirectories for album and artist artwork with SHA1-based distribution.
+- **Artist image caching**: Downloads and caches artist images locally from Spotify.
+- UPnP Control Point for Naim Atom and other renderers.
 - Modern, responsive Web UI.
 - **Refresh Metadata**: Targeted updates for artist information and external links.
 
@@ -59,6 +60,30 @@ Ensure your `MUSIC_PATH` environment variable is set if your music is not in the
 ## Project Structure
 
 - `app/`: Backend application code (FastAPI).
-- `web/`: Frontend assets (HTML/JS/CSS).
+- `web/`: Frontend (SvelteKit + TypeScript + Skeleton UI).
 - `cache/`: Local database and artwork cache.
+  - `cache/library.sqlite`: SQLite database.
+  - `cache/art/album/`: Album artwork organized in subdirectories (00-ff).
+  - `cache/art/artist/`: Artist images organized in subdirectories (00-ff).
 - `requirements.txt`: Python dependencies.
+
+## Frontend (SvelteKit + Skeleton)
+
+The web UI now lives in a SvelteKit app with Skeleton UI and Tailwind.
+
+Install and run the frontend in dev mode:
+
+```bash
+cd web
+npm install
+npm run dev -- --host 0.0.0.0 --port 4173
+```
+
+Build production assets (served by FastAPI from `web/build`):
+
+```bash
+cd web
+npm run build
+```
+
+The FastAPI app is already configured to serve the built assets from `web/build`; rebuild whenever you change frontend code.
