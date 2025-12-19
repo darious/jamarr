@@ -5,6 +5,8 @@ from app.db import init_db
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    from app.upnp import UPnPManager
+    UPnPManager.get_instance().start_background_scan()
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -16,11 +18,12 @@ from app.scanner.scan import scan_library
 
 from fastapi.staticfiles import StaticFiles
 from app.media import art
-from app.api import library, stream
+from app.api import library, stream, player
 
 app.include_router(art.router)
 app.include_router(library.router)
 app.include_router(stream.router)
+app.include_router(player.router)
 
 @app.post("/api/scan")
 async def trigger_scan(background_tasks: BackgroundTasks):
