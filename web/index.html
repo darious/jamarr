@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jamarr</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div id="app">
+        <header>
+            <img src="assets/logo.png" alt="Jamarr" class="logo">
+            <div class="controls">
+                <button id="scan-btn">Scan Library</button>
+            </div>
+        </header>
+        <div class="main-container">
+            <main id="content">
+                <div id="az-header" class="az-header">
+                    <!-- A-Z links injected here -->
+                </div>
+                <div id="all-artists-grid" class="artist-grid">
+                    <!-- Artists injected here -->
+                </div>
+                <div id="album-grid">
+                    <!-- Albums injected here -->
+                </div>
+                <div id="track-list" style="display: none;">
+                    <div id="album-header">
+                        <div id="album-art-container">
+                            <img id="album-art-large" src="" alt="Album Art">
+                        </div>
+                        <div class="album-details">
+                            <div id="album-genre" class="meta-line"></div>
+                            <h2 id="album-title"></h2>
+                            <h3 id="album-artist"></h3>
+                            <div id="album-meta" class="meta-line"></div>
+                            <div class="album-actions">
+                                <button id="play-album-btn" class="icon-btn">▶</button>
+                            </div>
+                        </div>
+                    </div>
+                    <ul id="tracks">
+                        <!-- Tracks injected here -->
+                    </ul>
+                </div>
+
+                <div id="artist-details" style="display: none;">
+                    <div class="artist-hero">
+                        <div class="artist-hero-bg"></div>
+                        <div class="artist-hero-content">
+                            <div class="artist-image-wrapper">
+                                <img id="artist-hero-image" src="" alt="">
+                            </div>
+                            <div class="artist-hero-info">
+                                <h1 id="artist-hero-name"></h1>
+                                <p id="artist-hero-bio"></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="artist-main-content">
+                        <div class="artist-top-tracks">
+                            <h3>Most popular</h3>
+                            <ul id="top-tracks-list"></ul>
+                        </div>
+
+                        <div class="artist-similar">
+                            <div class="similar-header">
+                                <h3>Similar artists</h3>
+                            </div>
+                            <div id="similar-artists-grid"></div>
+                        </div>
+                    </div>
+
+                    <div class="artist-albums-section">
+                        <h3>Albums</h3>
+                        <div id="artist-albums-grid" class="album-grid"></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>

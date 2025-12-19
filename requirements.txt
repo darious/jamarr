@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+mutagen
+async-upnp-client
+aiofiles
+python-multipart
+aiosqlite
+httpx
+beautifulsoup4
+PyYAML

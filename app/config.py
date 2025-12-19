@@ -1,0 +1,25 @@
+import yaml
+import os
+
+CONFIG_PATH = "config.yaml"
+
+_config = None
+
+def load_config():
+    global _config
+    if _config:
+        return _config
+    
+    if not os.path.exists(CONFIG_PATH):
+        raise FileNotFoundError(f"Config file not found at {CONFIG_PATH}")
+        
+    with open(CONFIG_PATH, "r") as f:
+        _config = yaml.safe_load(f)
+    return _config
+
+def get_music_path():
+    return load_config().get("music_path", "/root/music")
+
+def get_spotify_credentials():
+    cfg = load_config().get("spotify", {})
+    return cfg.get("client_id"), cfg.get("client_secret")

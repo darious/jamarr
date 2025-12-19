@@ -1,0 +1,30 @@
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+from app.db import get_db
+import os
+
+router = APIRouter()
+CACHE_DIR = "cache/art"
+
+@router.get("/art/{art_id}")
+async def get_artwork(art_id: int):
+    # We need to look up the SHA1 from the ID
+    # For simplicity, we'll do a quick DB lookup
+    # In a real app, we might want to cache this mapping or pass the SHA1 directly if possible
+    # But the outline says /art/{art_id}
+    
+    async for db in get_db():
+        async with db.execute("SELECT sha1 FROM artwork WHERE id = ?", (art_id,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Artwork not found")
+            
+            sha1 = row["sha1"]
+            path = os.path.join(CACHE_DIR, sha1)
+            
+            if not os.path.exists(path):
+                raise HTTPException(status_code=404, detail="Artwork file missing")
+            
+            return FileResponse(path)
+    
+    raise HTTPException(status_code=500, detail="Database error")
