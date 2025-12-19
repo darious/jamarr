@@ -46,6 +46,9 @@ Stores rich metadata for artists, fetched from external sources (MusicBrainz, Sp
 | `similar_artists` | TEXT | JSON string of similar artists. |
 | `top_tracks` | TEXT | JSON string of top tracks. |
 | `last_updated` | REAL | Timestamp of last metadata update. |
+| `wikipedia_url` | TEXT | URL to Wikipedia page. |
+| `qobuz_url` | TEXT | URL to Qobuz artist page. |
+| `musicbrainz_url` | TEXT | URL to MusicBrainz artist page. |
 
 ### `artwork`
 Stores unique artwork to avoid duplication.

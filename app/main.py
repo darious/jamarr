@@ -27,4 +27,10 @@ async def trigger_scan(background_tasks: BackgroundTasks):
     background_tasks.add_task(scan_library, "/root/music")
     return {"message": "Scan started"}
 
+@app.post("/api/scan_artist")
+async def trigger_artist_scan(artist_name: str, background_tasks: BackgroundTasks):
+    from app.scanner.scan import refresh_artist_metadata
+    background_tasks.add_task(refresh_artist_metadata, artist_name)
+    return {"message": f"Metadata refresh started for {artist_name}"}
+
 app.mount("/", StaticFiles(directory="web", html=True), name="web")

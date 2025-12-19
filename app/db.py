@@ -29,6 +29,14 @@ CREATE TABLE IF NOT EXISTS tracks (
     FOREIGN KEY(art_id) REFERENCES artwork(id)
 );
 
+CREATE TABLE IF NOT EXISTS track_artists (
+    track_id INTEGER,
+    mbid TEXT,
+    PRIMARY KEY (track_id, mbid),
+    FOREIGN KEY(track_id) REFERENCES tracks(id),
+    FOREIGN KEY(mbid) REFERENCES artists(mbid)
+);
+
 CREATE TABLE IF NOT EXISTS artists (
     mbid TEXT PRIMARY KEY,
     name TEXT,
@@ -39,7 +47,10 @@ CREATE TABLE IF NOT EXISTS artists (
     homepage TEXT,
     similar_artists TEXT,
     top_tracks TEXT,
-    last_updated REAL
+    last_updated REAL,
+    wikipedia_url TEXT,
+    qobuz_url TEXT,
+    musicbrainz_url TEXT
 );
 
 CREATE TABLE IF NOT EXISTS artwork (
@@ -69,4 +80,13 @@ async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(INIT_SCRIPT)
+        
+        # Migrations for existing DBs
+        try:
+             await db.execute("ALTER TABLE artists ADD COLUMN wikipedia_url TEXT")
+             await db.execute("ALTER TABLE artists ADD COLUMN qobuz_url TEXT")
+             await db.execute("ALTER TABLE artists ADD COLUMN musicbrainz_url TEXT")
+        except Exception:
+            pass # Columns likely exist
+
         await db.commit()

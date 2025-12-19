@@ -62,6 +62,9 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
         "image_url": None,
         "spotify_url": None,
         "homepage": None,
+        "wikipedia_url": None,
+        "qobuz_url": None,
+        "musicbrainz_url": None,
         "similar_artists": [],
         "top_tracks": [],
         "last_updated": time.time()
@@ -79,10 +82,15 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
             
             if resp.status_code == 200:
                 mb_data = resp.json()
+                if mb_data.get("name"):
+                    metadata["name"] = mb_data.get("name")
                 metadata["sort_name"] = mb_data.get("sort-name")
                 relations = mb_data.get("relations", [])
                 logger.debug(f"Found {len(relations)} relations for {artist_name}")
                 
+                # Set MusicBrainz URL
+                metadata["musicbrainz_url"] = f"https://musicbrainz.org/artist/{mbid}"
+
                 for rel in relations:
                     target = rel.get("url", {}).get("resource", "")
                     type_ = rel.get("type", "")
@@ -91,6 +99,66 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                         metadata["homepage"] = target
                     elif type_ == "wikidata":
                         wikidata_url = target
+                    elif type_ == "purchase for download" and "qobuz.com" in target:
+                        # Logic: Find the best Qobuz link. Prioritize one with a numeric ID.
+                        current_qobuz = metadata.get("qobuz_url")
+                        new_qobuz = target
+                        
+                        # Try to extract ID from new link
+                        new_id = None
+                        try:
+                             # 1. Regex to find the ID (last numeric component)
+                             import re
+                             match = re.search(r'/([0-9]+)(?:[\?#]|$)', target)
+                             if match:
+                                 new_id = match.group(1)
+                             else:
+                                 # 2. Fallback: split and look for digits
+                                 parts = target.strip("/").split("/")
+                                 for part in reversed(parts):
+                                     clean_part = part.split("?")[0]
+                                     if clean_part.isdigit():
+                                         new_id = clean_part
+                                         break
+                                 
+                                 # 3. Fallback: If no ID found in URL (e.g. /interpreter/bastille/...), fetch page to scrape ID
+                                 if not new_id and "qobuz.com" in target:
+                                     logger.debug(f"No ID in Qobuz URL, attempting to scrape: {target}")
+                                     try:
+                                         q_resp = await client.get(target, follow_redirects=True)
+                                         if q_resp.status_code == 200:
+                                             # Look for "artist/12345" in the final URL or content
+                                             final_url = str(q_resp.url)
+                                             match_final = re.search(r'/([0-9]+)(?:[\?#]|$)', final_url)
+                                             if match_final:
+                                                 new_id = match_final.group(1)
+                                                 logger.debug(f"Found ID {new_id} from redirect to {final_url}")
+                                             else:
+                                                 # Look in HTML content for something like "artist/12345"
+                                                 # Or typically canonical link: <link rel="canonical" href=".../artist/12345" />
+                                                 # Or JSON-LD
+                                                 match_content = re.search(r'qobuz\.com/.*/artist/([0-9]+)', q_resp.text)
+                                                 if match_content:
+                                                     new_id = match_content.group(1)
+                                                     logger.debug(f"Found ID {new_id} in page content")
+                                     except Exception as e:
+                                         logger.warning(f"Failed to scrape Qobuz page: {e}")
+
+                        except: pass
+                        
+                        # Logic to replace: 
+                        # 1. If we have no link yet, take this one.
+                        # 2. If this one has an ID, always take it (convert to play link).
+                        
+                        if not current_qobuz or new_id:
+                            if new_id:
+                                metadata["qobuz_url"] = f"https://play.qobuz.com/artist/{new_id}"
+                                logger.debug(f"Converted Qobuz URL: {metadata['qobuz_url']}")
+                            else:
+                                if not current_qobuz: # Don't overwrite existing (potentially better) link with a generic one
+                                    metadata["qobuz_url"] = target
+                        
+                        logger.debug(f"Found Qobuz URL: {target}")
                     elif type_ == "streaming" and "spotify.com" in target:
                         metadata["spotify_url"] = target
                         logger.debug(f"Found Spotify URL: {target}")
@@ -114,6 +182,7 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                     wiki_title = enwiki.get("title")
                     
                     if wiki_title:
+                        metadata["wikipedia_url"] = f"https://en.wikipedia.org/wiki/{wiki_title}"
                         wiki_api = f"{WIKI_API_ROOT}/{wiki_title}"
                         wiki_resp = await client.get(wiki_api)
                         if wiki_resp.status_code == 200:
@@ -127,8 +196,12 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                 
                 # If we don't have an ID yet, search by name
                 if not spotify_id:
-                    logger.debug(f"Searching Spotify for: {artist_name}")
-                    search_url = f"{SPOTIFY_API_ROOT}/search?q={artist_name}&type=artist&limit=1"
+                    # Use the name fetching from MB if available
+                    search_query = metadata.get("name") or artist_name
+                    if search_query and search_query != "Unknown Artist":
+                        logger.debug(f"Searching Spotify for: {search_query}")
+                        from urllib.parse import quote
+                        search_url = f"{SPOTIFY_API_ROOT}/search?q={quote(search_query)}&type=artist&limit=1"
                     s_resp = await client.get(search_url, headers=sp_headers)
                     if s_resp.status_code == 200:
                         s_data = s_resp.json()
@@ -214,6 +287,43 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
 
     except Exception as e:
         logger.error(f"Error fetching metadata for {artist_name}: {e}")
+
+    # Fallback: If no Qobuz URL found, generate a search link
+    if not metadata["qobuz_url"]:
+         # https://play.qobuz.com/search?q=Artist%20Name
+         from urllib.parse import quote
+         final_name = metadata.get("name") or artist_name
+         if final_name and final_name != "Unknown Artist":
+             encoded_name = quote(final_name)
+             search_url = f"https://play.qobuz.com/search?q={encoded_name}&type=artists"
+             metadata["qobuz_url"] = search_url
+             logger.debug(f"Generated Qobuz search fallback for {final_name}")
+             
+             # User Request: "store the correct links when its found the relevant pages"
+             # Attempt to resolve the search to a real artist page
+             try:
+                 logger.debug(f"Attempting to resolve Qobuz search: {search_url}")
+                 # Note: play.qobuz.com is a SPA (Single Page App). Fetching the search URL directly might return mostly JS.
+                 # The user said "scanner to do the search".
+                 # We can try to search via their public web store search which is easier to scrape:
+                 # https://www.qobuz.com/us-en/search?q=Artist&i=boutique
+                 store_search_url = f"https://www.qobuz.com/us-en/search?q={encoded_name}&i=boutique"
+                 
+                 async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0"}) as resolution_client:
+                    resp = await resolution_client.get(store_search_url, follow_redirects=True)
+                    if resp.status_code == 200:
+                        # Look for artist links: /interpreter/name/ID or /artist/ID
+                        # Regex for store artist link: /interpreter/([a-z0-9-]+)/([0-9]+) or /artist/([0-9]+)
+                        import re
+                        # Prioritize /interpreter/name/ID links which are common in store results
+                        match = re.search(r'href=".*?(?:/interpreter/[^/]+/|/artist/)([0-9]+)"', resp.text)
+                        if match:
+                            artist_id = match.group(1)
+                            resolved_url = f"https://play.qobuz.com/artist/{artist_id}"
+                            metadata["qobuz_url"] = resolved_url
+                            logger.info(f"Resolved Qobuz Search to: {resolved_url}")
+             except Exception as e:
+                 logger.warning(f"Failed to resolve Qobuz search: {e}")
 
     return metadata
 

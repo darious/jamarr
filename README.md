@@ -10,6 +10,7 @@ Jamarr is an open-source, web-based music controller designed to scan a local mu
 - High-quality artwork support.
 - UPnP Control Point for Naim Atom.
 - Modern, responsive Web UI.
+- **Refresh Metadata**: Targeted updates for artist information and external links.
 
 ## Setup
 
