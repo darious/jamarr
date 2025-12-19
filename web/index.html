@@ -52,6 +52,11 @@
                     </ul>
                 </div>
 
+                <div id="queue-view" style="display: none;">
+                    <h2 class="section-title">Play Queue</h2>
+                    <ul id="queue-list" class="track-list-styled"></ul>
+                </div>
+
                 <div id="artist-details" style="display: none;">
                     <div class="artist-hero">
                         <div class="artist-hero-bg"></div>
@@ -133,12 +138,21 @@
 
             <!-- Right: Volume/Tech -->
             <div class="player-right">
+                <!-- Removed duplicate tech info -->
+
                 <div class="player-tech-info">
                     <span class="tech-icon">◎</span>
                     <div class="tech-text">
                         <div id="player-tech-format">FLAC</div>
                         <div id="player-tech-details">44.1kHz • 16bit</div>
                     </div>
+                </div>
+
+                <div id="queue-indicator" class="queue-indicator" title="View Queue">
+                    <span id="queue-count">0 / 0</span>
+                    <svg viewBox="0 0 24 24">
+                        <path d="M4 10h12v2H4zm0-4h12v2H4zm0 8h8v2H4zM20 6v12l-6-6z" />
+                    </svg>
                 </div>
 
                 <div class="volume-control">

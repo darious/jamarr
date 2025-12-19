@@ -266,9 +266,14 @@ class UPnPManager:
         didl = self._create_didl(stream_url, metadata['mime'], metadata['title'], 
                                metadata['artist'], metadata['album'], art_url)
 
-        # 1. Stop (Optional, safer)
         # 1. Stop (Optional, safer) - Naim atoms prefer stop before new URI
-        await self._soap_action(control_url, 'Stop', {'InstanceID': 0})
+        try:
+            await self._soap_action(control_url, 'Stop', {'InstanceID': 0})
+        except Exception as e:
+            self.log(f"Stop command failed (ignoring): {e}")
+
+        await asyncio.sleep(0.2)
+
         # Construct Stream URL
         stream_url = f"{base}/api/stream/{track_id}"
         
@@ -280,6 +285,8 @@ class UPnPManager:
             'CurrentURI': stream_url,
             'CurrentURIMetaData': didl
         })
+
+        await asyncio.sleep(0.2)
 
         # 3. Play
         await self._soap_action(control_url, 'Play', {
