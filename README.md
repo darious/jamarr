@@ -51,6 +51,7 @@ python scan.py
 Options:
 - `-v`: Verbose mode. Shows every file being scanned.
 - `-vv`: Very verbose mode. Shows detailed API lookups and HTTP requests.
+- `--force-metadata`: Force update of artist metadata.
 
 Ensure your `MUSIC_PATH` environment variable is set if your music is not in the default location, or update the path in `app/scanner/scan.py`.
 
