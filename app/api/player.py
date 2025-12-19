@@ -4,9 +4,25 @@ import aiosqlite
 from app.upnp import UPnPManager
 import mimetypes
 import httpx
+from typing import Dict, Any, List
 
 router = APIRouter()
 upnp = UPnPManager.get_instance()
+queue_state: Dict[str, Any] = {"queue": [], "current_index": -1}
+
+
+async def _fetch_track(db: aiosqlite.Connection, track_id: int) -> Dict[str, Any]:
+    async with db.execute(
+        """
+        SELECT id, title, artist, album, art_id, duration_seconds, bitrate, sample_rate_hz, bit_depth, date, codec
+        FROM tracks WHERE id = ?
+        """,
+        (track_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Track not found: {track_id}")
+        return dict(row)
 
 @router.get("/api/player/debug")
 async def debug_info():
@@ -133,3 +149,39 @@ async def resume_playback():
     if upnp.active_renderer:
         await upnp.resume()
     return {"status": "ok"}
+
+
+@router.get("/api/player/queue")
+async def get_queue():
+    return queue_state
+
+
+@router.post("/api/player/queue/set")
+async def set_queue(data: dict, db: aiosqlite.Connection = Depends(get_db)):
+    track_ids: List[int] = data.get("track_ids") or []
+    current_index = data.get("current_index", 0)
+    if not track_ids:
+        queue_state["queue"] = []
+        queue_state["current_index"] = -1
+        return queue_state
+
+    tracks = []
+    for tid in track_ids:
+        tracks.append(await _fetch_track(db, int(tid)))
+
+    queue_state["queue"] = tracks
+    queue_state["current_index"] = min(max(0, int(current_index)), len(tracks) - 1)
+    return queue_state
+
+
+@router.post("/api/player/queue/add")
+async def add_to_queue(data: dict, db: aiosqlite.Connection = Depends(get_db)):
+    track_id = data.get("track_id")
+    if track_id is None:
+        raise HTTPException(status_code=400, detail="Missing track_id")
+
+    track = await _fetch_track(db, int(track_id))
+    queue_state["queue"] = queue_state.get("queue", []) + [track]
+    if queue_state.get("current_index", -1) == -1:
+        queue_state["current_index"] = 0
+    return queue_state

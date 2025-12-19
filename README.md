@@ -59,6 +59,27 @@ Ensure your `MUSIC_PATH` environment variable is set if your music is not in the
 ## Project Structure
 
 - `app/`: Backend application code (FastAPI).
-- `web/`: Frontend assets (HTML/JS/CSS).
+- `web/`: Frontend (SvelteKit + TypeScript + Skeleton UI).
 - `cache/`: Local database and artwork cache.
 - `requirements.txt`: Python dependencies.
+
+## Frontend (SvelteKit + Skeleton)
+
+The web UI now lives in a SvelteKit app with Skeleton UI and Tailwind.
+
+Install and run the frontend in dev mode:
+
+```bash
+cd web
+npm install
+npm run dev -- --host
+```
+
+Build production assets (served by FastAPI from `web/build`):
+
+```bash
+cd web
+npm run build
+```
+
+The FastAPI app is already configured to serve the built assets from `web/build`; rebuild whenever you change frontend code.
