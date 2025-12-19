@@ -469,7 +469,11 @@ function renderTracks(album) {
 
         discs[discNum].forEach(track => {
             const li = document.createElement('li');
+            li.setAttribute('data-track-id', track.id);
             li.innerHTML = `
+                <button class="play-btn" onclick="playTrack(${track.id}, this)">
+                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </button>
                 <div class="track-info">
                     <span class="track-num">${track.track_no}.</span>
                     <span class="track-title">${track.title}</span>
@@ -491,6 +495,170 @@ function renderTracks(album) {
     allArtistsGridEl.style.display = 'none';
     azHeaderEl.style.display = 'none';
     trackListEl.style.display = 'block';
+}
+
+// Audio Player Logic
+let currentAudio = null;
+let currentBtn = null;
+let currentTrackData = null;
+let currentAlbumData = null;
+
+// Player Elements
+const playerBar = document.getElementById('player-bar');
+const playerArt = document.getElementById('player-art');
+const playerTitle = document.getElementById('player-title');
+const playerArtist = document.getElementById('player-artist');
+const playPauseBtn = document.getElementById('play-pause-btn');
+const progressBar = document.getElementById('progress-bar');
+const progressContainer = document.getElementById('progress-container');
+const timeCurrent = document.getElementById('player-time-current');
+const timeTotal = document.getElementById('player-time-total');
+const volumeSlider = document.getElementById('volume-slider');
+const closePlayerBtn = document.getElementById('close-player-btn');
+const playerTechFormat = document.getElementById('player-tech-format');
+const playerTechDetails = document.getElementById('player-tech-details');
+
+// Event Listeners
+playPauseBtn.addEventListener('click', togglePlayPause);
+progressContainer.addEventListener('click', seekTo);
+volumeSlider.addEventListener('input', setVolume);
+closePlayerBtn.addEventListener('click', closePlayer);
+playerArt.addEventListener('click', goToCurrentAlbum);
+playerTitle.addEventListener('click', goToCurrentAlbum);
+playerArtist.addEventListener('click', (e) => {
+    if (e.target.classList.contains('link-artist')) goToCurrentArtist();
+    else if (e.target.classList.contains('link-album')) goToCurrentAlbum();
+});
+
+function playTrack(trackId, btn) {
+    // Find track data from state
+    currentTrackData = state.tracks.find(t => t.id === trackId);
+    if (!currentTrackData) return;
+
+    if (state.selectedAlbum) {
+        currentAlbumData = state.selectedAlbum;
+    }
+
+    if (currentAudio) {
+        // If clicking same button/track, just toggle pause
+        if (currentBtn === btn) {
+            togglePlayPause();
+            return;
+        }
+        stopPlayback();
+    }
+
+    currentBtn = btn;
+
+    // Update Player UI
+    playerBar.style.display = 'flex';
+    playerTitle.textContent = currentTrackData.title;
+    playerArtist.innerHTML = `<span class="link-artist">${currentTrackData.artist}</span> — <span class="link-album">${currentTrackData.album}</span>`;
+    playerArt.src = currentTrackData.art_id ? `/art/${currentTrackData.art_id}` : 'assets/default-art.png';
+    playerTechFormat.textContent = currentTrackData.codec.toUpperCase();
+    playerTechDetails.textContent = `${formatSampleRate(currentTrackData.sample_rate_hz)} • ${currentTrackData.bit_depth || 16}bit`;
+
+    // Start Playback
+    currentAudio = new Audio(`${API_BASE}/stream/${trackId}`);
+    currentAudio.volume = volumeSlider.value;
+
+    currentAudio.play().then(() => {
+        updatePlayIcons(true);
+    }).catch(e => {
+        console.error("Playback failed", e);
+        updatePlayIcons(false);
+    });
+
+    // Audio Events
+    currentAudio.addEventListener('timeupdate', updateProgress);
+    currentAudio.addEventListener('loadedmetadata', () => {
+        timeTotal.textContent = formatDuration(currentAudio.duration);
+    });
+    currentAudio.addEventListener('ended', onTrackEnded);
+
+    updatePlayIcons(true);
+}
+
+function togglePlayPause() {
+    if (!currentAudio) return;
+
+    if (currentAudio.paused) {
+        currentAudio.play();
+        updatePlayIcons(true);
+    } else {
+        currentAudio.pause();
+        updatePlayIcons(false);
+    }
+}
+
+function stopPlayback() {
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+    }
+    updatePlayIcons(false);
+    currentBtn = null;
+}
+
+function closePlayer() {
+    stopPlayback();
+    playerBar.style.display = 'none';
+}
+
+function updatePlayIcons(isPlaying) {
+    // Main Player Button
+    if (isPlaying) {
+        playPauseBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+    } else {
+        playPauseBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+    }
+
+    // List Item Button
+    if (currentBtn) {
+        if (isPlaying) {
+            currentBtn.classList.add('playing');
+            currentBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+        } else {
+            currentBtn.classList.remove('playing');
+            currentBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+        }
+    }
+}
+
+function updateProgress() {
+    if (!currentAudio) return;
+
+    const percent = (currentAudio.currentTime / currentAudio.duration) * 100;
+    progressBar.style.width = `${percent}%`;
+    timeCurrent.textContent = formatDuration(currentAudio.currentTime);
+}
+
+function seekTo(e) {
+    if (!currentAudio) return;
+
+    const rect = progressContainer.getBoundingClientRect();
+    const pos = (e.clientX - rect.left) / rect.width;
+    currentAudio.currentTime = pos * currentAudio.duration;
+}
+
+function setVolume() {
+    if (currentAudio) {
+        currentAudio.volume = volumeSlider.value;
+    }
+}
+
+function onTrackEnded() {
+    updatePlayIcons(false);
+    // Find next track
+    const currentIndex = state.tracks.findIndex(t => t.id === currentTrackData.id);
+    if (currentIndex !== -1 && currentIndex < state.tracks.length - 1) {
+        const nextTrack = state.tracks[currentIndex + 1];
+        // Find the button for this track
+        const nextBtn = document.querySelector(`li[data-track-id="${nextTrack.id}"] .play-btn`);
+        if (nextBtn) {
+            playTrack(nextTrack.id, nextBtn);
+        }
+    }
 }
 
 function formatDuration(seconds) {
@@ -543,6 +711,54 @@ function restoreView(viewState) {
         }
     }
 }
+
+function goToCurrentAlbum() {
+    if (currentAlbumData) {
+        // Use existing state logic to show album tracks
+        // We can reuse the logic from restoreView or hash handling
+        // But simplest is to just render it if we have the object
+
+        // We need 'trackListEl' etc to be available. They are likely global or in scope.
+        // And we need to hide other views.
+
+        // Re-implementing view switching logic briefly:
+        renderTracks(currentAlbumData);
+        trackListEl.style.display = 'block';
+        artistDetailsEl.style.display = 'none';
+        albumGridEl.style.display = 'none';
+        allArtistsGridEl.style.display = 'none';
+        azHeaderEl.style.display = 'none';
+
+        // Update URL/History?
+        // history.pushState... 
+        // For now, just navigation.
+    }
+}
+
+function goToCurrentArtist() {
+    // Try to get artist name from album data or track data
+    let artistName = null;
+
+    if (currentAlbumData && currentAlbumData.artist_name) {
+        artistName = currentAlbumData.artist_name;
+    } else if (currentTrackData) {
+        // Fallback to track artist
+        artistName = currentTrackData.artist;
+    }
+
+    if (artistName) {
+        // Find artist object in state by name
+        const artist = state.artists.find(a => a.name === artistName);
+        if (artist) {
+            selectArtist(artist);
+            showArtistDetails(artist);
+        } else {
+            console.warn("Artist not found in state:", artistName);
+        }
+    }
+}
+
+
 
 init().then(() => {
     // Check hash after artists are loaded
