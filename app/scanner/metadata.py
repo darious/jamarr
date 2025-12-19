@@ -327,3 +327,45 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
 
     return metadata
 
+
+async def fetch_track_credits(mb_recording_id: str, mb_release_track_id: str = None):
+    """
+    Fetch artist credits for a track/recording from MusicBrainz.
+    Returns a list of tuples: (mbid, name)
+    """
+    credits = []
+    # Prefer Recording ID (which is what we usually have as MBID from tags for track)
+    # But some tags might give Release Track ID.
+    target_id = mb_recording_id or mb_release_track_id
+    if not target_id:
+        return []
+
+    # MusicBrainz limits: 1 req/sec. We depend on caller to respect or be slow.
+    # Ideally use a semaphore or queue if parallelized.
+    
+    url = f"{MB_API_ROOT}/recording/{target_id}?inc=artist-credits&fmt=json"
+    logger.debug(f"Fetching track credits from: {url}")
+    
+    try:
+        async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                for ac in data.get("artist-credit", []):
+                    # ac is usually obj with 'artist' dict and 'joinphrase'
+                    artist_obj = ac.get("artist", {})
+                    mbid = artist_obj.get("id")
+                    name = artist_obj.get("name")
+                    if mbid and name:
+                        credits.append((mbid, name))
+            elif resp.status_code == 404 and mb_release_track_id and target_id == mb_recording_id:
+                # If Recording ID failed (maybe it WAS a Track ID?), try fetching as Track?
+                # MB Track ID endpoint: /track/{id}
+                # But usually tags have Recording ID.
+                pass
+            else:
+                logger.warning(f"Failed to fetch track credits for {target_id}: {resp.status_code}")
+    except Exception as e:
+        logger.error(f"Error fetching track credits: {e}")
+        
+    return credits

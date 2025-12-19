@@ -401,6 +401,7 @@ function renderTopTracks(tracks, showAll = false) {
                         ${track.album}
                     </span>
                     ${track.date ? ` • ${track.date.substring(0, 4)}` : ''}
+                    ${(state.selectedArtist && track.artist && state.selectedArtist.name !== track.artist) ? ` • <span class="track-feat-artist inline">${track.artist}</span>` : ''}
                 </div>
             </div>
             ${techHtml}
@@ -504,7 +505,8 @@ function renderAlbums() {
     const targetEl = state.selectedArtist ? artistAlbumsGridEl : albumGridEl;
     targetEl.innerHTML = '';
 
-    state.albums.forEach(album => {
+    // Helper to create a card
+    const createCard = (album) => {
         const div = document.createElement('div');
         div.className = 'album-card';
 
@@ -546,9 +548,41 @@ function renderAlbums() {
         }
 
         div.onclick = () => loadTracks(album);
+        return div;
+    };
 
-        targetEl.appendChild(div);
-    });
+    if (state.selectedArtist) {
+        // Artist View: Sections (Blocks) containing Grids
+        targetEl.className = 'artist-albums-container'; // Remove 'album-grid' class
+
+        const mainAlbums = state.albums.filter(a => a.type === 'main' || !a.type);
+        const guestAlbums = state.albums.filter(a => a.type === 'appears_on');
+
+        const renderSection = (title, list) => {
+            if (!list || list.length === 0) return;
+
+            const h2 = document.createElement('h2');
+            h2.className = 'section-title';
+            h2.textContent = title;
+            // Ensure headers have spacing
+            h2.style.marginTop = '2rem';
+            h2.style.marginBottom = '1rem';
+            targetEl.appendChild(h2);
+
+            const grid = document.createElement('div');
+            grid.className = 'album-grid';
+            list.forEach(a => grid.appendChild(createCard(a)));
+            targetEl.appendChild(grid);
+        };
+
+        renderSection('Albums', mainAlbums);
+        renderSection('Appears On', guestAlbums);
+
+    } else {
+        // Library View: Single Grid
+        targetEl.className = 'album-grid';
+        state.albums.forEach(a => targetEl.appendChild(createCard(a)));
+    }
 }
 
 const albumArtLargeEl = document.getElementById('album-art-large');
@@ -640,7 +674,10 @@ function renderTracks(album) {
                 </button>
                 <div class="track-info">
                     <span class="track-num">${track.track_no}.</span>
-                    <span class="track-title">${track.title}</span>
+                    <span class="track-title">
+                        ${track.title}
+                        ${(track.artist && track.artist !== album.artist_name) ? `<span class="track-feat-artist">${track.artist}</span>` : ''}
+                    </span>
                 </div>
                 <div class="track-meta">
                     <span class="badge">${track.codec}</span>

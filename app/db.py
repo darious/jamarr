@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     label TEXT,
     mb_artist_id TEXT,
     mb_album_artist_id TEXT,
+    mb_track_id TEXT,
+    mb_release_track_id TEXT,
     art_id INTEGER,
     FOREIGN KEY(art_id) REFERENCES artwork(id)
 );
