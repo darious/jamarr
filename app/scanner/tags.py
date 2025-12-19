@@ -69,6 +69,8 @@ def extract_tags(path: str) -> dict:
             label = get_first(t, ["ORGANIZATION", "TPUB", "label", "publisher"])
             mb_artist_id = get_first(t, ["MUSICBRAINZ_ARTISTID", "musicbrainz_artistid"])
             mb_album_artist_id = get_first(t, ["MUSICBRAINZ_ALBUMARTISTID", "musicbrainz_albumartistid"])
+            mb_release_track_id = get_first(t, ["MUSICBRAINZ_RELEASETRACKID", "musicbrainz_releasetrackid"])
+            mb_track_id = get_first(t, ["MUSICBRAINZ_TRACKID", "musicbrainz_trackid", "UFID:http://musicbrainz.org"])
 
         tags.update({
             "title": title,
@@ -82,6 +84,8 @@ def extract_tags(path: str) -> dict:
             "label": label,
             "mb_artist_id": mb_artist_id,
             "mb_album_artist_id": mb_album_artist_id,
+            "mb_track_id": mb_track_id, 
+            "mb_release_track_id": mb_release_track_id
         })
 
         return tags

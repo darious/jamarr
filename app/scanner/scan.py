@@ -6,7 +6,7 @@ from app.db import get_db
 from app.scanner.tags import extract_tags
 from app.scanner.artwork import extract_and_save_artwork
 from app.config import get_music_path
-from app.scanner.metadata import fetch_artist_metadata
+from app.scanner.metadata import fetch_artist_metadata, fetch_track_credits
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ async def _process_file(path, db, artist_mbids):
         keys = ["path", "mtime", "title", "artist", "album", "album_artist", 
                 "track_no", "disc_no", "date", "genre", "duration_seconds", 
                 "codec", "sample_rate_hz", "bit_depth", "bitrate", "channels", "label", 
-                "mb_artist_id", "mb_album_artist_id", "art_id"]
+                "mb_artist_id", "mb_album_artist_id", "mb_track_id", "mb_release_track_id", "art_id"]
         
         values = [
             path, mtime, tags.get("title"), tags.get("artist"), tags.get("album"), 
@@ -198,7 +198,8 @@ async def _process_file(path, db, artist_mbids):
             tags.get("date"), tags.get("genre"), tags.get("duration_seconds"),
             tags.get("codec"), tags.get("sample_rate_hz"), tags.get("bit_depth"),
             tags.get("bitrate"), tags.get("channels"), tags.get("label"),
-            tags.get("mb_artist_id"), tags.get("mb_album_artist_id"), art_id
+            tags.get("mb_artist_id"), tags.get("mb_album_artist_id"), 
+            tags.get("mb_track_id"), tags.get("mb_release_track_id"), art_id
         ]
         
         placeholders = ", ".join(["?"] * len(keys))
@@ -231,12 +232,38 @@ async def _process_file(path, db, artist_mbids):
                 return [x.strip() for x in cleaned.split(";") if x.strip()]
 
             # Track Artists
+            ids = []
             if tags.get("mb_artist_id"):
                 ids = extract_ids(tags["mb_artist_id"])
-                for mbid in ids:
-                    await db.execute("INSERT INTO track_artists (track_id, mbid) VALUES (?, ?)", (track_id, mbid))
-                    # Pass None for name so we fetch canonical name from MB instead of using the compound track artist string
-                    artist_mbids.add((mbid, None)) 
+            
+            # Enrich from MB if needed (e.g. missing featured artists)
+            mb_track_id = tags.get("mb_track_id") or tags.get("mb_release_track_id")
+            artist_tag = tags.get("artist") or ""
+            needs_enrichment = False
+            
+            # Heuristic: If artist tag implies multiple artists but we only have 1 ID (or 0), check MB.
+            if mb_track_id and (len(ids) <= 1):
+                if "feat" in artist_tag.lower() or "&" in artist_tag or "," in artist_tag:
+                    needs_enrichment = True
+            
+            if needs_enrichment:
+                try:
+                    logger.info(f"Enriching metadata for {tags.get('title')} (Fetching credits)")
+                    credits = await fetch_track_credits(tags.get("mb_track_id"), tags.get("mb_release_track_id"))
+                    if credits:
+                        # Use retrieved IDs
+                        ids = [c[0] for c in credits]
+                        for mbid, name in credits:
+                            artist_mbids.add((mbid, name))
+                except Exception as e:
+                    logger.warning(f"Enrichment failed: {e}")
+
+            # Insert all IDs (either from tags or enrichment)
+            for mbid in ids:
+                await db.execute("INSERT INTO track_artists (track_id, mbid) VALUES (?, ?)", (track_id, mbid))
+                if not needs_enrichment:
+                     # If we didn't enrich, we don't have atomic names, so pass None
+                     artist_mbids.add((mbid, None)) 
             
             # Album Artists
             if tags.get("mb_album_artist_id"):
