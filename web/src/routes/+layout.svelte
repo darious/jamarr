@@ -1,6 +1,7 @@
 <script lang="ts">
   import "../app.postcss";
   import PlayerBar from "$components/PlayerBar.svelte";
+  import SearchBar from "$components/SearchBar.svelte";
   import { onDestroy, onMount } from "svelte";
   import {
     loadQueueFromServer,
@@ -104,6 +105,11 @@
           />
         </div>
       </a>
+
+      <div class="flex-1 flex justify-center">
+        <SearchBar />
+      </div>
+
       <div class="flex items-center gap-3">
         <select
           class="select select-sm border border-white/10 bg-white/5 text-white"
