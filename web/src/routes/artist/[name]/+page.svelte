@@ -176,6 +176,18 @@
     return processed;
   })();
 
+  $: displayedMissingAlbums = (() => {
+    const missing = artist?.albums || [];
+    return missing.filter((m) => {
+      // Filter out if we have this album in our library
+      // Loose matching on title
+      const hasAlbum = data.albums.some(
+        (a) => a.album.toLowerCase().trim() === m.title.toLowerCase().trim(),
+      );
+      return !hasAlbum;
+    });
+  })();
+
   $: mainAlbums = data.albums.filter((a) => !a.type || a.type === "main");
 
   $: appearsOnAlbums = data.albums.filter((a) => a.type === "appears_on");
@@ -813,6 +825,106 @@
           </div>
         </article>
       {/each}
+    </div>
+  {/if}
+
+  {#if displayedMissingAlbums.length > 0}
+    <div class="section-head mt-10">
+      <div>
+        <p class="text-sm uppercase tracking-wide text-white/60">
+          Missing from Library
+        </p>
+        <h3 class="text-xl font-semibold">Missing Albums</h3>
+      </div>
+    </div>
+
+    <div class="glass-panel overflow-hidden">
+      <table class="w-full text-left text-sm">
+        <thead
+          class="bg-white/5 text-white/50 text-xs uppercase tracking-wider"
+        >
+          <tr>
+            <th class="px-6 py-3 font-medium">Year</th>
+            <th class="px-6 py-3 font-medium w-full">Title</th>
+            <th class="px-6 py-3 font-medium">Links</th>
+            <th class="px-6 py-3 font-medium text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-white/5">
+          {#each displayedMissingAlbums as album}
+            <tr class="group hover:bg-white/5 transition-colors">
+              <td class="px-6 py-3 text-white/60 tabular-nums">
+                {album.date ? album.date.substring(0, 4) : "—"}
+              </td>
+              <td class="px-6 py-3 font-medium text-white/90">
+                {album.title}
+              </td>
+              <td class="px-6 py-3">
+                <div class="flex items-center gap-3">
+                  {#if album.musicbrainz_url}
+                    <a
+                      href={album.musicbrainz_url}
+                      target="_blank"
+                      class="opacity-60 hover:opacity-100 transition-opacity"
+                      title="View on MusicBrainz"
+                    >
+                      <img
+                        src="/assets/logo-musicbrainz.svg"
+                        alt="MB"
+                        class="h-4 w-4"
+                      />
+                    </a>
+                  {/if}
+                  {#if album.qobuz_url}
+                    <a
+                      href={album.qobuz_url}
+                      target="_blank"
+                      class="opacity-60 hover:opacity-100 transition-opacity"
+                      title="View on Qobuz"
+                    >
+                      <img
+                        src="/assets/logo-qobuz.png"
+                        alt="Qobuz"
+                        class="h-4 w-4"
+                      />
+                    </a>
+                  {/if}
+                </div>
+              </td>
+              <td class="px-6 py-3 text-right">
+                {#if album.qobuz_id}
+                  <button
+                    class="btn btn-ghost btn-xs gap-2"
+                    on:click={() => {
+                      window.navigator.clipboard.writeText(
+                        album.qobuz_id || "",
+                      );
+                    }}
+                    title="Copy Qobuz Album ID"
+                  >
+                    <span class="opacity-60">{album.qobuz_id}</span>
+                    <svg
+                      class="h-3 w-3"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"
+                      />
+                    </svg>
+                  </button>
+                {:else}
+                  <span class="text-white/20 text-xs">—</span>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
     </div>
   {/if}
 </section>
