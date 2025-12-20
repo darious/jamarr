@@ -450,3 +450,62 @@ class UPnPManager:
             self.log(f"GetPositionInfo failed: {e}")
             
         return 0, 0
+
+    async def get_transport_info(self):
+        """Get CurrentTransportState (PLAYING, STOPPED, PAUSED_PLAYBACK, etc)."""
+        if not self.active_renderer:
+            return "STOPPED"
+        
+        r = self.renderers[self.active_renderer]
+        url = r['control_url']
+        
+        try:
+            action = "GetTransportInfo"
+            body = f"""<?xml version="1.0"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+                <s:Body>
+                    <u:{action} xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                        <InstanceID>0</InstanceID>
+                    </u:{action}>
+                </s:Body>
+            </s:Envelope>
+            """
+            
+            headers = {
+                'Content-Type': 'text/xml; charset="utf-8"',
+                'SOAPAction': f'"urn:schemas-upnp-org:service:AVTransport:1#{action}"'
+            }
+            
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, content=body, headers=headers, timeout=2.0)
+                if resp.status_code == 200:
+                    xml = resp.text
+                    import re
+                    match = re.search(r'<CurrentTransportState>(.*?)</CurrentTransportState>', xml)
+                    if match:
+                        return match.group(1)
+        except Exception as e:
+            self.log(f"GetTransportInfo failed: {e}")
+            
+        return "UNKNOWN"
+
+    async def seek(self, target_seconds: float):
+        """Seek to a specific time (REL_TIME)."""
+        if not self.active_renderer:
+            return
+
+        r = self.renderers[self.active_renderer]
+        control_url = r['control_url']
+        
+        # Format as H:MM:SS
+        m, s = divmod(int(target_seconds), 60)
+        h, m = divmod(m, 60)
+        target = f"{h}:{m:02d}:{s:02d}"
+        
+        self.log(f"Seeking to {target}")
+        
+        await self._soap_action(control_url, 'Seek', {
+            'InstanceID': 0,
+            'Unit': 'REL_TIME',
+            'Target': target
+        })
