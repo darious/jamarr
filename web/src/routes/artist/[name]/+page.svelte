@@ -14,7 +14,11 @@
     canonicalName: string;
     artist?: Artist;
     albums: Album[];
-    similarArtists: { name: string; art_id?: number | null }[];
+    similarArtists: {
+      name: string;
+      art_id?: number | null;
+      art_sha1?: string | null;
+    }[];
   };
 
   let artist: Artist | undefined = data.artist;
@@ -133,12 +137,14 @@
             artist_name: localTrack.artist,
             art_id: data.albums.find((a) => a.album === localTrack.album)
               ?.art_id,
+            art_sha1: data.albums.find((a) => a.album === localTrack.album)
+              ?.art_sha1,
             year: localTrack.date,
             track_count: 1,
             is_hires: 0,
             total_duration: localTrack.duration_seconds || 0,
             type: "appears_on",
-          };
+          } as Album;
           techData = {
             codec: localTrack.codec,
             bit_depth: localTrack.bit_depth,
@@ -152,6 +158,7 @@
         ...s,
         localId: localAlbum ? localAlbum.album : null, // Use album name as ID for navigation
         art_id: localAlbum?.art_id,
+        art_sha1: localAlbum?.art_sha1,
         // If we matched a track, we might want to navigate to that track's album
         navAlbum: localAlbum?.album,
         ...techData,
@@ -246,7 +253,7 @@
 <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
   <div
     class="absolute inset-0 bg-cover bg-center blur-3xl opacity-30 scale-110"
-    style={`background-image:url('${artist?.art_id ? `/art/${artist.art_id}` : "/assets/default-artist.svg"}')`}
+    style={`background-image:url('${artist?.art_sha1 ? `/art/file/${artist.art_sha1}` : artist?.art_id ? `/art/${artist.art_id}` : "/assets/default-artist.svg"}')`}
   ></div>
   <div
     class="absolute inset-0 bg-gradient-to-b from-surface-900/50 via-surface-900/80 to-surface-900"
@@ -262,9 +269,11 @@
     >
       <img
         class="h-full w-full object-cover"
-        src={artist?.art_id
-          ? `/art/${artist.art_id}`
-          : "/assets/default-artist.svg"}
+        src={artist?.art_sha1
+          ? `/art/file/${artist.art_sha1}`
+          : artist?.art_id
+            ? `/art/${artist.art_id}`
+            : "/assets/default-artist.svg"}
         alt={artist?.name ?? data.name}
       />
     </div>
@@ -384,7 +393,14 @@
                 >
                   {#if track.id && track.id > 0}
                     <img
-                      src={`/art/${data.albums.find((a) => a.album === track.album)?.art_id || "default"}`}
+                      src={(() => {
+                        const alb = data.albums.find(
+                          (a) => a.album === track.album,
+                        );
+                        if (alb?.art_sha1) return `/art/file/${alb.art_sha1}`;
+                        if (alb?.art_id) return `/art/${alb.art_id}`;
+                        return "/assets/default-artist.svg"; // Fallback
+                      })()}
                       alt={track.album}
                       class="h-full w-full object-cover"
                       on:error={(e) => {
@@ -500,9 +516,11 @@
                 <div
                   class="h-12 w-12 flex-shrink-0 rounded bg-white/10 overflow-hidden relative"
                 >
-                  {#if single.art_id}
+                  {#if single.art_sha1 || single.art_id}
                     <img
-                      src={`/art/${single.art_id}`}
+                      src={single.art_sha1
+                        ? `/art/file/${single.art_sha1}`
+                        : `/art/${single.art_id}`}
                       alt={single.title}
                       class="h-full w-full object-cover"
                     />
@@ -622,9 +640,11 @@
                 class="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-white/5 transition-colors"
                 on:click={() => goto(`/artist/${encodeURIComponent(sim.name)}`)}
               >
-                {#if sim.art_id}
+                {#if sim.art_sha1 || sim.art_id}
                   <img
-                    src={`/art/${sim.art_id}`}
+                    src={sim.art_sha1
+                      ? `/art/file/${sim.art_sha1}`
+                      : `/art/${sim.art_id}`}
                     alt={sim.name}
                     class="h-12 w-12 rounded-full object-cover"
                   />
@@ -666,7 +686,11 @@
               )}
           >
             <img
-              src={album.art_id ? `/art/${album.art_id}` : "/assets/logo.png"}
+              src={album.art_sha1
+                ? `/art/file/${album.art_sha1}`
+                : album.art_id
+                  ? `/art/${album.art_id}`
+                  : "/assets/logo.png"}
               alt={album.album}
               class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
             />
@@ -732,7 +756,11 @@
               )}
           >
             <img
-              src={album.art_id ? `/art/${album.art_id}` : "/assets/logo.png"}
+              src={album.art_sha1
+                ? `/art/file/${album.art_sha1}`
+                : album.art_id
+                  ? `/art/${album.art_id}`
+                  : "/assets/logo.png"}
               alt={album.album}
               class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
             />

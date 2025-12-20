@@ -11,7 +11,12 @@
 
     interface SearchResponse {
         artists: { name: string; mbid: string; image_url?: string }[];
-        albums: { title: string; artist: string; art_id?: number }[];
+        albums: {
+            title: string;
+            artist: string;
+            art_id?: number;
+            art_sha1?: string;
+        }[];
         tracks: {
             id: number;
             title: string;
@@ -19,6 +24,7 @@
             album: string;
             duration_seconds: number;
             art_id?: number;
+            art_sha1?: string;
         }[];
     }
 
@@ -195,9 +201,11 @@
                             <div
                                 class="h-8 w-8 rounded bg-white/10 flex items-center justify-center text-xs text-white/40 overflow-hidden"
                             >
-                                {#if album.art_id}
+                                {#if album.art_sha1 || album.art_id}
                                     <img
-                                        src={`/art/${album.art_id}`}
+                                        src={album.art_sha1
+                                            ? `/art/file/${album.art_sha1}`
+                                            : `/art/${album.art_id}`}
                                         alt=""
                                         class="h-full w-full object-cover"
                                     />
@@ -247,9 +255,11 @@
                             <div
                                 class="h-8 w-8 rounded bg-white/10 flex items-center justify-center text-xs text-white/40 overflow-hidden"
                             >
-                                {#if track.art_id}
+                                {#if track.art_sha1 || track.art_id}
                                     <img
-                                        src={`/art/${track.art_id}`}
+                                        src={track.art_sha1
+                                            ? `/art/file/${track.art_sha1}`
+                                            : `/art/${track.art_id}`}
                                         alt=""
                                         class="h-full w-full object-cover"
                                     />

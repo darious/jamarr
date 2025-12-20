@@ -12,11 +12,11 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {".flac", ".mp3", ".m4a", ".ogg", ".wav", ".aiff"}
 
-async def scan_library(root_path: str = None, force_metadata: bool = False):
+async def scan_library(root_path: str = None, force_metadata: bool = False, force_rescan: bool = False):
     if root_path is None:
         root_path = get_music_path()
 
-    logger.info(f"Starting scan of {root_path}")
+    logger.info(f"Starting scan of {root_path} (Force Rescan: {force_rescan})")
     
     if not os.path.exists(root_path):
         logger.error(f"Path not found: {root_path}")
@@ -26,7 +26,7 @@ async def scan_library(root_path: str = None, force_metadata: bool = False):
     artist_mbids = set()
 
     async for db in get_db():
-        await _scan_recursive(root_path, db, artist_mbids)
+        await _scan_recursive(root_path, db, artist_mbids, force_rescan)
         
         logger.info("File scan complete. Updating artist metadata...")
 
@@ -203,16 +203,16 @@ async def refresh_artist_singles_only(artist_name: str):
             await db.commit()
             logger.info(f"Singles updated for {artist_name}")
 
-async def _scan_recursive(root, db, artist_mbids):
+async def _scan_recursive(root, db, artist_mbids, force_rescan=False):
     for entry in os.scandir(root):
         if entry.is_dir():
-            await _scan_recursive(entry.path, db, artist_mbids)
+            await _scan_recursive(entry.path, db, artist_mbids, force_rescan)
         elif entry.is_file():
             ext = os.path.splitext(entry.name)[1].lower()
             if ext in SUPPORTED_EXTENSIONS:
-                await _process_file(entry.path, db, artist_mbids)
+                await _process_file(entry.path, db, artist_mbids, force_rescan)
 
-async def _process_file(path, db, artist_mbids):
+async def _process_file(path, db, artist_mbids, force_rescan=False):
     try:
         logger.debug(f"Scanning file: {path}")
         # Check if file exists and mtime matches
@@ -220,7 +220,7 @@ async def _process_file(path, db, artist_mbids):
         
         async with db.execute("SELECT id, mtime FROM tracks WHERE path = ?", (path,)) as cursor:
             row = await cursor.fetchone()
-            if row and row[1] == mtime: # row["mtime"] access depends on row_factory
+            if not force_rescan and row and row[1] == mtime: # row["mtime"] access depends on row_factory
                 return # Unchanged
 
         # Extract tags
@@ -249,7 +249,7 @@ async def _process_file(path, db, artist_mbids):
         keys = ["path", "mtime", "title", "artist", "album", "album_artist", 
                 "track_no", "disc_no", "date", "genre", "duration_seconds", 
                 "codec", "sample_rate_hz", "bit_depth", "bitrate", "channels", "label", 
-                "mb_artist_id", "mb_album_artist_id", "mb_track_id", "mb_release_track_id", "art_id"]
+                "mb_artist_id", "mb_album_artist_id", "mb_track_id", "mb_release_track_id", "mb_release_id", "art_id"]
         
         values = [
             path, mtime, tags.get("title"), tags.get("artist"), tags.get("album"), 
@@ -258,7 +258,7 @@ async def _process_file(path, db, artist_mbids):
             tags.get("codec"), tags.get("sample_rate_hz"), tags.get("bit_depth"),
             tags.get("bitrate"), tags.get("channels"), tags.get("label"),
             tags.get("mb_artist_id"), tags.get("mb_album_artist_id"), 
-            tags.get("mb_track_id"), tags.get("mb_release_track_id"), art_id
+            tags.get("mb_track_id"), tags.get("mb_release_track_id"), tags.get("mb_release_id"), art_id
         ]
         
         placeholders = ", ".join(["?"] * len(keys))

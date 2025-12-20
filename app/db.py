@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     mb_album_artist_id TEXT,
     mb_track_id TEXT,
     mb_release_track_id TEXT,
+    mb_release_id TEXT,
     art_id INTEGER,
     FOREIGN KEY(art_id) REFERENCES artwork(id)
 );
@@ -134,7 +135,8 @@ async def init_db():
             "ALTER TABLE artists ADD COLUMN qobuz_url TEXT",
             "ALTER TABLE artists ADD COLUMN musicbrainz_url TEXT",
             "ALTER TABLE artists ADD COLUMN art_id INTEGER REFERENCES artwork(id)",
-            "ALTER TABLE artists ADD COLUMN singles TEXT"
+            "ALTER TABLE artists ADD COLUMN singles TEXT",
+            "ALTER TABLE tracks ADD COLUMN mb_release_id TEXT"
         ]
         
         for sql in migrations:

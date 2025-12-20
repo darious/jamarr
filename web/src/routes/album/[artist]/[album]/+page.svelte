@@ -10,10 +10,12 @@
     albumMeta?: Album;
   };
 
-  const artId = () => {
-    if (data.albumMeta?.art_id) return data.albumMeta.art_id;
-    const withArt = data.tracks.find((t) => t.art_id);
-    return withArt?.art_id;
+  const getAlbumArtUrl = () => {
+    if (data.albumMeta?.art_sha1) return `/art/file/${data.albumMeta.art_sha1}`;
+    if (data.albumMeta?.art_id) return `/art/${data.albumMeta.art_id}`;
+    const withArt = data.tracks.find((t) => t.art_sha1 || t.art_id);
+    if (withArt?.art_sha1) return `/art/file/${withArt.art_sha1}`;
+    return withArt?.art_id ? `/art/${withArt.art_id}` : "/assets/logo.png";
   };
 
   const totalDuration = () =>
@@ -33,6 +35,22 @@
     return `${mins}:${secs}`;
   };
 
+  $: groupedTracks = (() => {
+    const groups: { [key: number]: Track[] } = {};
+    for (const track of data.tracks) {
+      const disc = track.disc_no || 1;
+      if (!groups[disc]) groups[disc] = [];
+      groups[disc].push(track);
+    }
+    // Sort by disc number
+    return Object.entries(groups)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([disc, tracks]) => ({
+        disc: Number(disc),
+        tracks: tracks.sort((a, b) => (a.track_no || 0) - (b.track_no || 0)),
+      }));
+  })();
+
   function playAll() {
     if (data.tracks?.length) {
       void setQueue(data.tracks, 0);
@@ -44,12 +62,23 @@
       addToQueue(data.tracks);
     }
   }
+
+  function playTrack(track: Track) {
+    // Find index in the FULL list to ensure playback order is preserved across discs
+    // But we probably want to play from this track onwards?
+    // The current implementation of setQueue takes the full list and an index.
+    // So we just need to find the index of this track in data.tracks
+    const idx = data.tracks.findIndex((t) => t.id === track.id);
+    if (idx !== -1) {
+      void setQueue(data.tracks, idx);
+    }
+  }
 </script>
 
 <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
   <div
     class="absolute inset-0 bg-cover bg-center blur-3xl opacity-30 scale-110"
-    style={`background-image: url('${artId() ? `/art/${artId()}` : "/assets/logo.png"}')`}
+    style={`background-image: url('${getAlbumArtUrl()}')`}
   ></div>
   <div
     class="absolute inset-0 bg-gradient-to-b from-surface-900/50 via-surface-900/80 to-surface-900"
@@ -57,7 +86,7 @@
 </div>
 
 <section
-  class="relative z-10 mx-auto flex w-full max-w-[1500px] flex-col gap-8 px-8 py-10"
+  class="relative z-10 mx-auto flex w-full max-w-[1700px] flex-col gap-10 px-8 py-10"
 >
   <div class="grid gap-8 md:grid-cols-[300px,1fr] items-end">
     <div
@@ -65,7 +94,7 @@
     >
       <img
         class="h-full w-full object-cover"
-        src={artId() ? `/art/${artId()}` : "/assets/logo.png"}
+        src={getAlbumArtUrl()}
         alt={data.album}
       />
 
@@ -103,7 +132,25 @@
     </div>
 
     <div class="space-y-4 pb-2">
-      <p class="pill w-max bg-white/10 text-white/70 backdrop-blur-md">Album</p>
+      <div class="flex items-center gap-3">
+        <p class="pill w-max bg-white/10 text-white/70 backdrop-blur-md">
+          Album
+        </p>
+        {#if data.albumMeta?.mb_release_id}
+          <a
+            class="pill hover:bg-white/15"
+            target="_blank"
+            href={`https://musicbrainz.org/release/${data.albumMeta.mb_release_id}`}
+          >
+            <img
+              src="/assets/logo-musicbrainz.svg"
+              alt="MusicBrainz"
+              class="h-4 w-4"
+            /> MusicBrainz
+          </a>
+        {/if}
+      </div>
+
       <h1 class="text-4xl md:text-6xl font-bold tracking-tight">
         {data.album}
       </h1>
@@ -128,78 +175,109 @@
     </div>
   </div>
 
-  <div class="glass-panel divide-y divide-white/5 mt-4">
+  <div class="glass-panel mt-4">
     {#if data.tracks.length === 0}
       <p class="p-6 text-white/60">No tracks found.</p>
     {:else}
-      {#each data.tracks as track, idx}
-        <div
-          class="group flex items-center gap-4 px-4 py-3 hover:bg-white/5 transition-colors"
-        >
-          <div class="w-8 text-center text-xs text-white/50">{idx + 1}</div>
-
+      {#each groupedTracks as group}
+        {#if groupedTracks.length > 1}
           <div
-            class="h-12 w-12 flex-shrink-0 rounded bg-white/10 overflow-hidden relative"
+            class="px-4 py-3 bg-white/5 border-b border-white/5 flex items-center gap-2"
           >
             <img
-              src={track.art_id ? `/art/${track.art_id}` : "/assets/logo.png"}
-              alt="Art"
-              class="h-full w-full object-cover"
-              on:error={(e) => {
-                e.currentTarget.src = "/assets/logo.png";
-              }}
+              src="/assets/logo-disk.svg"
+              alt="Disc"
+              class="h-4 w-4 opacity-50"
             />
-            <div
-              class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            <span class="text-sm font-semibold text-white/70"
+              >Disc {group.disc}</span
             >
-              <button
-                class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
-                on:click|stopPropagation={() => setQueue([track], 0)}
-              >
-                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
-                  ><path d="M8 5v14l11-7z" /></svg
-                >
-              </button>
-            </div>
           </div>
+        {/if}
 
-          <div class="flex-1 min-w-0">
-            <p
-              class="truncate text-sm font-semibold text-white/90 group-hover:text-white"
-            >
-              {track.title}
-            </p>
-            <div class="flex items-center gap-2 text-xs text-white/50 mt-0.5">
-              <span>{track.artist}</span>
-              {#if track.codec}
-                <span class="text-white/30">•</span>
-                <span class="uppercase">{track.codec}</span>
-              {/if}
-              {#if track.bit_depth && track.sample_rate_hz}
-                <span class="text-white/30">•</span>
-                <span
-                  >{track.bit_depth}bit / {track.sample_rate_hz / 1000}kHz</span
-                >
-              {/if}
-            </div>
-          </div>
-
-          <div class="flex items-center gap-4">
+        <div class="divide-y divide-white/5">
+          {#each group.tracks as track, idx}
             <button
-              class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-xs opacity-0 group-hover:opacity-100 transition-opacity"
-              title="Add to Queue"
-              on:click|stopPropagation={() => addToQueue([track])}
+              class="w-full group flex items-center gap-4 px-4 py-3 hover:bg-white/5 transition-colors text-left"
+              on:dblclick={() => playTrack(track)}
             >
-              <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"
-                ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
+              <div class="w-8 text-center text-xs text-white/50">
+                {track.track_no}
+              </div>
+
+              <div
+                class="h-12 w-12 flex-shrink-0 rounded bg-white/10 overflow-hidden relative"
               >
+                <img
+                  src={track.art_sha1
+                    ? `/art/file/${track.art_sha1}`
+                    : track.art_id
+                      ? `/art/${track.art_id}`
+                      : "/assets/logo.png"}
+                  alt="Art"
+                  class="h-full w-full object-cover"
+                  on:error={(e) => {
+                    const img = e.currentTarget;
+                    if (img instanceof HTMLImageElement)
+                      img.src = "/assets/logo.png";
+                  }}
+                />
+                <div
+                  class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <button
+                    class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
+                    on:click|stopPropagation={() => playTrack(track)}
+                  >
+                    <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
+                      ><path d="M8 5v14l11-7z" /></svg
+                    >
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex-1 min-w-0">
+                <p
+                  class="truncate text-sm font-semibold text-white/90 group-hover:text-white"
+                >
+                  {track.title}
+                </p>
+                <div
+                  class="flex items-center gap-2 text-xs text-white/50 mt-0.5"
+                >
+                  <span>{track.artist}</span>
+                  {#if track.codec}
+                    <span class="text-white/30">•</span>
+                    <span class="uppercase">{track.codec}</span>
+                  {/if}
+                  {#if track.bit_depth && track.sample_rate_hz}
+                    <span class="text-white/30">•</span>
+                    <span
+                      >{track.bit_depth}bit / {track.sample_rate_hz /
+                        1000}kHz</span
+                    >
+                  {/if}
+                </div>
+              </div>
+
+              <div class="flex items-center gap-4">
+                <button
+                  class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Add to Queue"
+                  on:click|stopPropagation={() => addToQueue([track])}
+                >
+                  <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"
+                    ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
+                  >
+                </button>
+                <div
+                  class="w-14 text-right text-xs text-white/60 font-medium tabular-nums"
+                >
+                  {formatDuration(track.duration_seconds)}
+                </div>
+              </div>
             </button>
-            <div
-              class="w-14 text-right text-xs text-white/60 font-medium tabular-nums"
-            >
-              {formatDuration(track.duration_seconds)}
-            </div>
-          </div>
+          {/each}
         </div>
       {/each}
     {/if}
