@@ -75,15 +75,45 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
     try:
         async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
             # 1. MusicBrainz
+            # 1. MusicBrainz
             mb_url = f"{MB_API_ROOT}/artist/{mbid}?inc=url-rels&fmt=json"
             logger.debug(f"Fetching MB data from: {mb_url}")
-            resp = await client.get(mb_url)
+            
+            mb_data = None
+            resp = None
+            
+            for attempt in range(3):
+                try:
+                    resp = await client.get(mb_url)
+                    if resp.status_code == 200:
+                        mb_data = resp.json()
+                        break
+                    elif resp.status_code == 503:
+                        await asyncio.sleep(1 * (attempt + 1))
+                        continue
+                    else:
+                        logger.warning(f"MusicBrainz returned status {resp.status_code} for {mbid}")
+                        break
+                except Exception as e:
+                    logger.warning(f"Attempt {attempt + 1}/3 failed to fetch MB data for {artist_name}: {repr(e)}")
+                    if attempt < 2:
+                        await asyncio.sleep(1 * (attempt + 1))
+                    # If we fail all attempts, we continue to check if we got partial data or proceed to other sources
+            
+            # Continue even if mb_data is None (we might fallback to other sources or partial data)
+            # But the logic below depends on resp.status_code check usually
+            
+            if mb_data:
+                # Mock a successful resp object logic or just use mb_data
+                # The code below uses 'resp.status_code == 200' and 'resp.json()'
+                # We can just change the condition to check mb_data
+                pass
             
             wikidata_url = None
             spotify_id = None
             
-            if resp.status_code == 200:
-                mb_data = resp.json()
+            if mb_data:
+                # mb_data already json()
                 if mb_data.get("name"):
                     metadata["name"] = mb_data.get("name")
                 metadata["sort_name"] = mb_data.get("sort-name")
@@ -439,26 +469,45 @@ async def fetch_track_credits(mb_recording_id: str, mb_release_track_id: str = N
     url = f"{MB_API_ROOT}/recording/{target_id}?inc=artist-credits&fmt=json"
     logger.debug(f"Fetching track credits from: {url}")
     
+    
     try:
         async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                data = resp.json()
-                for ac in data.get("artist-credit", []):
+            # Retry loop for initial MB connection
+            mb_data = None
+            for attempt in range(3):
+                try:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        mb_data = resp.json()
+                        break
+                    elif resp.status_code == 503:
+                        # Rate limit, wait and retry
+                        await asyncio.sleep(1 * (attempt + 1))
+                        continue
+                    else:
+                        logger.warning(f"MusicBrainz returned status {resp.status_code} for {target_id}")
+                        break
+                except Exception as e:
+                    logger.warning(f"Attempt {attempt + 1}/3 failed to fetch MB data for {target_id}: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(1 * (attempt + 1))
+                    else:
+                        logger.error(f"Error fetching metadata for {target_id}: {e}")
+            
+            if mb_data:
+                for ac in mb_data.get("artist-credit", []):
                     # ac is usually obj with 'artist' dict and 'joinphrase'
                     artist_obj = ac.get("artist", {})
                     mbid = artist_obj.get("id")
                     name = artist_obj.get("name")
                     if mbid and name:
                         credits.append((mbid, name))
-            elif resp.status_code == 404 and mb_release_track_id and target_id == mb_recording_id:
-                # If Recording ID failed (maybe it WAS a Track ID?), try fetching as Track?
-                # MB Track ID endpoint: /track/{id}
-                # But usually tags have Recording ID.
-                pass
-            else:
-                logger.warning(f"Failed to fetch track credits for {target_id}: {resp.status_code}")
+            elif mb_data is None and mb_release_track_id and target_id == mb_recording_id:
+                 # Logic for 404 fallback if needed, currently just logging warning above if status was not 200/503
+                 pass
     except Exception as e:
         logger.error(f"Error fetching track credits: {e}")
         
     return credits
+
+

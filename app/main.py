@@ -36,16 +36,16 @@ async def trigger_scan(background_tasks: BackgroundTasks, force_rescan: bool = F
     return {"message": "Scan started", "force_rescan": force_rescan}
 
 @app.post("/api/scan_artist")
-async def trigger_artist_scan(artist_name: str, background_tasks: BackgroundTasks):
+async def trigger_artist_scan(artist_name: str):
     from app.scanner.scan import refresh_artist_metadata
-    background_tasks.add_task(refresh_artist_metadata, artist_name)
-    return {"message": f"Metadata refresh started for {artist_name}"}
+    await refresh_artist_metadata(artist_name)
+    return {"message": f"Metadata refresh completed for {artist_name}"}
 
 @app.post("/api/scan_artist_singles")
-async def trigger_artist_singles_scan(artist_name: str, background_tasks: BackgroundTasks):
+async def trigger_artist_singles_scan(artist_name: str):
     from app.scanner.scan import refresh_artist_singles_only
-    background_tasks.add_task(refresh_artist_singles_only, artist_name)
-    return {"message": f"Singles refresh started for {artist_name}"}
+    await refresh_artist_singles_only(artist_name)
+    return {"message": f"Singles refresh completed for {artist_name}"}
 
 # Serve built SvelteKit frontend (output lives in web/build)
 # Serve built SvelteKit frontend (output lives in web/build)

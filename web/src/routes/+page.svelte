@@ -26,14 +26,19 @@
 </script>
 
 <section class="mx-auto flex w-full max-w-[1700px] flex-col gap-10 px-8 py-10">
-  <div class="section-head">
+  <div
+    class="section-head sticky top-0 z-40 bg-surface-50/80 backdrop-blur-xl py-4 -mx-4 px-4 rounded-b-2xl transition-all border-b border-white/5 shadow-lg"
+  >
     <div>
       <p class="text-sm uppercase tracking-wide text-white/60">Browse</p>
       <h2 class="text-2xl font-semibold">Artists A–Z</h2>
     </div>
     <div class="flex flex-wrap gap-2">
       {#each grouped() as [letter]}
-        <a href={`#group-${letter}`} class="pill hover:bg-white/10">{letter}</a>
+        <a
+          href={`#group-${letter}`}
+          class="pill hover:bg-white/10 transition-colors">{letter}</a
+        >
       {/each}
     </div>
   </div>
