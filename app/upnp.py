@@ -1,4 +1,5 @@
 import asyncio
+import os
 import socket
 import logging
 import httpx
@@ -18,11 +19,11 @@ class UPnPManager:
         return cls._instance
 
     def __init__(self):
+        self.debug_log = []
         self.renderers = {} # udn -> dict (friendly_name, location, control_url, rendering_control_url)
         self.active_renderer = None # udn
         self.local_ip = self._get_local_ip()
         self.base_url = None
-        self.debug_log = []
         self._bg_task = None
 
     def start_background_scan(self):
@@ -57,6 +58,12 @@ class UPnPManager:
         if len(self.debug_log) > 50: self.debug_log.pop(0)
 
     def _get_local_ip(self):
+        # 1. Check for manual override via environment variable
+        host_ip = os.environ.get('HOST_IP')
+        if host_ip:
+            self.log(f"Using configured HOST_IP: {host_ip}")
+            return host_ip
+
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(('10.255.255.255', 1))
@@ -368,6 +375,9 @@ class UPnPManager:
         </s:Envelope>
         """
         
+        # Log the full request body for debugging
+        logger.info(f"SOAP Request Body ({action}):\n{body}")
+
         headers = {
             'Content-Type': 'text/xml; charset="utf-8"',
             'SOAPAction': f'"urn:schemas-upnp-org:service:AVTransport:1#{action}"',
@@ -382,8 +392,10 @@ class UPnPManager:
                     logger.error(f"SOAP Action {action} failed: {resp.status_code} {resp.text}")
                 else:
                     self.log(f"SOAP Action {action} SUCCESS")
+                    logger.info(f"SOAP Action {action} Response:\n{resp.text}")
         except Exception as e:
             self.log(f"SOAP Action {action} ERROR: {e}")
+            logger.exception(f"SOAP Action {action} Exception")
             raise e
 
     def _parse_time(self, time_str):
