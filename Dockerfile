@@ -24,6 +24,9 @@ COPY app ./app
 # Copy built frontend assets
 COPY --from=frontend-builder /app/web/build ./web/build
 
+# Copy management scripts
+COPY scan.py .
+
 # Expose port
 EXPOSE 8111
 
