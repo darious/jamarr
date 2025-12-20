@@ -288,3 +288,16 @@ export async function resume() {
         console.error('Failed to resume', e);
     }
 }
+
+export async function seek(seconds: number) {
+    try {
+        await fetch('/api/player/seek', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ seconds })
+        });
+        playerState.update(s => ({ ...s, position_seconds: seconds }));
+    } catch (e) {
+        console.error('Failed to seek', e);
+    }
+}

@@ -8,6 +8,7 @@
     setVolume,
     pause,
     resume,
+    seek,
   } from "$stores/player";
   import { onMount } from "svelte";
   import { page } from "$app/stores";
@@ -97,6 +98,38 @@
       console.log("[PlayerBar] Logged play to history:", track.title);
     } catch (e) {
       console.error("[PlayerBar] Failed to log play:", e);
+    }
+  }
+
+  function handleSeek(e: MouseEvent & { currentTarget: HTMLDivElement }) {
+    if (!$playerState.queue.length && !$playerState.renderer) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const percent = Math.max(
+      0,
+      Math.min(1, (e.clientX - rect.left) / rect.width),
+    );
+
+    // Use duration from current track
+    const duration = currentTrack?.duration_seconds || audio?.duration || 0;
+    if (!duration) return;
+
+    const time = percent * duration;
+
+    // Remote Seek
+    if ($playerState.renderer !== "local") {
+      console.log("[PlayerBar] Remote seek to:", time);
+      seek(time);
+      progress = time; // Optimistic
+      return;
+    }
+
+    // Local Seek
+    if (audio) {
+      console.log("[PlayerBar] Local seek to:", time);
+      audio.currentTime = time;
+      progress = time;
+      updateProgress(time, isPlaying);
     }
   }
 
@@ -212,6 +245,8 @@
     }
 
     // Polling for remote playback
+    let lastTransportState = "";
+
     const interval = setInterval(async () => {
       if ($playerState.renderer !== "local" && $playerState.is_playing) {
         try {
@@ -219,7 +254,33 @@
           if (res.ok) {
             const state = await res.json();
             progress = state.position_seconds;
-            // Only update duration if needed, usually static per track
+
+            // Auto-advance queue if remote playback stopped naturally
+            if (
+              state.transport_state === "STOPPED" ||
+              state.transport_state === "NO_MEDIA_PRESENT"
+            ) {
+              // Determine if this is a "natural" stop (track ended) vs user paused
+              // We assume if we think it should be playing ($playerState.is_playing) but device says STOPPED,
+              // it means track finished. User pause sets is_playing=false.
+
+              // Debounce simple glitches: only if we saw something else recently or if position is 0
+              // For simplicity: if we expected playing, and it stopped, go next.
+              // But safeguard: if we just started, we might read STOPPED briefly.
+              // Assuming backend updates transport_state frequently enough.
+
+              if (
+                lastTransportState &&
+                lastTransportState !== "STOPPED" &&
+                lastTransportState !== "TRANSITIONING"
+              ) {
+                console.log(
+                  "[PlayerBar] Remote track finished (STOPPED), calling next()",
+                );
+                next();
+              }
+            }
+            lastTransportState = state.transport_state;
           }
         } catch (e) {
           console.error("Polling error", e);
@@ -418,16 +479,32 @@
         class="flex items-center gap-2 w-full max-w-md text-xs text-white/60"
       >
         <span>{formatTime(progress)}</span>
-        <input
-          type="range"
-          min="0"
-          max={duration || 100}
-          value={progress}
-          class="range range-xs range-primary"
-          on:input={(e) => {
-            if (audio) audio.currentTime = parseFloat(e.currentTarget.value);
-          }}
-        />
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <div
+          class="relative w-full h-4 flex items-center cursor-pointer group"
+          on:click={handleSeek}
+          role="slider"
+          aria-valuenow={progress}
+          aria-valuemin={0}
+          aria-valuemax={duration || 100}
+          tabindex="0"
+        >
+          <!-- Background Track -->
+          <div
+            class="absolute w-full h-1 bg-white/20 rounded-full overflow-hidden"
+          >
+            <!-- Filled Track -->
+            <div
+              class="h-full bg-white transition-all duration-100 ease-linear"
+              style="width: {(progress / (duration || 1)) * 100}%"
+            ></div>
+          </div>
+          <!-- Thumb (visible on hover) -->
+          <div
+            class="absolute h-3 w-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+            style="left: {(progress / (duration || 1)) * 100}%"
+          ></div>
+        </div>
         <span>{formatTime(duration)}</span>
       </div>
     </div>

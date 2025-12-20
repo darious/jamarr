@@ -40,6 +40,7 @@ class PlayerState(BaseModel):
     position_seconds: float
     is_playing: bool
     renderer: Optional[str] = 'local'
+    transport_state: Optional[str] = None
 
 class QueueUpdate(BaseModel):
     queue: List[Track]
@@ -179,7 +180,8 @@ async def get_player_state():
                     "current_index": idx,
                     "position_seconds": pos,
                     "is_playing": bool(playing),
-                    "renderer": upnp.active_renderer if upnp.active_renderer else 'local'
+                    "renderer": upnp.active_renderer if upnp.active_renderer else 'local',
+                    "transport_state": await upnp.get_transport_info() if upnp.active_renderer else "STOPPED"
                 }
     return {"queue": [], "current_index": 0, "position_seconds": 0, "is_playing": False, "renderer": 'local'}
 
@@ -400,6 +402,15 @@ async def set_volume(data: dict):
         # Don't fail the request if just UPnP issue, but good to know
         return {"status": "error", "detail": str(e)}
 
-@router.get("/api/player/debug-logs")
-async def get_debug_logs():
-    return {"logs": upnp.debug_log, "active_renderer": upnp.active_renderer, "renderers": list(upnp.renderers.keys())}
+@router.post("/api/player/seek")
+async def seek_track(data: dict):
+    seconds = data.get("seconds")
+    if seconds is None:
+        raise HTTPException(status_code=400, detail="Missing seconds")
+    
+    if upnp.active_renderer:
+        await upnp.seek(float(seconds))
+        return {"status": "ok", "target": seconds}
+    else:
+        # Local seek is handled by frontend directly setting audio.currentTime
+        return {"status": "local", "message": "Handle seek in browser"}
