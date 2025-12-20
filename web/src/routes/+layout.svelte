@@ -75,7 +75,11 @@
   <title>Jamarr • Music Controller</title>
   <link rel="icon" href="/assets/logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    rel="preconnect"
+    href="https://fonts.gstatic.com"
+    crossorigin="anonymous"
+  />
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap"
     rel="stylesheet"
@@ -102,13 +106,18 @@
       </a>
       <div class="flex items-center gap-3">
         <select
-          class="select select-sm border border-white/10 bg-white/5"
+          class="select select-sm border border-white/10 bg-white/5 text-white"
           on:change={(e) => changeRenderer(e.currentTarget.value)}
           value={activeRenderer}
           aria-label="Renderer"
         >
           {#each rendererList as renderer}
-            <option value={renderer.udn}>{renderer.name}</option>
+            <option
+              value={renderer.udn}
+              style="background-color: #1f2937; color: white;"
+            >
+              {renderer.name}
+            </option>
           {/each}
         </select>
         <nav class="flex items-center gap-2 text-sm text-white/80">

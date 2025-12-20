@@ -26,6 +26,12 @@
   // Subscribe to store
   $: currentTrack = $playerState.queue[$playerState.current_index];
   $: isPlaying = $playerState.is_playing;
+  $: if ($playerState.renderer !== "local" && currentTrack) {
+    duration = currentTrack.duration_seconds;
+  } else if (currentTrack && (!audio || !audio.duration)) {
+    // Fallback for local if audio not ready
+    duration = currentTrack.duration_seconds;
+  }
   $: {
     const r = $playerState.renderers.find(
       (r) => r.udn === $playerState.renderer,
@@ -59,10 +65,16 @@
       currentTrack.title,
     );
     hasAttemptedAutoResume = true;
-    // Trigger the play-local event to resume
-    window.dispatchEvent(
-      new CustomEvent("jamarr:play-local", { detail: currentTrack }),
-    );
+    // Trigger the play-local event to resume ONLY if local
+    if ($playerState.renderer === "local") {
+      window.dispatchEvent(
+        new CustomEvent("jamarr:play-local", { detail: currentTrack }),
+      );
+    } else {
+      console.log(
+        "[PlayerBar] Remote renderer active, skipping local auto-resume event",
+      );
+    }
   }
 
   async function logPlayToHistory(track: any) {
@@ -107,6 +119,10 @@
     window.addEventListener("jamarr:play-local", (e: CustomEvent) => {
       console.log("[PlayerBar] jamarr:play-local event received:", e.detail);
       const track = e.detail;
+
+      // Safety check: if we are remote, we shouldn't be messing with local audio
+      if ($playerState.renderer !== "local") return;
+
       if (audio) {
         console.log(
           "[PlayerBar] Setting audio src to:",
