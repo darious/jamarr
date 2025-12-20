@@ -30,7 +30,8 @@ app.include_router(player.router)
 
 @app.post("/api/scan")
 async def trigger_scan(background_tasks: BackgroundTasks):
-    background_tasks.add_task(scan_library, "/root/music")
+    from app.config import get_music_path
+    background_tasks.add_task(scan_library, get_music_path())
     return {"message": "Scan started"}
 
 @app.post("/api/scan_artist")
