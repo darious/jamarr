@@ -372,7 +372,7 @@
 </script>
 
 <div
-  class="fixed bottom-0 w-full bg-surface-900 border-t border-white/10 p-4 text-white z-50"
+  class="fixed bottom-0 w-full bg-[#0a0a0a]/75 backdrop-blur-md border-t border-white/10 p-4 text-white z-50"
 >
   <div class="flex items-center justify-between max-w-[1700px] mx-auto">
     <!-- Track Info -->
