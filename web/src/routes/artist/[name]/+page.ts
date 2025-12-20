@@ -24,7 +24,7 @@ export const load: PageLoad = async ({ params, fetch }) => {
 
   const similarArtists = (artist?.similar_artists || []).map((sim) => {
     const libMatch = artists.find((a) => normalize(a.name) === normalize(sim));
-    return { name: sim, art_id: libMatch?.art_id };
+    return { name: sim, art_id: libMatch?.art_id, art_sha1: libMatch?.art_sha1 };
   });
 
   return {

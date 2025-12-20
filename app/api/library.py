@@ -13,6 +13,7 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             a.name,
             a.image_url, 
             a.art_id,
+            ar.sha1 as art_sha1,
             a.bio, 
             a.similar_artists,
             a.top_tracks,
@@ -25,6 +26,7 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             a.singles
         FROM artists a
         JOIN track_artists ta ON a.mbid = ta.mbid
+        LEFT JOIN artwork ar ON a.art_id = ar.id
         WHERE a.name IS NOT NULL 
         ORDER BY a.sort_name COLLATE NOCASE
     """
@@ -35,16 +37,17 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
                 "name": row[0], 
                 "image_url": row[1], 
                 "art_id": row[2],
-                "bio": row[3], 
-                "similar_artists": json.loads(row[4]) if row[4] else [],
-                "top_tracks": json.loads(row[5]) if row[5] else [],
-                "sort_name": row[6] or row[0], # Fallback to name
-                "homepage": row[7],
-                "spotify_url": row[8],
-                "wikipedia_url": row[9],
-                "qobuz_url": row[10],
-                "musicbrainz_url": row[11],
-                "singles": json.loads(row[12]) if row[12] else []
+                "art_sha1": row[3],
+                "bio": row[4], 
+                "similar_artists": json.loads(row[5]) if row[5] else [],
+                "top_tracks": json.loads(row[6]) if row[6] else [],
+                "sort_name": row[7] or row[0], # Fallback to name
+                "homepage": row[8],
+                "spotify_url": row[9],
+                "wikipedia_url": row[10],
+                "qobuz_url": row[11],
+                "musicbrainz_url": row[12],
+                "singles": json.loads(row[13]) if row[13] else []
             } 
             for row in rows
         ]
@@ -64,16 +67,19 @@ async def get_albums(artist: str = None, db: aiosqlite.Connection = Depends(get_
         SELECT 
             t.album, 
             t.art_id, 
+            MAX(a.sha1) as art_sha1,
             COALESCE(t.album_artist, t.artist) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
             MIN(t.date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
+            MAX(t.mb_release_id) as mb_release_id,
             CASE 
                 WHEN ? IS NOT NULL AND (t.mb_album_artist_id LIKE ? || '%' OR t.mb_album_artist_id = ?) THEN 'main'
                 ELSE 'appears_on' 
             END as type
         FROM tracks t
+        LEFT JOIN artwork a ON t.art_id = a.id
     """
     params = [target_mbid, target_mbid, target_mbid]
     
@@ -81,8 +87,8 @@ async def get_albums(artist: str = None, db: aiosqlite.Connection = Depends(get_
         # Filter by any artist associated with the tracks via track_artists
         query += """
             JOIN track_artists ta ON t.id = ta.track_id
-            JOIN artists a ON ta.mbid = a.mbid
-            WHERE a.name = ?
+            JOIN artists ar ON ta.mbid = ar.mbid
+            WHERE ar.name = ?
         """
         params.append(artist)
     else:
@@ -101,11 +107,13 @@ async def get_tracks(album: str = None, artist: str = None, db: aiosqlite.Connec
     # This ensures "Taylor Swift, Ed Sheeran" is returned instead of just "Taylor Swift" tag
     query = """
         SELECT t.*, 
+        a.sha1 as art_sha1,
         (SELECT GROUP_CONCAT(a2.name, ', ') 
          FROM track_artists ta2 
          JOIN artists a2 ON ta2.mbid = a2.mbid 
          WHERE ta2.track_id = t.id) as aggregated_artists
         FROM tracks t
+        LEFT JOIN artwork a ON t.art_id = a.id
     """
     params = []
     

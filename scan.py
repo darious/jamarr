@@ -50,6 +50,7 @@ async def main():
     parser.add_argument("--force-metadata", action="store_true", help="Force update of artist metadata")
     parser.add_argument("--refresh-singles", type=str, help="Refresh singles for a specific artist (use 'all' for all artists)")
     parser.add_argument("--reset", action="store_true", help="Wipe database and artwork cache before scanning")
+    parser.add_argument("--force-rescan", action="store_true", help="Force rescan of all files, ignoring modification times")
     args = parser.parse_args()
     
     configure_logging(args.verbose)
@@ -75,6 +76,7 @@ async def main():
         
         # Recreate directory just in case
         os.makedirs(ART_CACHE_DIR, exist_ok=True)
+        # Implicitly force rescan since DB is gone
     
     print("Initializing database...")
     await init_db()
@@ -92,8 +94,8 @@ async def main():
         print("Done.")
         return
 
-    print("Starting library scan...")
-    await scan_library(force_metadata=args.force_metadata)
+    print(f"Starting library scan... (Force Rescan: {args.force_rescan})")
+    await scan_library(force_metadata=args.force_metadata, force_rescan=args.force_rescan)
     print("Scan complete.")
 
 if __name__ == "__main__":

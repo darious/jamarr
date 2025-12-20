@@ -56,6 +56,7 @@ def extract_tags(path: str) -> dict:
         # Common keys in Vorbis/FLAC: TITLE, ARTIST, ALBUM, ALBUMARTIST, TRACKNUMBER, DISCNUMBER, DATE, GENRE
         # Common keys in ID3: TIT2, TPE1, TALB, TPE2, TRCK, TPOS, TDRC, TCON
         
+
         t = f.tags
         if t:
             title = get_first(t, ["TITLE", "TIT2", "title"])
@@ -71,6 +72,8 @@ def extract_tags(path: str) -> dict:
             mb_album_artist_id = get_first(t, ["MUSICBRAINZ_ALBUMARTISTID", "musicbrainz_albumartistid"])
             mb_release_track_id = get_first(t, ["MUSICBRAINZ_RELEASETRACKID", "musicbrainz_releasetrackid"])
             mb_track_id = get_first(t, ["MUSICBRAINZ_TRACKID", "musicbrainz_trackid", "UFID:http://musicbrainz.org"])
+            # Fallback to AlbumID as release ID if needed, though they are usually distinct concepts but mapped similarly in simple taggers
+            mb_release_id = get_first(t, ["MUSICBRAINZ_ALBUMID", "musicbrainz_albumid", "MUSICBRAINZ_RELEASEID", "musicbrainz_releaseid"])
 
         tags.update({
             "title": title,
@@ -85,7 +88,8 @@ def extract_tags(path: str) -> dict:
             "mb_artist_id": mb_artist_id,
             "mb_album_artist_id": mb_album_artist_id,
             "mb_track_id": mb_track_id, 
-            "mb_release_track_id": mb_release_track_id
+            "mb_release_track_id": mb_release_track_id,
+            "mb_release_id": mb_release_id
         })
 
         return tags

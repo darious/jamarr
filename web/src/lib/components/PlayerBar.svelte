@@ -382,9 +382,11 @@
           class="relative h-14 w-14 flex-shrink-0 rounded bg-surface-800 overflow-hidden group"
         >
           <img
-            src={currentTrack.art_id
-              ? `/art/${currentTrack.art_id}`
-              : "/assets/logo.png"}
+            src={currentTrack.art_sha1
+              ? `/art/file/${currentTrack.art_sha1}`
+              : currentTrack.art_id
+                ? `/art/${currentTrack.art_id}`
+                : "/assets/logo.png"}
             alt="Art"
             class="h-full w-full object-cover"
             on:error={handleImageError}
