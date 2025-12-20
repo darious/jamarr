@@ -399,3 +399,7 @@ async def set_volume(data: dict):
         logger.error(f"Failed to set volume: {e}")
         # Don't fail the request if just UPnP issue, but good to know
         return {"status": "error", "detail": str(e)}
+
+@router.get("/api/player/debug-logs")
+async def get_debug_logs():
+    return {"logs": upnp.debug_log, "active_renderer": upnp.active_renderer, "renderers": list(upnp.renderers.keys())}
