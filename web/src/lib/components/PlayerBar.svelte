@@ -134,10 +134,11 @@
   }
 
   function checkPlayThreshold() {
-    if (!currentTrack || !audio || hasLoggedCurrentTrack) return;
+    if (!currentTrack || hasLoggedCurrentTrack) return;
 
-    const playedSeconds = audio.currentTime;
-    const totalSeconds = audio.duration;
+    // Use 'progress' which handles both local (updated via timeupdate) and remote (updated via polling)
+    const playedSeconds = progress;
+    const totalSeconds = currentTrack.duration_seconds || audio?.duration || 0;
 
     if (!totalSeconds || totalSeconds === 0) return;
 
@@ -254,6 +255,9 @@
           if (res.ok) {
             const state = await res.json();
             progress = state.position_seconds;
+
+            // Check history threshold for remote playback
+            checkPlayThreshold();
 
             // Auto-advance queue if remote playback stopped naturally
             if (
