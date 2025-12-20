@@ -1,8 +1,31 @@
-import type { Artist } from '$api';
-import { fetchArtists } from '$api';
-import type { PageLoad } from './$types';
+import {
+    fetchNewReleases,
+    fetchRecentlyAddedAlbums,
+    fetchRecentlyPlayedAlbums,
+    fetchRecentlyPlayedArtists,
+    fetchDiscoverArtists
+} from '$lib/api';
 
-export const load: PageLoad = async ({ fetch }) => {
-  const artists: Artist[] = await fetchArtists(fetch);
-  return { artists };
-};
+export async function load({ fetch }) {
+    const [
+        newReleases,
+        recentlyAddedAlbums,
+        recentlyPlayedAlbums,
+        recentlyPlayedArtists,
+        discoverArtists
+    ] = await Promise.all([
+        fetchNewReleases(fetch),
+        fetchRecentlyAddedAlbums(fetch),
+        fetchRecentlyPlayedAlbums(fetch),
+        fetchRecentlyPlayedArtists(fetch),
+        fetchDiscoverArtists(fetch)
+    ]);
+
+    return {
+        newReleases,
+        recentlyAddedAlbums,
+        recentlyPlayedAlbums,
+        recentlyPlayedArtists,
+        discoverArtists
+    };
+}
