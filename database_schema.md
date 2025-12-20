@@ -79,6 +79,28 @@ Stores discovered UPnP/DLNA renderers.
 | `location_url` | TEXT | URL to the device description. |
 | `last_seen` | REAL | Timestamp when the device was last seen. |
 
+### `playback_state`
+Singleton table (row id=1) storing the current playback status for persistence across reloads.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | INTEGER | Primary Key. Always 1. |
+| `queue` | TEXT | JSON list of tracks in the queue. |
+| `current_index` | INTEGER | Index of the currently playing track. |
+| `position_seconds` | REAL | Last saved playback position. |
+| `is_playing` | BOOLEAN | Whether playback is active. |
+
+### `playback_history`
+Log of played tracks.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | INTEGER | Primary Key. |
+| `track_id` | INTEGER | Foreign Key referencing `tracks.id`. |
+| `timestamp` | DATETIME | Time of playback. |
+| `client_ip` | TEXT | IP address of the controller/client. |
+| `hostname` | TEXT | Hostname of the controller. |
+
 ---
 
 ## Performance Tuning
