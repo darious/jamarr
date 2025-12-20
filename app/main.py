@@ -8,6 +8,7 @@ async def lifespan(app: FastAPI):
     from app.upnp import UPnPManager
     UPnPManager.get_instance().start_background_scan()
     yield
+    UPnPManager.get_instance().stop_background_scan()
 
 app = FastAPI(lifespan=lifespan)
 

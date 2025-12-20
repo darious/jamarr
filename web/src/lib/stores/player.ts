@@ -94,9 +94,10 @@ export async function loadQueueFromServer() {
                 queue: data.queue || [],
                 current_index: data.current_index,
                 position_seconds: data.position_seconds,
-                is_playing: data.is_playing
+                is_playing: data.is_playing,
+                renderer: data.renderer || 'local'
             }));
-            console.log('[loadQueueFromServer] State updated');
+            console.log('[loadQueueFromServer] State updated. Renderer:', data.renderer);
 
             // If playing, we might want to resume? 
             // For now, let's just load the state. The UI can decide to auto-play or not.
