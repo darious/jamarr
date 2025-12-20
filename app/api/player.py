@@ -38,7 +38,6 @@ class PlayerState(BaseModel):
     queue: List[Track]
     current_index: int
     position_seconds: float
-    position_seconds: float
     is_playing: bool
     renderer: Optional[str] = 'local'
     transport_state: Optional[str] = None
@@ -63,31 +62,29 @@ class ProgressUpdate(BaseModel):
 
 # --- Helper Functions ---
 
-# --- Helper Functions ---
-
 def get_client_ip(request: Request) -> str:
     """Get the real client IP, accounting for proxies."""
-    # Debug: log all headers
-    logger.warning(f"[IP Debug] Request headers: {dict(request.headers)}")
-    logger.warning(f"[IP Debug] Request client: {request.client}")
+    # Debug logs for troubleshooting; keep at debug level to avoid noisy output
+    logger.debug(f"[IP Debug] Request headers: {dict(request.headers)}")
+    logger.debug(f"[IP Debug] Request client: {request.client}")
     
     # Check X-Forwarded-For header first (for reverse proxies)
     forwarded_for = request.headers.get("X-Forwarded-For") or request.headers.get("x-forwarded-for")
     if forwarded_for:
         # X-Forwarded-For can be a comma-separated list, take the first (original client)
         client_ip = forwarded_for.split(",")[0].strip()
-        logger.warning(f"[IP Debug] Using X-Forwarded-For: {client_ip}")
+        logger.debug(f"[IP Debug] Using X-Forwarded-For: {client_ip}")
         return client_ip
     
     # Check X-Real-IP header (alternative proxy header)
     real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
     if real_ip:
-        logger.warning(f"[IP Debug] Using X-Real-IP: {real_ip}")
+        logger.debug(f"[IP Debug] Using X-Real-IP: {real_ip}")
         return real_ip.strip()
     
     # Fallback to direct connection IP
     fallback = request.client.host if request.client else "unknown"
-    logger.warning(f"[IP Debug] Using fallback client.host: {fallback}")
+    logger.debug(f"[IP Debug] Using fallback client.host: {fallback}")
     return fallback
 
 async def log_history(db: aiosqlite.Connection, track_id: int, client_ip: str, hostname: str = None):

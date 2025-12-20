@@ -2,16 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.db import get_db
 import aiosqlite
 import json
-from enum import Enum
 from typing import List, Optional
 
 router = APIRouter()
-
-class AlbumSort(str, Enum):
-    newest = "newest" # Release Date
-    added = "added"   # Import Date
-    played = "played" # Recently Played
-
 
 @router.get("/api/artists")
 async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
@@ -60,7 +53,6 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             for row in rows
         ]
 
-@router.get("/api/albums")
 @router.get("/api/albums")
 async def get_albums(artist: str = None, db: aiosqlite.Connection = Depends(get_db)):
     # 1. If artist is provided, find their MBID to classify 'main' vs 'appears_on'
