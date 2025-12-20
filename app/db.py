@@ -150,7 +150,8 @@ async def init_db():
         except Exception:
             pass # Column likely exists
 
-        # Playback State (Single row enforced)
+        # Playback State (Single row enforced) - DEPRECATED in favor of renderer_states
+        # Kept for backward compat or migration if needed, but we will use renderer_states now.
         await db.execute("""
             CREATE TABLE IF NOT EXISTS playback_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -163,6 +164,27 @@ async def init_db():
         
         # Ensure the single row exists
         await db.execute("INSERT OR IGNORE INTO playback_state (id) VALUES (1)")
+        
+        # --- Multi-User & Renderer State Tables ---
+        
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS client_sessions (
+                client_id TEXT PRIMARY KEY,
+                active_renderer_udn TEXT,
+                last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS renderer_states (
+                renderer_udn TEXT PRIMARY KEY,
+                queue TEXT DEFAULT '[]',
+                current_index INTEGER DEFAULT -1,
+                position_seconds REAL DEFAULT 0,
+                is_playing BOOLEAN DEFAULT 0,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
         # Playback History
         await db.execute("""
