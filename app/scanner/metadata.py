@@ -66,7 +66,6 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
         "qobuz_url": None,
         "musicbrainz_url": None,
         "similar_artists": [],
-        "similar_artists": [],
         "top_tracks": [],
         "singles": [],
         "last_updated": time.time()
@@ -74,7 +73,6 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
 
     try:
         async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
-            # 1. MusicBrainz
             # 1. MusicBrainz
             mb_url = f"{MB_API_ROOT}/artist/{mbid}?inc=url-rels&fmt=json"
             logger.debug(f"Fetching MB data from: {mb_url}")
@@ -230,20 +228,22 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                 if not spotify_id:
                     # Use the name fetching from MB if available
                     search_query = metadata.get("name") or artist_name
+                    search_url = None
                     if search_query and search_query != "Unknown Artist":
                         logger.debug(f"Searching Spotify for: {search_query}")
                         from urllib.parse import quote
                         search_url = f"{SPOTIFY_API_ROOT}/search?q={quote(search_query)}&type=artist&limit=1"
-                    s_resp = await client.get(search_url, headers=sp_headers)
-                    if s_resp.status_code == 200:
-                        s_data = s_resp.json()
-                        items = s_data.get("artists", {}).get("items", [])
-                        if items:
-                            spotify_id = items[0]["id"]
-                            metadata["spotify_url"] = items[0]["external_urls"]["spotify"]
-                            logger.debug(f"Found Spotify ID via search: {spotify_id}")
-                    else:
-                        logger.error(f"Spotify Search Failed: {s_resp.status_code}")
+                    if search_url:
+                        s_resp = await client.get(search_url, headers=sp_headers)
+                        if s_resp.status_code == 200:
+                            s_data = s_resp.json()
+                            items = s_data.get("artists", {}).get("items", [])
+                            if items:
+                                spotify_id = items[0]["id"]
+                                metadata["spotify_url"] = items[0]["external_urls"]["spotify"]
+                                logger.debug(f"Found Spotify ID via search: {spotify_id}")
+                        else:
+                            logger.error(f"Spotify Search Failed: {s_resp.status_code}")
 
                 if spotify_id:
                     # Get Artist (Image)
@@ -509,5 +509,4 @@ async def fetch_track_credits(mb_recording_id: str, mb_release_track_id: str = N
         logger.error(f"Error fetching track credits: {e}")
         
     return credits
-
 

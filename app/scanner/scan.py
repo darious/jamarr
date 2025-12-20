@@ -78,7 +78,6 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
         logger.info("Updating artist metadata...")
 
         # Get all MBIDs from DB (Track Artists AND Album Artists)
-        # Get all MBIDs from DB (Track Artists AND Album Artists)
         # We need to process them to handle splits (id1; id2)
         async with db.execute("SELECT DISTINCT mb_artist_id, artist FROM tracks WHERE mb_artist_id IS NOT NULL UNION SELECT DISTINCT mb_album_artist_id, album_artist FROM tracks WHERE mb_album_artist_id IS NOT NULL") as cursor:
             rows = await cursor.fetchall()
@@ -92,12 +91,9 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                        if mbid:
                            # Pass None for name to force canonical lookup, avoiding "A & B" poisoning
                            artist_mbids.add((mbid, None))
-                       if mbid:
-                           # Pass None for name to force canonical lookup, avoiding "A & B" poisoning
-                           artist_mbids.add((mbid, None))
-                           
+                       
 
-    
+
         # Fetch metadata for artists
         logger.info(f"Found {len(artist_mbids)} artist MBIDs to check.")
         for mbid, artist_name in artist_mbids:
@@ -162,7 +158,6 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                 json.dumps(meta.get("singles", [])),
                 meta["last_updated"]
             ))
-            await db.commit()
             await db.commit()
         
     # Cleanup orphaned artwork (New DB connection for safety/isolation)
