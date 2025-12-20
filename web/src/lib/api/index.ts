@@ -2,6 +2,7 @@ export interface Artist {
     name: string;
     image_url: string | null;
     art_id: number | null;
+    art_sha1?: string | null;
     bio: string | null;
     similar_artists: string[];
     top_tracks: { name: string; album: string; date: string; duration_ms: number }[];
@@ -17,12 +18,14 @@ export interface Artist {
 export interface Album {
     album: string;
     art_id: number | null;
+    art_sha1?: string | null;
     artist_name: string;
     is_hires: number;
     year: string | null;
     track_count: number;
     total_duration: number;
     type: 'main' | 'appears_on';
+    mb_release_id?: string;
 }
 
 export interface Track {
@@ -37,6 +40,7 @@ export interface Track {
     date: string | null;
     duration_seconds: number;
     art_id: number | null;
+    art_sha1?: string | null;
     codec: string | null;
     bitrate: number | null;
     sample_rate_hz: number | null;
