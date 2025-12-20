@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
+import os
 from app.db import get_db
 import aiosqlite
 from app.upnp import UPnPManager
@@ -37,7 +38,10 @@ class PlayerState(BaseModel):
     queue: List[Track]
     current_index: int
     position_seconds: float
+    position_seconds: float
     is_playing: bool
+    renderer: Optional[str] = 'local'
+    transport_state: Optional[str] = None
 
 class QueueUpdate(BaseModel):
     queue: List[Track]
@@ -165,13 +169,22 @@ async def get_player_state():
                     queue = json.loads(queue_json)
                 except:
                     queue = []
+                
+                # If UPnP is active, get live position
+                if upnp.active_renderer:
+                    pos, dur = await upnp.get_position()
+                    if pos > 0:
+                        pos = pos
+                
                 return {
                     "queue": queue,
                     "current_index": idx,
                     "position_seconds": pos,
-                    "is_playing": bool(playing)
+                    "is_playing": bool(playing),
+                    "renderer": upnp.active_renderer if upnp.active_renderer else 'local',
+                    "transport_state": await upnp.get_transport_info() if upnp.active_renderer else "STOPPED"
                 }
-    return {"queue": [], "current_index": 0, "position_seconds": 0, "is_playing": False}
+    return {"queue": [], "current_index": 0, "position_seconds": 0, "is_playing": False, "renderer": 'local'}
 
 @router.post("/api/player/queue")
 async def set_queue(update: QueueUpdate, request: Request):
@@ -334,27 +347,92 @@ async def play_track(data: dict, request: Request, db: aiosqlite.Connection = De
         
         # Mime
         mime, _ = mimetypes.guess_type(track['path'])
-        track['mime'] = mime or "audio/flac"
+        if not mime:
+            ext = os.path.splitext(track['path'])[1].lower()
+            if ext == '.flac':
+                mime = "audio/flac"
+            elif ext == '.mp3':
+                mime = "audio/mpeg"
+            elif ext == '.m4a':
+                mime = "audio/mp4"
+            elif ext == '.wav':
+                mime = "audio/wav"
+            elif ext == '.ogg':
+                mime = "audio/ogg"
+            else:
+                mime = "audio/flac" # Historic default, maybe keep or change? Let's keep for safety but rely on extension logic above.
+        
+        track['mime'] = mime
 
         # Update UPnP manager's base URL knowledge from this request
-        base_url = str(request.base_url).rstrip('/')
-        port = request.url.port or 80
-        upnp.base_url = f"http://{upnp.local_ip}:{port}" 
+        # Priority: HOST_PORT > request.url.port > 8111
+        env_port = os.environ.get('HOST_PORT')
+        if env_port:
+             port = env_port
+        else:
+             port = request.url.port or 8111
+        
+        upnp.base_url = f"http://{upnp.local_ip}:{port}"
+        logger.info(f"[Playback] Setting UPnP Base URL: {upnp.base_url} (IP: {upnp.local_ip}, Port: {port})") 
         
         if upnp.active_renderer:
             await upnp.play_track(track['id'], track['path'], track)
+            
+            # Update DB state to playing
+            await db.execute(
+                "UPDATE playback_state SET is_playing = 1, current_index = (SELECT current_index FROM playback_state WHERE id = 1) WHERE id = 1"
+            )
+            await db.commit()
+            
             return {"status": "streaming_started", "renderer": upnp.active_renderer}
         else:
             return {"status": "local_playback", "message": "Handle playback in browser"}
 
 @router.post("/api/player/pause")
 async def pause_playback():
+    async for db in get_db():
+        await db.execute("UPDATE playback_state SET is_playing = 0 WHERE id = 1")
+        await db.commit()
+        
     if upnp.active_renderer:
         await upnp.pause()
     return {"status": "ok"}
 
 @router.post("/api/player/resume")
 async def resume_playback():
+    async for db in get_db():
+        await db.execute("UPDATE playback_state SET is_playing = 1 WHERE id = 1")
+        await db.commit()
+    
     if upnp.active_renderer:
         await upnp.resume()
     return {"status": "ok"}
+
+@router.post("/api/player/volume")
+async def set_volume(data: dict):
+    percent = data.get("percent")
+    if percent is None:
+        raise HTTPException(status_code=400, detail="Missing percent")
+    
+    try:
+        # Clamp between 0 and 100
+        percent = max(0, min(100, int(percent)))
+        await upnp.set_volume(percent)
+        return {"status": "ok", "percent": percent}
+    except Exception as e:
+        logger.error(f"Failed to set volume: {e}")
+        # Don't fail the request if just UPnP issue, but good to know
+        return {"status": "error", "detail": str(e)}
+
+@router.post("/api/player/seek")
+async def seek_track(data: dict):
+    seconds = data.get("seconds")
+    if seconds is None:
+        raise HTTPException(status_code=400, detail="Missing seconds")
+    
+    if upnp.active_renderer:
+        await upnp.seek(float(seconds))
+        return {"status": "ok", "target": seconds}
+    else:
+        # Local seek is handled by frontend directly setting audio.currentTime
+        return {"status": "local", "message": "Handle seek in browser"}

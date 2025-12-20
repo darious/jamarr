@@ -1,0 +1,27 @@
+services:
+  jamarr:
+    build: .
+    container_name: jamarr
+    network_mode: "host" # Critical for UPnP discovery
+    volumes:
+      - type: volume
+        source: music
+        target: /app/music
+        read_only: true
+        volume:
+          nocopy: true
+      - ./cache:/app/cache
+      - ./config.yaml:/app/config.yaml
+    restart: unless-stopped
+    environment:
+      - HOST=0.0.0.0
+      - HOST_IP=REDACTED_IP # Explicitly advertise this IP for UPnP
+      - HOST_PORT=8111 # Explicitly advertise this Port
+
+
+volumes:
+  music:
+    driver_opts:
+      type: "nfs"
+      o: "addr=REDACTED_IP,nolock,soft,rw"
+      device: ":/mnt/tank/music/testing"

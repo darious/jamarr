@@ -17,7 +17,7 @@ export interface PlayerState {
 }
 
 export const playerState = writable<PlayerState>({
-    renderers: [],
+    renderers: [{ udn: 'local', name: 'This Device (Web Browser)', type: 'local' }],
     renderer: 'local',
     queue: [],
     current_index: -1,
@@ -25,15 +25,22 @@ export const playerState = writable<PlayerState>({
     position_seconds: 0
 });
 
-export async function refreshRenderers() {
+export async function refreshRenderers(force: boolean = false) {
+    console.log('[refreshRenderers] Starting...', { force });
     try {
-        const res = await fetch('/api/renderers?refresh=true');
+        console.log(`[refreshRenderers] Fetching from: /api/renderers?refresh=${force}`);
+        const res = await fetch(`/api/renderers?refresh=${force}`);
+        console.log('[refreshRenderers] Response status:', res.status);
         if (res.ok) {
             const renderers = await res.json();
+            console.log('[refreshRenderers] Received renderers:', renderers);
             playerState.update(s => ({ ...s, renderers }));
+            console.log('[refreshRenderers] Store updated');
+        } else {
+            console.error('[refreshRenderers] Response not OK:', res.status, res.statusText);
         }
     } catch (e) {
-        console.error('Failed to refresh renderers', e);
+        console.error('[refreshRenderers] Failed to refresh renderers', e);
     }
 }
 
@@ -87,9 +94,10 @@ export async function loadQueueFromServer() {
                 queue: data.queue || [],
                 current_index: data.current_index,
                 position_seconds: data.position_seconds,
-                is_playing: data.is_playing
+                is_playing: data.is_playing,
+                renderer: data.renderer || 'local'
             }));
-            console.log('[loadQueueFromServer] State updated');
+            console.log('[loadQueueFromServer] State updated. Renderer:', data.renderer);
 
             // If playing, we might want to resume? 
             // For now, let's just load the state. The UI can decide to auto-play or not.
@@ -244,5 +252,52 @@ async function playCurrentTrack() {
         }
     } catch (e) {
         console.error('[playCurrentTrack] Exception:', e);
+    }
+}
+
+export async function setVolume(percent: number) {
+    try {
+        await fetch('/api/player/volume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ percent })
+        });
+    } catch (e) {
+        console.error('Failed to set volume', e);
+    }
+}
+
+export async function pause() {
+    try {
+        await fetch('/api/player/pause', {
+            method: 'POST'
+        });
+        playerState.update(s => ({ ...s, is_playing: false }));
+    } catch (e) {
+        console.error('Failed to pause', e);
+    }
+}
+
+export async function resume() {
+    try {
+        await fetch('/api/player/resume', {
+            method: 'POST'
+        });
+        playerState.update(s => ({ ...s, is_playing: true }));
+    } catch (e) {
+        console.error('Failed to resume', e);
+    }
+}
+
+export async function seek(seconds: number) {
+    try {
+        await fetch('/api/player/seek', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ seconds })
+        });
+        playerState.update(s => ({ ...s, position_seconds: seconds }));
+    } catch (e) {
+        console.error('Failed to seek', e);
     }
 }
