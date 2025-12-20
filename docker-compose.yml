@@ -4,8 +4,24 @@ services:
     container_name: jamarr
     network_mode: "host" # Critical for UPnP discovery
     volumes:
-      - /path/to/music:/app/music
+      - type: volume
+        source: music
+        target: /app/music
+        read_only: true
+        volume:
+          nocopy: true
       - ./cache:/app/cache
+      - ./config.yaml:/app/config.yaml
     restart: unless-stopped
     environment:
       - HOST=0.0.0.0
+      - HOST_IP=192.168.1.103 # Explicitly advertise this IP for UPnP
+      - HOST_PORT=8111 # Explicitly advertise this Port
+
+
+volumes:
+  music:
+    driver_opts:
+      type: "nfs"
+      o: "addr=192.168.1.201,nolock,soft,rw"
+      device: ":/mnt/tank/music/testing"

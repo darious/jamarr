@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
+import os
 from app.db import get_db
 import aiosqlite
 from app.upnp import UPnPManager
@@ -346,12 +347,33 @@ async def play_track(data: dict, request: Request, db: aiosqlite.Connection = De
         
         # Mime
         mime, _ = mimetypes.guess_type(track['path'])
-        track['mime'] = mime or "audio/flac"
+        if not mime:
+            ext = os.path.splitext(track['path'])[1].lower()
+            if ext == '.flac':
+                mime = "audio/flac"
+            elif ext == '.mp3':
+                mime = "audio/mpeg"
+            elif ext == '.m4a':
+                mime = "audio/mp4"
+            elif ext == '.wav':
+                mime = "audio/wav"
+            elif ext == '.ogg':
+                mime = "audio/ogg"
+            else:
+                mime = "audio/flac" # Historic default, maybe keep or change? Let's keep for safety but rely on extension logic above.
+        
+        track['mime'] = mime
 
         # Update UPnP manager's base URL knowledge from this request
-        base_url = str(request.base_url).rstrip('/')
-        port = request.url.port or 80
-        upnp.base_url = f"http://{upnp.local_ip}:{port}" 
+        # Priority: HOST_PORT > request.url.port > 8111
+        env_port = os.environ.get('HOST_PORT')
+        if env_port:
+             port = env_port
+        else:
+             port = request.url.port or 8111
+        
+        upnp.base_url = f"http://{upnp.local_ip}:{port}"
+        logger.info(f"[Playback] Setting UPnP Base URL: {upnp.base_url} (IP: {upnp.local_ip}, Port: {port})") 
         
         if upnp.active_renderer:
             await upnp.play_track(track['id'], track['path'], track)

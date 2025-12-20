@@ -23,6 +23,19 @@ async def stream_track(track_id: int, db: aiosqlite.Connection = Depends(get_db)
         # Guess mime type or default to octet-stream
         media_type, _ = mimetypes.guess_type(path)
         if media_type is None:
-            media_type = "application/octet-stream"
+            # Fallbacks for common types if system mime.types is missing
+            ext = os.path.splitext(path)[1].lower()
+            if ext == '.flac':
+                media_type = "audio/flac"
+            elif ext == '.mp3':
+                media_type = "audio/mpeg"
+            elif ext == '.m4a':
+                media_type = "audio/mp4"
+            elif ext == '.wav':
+                media_type = "audio/wav"
+            elif ext == '.ogg':
+                media_type = "audio/ogg"
+            else:
+                media_type = "application/octet-stream"
             
         return FileResponse(path, media_type=media_type)
