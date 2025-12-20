@@ -372,7 +372,7 @@
 </script>
 
 <div
-  class="fixed bottom-0 w-full bg-surface-900 border-t border-white/10 p-4 text-white z-50"
+  class="fixed bottom-0 w-full bg-[#0a0a0a]/75 backdrop-blur-md border-t border-white/10 p-4 text-white z-50"
 >
   <div class="flex items-center justify-between max-w-[1700px] mx-auto">
     <!-- Track Info -->
@@ -382,9 +382,11 @@
           class="relative h-14 w-14 flex-shrink-0 rounded bg-surface-800 overflow-hidden group"
         >
           <img
-            src={currentTrack.art_id
-              ? `/art/${currentTrack.art_id}`
-              : "/assets/logo.png"}
+            src={currentTrack.art_sha1
+              ? `/art/file/${currentTrack.art_sha1}`
+              : currentTrack.art_id
+                ? `/art/${currentTrack.art_id}`
+                : "/assets/logo.png"}
             alt="Art"
             class="h-full w-full object-cover"
             on:error={handleImageError}

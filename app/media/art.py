@@ -31,6 +31,34 @@ async def get_artwork(art_id: int):
             if not os.path.exists(path):
                 raise HTTPException(status_code=404, detail="Artwork file missing")
             
-            return FileResponse(path)
+            response = FileResponse(path)
+            # Disable browser caching to prevent collisions across DB resets
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
+    
+    raise HTTPException(status_code=500, detail="Database error")
+
+@router.get("/art/file/{sha1}")
+async def get_artwork_by_sha1(sha1: str):
+    # Lookup type to build path
+    async for db in get_db():
+        async with db.execute("SELECT type FROM artwork WHERE sha1 = ?", (sha1,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Artwork not found")
+            
+            art_type = row["type"] or "album"
+            path = _get_art_path(sha1, art_type)
+            
+            if not os.path.exists(path):
+                raise HTTPException(status_code=404, detail="Artwork file missing")
+            
+            # Since this is SHA1-based, we CAN cache it safely forever!
+            # The URL uniquely identifies the content.
+            response = FileResponse(path)
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return response
     
     raise HTTPException(status_code=500, detail="Database error")
