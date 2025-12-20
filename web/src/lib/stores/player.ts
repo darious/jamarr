@@ -17,7 +17,7 @@ export interface PlayerState {
 }
 
 export const playerState = writable<PlayerState>({
-    renderers: [],
+    renderers: [{ udn: 'local', name: 'This Device (Web Browser)', type: 'local' }],
     renderer: 'local',
     queue: [],
     current_index: -1,
@@ -25,15 +25,22 @@ export const playerState = writable<PlayerState>({
     position_seconds: 0
 });
 
-export async function refreshRenderers() {
+export async function refreshRenderers(force: boolean = false) {
+    console.log('[refreshRenderers] Starting...', { force });
     try {
-        const res = await fetch('/api/renderers?refresh=true');
+        console.log(`[refreshRenderers] Fetching from: /api/renderers?refresh=${force}`);
+        const res = await fetch(`/api/renderers?refresh=${force}`);
+        console.log('[refreshRenderers] Response status:', res.status);
         if (res.ok) {
             const renderers = await res.json();
+            console.log('[refreshRenderers] Received renderers:', renderers);
             playerState.update(s => ({ ...s, renderers }));
+            console.log('[refreshRenderers] Store updated');
+        } else {
+            console.error('[refreshRenderers] Response not OK:', res.status, res.statusText);
         }
     } catch (e) {
-        console.error('Failed to refresh renderers', e);
+        console.error('[refreshRenderers] Failed to refresh renderers', e);
     }
 }
 
