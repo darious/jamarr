@@ -49,6 +49,7 @@ async def main():
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity (-v for files, -vv for API details)")
     parser.add_argument("--force-metadata", action="store_true", help="Force update of artist metadata")
     parser.add_argument("--refresh-singles", type=str, help="Refresh singles for a specific artist (use 'all' for all artists)")
+    parser.add_argument("--scan-dir", type=str, help="Scan only a specific subdirectory (relative to music root)")
     parser.add_argument("--reset", action="store_true", help="Wipe database and artwork cache before scanning")
     parser.add_argument("--force-rescan", action="store_true", help="Force rescan of all files, ignoring modification times")
     args = parser.parse_args()
@@ -94,8 +95,20 @@ async def main():
         print("Done.")
         return
 
+    root_to_scan = None
+    if args.scan_dir:
+        from app.config import get_music_path
+        base = get_music_path()
+        target = os.path.join(base, args.scan_dir)
+        if os.path.exists(target):
+            root_to_scan = target
+            print(f"Scanning subdirectory: {root_to_scan}")
+        else:
+             print(f"Error: Directory not found: {target}")
+             return
+
     print(f"Starting library scan... (Force Rescan: {args.force_rescan})")
-    await scan_library(force_metadata=args.force_metadata, force_rescan=args.force_rescan)
+    await scan_library(root_path=root_to_scan, force_metadata=args.force_metadata, force_rescan=args.force_rescan)
     print("Scan complete.")
 
 if __name__ == "__main__":

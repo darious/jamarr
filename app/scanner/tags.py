@@ -40,7 +40,8 @@ def extract_tags(path: str) -> dict:
                 if k in obj:
                     val = obj[k]
                     if isinstance(val, list):
-                        return str(val[0])
+                        # Join multiple values with semicolon
+                        return "; ".join([str(v) for v in val])
                     return str(val)
             return None
 

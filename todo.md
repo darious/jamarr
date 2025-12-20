@@ -18,6 +18,10 @@
 * if a 2nd user picks the same renderer and the 1st, then it should pick up the queue and playback position and allow both to control the same renderer
 
 
+## Artist page
+* pull all the albums for the artist and add a missing album section to the bottom of the page, ideally with a button to grab the qobuz id for the album on to the clipboard.
+
+
 ## Album page
 * split multi disc albums so we can see each disc
 * make it feel more like the artist page, add links to the album in musicbrainz, make sue the album art is the same size and locatgion as the artist artwork on the artist page
@@ -25,3 +29,4 @@
 
 ## playback
 * play pause button not working for upnp post a page reload
+* fix playback pausing when browser tab does not have the focus

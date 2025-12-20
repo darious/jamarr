@@ -5,7 +5,7 @@
     refreshArtistMetadata,
     refreshArtistSingles,
   } from "$lib/api";
-  import { goto } from "$app/navigation";
+  import { goto, invalidateAll } from "$app/navigation";
   import { addToQueue, loadQueueFromServer, setQueue } from "$stores/player";
   import { browser } from "$app/environment";
 
@@ -185,7 +185,12 @@
     message = "Requesting fresh metadata...";
     try {
       await refreshArtistMetadata(data.canonicalName || data.name);
-      message = "Refresh started. Check back in a few seconds.";
+      message = "Metadata updated. Reloading...";
+      await invalidateAll();
+      message = "Metadata updated successfully!";
+      setTimeout(() => {
+        if (message === "Metadata updated successfully!") message = "";
+      }, 3000);
     } catch (e) {
       message = "Failed to refresh metadata.";
     } finally {
@@ -197,7 +202,12 @@
     refreshingSingles = true;
     try {
       await refreshArtistSingles(data.canonicalName || data.name);
-      message = "Singles refresh started.";
+      message = "Singles updated. Reloading...";
+      await invalidateAll();
+      message = "Singles updated successfully!";
+      setTimeout(() => {
+        if (message === "Singles updated successfully!") message = "";
+      }, 3000);
     } catch (e) {
       message = "Failed to refresh singles.";
     } finally {
