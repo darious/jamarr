@@ -68,6 +68,7 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
         "similar_artists": [],
         "top_tracks": [],
         "singles": [],
+        "albums": [],
         "last_updated": time.time()
     }
 
@@ -321,6 +322,9 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
 
             # 4. MusicBrainz Singles (Release Groups)
             metadata["singles"] = await fetch_artist_singles(mbid, client)
+            
+            # 5. MusicBrainz Albums (Missing Albums)
+            metadata["albums"] = await fetch_artist_albums(mbid, metadata["name"], client)
 
     except Exception as e:
         logger.error(f"Error fetching metadata for {artist_name}: {e}")
@@ -449,6 +453,221 @@ async def fetch_artist_singles(mbid: str, client: httpx.AsyncClient = None):
             await client.aclose()
             
     return singles
+
+
+async def fetch_artist_albums(mbid: str, artist_name: str, client: httpx.AsyncClient = None):
+    """
+    Fetches albums (Release Groups) from MusicBrainz, excluding EPs, Singles, Compilations, etc.
+    Attempts to resolve Qobuz IDs for them.
+    """
+    albums = []
+    should_close = False
+    if client is None:
+        client = httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"})
+        should_close = True
+        
+    try:
+        offset = 0
+        limit = 100
+        seen_titles = set()
+        
+        # We need to process potentially many albums.
+        # To avoid being too slow with Qobuz resolution, we might want to limit or parallelize?
+        # For now, let's do sequential but simple.
+        
+        while True:
+            # Type 'album'
+            rg_url = f"{MB_API_ROOT}/release-group?artist={mbid}&type=album&fmt=json&limit={limit}&offset={offset}&inc=artist-credits"
+            logger.debug(f"Fetching albums from: {rg_url}")
+            rg_resp = await client.get(rg_url)
+            
+            if rg_resp.status_code == 200:
+                rg_data = rg_resp.json()
+                release_groups = rg_data.get("release-groups", [])
+                
+                for rg in release_groups:
+                    # Filter out if artist is not primary
+                    credits = rg.get("artist-credit", [])
+                    if not credits: continue
+                    
+                    is_primary = False
+                    for c in credits:
+                        if c.get("artist", {}).get("id") == mbid:
+                            is_primary = True
+                            break
+                    
+                    if not is_primary:
+                        continue
+
+                    # Filter out secondary types (Compliance with user request: no compilations, live, remix)
+                    secondary_types = rg.get("secondary-types", [])
+                    if secondary_types:
+                        # User explicit list: "not the +compliation, or + live or + remix, no EPs etc..."
+                        # EPs are usually primary type 'EP', but here we requested type='album' so EPs shouldn't be here.
+                        # But 'Live', 'Remix', 'Compilation' are secondary types.
+                        logger.debug(f"Skipping album {rg.get('title')} due to secondary types: {secondary_types}")
+                        continue
+
+                    title = rg.get("title")
+                    norm_title = title.lower().strip()
+                    if norm_title in seen_titles:
+                        continue
+                    seen_titles.add(norm_title)
+                    
+                    first_date = rg.get("first-release-date")
+                    
+                    # Qobuz Search/Resolution
+                    qobuz_url = None
+                    qobuz_id = None
+                    
+                    # Message from user: Try to find Qobuz link in MusicBrainz relations first!
+                    try:
+                        # Fetch releases for this RG to check for URL relations
+                        # Rate limit considerations: we should be careful.
+                        rg_details_url = f"{MB_API_ROOT}/release-group/{rg.get('id')}?inc=releases&fmt=json"
+                        await asyncio.sleep(1.1)
+                        rg_d_resp = await client.get(rg_details_url)
+                        
+                        if rg_d_resp.status_code == 200:
+                            rg_full = rg_d_resp.json()
+                            releases = rg_full.get("releases", [])
+                            
+                            # Check first few releases (limit to 5 to avoid extended delays)
+                            for rel in releases[:5]:
+                                rel_id = rel.get("id")
+                                await asyncio.sleep(1.1)
+                                rel_url = f"{MB_API_ROOT}/release/{rel_id}?inc=url-rels&fmt=json"
+                                r_resp = await client.get(rel_url)
+                                
+                                if r_resp.status_code == 200:
+                                    r_data = r_resp.json()
+                                    for relation in r_data.get("relations", []):
+                                        res_url = relation.get("url", {}).get("resource", "")
+                                        if "qobuz.com" in res_url and "/album/" in res_url:
+                                            # Found one!
+                                            # https://www.qobuz.com/us-en/album/swag-ii-justin-bieber/txv1d601wp14b
+                                            if "open.qobuz.com" in res_url or "play.qobuz.com" in res_url or "www.qobuz.com" in res_url:
+                                                 parts = res_url.split("/")
+                                                 possible_id = parts[-1]
+                                                 if possible_id:
+                                                     qobuz_id = possible_id
+                                                     qobuz_url = f"https://play.qobuz.com/album/{qobuz_id}"
+                                                     logger.debug(f"Resolved Qobuz ID from MusicBrainz relation: {qobuz_id}")
+                                                     break
+                                    if qobuz_id: break
+                                    
+                    except Exception as e:
+                        logger.warning(f"MB Qobuz lookup failed: {e}")
+
+                    if not qobuz_id:
+                        # Fallback to Search
+                        # Construct search query: "Album Name Artist Name" (Title first is often more specific)
+                        from urllib.parse import quote
+                        query = f"{title} {artist_name}"
+                        encoded_query = quote(query)
+                        
+                        # Use store search which is easier to scrape than play.qobuz.com SPA
+                        store_search_url = f"https://www.qobuz.com/us-en/search?q={encoded_query}"
+                        
+                        try:
+                            # Rate limiting for Qobuz scraping to be polite
+                            await asyncio.sleep(0.5) 
+                            
+                            s_resp = await client.get(store_search_url, follow_redirects=True)
+                            if s_resp.status_code == 200:
+                                import re
+                                matches = re.findall(r'href=".*?(?:/album/([^/]+)/)([0-9a-zA-Z]+)"', s_resp.text)
+                                
+                                best_match_id = None
+                                
+                                # Normalize artist for comparison 
+                                artist_parts = [p.lower() for p in artist_name.split() if len(p) > 2]
+                                if not artist_parts: 
+                                    artist_parts = [artist_name.lower()]
+
+                                def clean_slug_title(t):
+                                    t = t.lower().strip()
+                                    # Symbol replacements for common album titles (e.g. Ed Sheeran)
+                                    t = t.replace("×", "x")
+                                    t = t.replace("+", "plus")
+                                    t = t.replace("÷", "divide")
+                                    t = t.replace("=", "equals")
+                                    
+                                    if t.startswith("the "): t = t[4:]
+                                    elif t.startswith("a "): t = t[2:]
+                                    elif t.startswith("an "): t = t[3:]
+                                    return "".join([c if c.isalnum() or c.isspace() else "" for c in t]).split()
+
+                                title_words = clean_slug_title(title)
+                                
+                                for slug, q_id in matches:
+                                    slug_clean = slug.lower().replace("-", " ")
+                                    
+                                    # 1. Check Artist Match
+                                    if not all(part in slug_clean for part in artist_parts):
+                                        continue
+                                    
+                                    # 2. Check Title Start Match
+                                    if title_words:
+                                        first_word = title_words[0]
+                                        if not slug_clean.startswith(first_word):
+                                            continue
+                                    
+                                    # Match found!
+                                    # Prioritize Numeric IDs
+                                    if q_id.isdigit():
+                                        best_match_id = q_id
+                                        break 
+                                    
+                                    if best_match_id is None:
+                                        best_match_id = q_id
+                                
+                                if best_match_id:
+                                    qobuz_id = best_match_id
+                                    qobuz_url = f"https://play.qobuz.com/album/{qobuz_id}"
+                                    logger.debug(f"Resolved Qobuz album {title} -> {qobuz_id} (Verified Artist)")
+                                else:
+                                    logger.debug(f"No strict artist match found for {artist_name} - {title} in Qobuz search results.")
+                                    qobuz_url = f"https://play.qobuz.com/search?q={encoded_query}&type=albums"
+                            else:
+                                 qobuz_url = f"https://play.qobuz.com/search?q={encoded_query}&type=albums"
+                                 
+                        except Exception as e:
+                            logger.warning(f"Qobuz resolution failed for {title}: {e}")
+                            qobuz_url = f"https://play.qobuz.com/search?q={encoded_query}&type=albums"
+
+                    albums.append({
+                        "mbid": rg.get("id"),
+                        "title": title,
+                        "date": first_date,
+                        "artist": artist_name,
+                        "qobuz_url": qobuz_url,
+                        "qobuz_id": qobuz_id,
+                        "musicbrainz_url": f"https://musicbrainz.org/release-group/{rg.get('id')}"
+                    })
+
+                # Pagination
+                count = rg_data.get("release-group-count", 0)
+                if len(release_groups) < limit or (offset + len(release_groups)) >= count:
+                    break
+                
+                offset += limit
+                await asyncio.sleep(1.1)
+            else:
+                logger.error(f"MusicBrainz Albums Fetch Failed: {rg_resp.status_code}")
+                break
+                
+        # Sort by date
+        albums.sort(key=lambda x: x["date"] or "", reverse=True)
+        logger.debug(f"Found {len(albums)} missing albums candidates")
+        
+    except Exception as e:
+        logger.error(f"Error fetching albums for {mbid}: {e}")
+    finally:
+        if should_close:
+            await client.aclose()
+            
+    return albums
 
 
 async def fetch_track_credits(mb_recording_id: str, mb_release_track_id: str = None):

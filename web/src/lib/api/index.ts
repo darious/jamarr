@@ -13,6 +13,15 @@ export interface Artist {
     wikipedia_url: string | null;
     qobuz_url: string | null;
     musicbrainz_url: string | null;
+    albums?: {
+        mbid: string;
+        title: string;
+        date: string;
+        artist: string;
+        qobuz_url?: string;
+        qobuz_id?: string;
+        musicbrainz_url?: string;
+    }[];
 }
 
 export interface Album {

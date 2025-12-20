@@ -131,9 +131,9 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                 INSERT INTO artists (
                     mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
                     wikipedia_url, qobuz_url, musicbrainz_url,
-                    similar_artists, top_tracks, singles, last_updated
+                    top_tracks, singles, albums, last_updated
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mbid) DO UPDATE SET
                     name=excluded.name,
                     sort_name=excluded.sort_name,
@@ -148,6 +148,7 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                     similar_artists=excluded.similar_artists,
                     top_tracks=excluded.top_tracks,
                     singles=excluded.singles,
+                    albums=excluded.albums,
                     last_updated=excluded.last_updated
             """, (
                 meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
@@ -156,6 +157,7 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                 json.dumps(meta["similar_artists"]), 
                 json.dumps(meta["top_tracks"]),
                 json.dumps(meta.get("singles", [])),
+                json.dumps(meta.get("albums", [])),
                 meta["last_updated"]
             ))
             await db.commit()
@@ -243,9 +245,9 @@ async def refresh_artist_metadata(artist_name: str):
                      INSERT INTO artists (
                          mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
                          wikipedia_url, qobuz_url, musicbrainz_url,
-                         similar_artists, top_tracks, singles, last_updated
+                         similar_artists, top_tracks, singles, albums, last_updated
                      )
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT(mbid) DO UPDATE SET
                          name=excluded.name,
                          sort_name=excluded.sort_name,
@@ -260,6 +262,7 @@ async def refresh_artist_metadata(artist_name: str):
                          similar_artists=excluded.similar_artists,
                          top_tracks=excluded.top_tracks,
                          singles=excluded.singles,
+                         albums=excluded.albums,
                          last_updated=excluded.last_updated
                  """, (
                      meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
@@ -268,6 +271,7 @@ async def refresh_artist_metadata(artist_name: str):
                      json.dumps(meta["similar_artists"]), 
                      json.dumps(meta["top_tracks"]),
                      json.dumps(meta.get("singles", [])),
+                     json.dumps(meta.get("albums", [])),
                      meta["last_updated"]
                  ))
                  await db.commit()
