@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS artists (
     homepage TEXT,
     similar_artists TEXT,
     top_tracks TEXT,
+    singles TEXT,
     last_updated REAL,
     wikipedia_url TEXT,
     qobuz_url TEXT,
@@ -128,17 +129,56 @@ async def init_db():
         await db.executescript(INIT_SCRIPT)
         
         # Migrations for existing DBs
-        try:
-             await db.execute("ALTER TABLE artists ADD COLUMN wikipedia_url TEXT")
-             await db.execute("ALTER TABLE artists ADD COLUMN qobuz_url TEXT")
-             await db.execute("ALTER TABLE artists ADD COLUMN musicbrainz_url TEXT")
-             await db.execute("ALTER TABLE artists ADD COLUMN art_id INTEGER REFERENCES artwork(id)")
-        except Exception:
-            pass # Columns likely exist
+        migrations = [
+            "ALTER TABLE artists ADD COLUMN wikipedia_url TEXT",
+            "ALTER TABLE artists ADD COLUMN qobuz_url TEXT",
+            "ALTER TABLE artists ADD COLUMN musicbrainz_url TEXT",
+            "ALTER TABLE artists ADD COLUMN art_id INTEGER REFERENCES artwork(id)",
+            "ALTER TABLE artists ADD COLUMN singles TEXT"
+        ]
+        
+        for sql in migrations:
+            try:
+                await db.execute(sql)
+            except Exception:
+                pass # Column likely exists
             
         try:
              await db.execute("ALTER TABLE artwork ADD COLUMN type TEXT")
         except Exception:
             pass # Column likely exists
+
+        # Playback State (Single row enforced)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS playback_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                queue TEXT DEFAULT '[]',
+                current_index INTEGER DEFAULT 0,
+                position_seconds REAL DEFAULT 0,
+                is_playing BOOLEAN DEFAULT 0
+            )
+        """)
+        
+        # Ensure the single row exists
+        await db.execute("INSERT OR IGNORE INTO playback_state (id) VALUES (1)")
+
+        # Playback History
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS playback_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                client_ip TEXT,
+                hostname TEXT,
+                FOREIGN KEY(track_id) REFERENCES tracks(id)
+            )
+        """)
+        
+        # Migration: Add hostname column if it doesn't exist
+        try:
+            await db.execute("ALTER TABLE playback_history ADD COLUMN hostname TEXT")
+            await db.commit()
+        except Exception:
+            pass  # Column likely exists
 
         await db.commit()

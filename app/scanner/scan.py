@@ -84,9 +84,9 @@ async def scan_library(root_path: str = None, force_metadata: bool = False):
                 INSERT INTO artists (
                     mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
                     wikipedia_url, qobuz_url, musicbrainz_url,
-                    similar_artists, top_tracks, last_updated
+                    similar_artists, top_tracks, singles, last_updated
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mbid) DO UPDATE SET
                     name=excluded.name,
                     sort_name=excluded.sort_name,
@@ -100,6 +100,7 @@ async def scan_library(root_path: str = None, force_metadata: bool = False):
                     musicbrainz_url=excluded.musicbrainz_url,
                     similar_artists=excluded.similar_artists,
                     top_tracks=excluded.top_tracks,
+                    singles=excluded.singles,
                     last_updated=excluded.last_updated
             """, (
                 meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
@@ -107,6 +108,7 @@ async def scan_library(root_path: str = None, force_metadata: bool = False):
                 meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
                 json.dumps(meta["similar_artists"]), 
                 json.dumps(meta["top_tracks"]),
+                json.dumps(meta.get("singles", [])),
                 meta["last_updated"]
             ))
             await db.commit()
@@ -150,9 +152,9 @@ async def refresh_artist_metadata(artist_name: str):
                 INSERT INTO artists (
                     mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
                     wikipedia_url, qobuz_url, musicbrainz_url,
-                    similar_artists, top_tracks, last_updated
+                    similar_artists, top_tracks, singles, last_updated
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mbid) DO UPDATE SET
                     name=excluded.name,
                     sort_name=excluded.sort_name,
@@ -166,6 +168,7 @@ async def refresh_artist_metadata(artist_name: str):
                     musicbrainz_url=excluded.musicbrainz_url,
                     similar_artists=excluded.similar_artists,
                     top_tracks=excluded.top_tracks,
+                    singles=excluded.singles,
                     last_updated=excluded.last_updated
             """, (
                 meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
@@ -173,10 +176,32 @@ async def refresh_artist_metadata(artist_name: str):
                 meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
                 json.dumps(meta["similar_artists"]), 
                 json.dumps(meta["top_tracks"]),
+                json.dumps(meta.get("singles", [])),
                 meta["last_updated"]
             ))
             await db.commit()
             logger.info(f"Metadata updated for {artist_name}")
+
+async def refresh_artist_singles_only(artist_name: str):
+    logger.info(f"Refreshing singles only for {artist_name}")
+    from app.scanner.metadata import fetch_artist_singles
+    
+    async for db in get_db():
+        # Find MBID for artist
+        async with db.execute("SELECT mbid FROM artists WHERE name = ? COLLATE NOCASE", (artist_name,)) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                logger.warning(f"Artist {artist_name} not found in DB (must be scanned first).")
+                return
+
+            mbid = row[0]
+            logger.info(f"Found MBID {mbid} for {artist_name}. Fetching singles...")
+            
+            singles = await fetch_artist_singles(mbid)
+            
+            await db.execute("UPDATE artists SET singles = ? WHERE mbid = ?", (json.dumps(singles), mbid))
+            await db.commit()
+            logger.info(f"Singles updated for {artist_name}")
 
 async def _scan_recursive(root, db, artist_mbids):
     for entry in os.scandir(root):
@@ -309,3 +334,28 @@ async def _process_file(path, db, artist_mbids):
 
     except Exception as e:
         logger.error(f"Error processing {path}: {e}")
+
+async def refresh_all_artist_singles():
+    logger.info("Refreshing singles for ALL artists...")
+    async for db in get_db():
+        async with db.execute("SELECT name FROM artists") as cursor:
+            rows = await cursor.fetchall()
+            
+    if not rows:
+        logger.warning("No artists found in database.")
+        return
+
+    total = len(rows)
+    logger.info(f"Found {total} artists. Starting batch refresh...")
+    
+    for i, row in enumerate(rows):
+        artist_name = row[0]
+        logger.info(f"[{i+1}/{total}] Processing {artist_name}...")
+        try:
+            await refresh_artist_singles_only(artist_name)
+            # Be nice to the API
+            await asyncio.sleep(1.1) 
+        except Exception as e:
+            logger.error(f"Failed to refresh singles for {artist_name}: {e}")
+            
+    logger.info("Finished refreshing singles for all artists.")

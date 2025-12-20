@@ -48,6 +48,7 @@ async def main():
     parser = argparse.ArgumentParser(description="Scan music library")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Increase verbosity (-v for files, -vv for API details)")
     parser.add_argument("--force-metadata", action="store_true", help="Force update of artist metadata")
+    parser.add_argument("--refresh-singles", type=str, help="Refresh singles for a specific artist (use 'all' for all artists)")
     parser.add_argument("--reset", action="store_true", help="Wipe database and artwork cache before scanning")
     args = parser.parse_args()
     
@@ -80,6 +81,16 @@ async def main():
     
     # Ensure art dir exists (init_db creates cache/, but maybe not cache/art)
     os.makedirs(ART_CACHE_DIR, exist_ok=True)
+
+    if args.refresh_singles:
+        from app.scanner.scan import refresh_artist_singles_only, refresh_all_artist_singles
+        if args.refresh_singles.lower() == 'all':
+             await refresh_all_artist_singles()
+        else:
+             print(f"Refreshing singles for: {args.refresh_singles}")
+             await refresh_artist_singles_only(args.refresh_singles)
+        print("Done.")
+        return
 
     print("Starting library scan...")
     await scan_library(force_metadata=args.force_metadata)
