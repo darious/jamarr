@@ -4,14 +4,15 @@
 
 Jamarr is an open-source, web-based music controller designed to scan a local music library, cache rich metadata, and play music to a Naim Uniti Atom (or other UPnP renderers) via a fast, responsive web UI.
 
+It supports **gapless playback** (via UPnP queue management), **instant search**, **rich artist metadata** (biographies, images, similar artists), and **seamless deployment** via Docker.
+
 ## Features
-- Fast library scanning and metadata extraction (mutagen).
-- Local SQLite cache for instant browsing.
-- **Organized artwork cache**: Separate subdirectories for album and artist artwork with SHA1-based distribution.
-- **Artist image caching**: Downloads and caches artist images locally from Spotify.
-- UPnP Control Point for Naim Atom and other renderers.
-- Modern, responsive Web UI.
-- **Refresh Metadata**: Targeted updates for artist information and external links.
+- **Dockerized Deployment**: Single-container setup via Docker Compose.
+- **UPnP Control**: Play/Pause, Next, Seek, and Volume control for network players.
+- **Rich Metadata**: Auto-fetches artist bios, images, and similar artists from Spotify/MusicBrainz.
+- **Fast Scanning**: efficiently scans large libraries with local caching.
+- **Modern UI**: Dark-themed, responsive SvelteKit interface.
+- **Playback History**: Tracks listening history for both local and remote playback.
 
 ## Setup
 
@@ -32,15 +33,45 @@ Jamarr is an open-source, web-based music controller designed to scan a local mu
     pip install -r requirements.txt
     ```
 
-## Running the Application
+## Deployment (Docker)
 
-Start the backend server:
+The recommended way to run Jamarr is via Docker Compose.
 
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
+1.  **Configure Volumes**:
+    Edit `docker-compose.yml` to point to your music library:
+    ```yaml
+    volumes:
+      - /path/to/your/music:/app/music
+      - ./cache:/app/cache
+    ```
 
-The API will be available at `http://localhost:8000`.
+2.  **Run**:
+    ```bash
+    docker-compose up --build -d
+    ```
+
+3.  **Access**:
+    Open `http://localhost:8111`.
+
+**Note**: The container uses `network_mode: "host"` to enable UPnP device discovery on your local network.
+
+## Development Setup
+
+### Prerequisites
+- Python 3.12+
+- Node.js 20+
+- `ffmpeg` (optional, for analysis)
+
+### Backend
+1.  Create venv: `python3 -m venv venv && source venv/bin/activate`
+2.  Install: `pip install -r requirements.txt`
+3.  Run: `uvicorn app.main:app --reload --host 0.0.0.0 --port 8111`
+
+### Frontend
+1.  Apps lives in `web/`.
+2.  Install: `cd web && npm install`
+3.  Run: `npm run dev -- --host 0.0.0.0 --port 4173`
+
 
 ### Running the Scanner
 

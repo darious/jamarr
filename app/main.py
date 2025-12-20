@@ -46,8 +46,22 @@ async def trigger_artist_singles_scan(artist_name: str, background_tasks: Backgr
     return {"message": f"Singles refresh started for {artist_name}"}
 
 # Serve built SvelteKit frontend (output lives in web/build)
+# Serve built SvelteKit frontend (output lives in web/build)
 build_dir = Path("web/build")
-app.mount("/_app", StaticFiles(directory=build_dir / "_app", html=False, check_dir=False), name="svelte-app")
+
+if build_dir.exists():
+    app.mount("/_app", StaticFiles(directory=build_dir / "_app"), name="svelte-app")
+
+    @app.get("/{catchall:path}")
+    async def serve_frontend(catchall: str):
+        # check if file exists in build_dir
+        path = build_dir / catchall
+        if path.is_file():
+             return FileResponse(path)
+        # otherwise return index.html
+        return FileResponse(build_dir / "index.html")
+else:
+    print("Warning: web/build directory not found. Frontend will not be served.")
 app.mount("/assets", StaticFiles(directory=build_dir / "assets", html=False, check_dir=False), name="assets")
 app.mount("/favicon.ico", StaticFiles(directory=build_dir, html=False, check_dir=False), name="favicon")
 
