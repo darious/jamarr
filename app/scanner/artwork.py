@@ -106,3 +106,47 @@ async def download_and_save_artwork(url: str, art_type: str = 'artist') -> str:
     except Exception as e:
         print(f"Failed to download artwork from {url}: {e}")
         return None
+
+async def cleanup_orphaned_artwork(db):
+    """
+    Remove artwork from cache and DB that is not referenced by any tracks or artists.
+    """
+    try:
+        # Find orphaned artwork IDs
+        # (Left Join tracks and artists, select where both matches are null)
+        # Actually easier: SELECT id FROM artwork WHERE id NOT IN (SELECT art_id FROM tracks WHERE art_id IS NOT NULL) AND id NOT IN (SELECT art_id FROM artists WHERE art_id IS NOT NULL)
+        
+        sql = """
+            SELECT id, sha1, type FROM artwork 
+            WHERE id NOT IN (SELECT DISTINCT art_id FROM tracks WHERE art_id IS NOT NULL)
+            AND id NOT IN (SELECT DISTINCT art_id FROM artists WHERE art_id IS NOT NULL)
+        """
+        
+        async with db.execute(sql) as cursor:
+            rows = await cursor.fetchall()
+            
+        if not rows:
+            return 0
+            
+        count = 0
+        for row in rows:
+            art_id, sha1, art_type = row
+            path = _get_art_path(sha1, art_type)
+            
+            # Delete file
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    print(f"Error removing artwork file {path}: {e}")
+            
+            # Delete DB entry
+            await db.execute("DELETE FROM artwork WHERE id = ?", (art_id,))
+            count += 1
+            
+        await db.commit()
+        return count
+        
+    except Exception as e:
+        print(f"Error extracting orphaned artwork: {e}")
+        return 0
