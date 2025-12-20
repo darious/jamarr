@@ -21,7 +21,8 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             a.spotify_url,
             a.wikipedia_url,
             a.qobuz_url,
-            a.musicbrainz_url
+            a.musicbrainz_url,
+            a.singles
         FROM artists a
         JOIN track_artists ta ON a.mbid = ta.mbid
         WHERE a.name IS NOT NULL 
@@ -42,7 +43,8 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
                 "spotify_url": row[8],
                 "wikipedia_url": row[9],
                 "qobuz_url": row[10],
-                "musicbrainz_url": row[11]
+                "musicbrainz_url": row[11],
+                "singles": json.loads(row[12]) if row[12] else []
             } 
             for row in rows
         ]

@@ -1,5 +1,12 @@
 <script lang="ts">
   import { next, playFromQueue, playerState, previous } from '$stores/player';
+
+  function formatTime(seconds: number) {
+      if (!seconds || isNaN(seconds)) return '0:00';
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      return `${m}:${s.toString().padStart(2, '0')}`;
+  }
 </script>
 
 <section class="mx-auto flex max-w-5xl flex-col gap-6 px-6 py-10">
@@ -23,17 +30,34 @@
       {#each $playerState.queue as track, idx}
         <button
           class={`flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-white/5 ${
-            idx === $playerState.currentIndex ? 'bg-white/5' : ''
+            idx === $playerState.current_index ? 'bg-white/5' : ''
           }`}
           on:click={() => playFromQueue(idx)}
         >
-          <div class="h-10 w-10 rounded-lg bg-white/10 text-center text-xs leading-10">{idx + 1}</div>
+          <div class="w-8 text-center text-xs text-white/50">{idx + 1}</div>
+          <div class="h-12 w-12 flex-shrink-0 rounded bg-white/10 overflow-hidden">
+             <img 
+                src={track.art_id ? `/art/${track.art_id}` : '/assets/logo.png'} 
+                alt="Art" 
+                class="h-full w-full object-cover"
+                on:error={(e) => { e.currentTarget.src = '/assets/logo.png'; }} 
+            />
+          </div>
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-semibold">{track.title}</p>
             <p class="text-xs text-white/60 truncate">{track.artist} • {track.album}</p>
+             <div class="flex items-center gap-2 text-xs text-white/40 mt-0.5">
+                {#if track.codec}
+                    <span class="uppercase">{track.codec}</span>
+                {/if}
+                {#if track.bit_depth && track.sample_rate_hz}
+                    <span>•</span>
+                    <span>{track.bit_depth}bit / {track.sample_rate_hz / 1000}kHz</span>
+                {/if}
+             </div>
           </div>
           <div class="text-xs text-white/60 w-20 text-right">
-            {track.duration_seconds ? Math.round(track.duration_seconds / 60) + ' min' : ''}
+            {formatTime(track.duration_seconds)}
           </div>
         </button>
       {/each}
