@@ -165,6 +165,13 @@ async def get_player_state():
                     queue = json.loads(queue_json)
                 except:
                     queue = []
+                
+                # If UPnP is active, get live position
+                if upnp.active_renderer:
+                    pos, dur = await upnp.get_position()
+                    if pos > 0:
+                        pos = pos
+                
                 return {
                     "queue": queue,
                     "current_index": idx,
@@ -358,3 +365,19 @@ async def resume_playback():
     if upnp.active_renderer:
         await upnp.resume()
     return {"status": "ok"}
+
+@router.post("/api/player/volume")
+async def set_volume(data: dict):
+    percent = data.get("percent")
+    if percent is None:
+        raise HTTPException(status_code=400, detail="Missing percent")
+    
+    try:
+        # Clamp between 0 and 100
+        percent = max(0, min(100, int(percent)))
+        await upnp.set_volume(percent)
+        return {"status": "ok", "percent": percent}
+    except Exception as e:
+        logger.error(f"Failed to set volume: {e}")
+        # Don't fail the request if just UPnP issue, but good to know
+        return {"status": "error", "detail": str(e)}
