@@ -66,7 +66,9 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
         "qobuz_url": None,
         "musicbrainz_url": None,
         "similar_artists": [],
+        "similar_artists": [],
         "top_tracks": [],
+        "singles": [],
         "last_updated": time.time()
     }
 
@@ -285,6 +287,11 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
             else:
                 logger.error("Failed to get Spotify token")
 
+
+
+            # 4. MusicBrainz Singles (Release Groups)
+            metadata["singles"] = await fetch_artist_singles(mbid, client)
+
     except Exception as e:
         logger.error(f"Error fetching metadata for {artist_name}: {e}")
 
@@ -326,6 +333,92 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                  logger.warning(f"Failed to resolve Qobuz search: {e}")
 
     return metadata
+
+async def fetch_artist_singles(mbid: str, client: httpx.AsyncClient = None):
+    """
+    Fetches singles (Release Groups) for an artist from MusicBrainz.
+    """
+    singles = []
+    should_close = False
+    if client is None:
+        client = httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"})
+        should_close = True
+        
+    try:
+        offset = 0
+        limit = 100
+        seen_titles = set()
+
+        while True:
+            # https://musicbrainz.org/ws/2/release-group?artist=<MBID>&type=single&fmt=json
+            rg_url = f"{MB_API_ROOT}/release-group?artist={mbid}&type=single&fmt=json&limit={limit}&offset={offset}&inc=artist-credits"
+            logger.debug(f"Fetching singles from: {rg_url}")
+            rg_resp = await client.get(rg_url)
+            
+            if rg_resp.status_code == 200:
+                rg_data = rg_resp.json()
+                release_groups = rg_data.get("release-groups", [])
+                
+                for rg in release_groups:
+                    # Filter out if artist is not primary
+                    credits = rg.get("artist-credit", [])
+                    if not credits: continue
+                    
+                    # Check if primary artist ID matches
+                    is_primary = False
+                    for c in credits:
+                        if c.get("artist", {}).get("id") == mbid:
+                            is_primary = True
+                            break
+                    
+                    if not is_primary:
+                        continue
+
+                    # Filter out "junk" secondary types (Remix, Live, etc.)
+                    # If the user wants ONLY singles, we should exclude anything with a secondary type.
+                    # Secondary types: Live, Remix, Compilation, Demo, DJ-mix, Mixtape/Street, etc.
+                    secondary_types = rg.get("secondary-types", [])
+                    if secondary_types:
+                        logger.debug(f"Skipping {rg.get('title')} due to secondary types: {secondary_types}")
+                        continue
+
+                    title = rg.get("title")
+                    
+                    # Deduplicate by title
+                    norm_title = title.lower().strip()
+                    if norm_title in seen_titles:
+                        continue
+                    seen_titles.add(norm_title)
+
+                    singles.append({
+                        "mbid": rg.get("id"),
+                        "title": title,
+                        "date": rg.get("first-release-date"),
+                        "artist": rg.get("artist-credit-phrase")
+                    })
+
+                # Pagination check
+                count = rg_data.get("release-group-count", 0)
+                if len(release_groups) < limit or (offset + len(release_groups)) >= count:
+                    break
+                
+                offset += limit
+                await asyncio.sleep(1.1) # Rate limit
+            else:
+                logger.error(f"MusicBrainz Singles Fetch Failed: {rg_resp.status_code}")
+                break
+            
+        # Sort by date descending
+        singles.sort(key=lambda x: x["date"] or "", reverse=True)
+        logger.debug(f"Found {len(singles)} singles")
+            
+    except Exception as e:
+        logger.error(f"Error fetching singles for {mbid}: {e}")
+    finally:
+        if should_close:
+            await client.aclose()
+            
+    return singles
 
 
 async def fetch_track_credits(mb_recording_id: str, mb_release_track_id: str = None):

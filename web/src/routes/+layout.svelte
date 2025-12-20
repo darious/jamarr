@@ -13,8 +13,19 @@
   let isScanning = false;
 
   onMount(async () => {
-    await refreshRenderers();
-    await loadQueueFromServer();
+    console.log('[Layout] onMount called');
+    console.log('[Layout] About to call loadQueueFromServer');
+    try {
+      await loadQueueFromServer();
+    } catch (e) {
+      console.error('[Layout] loadQueueFromServer failed:', e);
+    }
+    console.log('[Layout] loadQueueFromServer completed');
+    try {
+      await refreshRenderers();
+    } catch (e) {
+      console.error('[Layout] refreshRenderers failed:', e);
+    }
     unsub = playerState.subscribe((state) => {
       rendererList = state.renderers || [];
       activeRenderer = state.renderer || 'local';
@@ -78,6 +89,7 @@
         <nav class="flex items-center gap-2 text-sm text-white/80">
           <a class="btn btn-ghost btn-sm" href="/">Artists</a>
           <a class="btn btn-ghost btn-sm" href="/queue">Queue</a>
+          <a class="btn btn-ghost btn-sm" href="/history">History</a>
         </nav>
         <div class="relative">
           <button

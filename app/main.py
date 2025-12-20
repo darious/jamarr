@@ -38,6 +38,12 @@ async def trigger_artist_scan(artist_name: str, background_tasks: BackgroundTask
     background_tasks.add_task(refresh_artist_metadata, artist_name)
     return {"message": f"Metadata refresh started for {artist_name}"}
 
+@app.post("/api/scan_artist_singles")
+async def trigger_artist_singles_scan(artist_name: str, background_tasks: BackgroundTasks):
+    from app.scanner.scan import refresh_artist_singles_only
+    background_tasks.add_task(refresh_artist_singles_only, artist_name)
+    return {"message": f"Singles refresh started for {artist_name}"}
+
 # Serve built SvelteKit frontend (output lives in web/build)
 build_dir = Path("web/build")
 app.mount("/_app", StaticFiles(directory=build_dir / "_app", html=False, check_dir=False), name="svelte-app")

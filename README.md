@@ -76,7 +76,7 @@ Install and run the frontend in dev mode:
 ```bash
 cd web
 npm install
-npm run dev -- --host
+npm run dev -- --host 0.0.0.0 --port 4173
 ```
 
 Build production assets (served by FastAPI from `web/build`):
