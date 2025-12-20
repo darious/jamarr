@@ -1,0 +1,11 @@
+services:
+  jamarr:
+    build: .
+    container_name: jamarr
+    network_mode: "host" # Critical for UPnP discovery
+    volumes:
+      - /path/to/music:/app/music
+      - ./cache:/app/cache
+    restart: unless-stopped
+    environment:
+      - HOST=0.0.0.0

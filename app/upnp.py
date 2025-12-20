@@ -277,7 +277,7 @@ class UPnPManager:
         if self.base_url:
             base = self.base_url
         else:
-            base = f"http://{self.local_ip}:8000"
+            base = f"http://{self.local_ip}:8111"
 
         stream_url = f"{base}/api/stream/{track_id}"
         art_url = f"{base}/art/{metadata.get('art_id')}" if metadata.get('art_id') else ""
