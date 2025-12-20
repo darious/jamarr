@@ -1,9 +1,17 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from app.db import get_db
 import aiosqlite
 import json
+from enum import Enum
+from typing import List, Optional
 
 router = APIRouter()
+
+class AlbumSort(str, Enum):
+    newest = "newest" # Release Date
+    added = "added"   # Import Date
+    played = "played" # Recently Played
+
 
 @router.get("/api/artists")
 async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
@@ -150,3 +158,146 @@ async def get_tracks(album: str = None, artist: str = None, db: aiosqlite.Connec
                 d["artist"] = d["aggregated_artists"]
             results.append(d)
         return results
+
+@router.get("/api/home/new-releases")
+async def get_new_releases(limit: int = 20, db: aiosqlite.Connection = Depends(get_db)):
+    query = """
+        SELECT 
+            t.album, 
+            t.art_id, 
+            MAX(a.sha1) as art_sha1,
+            COALESCE(t.album_artist, t.artist) as artist_name,
+            MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
+            MIN(t.date) as year,
+            COUNT(DISTINCT t.id) as track_count,
+            SUM(t.duration_seconds) as total_duration,
+            MAX(t.mb_release_id) as mb_release_id,
+            'main' as type
+        FROM tracks t
+        LEFT JOIN artwork a ON t.art_id = a.id
+        WHERE t.album IS NOT NULL
+        GROUP BY t.album
+        ORDER BY year DESC, t.mtime DESC
+        LIMIT ?
+    """
+    async with db.execute(query, (limit,)) as cursor:
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+@router.get("/api/home/recently-added-albums")
+async def get_recently_added_albums(limit: int = 20, db: aiosqlite.Connection = Depends(get_db)):
+    query = """
+        SELECT 
+            t.album, 
+            t.art_id, 
+            MAX(a.sha1) as art_sha1,
+            COALESCE(t.album_artist, t.artist) as artist_name,
+            MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
+            MIN(t.date) as year,
+            COUNT(DISTINCT t.id) as track_count,
+            SUM(t.duration_seconds) as total_duration,
+            MAX(t.mb_release_id) as mb_release_id,
+            'main' as type
+        FROM tracks t
+        LEFT JOIN artwork a ON t.art_id = a.id
+        WHERE t.album IS NOT NULL
+        GROUP BY t.album
+        ORDER BY MAX(t.id) DESC
+        LIMIT ?
+    """
+    async with db.execute(query, (limit,)) as cursor:
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+@router.get("/api/home/recently-played-albums")
+async def get_recently_played_albums(limit: int = 20, db: aiosqlite.Connection = Depends(get_db)):
+    # Join playback_history to get specific albums
+    query = """
+        SELECT 
+            t.album, 
+            t.art_id, 
+            MAX(a.sha1) as art_sha1,
+            COALESCE(t.album_artist, t.artist) as artist_name,
+            MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
+            MIN(t.date) as year,
+            COUNT(DISTINCT t.id) as track_count,
+            SUM(t.duration_seconds) as total_duration,
+            MAX(t.mb_release_id) as mb_release_id,
+            MAX(ph.timestamp) as last_played
+        FROM playback_history ph
+        JOIN tracks t ON ph.track_id = t.id
+        LEFT JOIN artwork a ON t.art_id = a.id
+        WHERE t.album IS NOT NULL
+        GROUP BY t.album
+        ORDER BY last_played DESC
+        LIMIT ?
+    """
+    async with db.execute(query, (limit,)) as cursor:
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+@router.get("/api/home/recently-played-artists")
+async def get_recently_played_artists(limit: int = 20, db: aiosqlite.Connection = Depends(get_db)):
+    query = """
+        SELECT DISTINCT 
+            a.name,
+            a.image_url, 
+            a.art_id,
+            ar.sha1 as art_sha1,
+            a.bio, 
+            MAX(ph.timestamp) as last_played
+        FROM playback_history ph
+        JOIN tracks t ON ph.track_id = t.id
+        JOIN track_artists ta ON t.id = ta.track_id
+        JOIN artists a ON ta.mbid = a.mbid
+        LEFT JOIN artwork ar ON a.art_id = ar.id
+        WHERE a.name IS NOT NULL AND a.name != '' AND a.name != 'null'
+        GROUP BY a.mbid
+        ORDER BY last_played DESC
+        LIMIT ?
+    """
+    async with db.execute(query, (limit,)) as cursor:
+        rows = await cursor.fetchall()
+        return [
+            {
+                "name": row[0], 
+                "image_url": row[1], 
+                "art_id": row[2],
+                "art_sha1": row[3],
+                "bio": row[4]
+            } 
+            for row in rows
+        ]
+
+@router.get("/api/home/discover-artists")
+async def get_discover_artists(limit: int = 20, db: aiosqlite.Connection = Depends(get_db)):
+    # Newly added artists (based on track mtime)
+    query = """
+        SELECT DISTINCT 
+            a.name,
+            a.image_url, 
+            a.art_id,
+            ar.sha1 as art_sha1,
+            a.bio,
+            MAX(t.id) as last_added
+        FROM artists a
+        JOIN track_artists ta ON a.mbid = ta.mbid
+        JOIN tracks t ON ta.track_id = t.id
+        LEFT JOIN artwork ar ON a.art_id = ar.id
+        WHERE a.name IS NOT NULL AND a.name != '' AND a.name != 'null'
+        GROUP BY a.mbid
+        ORDER BY last_added DESC
+        LIMIT ?
+    """
+    async with db.execute(query, (limit,)) as cursor:
+        rows = await cursor.fetchall()
+        return [
+            {
+                "name": row[0], 
+                "image_url": row[1], 
+                "art_id": row[2],
+                "art_sha1": row[3],
+                "bio": row[4]
+            } 
+            for row in rows
+        ]

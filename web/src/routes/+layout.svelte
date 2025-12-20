@@ -127,7 +127,7 @@
           {/each}
         </select>
         <nav class="flex items-center gap-2 text-sm text-white/80">
-          <a class="btn btn-ghost btn-sm" href="/">Artists</a>
+          <a class="btn btn-ghost btn-sm" href="/artists">Artists</a>
           <a class="btn btn-ghost btn-sm" href="/queue">Queue</a>
           <a class="btn btn-ghost btn-sm" href="/history">History</a>
         </nav>
