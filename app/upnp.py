@@ -30,15 +30,24 @@ class UPnPManager:
             self._bg_task = asyncio.create_task(self._discovery_loop())
 
     async def _discovery_loop(self):
-        while True:
-            try:
-                self.log("Starting background discovery...")
-                await self.discover(timeout=5)
-            except Exception as e:
-                self.log(f"Background discovery error: {e}")
-            
-            # Sleep 60s
-            await asyncio.sleep(60)
+        try:
+            while True:
+                try:
+                    self.log("Starting background discovery...")
+                    await self.discover(timeout=5)
+                except Exception as e:
+                    self.log(f"Background discovery error: {e}")
+                
+                # Sleep 60s
+                await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            self.log("Background discovery cancelled")
+            raise
+
+    def stop_background_scan(self):
+        if self._bg_task:
+            self._bg_task.cancel()
+            self._bg_task = None
 
     def log(self, msg):
         import datetime

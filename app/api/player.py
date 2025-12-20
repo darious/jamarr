@@ -37,7 +37,9 @@ class PlayerState(BaseModel):
     queue: List[Track]
     current_index: int
     position_seconds: float
+    position_seconds: float
     is_playing: bool
+    renderer: Optional[str] = 'local'
 
 class QueueUpdate(BaseModel):
     queue: List[Track]
@@ -176,9 +178,10 @@ async def get_player_state():
                     "queue": queue,
                     "current_index": idx,
                     "position_seconds": pos,
-                    "is_playing": bool(playing)
+                    "is_playing": bool(playing),
+                    "renderer": upnp.active_renderer if upnp.active_renderer else 'local'
                 }
-    return {"queue": [], "current_index": 0, "position_seconds": 0, "is_playing": False}
+    return {"queue": [], "current_index": 0, "position_seconds": 0, "is_playing": False, "renderer": 'local'}
 
 @router.post("/api/player/queue")
 async def set_queue(update: QueueUpdate, request: Request):
@@ -350,18 +353,33 @@ async def play_track(data: dict, request: Request, db: aiosqlite.Connection = De
         
         if upnp.active_renderer:
             await upnp.play_track(track['id'], track['path'], track)
+            
+            # Update DB state to playing
+            await db.execute(
+                "UPDATE playback_state SET is_playing = 1, current_index = (SELECT current_index FROM playback_state WHERE id = 1) WHERE id = 1"
+            )
+            await db.commit()
+            
             return {"status": "streaming_started", "renderer": upnp.active_renderer}
         else:
             return {"status": "local_playback", "message": "Handle playback in browser"}
 
 @router.post("/api/player/pause")
 async def pause_playback():
+    async for db in get_db():
+        await db.execute("UPDATE playback_state SET is_playing = 0 WHERE id = 1")
+        await db.commit()
+        
     if upnp.active_renderer:
         await upnp.pause()
     return {"status": "ok"}
 
 @router.post("/api/player/resume")
 async def resume_playback():
+    async for db in get_db():
+        await db.execute("UPDATE playback_state SET is_playing = 1 WHERE id = 1")
+        await db.commit()
+    
     if upnp.active_renderer:
         await upnp.resume()
     return {"status": "ok"}
