@@ -29,7 +29,7 @@
   // Subscribe to store
   $: currentTrack = $playerState.queue[$playerState.current_index];
   $: isPlaying = $playerState.is_playing;
-  $: if ($playerState.renderer !== "local" && currentTrack) {
+  $: if (!$playerState.renderer.startsWith("local") && currentTrack) {
     duration = currentTrack.duration_seconds;
   } else if (currentTrack && (!audio || !audio.duration)) {
     // Fallback for local if audio not ready
@@ -69,7 +69,7 @@
     );
     hasAttemptedAutoResume = true;
     // Trigger the play-local event to resume ONLY if local
-    if ($playerState.renderer === "local") {
+    if ($playerState.renderer.startsWith("local")) {
       window.dispatchEvent(
         new CustomEvent("jamarr:play-local", { detail: currentTrack }),
       );
@@ -117,7 +117,7 @@
     const time = percent * duration;
 
     // Remote Seek
-    if ($playerState.renderer !== "local") {
+    if (!$playerState.renderer.startsWith("local")) {
       console.log("[PlayerBar] Remote seek to:", time);
       seek(time);
       progress = time; // Optimistic
@@ -157,7 +157,7 @@
       const track = e.detail;
 
       // Safety check: if we are remote, we shouldn't be messing with local audio
-      if ($playerState.renderer !== "local") return;
+      if (!$playerState.renderer.startsWith("local")) return;
 
       if (audio) {
         console.log(
@@ -249,7 +249,10 @@
     let lastTransportState = "";
 
     const interval = setInterval(async () => {
-      if ($playerState.renderer !== "local" && $playerState.is_playing) {
+      if (
+        !$playerState.renderer.startsWith("local") &&
+        $playerState.is_playing
+      ) {
         try {
           const res = await fetch("/api/player/state");
           if (res.ok) {
@@ -323,7 +326,7 @@
     }
 
     // Remote / UPnP Logic
-    if ($playerState.renderer !== "local") {
+    if (!$playerState.renderer.startsWith("local")) {
       if ($playerState.is_playing) {
         console.log("[PlayerBar] Remote: pausing");
         pause();
@@ -540,7 +543,7 @@
           on:input={(e) => {
             const val = parseFloat(e.currentTarget.value);
             volume = val;
-            if ($playerState.renderer !== "local") {
+            if (!$playerState.renderer.startsWith("local")) {
               setVolume(Math.round(val * 100)); // Convert 0-1 to 0-100
             }
           }}
