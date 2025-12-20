@@ -253,3 +253,15 @@ async function playCurrentTrack() {
         console.error('[playCurrentTrack] Exception:', e);
     }
 }
+
+export async function setVolume(percent: number) {
+    try {
+        await fetch('/api/player/volume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ percent })
+        });
+    } catch (e) {
+        console.error('Failed to set volume', e);
+    }
+}

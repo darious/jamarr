@@ -18,7 +18,7 @@ class UPnPManager:
         return cls._instance
 
     def __init__(self):
-        self.renderers = {} # udn -> dict (friendly_name, location, control_url)
+        self.renderers = {} # udn -> dict (friendly_name, location, control_url, rendering_control_url)
         self.active_renderer = None # udn
         self.local_ip = self._get_local_ip()
         self.base_url = None
@@ -130,11 +130,15 @@ class UPnPManager:
                             services = device.findall('.//service')
                             
                         control_url = None
+                        rendering_control_url = None
+                        
                         for svc in services:
-                            svc_type = svc.findtext('{urn:schemas-upnp-org:device-1-0}serviceType') or svc.findtext('serviceType')
-                            if 'AVTransport' in (svc_type or ''):
+                            svc_type = svc.findtext('{urn:schemas-upnp-org:device-1-0}serviceType') or svc.findtext('serviceType') or ''
+                            if 'AVTransport' in svc_type:
                                 control_url = svc.findtext('{urn:schemas-upnp-org:device-1-0}controlURL') or svc.findtext('controlURL')
-                                break
+                            elif 'RenderingControl' in svc_type:
+                                rendering_control_url = svc.findtext('{urn:schemas-upnp-org:device-1-0}controlURL') or svc.findtext('controlURL')
+                        
                         
                         if udn and control_url:
                             # Normalize Control URL
@@ -145,11 +149,18 @@ class UPnPManager:
                                     control_url = '/' + control_url
                                 control_url = base + control_url
                                 
+                            if rendering_control_url:
+                                if not rendering_control_url.startswith('http'):
+                                    if not rendering_control_url.startswith('/'):
+                                        rendering_control_url = '/' + rendering_control_url
+                                    rendering_control_url = base + rendering_control_url
+
                             self.renderers[udn] = {
                                 'udn': udn,
                                 'name': name,
                                 'location': location,
                                 'control_url': control_url,
+                                'rendering_control_url': rendering_control_url,
                                 'ip': parsed.hostname
                             }
                             self.log(f"Added Renderer: {name} at {control_url}")
@@ -304,6 +315,19 @@ class UPnPManager:
             r = self.renderers[self.active_renderer]
             await self._soap_action(r['control_url'], 'Play', {'InstanceID': 0, 'Speed': 1})
 
+    async def set_volume(self, volume_percent: int):
+        if self.active_renderer:
+            r = self.renderers[self.active_renderer]
+            rc_url = r.get('rendering_control_url')
+            if rc_url:
+                await self._soap_action(rc_url, 'SetVolume', {
+                    'InstanceID': 0,
+                    'Channel': 'Master',
+                    'DesiredVolume': volume_percent
+                })
+            else:
+                self.log("No RenderingControl URL for active renderer")
+
     def _create_didl(self, url, mime, title, artist, album, art_url):
         import html
         title = html.escape(title or "Unknown")
@@ -328,7 +352,7 @@ class UPnPManager:
         body = f"""<?xml version="1.0"?>
         <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
             <s:Body>
-                <u:{action} xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                <u:{action} xmlns:u="urn:schemas-upnp-org:service:AVTransport:1" xmlns:r="urn:schemas-upnp-org:service:RenderingControl:1">
                     {''.join([f"<{k}>{v}</{k}>" for k, v in args.items()])}
                 </u:{action}>
             </s:Body>
@@ -352,3 +376,68 @@ class UPnPManager:
         except Exception as e:
             self.log(f"SOAP Action {action} ERROR: {e}")
             raise e
+
+    def _parse_time(self, time_str):
+        if not time_str or time_str == 'NOT_IMPLEMENTED':
+            return 0
+        try:
+            parts = time_str.split(':')
+            if len(parts) == 3:
+                h, m, s = map(float, parts)
+                return h * 3600 + m * 60 + s
+        except:
+            pass
+        return 0
+
+    async def get_position(self):
+        """Get current position and duration from active renderer."""
+        if not self.active_renderer:
+            return 0, 0
+        
+        r = self.renderers[self.active_renderer]
+        url = r['control_url']
+        
+        try:
+            # GetPositionInfo
+            action = "GetPositionInfo"
+            body = f"""<?xml version="1.0"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+                <s:Body>
+                    <u:{action} xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                        <InstanceID>0</InstanceID>
+                    </u:{action}>
+                </s:Body>
+            </s:Envelope>
+            """
+            
+            headers = {
+                'Content-Type': 'text/xml; charset="utf-8"',
+                'SOAPAction': f'"urn:schemas-upnp-org:service:AVTransport:1#{action}"'
+            }
+            
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, content=body, headers=headers, timeout=2.0)
+                if resp.status_code == 200:
+                    xml = resp.text
+                    # Parse RelTime and TrackDuration
+                    # <RelTime>00:00:23</RelTime>
+                    # <TrackDuration>00:03:45</TrackDuration>
+                    
+                    # Simple parsing
+                    rel_time = 0
+                    duration = 0
+                    
+                    import re
+                    rel_match = re.search(r'<RelTime>(.*?)</RelTime>', xml)
+                    dur_match = re.search(r'<TrackDuration>(.*?)</TrackDuration>', xml)
+                    
+                    if rel_match:
+                        rel_time = self._parse_time(rel_match.group(1))
+                    if dur_match:
+                        duration = self._parse_time(dur_match.group(1))
+                        
+                    return rel_time, duration
+        except Exception as e:
+            self.log(f"GetPositionInfo failed: {e}")
+            
+        return 0, 0
