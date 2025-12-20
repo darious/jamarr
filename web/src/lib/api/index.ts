@@ -90,3 +90,33 @@ export async function refreshArtistSingles(artistName: string): Promise<void> {
     const res = await fetch(`/api/scan_artist_singles?artist_name=${encodeURIComponent(artistName)}`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to refresh artist singles');
 }
+
+export async function fetchNewReleases(fetchFn: any = fetch): Promise<Album[]> {
+    const res = await fetchFn('/api/home/new-releases');
+    if (!res.ok) throw new Error('Failed to fetch new releases');
+    return await res.json();
+}
+
+export async function fetchRecentlyAddedAlbums(fetchFn: any = fetch): Promise<Album[]> {
+    const res = await fetchFn('/api/home/recently-added-albums');
+    if (!res.ok) throw new Error('Failed to fetch recently added albums');
+    return await res.json();
+}
+
+export async function fetchRecentlyPlayedAlbums(fetchFn: any = fetch): Promise<Album[]> {
+    const res = await fetchFn('/api/home/recently-played-albums');
+    if (!res.ok) throw new Error('Failed to fetch recently played albums');
+    return await res.json();
+}
+
+export async function fetchRecentlyPlayedArtists(fetchFn: any = fetch): Promise<Artist[]> {
+    const res = await fetchFn('/api/home/recently-played-artists');
+    if (!res.ok) throw new Error('Failed to fetch recently played artists');
+    return await res.json();
+}
+
+export async function fetchDiscoverArtists(fetchFn: any = fetch): Promise<Artist[]> {
+    const res = await fetchFn('/api/home/discover-artists');
+    if (!res.ok) throw new Error('Failed to fetch discover artists');
+    return await res.json();
+}
