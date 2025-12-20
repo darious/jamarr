@@ -14,5 +14,6 @@
 
 
 ## Album page
+* split multi disc albums so we can see each disc
 * make it feel more like the artist page, add links to the album in musicbrainz, make sue the album art is the same size and locatgion as the artist artwork on the artist page
 
