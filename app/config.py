@@ -23,3 +23,6 @@ def get_music_path():
 def get_spotify_credentials():
     cfg = load_config().get("spotify", {})
     return cfg.get("client_id"), cfg.get("client_secret")
+
+def get_musicbrainz_root_url():
+    return load_config().get("musicbrainz", {}).get("root_url", "https://musicbrainz.org")

@@ -7,12 +7,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MB_API_ROOT = "https://musicbrainz.org/ws/2"
-WIKI_API_ROOT = "https://en.wikipedia.org/api/rest_v1/page/summary"
-
 import base64
 
-from app.config import get_spotify_credentials
+from app.config import get_spotify_credentials, get_musicbrainz_root_url
+
+MB_API_ROOT = f"{get_musicbrainz_root_url()}/ws/2"
+WIKI_API_ROOT = "https://en.wikipedia.org/api/rest_v1/page/summary"
+
 
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_API_ROOT = "https://api.spotify.com/v1"
@@ -66,9 +67,9 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
         "qobuz_url": None,
         "musicbrainz_url": None,
         "similar_artists": [],
-        "similar_artists": [],
         "top_tracks": [],
         "singles": [],
+        "albums": [],
         "last_updated": time.time()
     }
 
@@ -77,13 +78,42 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
             # 1. MusicBrainz
             mb_url = f"{MB_API_ROOT}/artist/{mbid}?inc=url-rels&fmt=json"
             logger.debug(f"Fetching MB data from: {mb_url}")
-            resp = await client.get(mb_url)
+            
+            mb_data = None
+            resp = None
+            
+            for attempt in range(3):
+                try:
+                    resp = await client.get(mb_url)
+                    if resp.status_code == 200:
+                        mb_data = resp.json()
+                        break
+                    elif resp.status_code == 503:
+                        await asyncio.sleep(1 * (attempt + 1))
+                        continue
+                    else:
+                        logger.warning(f"MusicBrainz returned status {resp.status_code} for {mbid}")
+                        break
+                except Exception as e:
+                    logger.warning(f"Attempt {attempt + 1}/3 failed to fetch MB data for {artist_name}: {repr(e)}")
+                    if attempt < 2:
+                        await asyncio.sleep(1 * (attempt + 1))
+                    # If we fail all attempts, we continue to check if we got partial data or proceed to other sources
+            
+            # Continue even if mb_data is None (we might fallback to other sources or partial data)
+            # But the logic below depends on resp.status_code check usually
+            
+            if mb_data:
+                # Mock a successful resp object logic or just use mb_data
+                # The code below uses 'resp.status_code == 200' and 'resp.json()'
+                # We can just change the condition to check mb_data
+                pass
             
             wikidata_url = None
             spotify_id = None
             
-            if resp.status_code == 200:
-                mb_data = resp.json()
+            if mb_data:
+                # mb_data already json()
                 if mb_data.get("name"):
                     metadata["name"] = mb_data.get("name")
                 metadata["sort_name"] = mb_data.get("sort-name")
@@ -91,7 +121,8 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                 logger.debug(f"Found {len(relations)} relations for {artist_name}")
                 
                 # Set MusicBrainz URL
-                metadata["musicbrainz_url"] = f"https://musicbrainz.org/artist/{mbid}"
+                # Set MusicBrainz URL
+                metadata["musicbrainz_url"] = f"{get_musicbrainz_root_url()}/artist/{mbid}"
 
                 for rel in relations:
                     target = rel.get("url", {}).get("resource", "")
@@ -200,20 +231,22 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                 if not spotify_id:
                     # Use the name fetching from MB if available
                     search_query = metadata.get("name") or artist_name
+                    search_url = None
                     if search_query and search_query != "Unknown Artist":
                         logger.debug(f"Searching Spotify for: {search_query}")
                         from urllib.parse import quote
                         search_url = f"{SPOTIFY_API_ROOT}/search?q={quote(search_query)}&type=artist&limit=1"
-                    s_resp = await client.get(search_url, headers=sp_headers)
-                    if s_resp.status_code == 200:
-                        s_data = s_resp.json()
-                        items = s_data.get("artists", {}).get("items", [])
-                        if items:
-                            spotify_id = items[0]["id"]
-                            metadata["spotify_url"] = items[0]["external_urls"]["spotify"]
-                            logger.debug(f"Found Spotify ID via search: {spotify_id}")
-                    else:
-                        logger.error(f"Spotify Search Failed: {s_resp.status_code}")
+                    if search_url:
+                        s_resp = await client.get(search_url, headers=sp_headers)
+                        if s_resp.status_code == 200:
+                            s_data = s_resp.json()
+                            items = s_data.get("artists", {}).get("items", [])
+                            if items:
+                                spotify_id = items[0]["id"]
+                                metadata["spotify_url"] = items[0]["external_urls"]["spotify"]
+                                logger.debug(f"Found Spotify ID via search: {spotify_id}")
+                        else:
+                            logger.error(f"Spotify Search Failed: {s_resp.status_code}")
 
                 if spotify_id:
                     # Get Artist (Image)
@@ -291,6 +324,9 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
 
             # 4. MusicBrainz Singles (Release Groups)
             metadata["singles"] = await fetch_artist_singles(mbid, client)
+            
+            # 5. MusicBrainz Albums (Missing Albums)
+            metadata["albums"] = await fetch_artist_albums(mbid, metadata["name"], client)
 
     except Exception as e:
         logger.error(f"Error fetching metadata for {artist_name}: {e}")
@@ -421,6 +457,248 @@ async def fetch_artist_singles(mbid: str, client: httpx.AsyncClient = None):
     return singles
 
 
+
+import time
+import asyncio
+
+class RateLimiter:
+    def __init__(self, rate_limit: float, burst_limit: int = 1):
+        self.rate_limit = rate_limit
+        self.burst_limit = burst_limit
+        self._tokens = burst_limit
+        self._last_update = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self):
+        async with self._lock:
+            now = time.monotonic()
+            time_passed = now - self._last_update
+            self._last_update = now
+            self._tokens = min(self.burst_limit, self._tokens + time_passed * self.rate_limit)
+
+            if self._tokens < 1:
+                wait_time = (1 - self._tokens) / self.rate_limit
+                await asyncio.sleep(wait_time)
+                self._tokens -= 1
+                self._last_update = time.monotonic()
+            else:
+                self._tokens -= 1
+
+# Global Limiters
+# MB: 1 req/sec (technically allows bursts but be safe)
+mb_limiter = RateLimiter(rate_limit=1.0, burst_limit=2)
+# Qobuz: Unknown, be polite (2 req/sec)
+qobuz_limiter = RateLimiter(rate_limit=2.0, burst_limit=5)
+# Store Search: Be very polite (1 req/sec)
+store_limiter = RateLimiter(rate_limit=1.0, burst_limit=1)
+
+async def _process_single_album(rg, artist_name, client):
+    """
+    Process a single release group: fetch MB relations or search Qobuz.
+    """
+    title = rg.get("title")
+    first_date = rg.get("first-release-date")
+    
+    qobuz_url = None
+    qobuz_id = None
+    
+    # 1. MusicBrainz Direct Lookup
+    try:
+        await mb_limiter.acquire()
+        rg_details_url = f"{MB_API_ROOT}/release-group/{rg.get('id')}?inc=releases&fmt=json"
+        rg_d_resp = await client.get(rg_details_url)
+        
+        if rg_d_resp.status_code == 200:
+            rg_full = rg_d_resp.json()
+            releases = rg_full.get("releases", [])
+            
+            # Check first few releases
+            for rel in releases[:5]:
+                rel_id = rel.get("id")
+                await mb_limiter.acquire()
+                rel_url = f"{MB_API_ROOT}/release/{rel_id}?inc=url-rels&fmt=json"
+                r_resp = await client.get(rel_url)
+                
+                if r_resp.status_code == 200:
+                    r_data = r_resp.json()
+                    for relation in r_data.get("relations", []):
+                        res_url = relation.get("url", {}).get("resource", "")
+                        if "qobuz.com" in res_url and "/album/" in res_url:
+                            if "open.qobuz.com" in res_url or "play.qobuz.com" in res_url or "www.qobuz.com" in res_url:
+                                    parts = res_url.split("/")
+                                    possible_id = parts[-1]
+                                    if possible_id:
+                                        qobuz_id = possible_id
+                                        qobuz_url = f"https://play.qobuz.com/album/{qobuz_id}"
+                                        logger.debug(f"Resolved Qobuz ID from MusicBrainz relation: {qobuz_id}")
+                                        break
+                    if qobuz_id: break
+                    
+    except Exception as e:
+        logger.warning(f"MB Qobuz lookup failed for {title}: {e}")
+
+    # 2. Search Fallback
+    if not qobuz_id:
+        from urllib.parse import quote
+        query = f"{title} {artist_name}"
+        encoded_query = quote(query)
+        store_search_url = f"https://www.qobuz.com/us-en/search?q={encoded_query}"
+        
+        try:
+            await store_limiter.acquire()
+            s_resp = await client.get(store_search_url, follow_redirects=True)
+            if s_resp.status_code == 200:
+                import re
+                matches = re.findall(r'href=".*?(?:/album/([^/]+)/)([0-9a-zA-Z]+)"', s_resp.text)
+                
+                best_match_id = None
+                
+                # Normalize artist
+                artist_parts = [p.lower() for p in artist_name.split() if len(p) > 2]
+                if not artist_parts: artist_parts = [artist_name.lower()]
+
+                def clean_slug_title(t):
+                    t = t.lower().strip()
+                    t = t.replace("×", "x").replace("+", "plus").replace("÷", "divide").replace("=", "equals")
+                    if t.startswith("the "): t = t[4:]
+                    elif t.startswith("a "): t = t[2:]
+                    elif t.startswith("an "): t = t[3:]
+                    return "".join([c if c.isalnum() or c.isspace() else "" for c in t]).split()
+
+                title_words = clean_slug_title(title)
+                
+                for slug, q_id in matches:
+                    slug_clean = slug.lower().replace("-", " ")
+                    if not all(part in slug_clean for part in artist_parts): continue
+                    if title_words:
+                        first_word = title_words[0]
+                        if not slug_clean.startswith(first_word): continue
+                    
+                    if q_id.isdigit():
+                        best_match_id = q_id
+                        break 
+                    if best_match_id is None:
+                        best_match_id = q_id
+                
+                if best_match_id:
+                    qobuz_id = best_match_id
+                    qobuz_url = f"https://play.qobuz.com/album/{qobuz_id}"
+                    logger.debug(f"Resolved Qobuz album {title} -> {qobuz_id}")
+                else:
+                    qobuz_url = f"https://play.qobuz.com/search?q={encoded_query}&type=albums"
+            else:
+                    qobuz_url = f"https://play.qobuz.com/search?q={encoded_query}&type=albums"
+                    
+        except Exception as e:
+            logger.warning(f"Qobuz resolution failed for {title}: {e}")
+            qobuz_url = f"https://play.qobuz.com/search?q={encoded_query}&type=albums"
+
+    return {
+        "mbid": rg.get("id"),
+        "title": title,
+        "date": first_date,
+        "artist": artist_name,
+        "qobuz_url": qobuz_url,
+        "qobuz_id": qobuz_id,
+        "musicbrainz_url": f"{get_musicbrainz_root_url()}/release-group/{rg.get('id')}"
+    }
+
+async def fetch_artist_albums(mbid: str, artist_name: str, client: httpx.AsyncClient = None):
+    """
+    Fetches albums (Release Groups) from MusicBrainz, excluding EPs, Singles, Compilations, etc.
+    Attempts to resolve Qobuz IDs for them.
+    """
+    albums = []
+    should_close = False
+    if client is None:
+        client = httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"})
+        should_close = True
+        
+    try:
+        offset = 0
+        limit = 100
+        seen_titles = set()
+        
+        all_rgs = []
+
+        # 1. Gather all release groups first
+        while True:
+            # Type 'album'
+            rg_url = f"{MB_API_ROOT}/release-group?artist={mbid}&type=album&fmt=json&limit={limit}&offset={offset}&inc=artist-credits"
+            await mb_limiter.acquire()
+            logger.debug(f"Fetching albums from: {rg_url}")
+            rg_resp = await client.get(rg_url)
+            
+            if rg_resp.status_code == 200:
+                rg_data = rg_resp.json()
+                release_groups = rg_data.get("release-groups", [])
+                
+                for rg in release_groups:
+                    # Filter out if artist is not primary
+                    credits = rg.get("artist-credit", [])
+                    if not credits: continue
+                    
+                    is_primary = False
+                    for c in credits:
+                        if c.get("artist", {}).get("id") == mbid:
+                            is_primary = True
+                            break
+                    
+                    if not is_primary:
+                        continue
+
+                    # Filter out secondary types (Compliance with user request: no compilations, live, remix)
+                    secondary_types = rg.get("secondary-types", [])
+                    if secondary_types:
+                        # User explicit list: "not the +compliation, or + live or + remix, no EPs etc..."
+                        # EPs are usually primary type 'EP', but here we requested type='album' so EPs shouldn't be here.
+                        # But 'Live', 'Remix', 'Compilation' are secondary types.
+                        logger.debug(f"Skipping album {rg.get('title')} due to secondary types: {secondary_types}")
+                        continue
+
+                    title = rg.get("title")
+                    norm_title = title.lower().strip()
+                    if norm_title in seen_titles:
+                        continue
+                    seen_titles.add(norm_title)
+                    
+                    all_rgs.append(rg)
+
+                # Pagination
+                count = rg_data.get("release-group-count", 0)
+                if len(release_groups) < limit or (offset + len(release_groups)) >= count:
+                    break
+                
+                offset += limit
+            else:
+                logger.error(f"MusicBrainz Albums Fetch Failed: {rg_resp.status_code}")
+                break
+                
+        logger.info(f"Processing {len(all_rgs)} unique albums for {artist_name}...")
+
+        # 2. Process concurrently with Semaphore
+        sem = asyncio.Semaphore(5) # Limit concurrent album validations
+        
+        async def sem_process(rg):
+            async with sem:
+                return await _process_single_album(rg, artist_name, client)
+
+        tasks = [sem_process(rg) for rg in all_rgs]
+        results = await asyncio.gather(*tasks)
+        
+        # Sort by date
+        albums = sorted([r for r in results if r], key=lambda x: x["date"] or "", reverse=True)
+        logger.debug(f"Found {len(albums)} missing albums candidates")
+        
+    except Exception as e:
+        logger.error(f"Error fetching albums for {mbid}: {e}")
+    finally:
+        if should_close:
+            await client.aclose()
+            
+    return albums
+
+
 async def fetch_track_credits(mb_recording_id: str, mb_release_track_id: str = None):
     """
     Fetch artist credits for a track/recording from MusicBrainz.
@@ -439,26 +717,44 @@ async def fetch_track_credits(mb_recording_id: str, mb_release_track_id: str = N
     url = f"{MB_API_ROOT}/recording/{target_id}?inc=artist-credits&fmt=json"
     logger.debug(f"Fetching track credits from: {url}")
     
+    
     try:
         async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                data = resp.json()
-                for ac in data.get("artist-credit", []):
+            # Retry loop for initial MB connection
+            mb_data = None
+            for attempt in range(3):
+                try:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        mb_data = resp.json()
+                        break
+                    elif resp.status_code == 503:
+                        # Rate limit, wait and retry
+                        await asyncio.sleep(1 * (attempt + 1))
+                        continue
+                    else:
+                        logger.warning(f"MusicBrainz returned status {resp.status_code} for {target_id}")
+                        break
+                except Exception as e:
+                    logger.warning(f"Attempt {attempt + 1}/3 failed to fetch MB data for {target_id}: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(1 * (attempt + 1))
+                    else:
+                        logger.error(f"Error fetching metadata for {target_id}: {e}")
+            
+            if mb_data:
+                for ac in mb_data.get("artist-credit", []):
                     # ac is usually obj with 'artist' dict and 'joinphrase'
                     artist_obj = ac.get("artist", {})
                     mbid = artist_obj.get("id")
                     name = artist_obj.get("name")
                     if mbid and name:
                         credits.append((mbid, name))
-            elif resp.status_code == 404 and mb_release_track_id and target_id == mb_recording_id:
-                # If Recording ID failed (maybe it WAS a Track ID?), try fetching as Track?
-                # MB Track ID endpoint: /track/{id}
-                # But usually tags have Recording ID.
-                pass
-            else:
-                logger.warning(f"Failed to fetch track credits for {target_id}: {resp.status_code}")
+            elif mb_data is None and mb_release_track_id and target_id == mb_recording_id:
+                 # Logic for 404 fallback if needed, currently just logging warning above if status was not 200/503
+                 pass
     except Exception as e:
         logger.error(f"Error fetching track credits: {e}")
         
     return credits
+

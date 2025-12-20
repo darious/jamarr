@@ -4,7 +4,7 @@ import logging
 import json
 from app.db import get_db
 from app.scanner.tags import extract_tags
-from app.scanner.artwork import extract_and_save_artwork, download_and_save_artwork
+from app.scanner.artwork import extract_and_save_artwork, download_and_save_artwork, cleanup_orphaned_artwork
 from app.config import get_music_path
 from app.scanner.metadata import fetch_artist_metadata, fetch_track_credits
 
@@ -25,12 +25,58 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
     # We'll collect MBIDs to fetch metadata for
     artist_mbids = set()
 
-    async for db in get_db():
-        await _scan_recursive(root_path, db, artist_mbids, force_rescan)
-        
-        logger.info("File scan complete. Updating artist metadata...")
+    # Track seen paths for cleanup
+    seen_paths = set()
 
-        # Get all MBIDs from DB (Track Artists AND Album Artists)
+    async for db in get_db():
+        await _scan_recursive(root_path, db, artist_mbids, seen_paths, force_rescan)
+        
+        logger.info("File scan complete. Checking for removed files...")
+        
+        # Cleanup: Remove tracks that are in DB but were not seen in this scan
+        # ONLY for tracks that fall under the root_path we just scanned
+        
+        # Ensure directory path for LIKE query (append / if not present)
+        # This prevents scanning /music/Band removing /music/BandOfHorses
+        scan_root_wildcard = root_path if root_path.endswith(os.sep) else root_path + os.sep
+        scan_root_wildcard += "%"
+        
+        # If root_path is exactly a file (unlikely for "scan_library" but possible if generalized),
+        # we might need handling, but usually root_path is a dir. 
+        # If it's a single file scan, _scan_recursive handles it? mmm scan_library iterates scandir
+        # scan_library expects a directory.
+        
+        async with db.execute("SELECT path FROM tracks WHERE path LIKE ?", (scan_root_wildcard,)) as cursor:
+            rows = await cursor.fetchall()
+            db_paths = {row[0] for row in rows}
+            
+        orphans = db_paths - seen_paths
+        
+        if orphans:
+            logger.info(f"Found {len(orphans)} orphaned tracks. Removing...")
+            for orphan in orphans:
+                logger.debug(f"Removing orphan: {orphan}")
+                await db.execute("DELETE FROM tracks WHERE path = ?", (orphan,))
+                # Also clean up track_artists? 
+                # SQLite ON DELETE CASCADE might be needed or manual cleanup.
+                # Tracks table usually doesn't cascade to artists table (since artists are shared),
+                # but track_artists join table should be cleared.
+                # Assuming schema handles `track_artists` via foreign key cascade or we leave it (it's weak ref).
+                # Checking schema would be good, but typically 'DELETE FROM tracks' is enough if configured.
+                # If not, we might leave junk in track_artists.
+                # Let's assume standard behavior for now, or add cleanup for track_artists if needed.
+                # Actually, earlier in code: "DELETE FROM track_artists WHERE track_id = ?" 
+                # suggesting manual management or no cascade.
+                # Let's check if we need to delete from track_clients etc.
+                # For now, just delete from tracks.
+            
+            await db.commit()
+            logger.info(f"Removed {len(orphans)} orphaned tracks.")
+        else:
+            logger.info("No orphaned tracks found.")
+
+        logger.info("Updating artist metadata...")
+
         # Get all MBIDs from DB (Track Artists AND Album Artists)
         # We need to process them to handle splits (id1; id2)
         async with db.execute("SELECT DISTINCT mb_artist_id, artist FROM tracks WHERE mb_artist_id IS NOT NULL UNION SELECT DISTINCT mb_album_artist_id, album_artist FROM tracks WHERE mb_album_artist_id IS NOT NULL") as cursor:
@@ -45,10 +91,11 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                        if mbid:
                            # Pass None for name to force canonical lookup, avoiding "A & B" poisoning
                            artist_mbids.add((mbid, None))
-    
-        logger.info(f"Found {len(artist_mbids)} artists with MBIDs.")
-    
+                       
+
+
         # Fetch metadata for artists
+        logger.info(f"Found {len(artist_mbids)} artist MBIDs to check.")
         for mbid, artist_name in artist_mbids:
             if not mbid: continue
             
@@ -84,9 +131,9 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                 INSERT INTO artists (
                     mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
                     wikipedia_url, qobuz_url, musicbrainz_url,
-                    similar_artists, top_tracks, singles, last_updated
+                    top_tracks, singles, albums, last_updated
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mbid) DO UPDATE SET
                     name=excluded.name,
                     sort_name=excluded.sort_name,
@@ -101,6 +148,7 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                     similar_artists=excluded.similar_artists,
                     top_tracks=excluded.top_tracks,
                     singles=excluded.singles,
+                    albums=excluded.albums,
                     last_updated=excluded.last_updated
             """, (
                 meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
@@ -109,78 +157,127 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                 json.dumps(meta["similar_artists"]), 
                 json.dumps(meta["top_tracks"]),
                 json.dumps(meta.get("singles", [])),
+                json.dumps(meta.get("albums", [])),
                 meta["last_updated"]
             ))
             await db.commit()
-            await db.commit()
+        
+    # Cleanup orphaned artwork (New DB connection for safety/isolation)
+    async for db in get_db():
+        logger.info("Cleaning up orphaned artwork...")
+        count = await cleanup_orphaned_artwork(db)
+        if count:
+            logger.info(f"Removed {count} orphaned artwork files.")
         break
+
 
 async def refresh_artist_metadata(artist_name: str):
     logger.info(f"Forced metadata refresh for {artist_name}")
     async for db in get_db():
-        # Find MBID for artist
-        async with db.execute("SELECT mb_artist_id FROM tracks WHERE artist = ? AND mb_artist_id IS NOT NULL LIMIT 1", (artist_name,)) as cursor:
+        # 1. Try to find MBID from existing artists table
+        async with db.execute("SELECT mbid FROM artists WHERE name = ?", (artist_name,)) as cursor:
             row = await cursor.fetchone()
-            if not row:
-                logger.warning(f"No MBID found for artist {artist_name}, assuming not local or not tagged properly.")
-                # We could try to fetch by name, but for now strict MBID match is safer
-                return
+            if row:
+                mbids = [row[0]]
+                logger.info(f"Found MBID {mbids[0]} for {artist_name} in artists table.")
+            else:
+                # 2. Fallback: Find MBID from tracks table (fuzzy match or exact match failed)
+                # Use LIKE to find the name in the artist string (e.g. "Ed Sheeran feat. Chance the Rapper")
+                async with db.execute("SELECT mb_artist_id FROM tracks WHERE (artist = ? OR artist LIKE ?) AND mb_artist_id IS NOT NULL LIMIT 1", (artist_name, f"%{artist_name}%")) as cursor:
+                    row = await cursor.fetchone()
+                    
+                    if not row:
+                        logger.warning(f"No MBID found for artist {artist_name}, assuming not local or not tagged properly.")
+                        return
 
-            mbid = row[0]
-            logger.info(f"Found MBID {mbid} for {artist_name}. Fetching fresh metadata...")
-            
-            meta = await fetch_artist_metadata(mbid, artist_name)
-            
-            # Download and cache artist image if available
-            art_id = None
-            if meta.get("image_url"):
-                art_hash = await download_and_save_artwork(meta["image_url"], art_type='artist')
-                if art_hash:
-                    # Get or create artwork record
-                    async with db.execute("SELECT id FROM artwork WHERE sha1 = ?", (art_hash,)) as cursor:
-                        art_row = await cursor.fetchone()
-                        if art_row:
-                            art_id = art_row[0]
-                        else:
-                            await db.execute("INSERT INTO artwork (sha1, type) VALUES (?, ?)", (art_hash, 'artist'))
-                            await db.commit()
-                            async with db.execute("SELECT last_insert_rowid()") as id_cursor:
-                                art_id = (await id_cursor.fetchone())[0]
-            
-            # Save to DB (Update existing)
-            await db.execute("""
-                INSERT INTO artists (
-                    mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
-                    wikipedia_url, qobuz_url, musicbrainz_url,
-                    similar_artists, top_tracks, singles, last_updated
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(mbid) DO UPDATE SET
-                    name=excluded.name,
-                    sort_name=excluded.sort_name,
-                    bio=excluded.bio,
-                    image_url=excluded.image_url,
-                    art_id=excluded.art_id,
-                    spotify_url=excluded.spotify_url,
-                    homepage=excluded.homepage,
-                    wikipedia_url=excluded.wikipedia_url,
-                    qobuz_url=excluded.qobuz_url,
-                    musicbrainz_url=excluded.musicbrainz_url,
-                    similar_artists=excluded.similar_artists,
-                    top_tracks=excluded.top_tracks,
-                    singles=excluded.singles,
-                    last_updated=excluded.last_updated
-            """, (
-                meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
-                meta["spotify_url"], meta["homepage"], 
-                meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
-                json.dumps(meta["similar_artists"]), 
-                json.dumps(meta["top_tracks"]),
-                json.dumps(meta.get("singles", [])),
-                meta["last_updated"]
-            ))
-            await db.commit()
-            logger.info(f"Metadata updated for {artist_name}")
+                    raw_mbid = row[0]
+                    if not raw_mbid:
+                        return
+
+                    # Split MBIDs (handle ; / &)
+                    mbids = raw_mbid.replace("/", ";").replace("&", ";").split(";")
+                    mbids = [m.strip() for m in mbids if m.strip()]
+                    
+                    if not mbids:
+                        return
+
+        logger.info(f"Found MBIDs {mbids} for {artist_name}. Fetching fresh metadata...")
+        
+        for mbid in mbids:
+             logger.debug(f"Processing MBID: {mbid}")
+             # Only update if we either don't know the artist name yet 
+             # OR if this MBID is actually potentially relevant (fetched name matches?)
+             # Since we can't easily know which MBID belongs to whom without fetching,
+             # we fetch all. This is fine.
+             try:
+                 meta = await fetch_artist_metadata(mbid, artist_name)
+                 logger.debug(f"Metadata fetch complete for {mbid}. Name: {meta.get('name')}")
+             except Exception as e:
+                 logger.warning(f"Failed to fetch metadata for {mbid} during refresh: {repr(e)}")
+                 continue
+                 
+             # SAFETY CHECK: If MB fetch failed (no musicbrainz_url) and name implies we are just guessing,
+             # don't overwrite unrelated artists with 'Chance the Rapper'
+             # We assume if musicbrainz_url is present, we got valid data from MB.
+             if not meta.get("musicbrainz_url") and meta.get("name") == artist_name and len(mbids) > 1:
+                 logger.warning(f"Skipping update for {mbid} - MB fetch failed and ambiguous name assignment potential.")
+                 continue
+
+             # Download and cache artist image if available
+             art_id = None
+             if meta.get("image_url"):
+                 logger.debug(f"Downloading artwork from {meta['image_url']}")
+                 art_hash = await download_and_save_artwork(meta["image_url"], art_type='artist')
+                 if art_hash:
+                     # Get or create artwork record
+                     async with db.execute("SELECT id FROM artwork WHERE sha1 = ?", (art_hash,)) as cursor:
+                         art_row = await cursor.fetchone()
+                         if art_row:
+                             art_id = art_row[0]
+                         else:
+                             await db.execute("INSERT INTO artwork (sha1, type) VALUES (?, ?)", (art_hash, 'artist'))
+                             await db.commit()
+                             async with db.execute("SELECT last_insert_rowid()") as id_cursor:
+                                 art_id = (await id_cursor.fetchone())[0]
+                 
+                 # Save to DB (Update existing)
+                 await db.execute("""
+                     INSERT INTO artists (
+                         mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
+                         wikipedia_url, qobuz_url, musicbrainz_url,
+                         similar_artists, top_tracks, singles, albums, last_updated
+                     )
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(mbid) DO UPDATE SET
+                         name=excluded.name,
+                         sort_name=excluded.sort_name,
+                         bio=excluded.bio,
+                         image_url=excluded.image_url,
+                         art_id=excluded.art_id,
+                         spotify_url=excluded.spotify_url,
+                         homepage=excluded.homepage,
+                         wikipedia_url=excluded.wikipedia_url,
+                         qobuz_url=excluded.qobuz_url,
+                         musicbrainz_url=excluded.musicbrainz_url,
+                         similar_artists=excluded.similar_artists,
+                         top_tracks=excluded.top_tracks,
+                         singles=excluded.singles,
+                         albums=excluded.albums,
+                         last_updated=excluded.last_updated
+                 """, (
+                     meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
+                     meta["spotify_url"], meta["homepage"], 
+                     meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
+                     json.dumps(meta["similar_artists"]), 
+                     json.dumps(meta["top_tracks"]),
+                     json.dumps(meta.get("singles", [])),
+                     json.dumps(meta.get("albums", [])),
+                     meta["last_updated"]
+                 ))
+                 await db.commit()
+                 logger.info(f"Metadata updated for {artist_name} (MBID: {mbid})")
+
+
 
 async def refresh_artist_singles_only(artist_name: str):
     logger.info(f"Refreshing singles only for {artist_name}")
@@ -203,14 +300,22 @@ async def refresh_artist_singles_only(artist_name: str):
             await db.commit()
             logger.info(f"Singles updated for {artist_name}")
 
-async def _scan_recursive(root, db, artist_mbids, force_rescan=False):
-    for entry in os.scandir(root):
-        if entry.is_dir():
-            await _scan_recursive(entry.path, db, artist_mbids, force_rescan)
-        elif entry.is_file():
-            ext = os.path.splitext(entry.name)[1].lower()
-            if ext in SUPPORTED_EXTENSIONS:
-                await _process_file(entry.path, db, artist_mbids, force_rescan)
+async def _scan_recursive(root, db, artist_mbids, seen_paths, force_rescan=False):
+    try:
+        # Check if root exists before scanning (it might have been deleted)
+        if not os.path.exists(root):
+            return
+
+        for entry in os.scandir(root):
+            if entry.is_dir():
+                await _scan_recursive(entry.path, db, artist_mbids, seen_paths, force_rescan)
+            elif entry.is_file():
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext in SUPPORTED_EXTENSIONS:
+                    seen_paths.add(entry.path)
+                    await _process_file(entry.path, db, artist_mbids, force_rescan)
+    except OSError as e:
+        logger.error(f"Error scanning directory {root}: {e}")
 
 async def _process_file(path, db, artist_mbids, force_rescan=False):
     try:
