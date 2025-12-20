@@ -6,6 +6,8 @@
     playFromQueue,
     updateProgress,
     setVolume,
+    pause,
+    resume,
   } from "$stores/player";
   import { onMount } from "svelte";
   import { page } from "$app/stores";
@@ -255,6 +257,21 @@
       return;
     }
 
+    // Remote / UPnP Logic
+    if ($playerState.renderer !== "local") {
+      if ($playerState.is_playing) {
+        console.log("[PlayerBar] Remote: pausing");
+        pause();
+        isPlaying = false; // Optimistic update
+      } else {
+        console.log("[PlayerBar] Remote: resuming");
+        resume();
+        isPlaying = true; // Optimistic update
+      }
+      return;
+    }
+
+    // Local Audio Logic
     if (audio.paused) {
       console.log("[PlayerBar] togglePlay: playing");
       audio.play().catch((e) => console.error("[PlayerBar] Play failed:", e));
@@ -311,18 +328,22 @@
             class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
             on:click={toggleQueue}
           >
-            <svg
-              class="w-6 h-6 text-white"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 6h16M4 12h16M4 18h16"
-              ></path></svg
+            <div
+              class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
             >
+              <svg
+                class="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 6h16M4 12h16M4 18h16"
+                ></path></svg
+              >
+            </div>
           </button>
         </div>
         <div class="min-w-0">
@@ -358,13 +379,19 @@
     <!-- Controls -->
     <div class="flex flex-col items-center gap-2 w-1/3">
       <div class="flex items-center gap-4">
-        <button class="btn btn-ghost btn-sm btn-circle" on:click={previous}>
+        <button
+          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
+          on:click={previous}
+        >
           <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
             ><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg
           >
         </button>
 
-        <button class="btn btn-circle btn-primary" on:click={togglePlay}>
+        <button
+          class="btn btn-circle bg-white/10 hover:bg-white/20 text-white border-none hover:scale-105 transition-transform"
+          on:click={togglePlay}
+        >
           {#if isPlaying}
             <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
               ><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg
@@ -376,7 +403,10 @@
           {/if}
         </button>
 
-        <button class="btn btn-ghost btn-sm btn-circle" on:click={next}>
+        <button
+          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
+          on:click={next}
+        >
           <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
             ><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg
           >
@@ -435,7 +465,7 @@
         />
       </div>
       <button
-        class="btn btn-ghost btn-sm btn-circle"
+        class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
         title="Queue"
         on:click={toggleQueue}
       >

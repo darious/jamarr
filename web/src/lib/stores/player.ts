@@ -266,3 +266,25 @@ export async function setVolume(percent: number) {
         console.error('Failed to set volume', e);
     }
 }
+
+export async function pause() {
+    try {
+        await fetch('/api/player/pause', {
+            method: 'POST'
+        });
+        playerState.update(s => ({ ...s, is_playing: false }));
+    } catch (e) {
+        console.error('Failed to pause', e);
+    }
+}
+
+export async function resume() {
+    try {
+        await fetch('/api/player/resume', {
+            method: 'POST'
+        });
+        playerState.update(s => ({ ...s, is_playing: true }));
+    } catch (e) {
+        console.error('Failed to resume', e);
+    }
+}
