@@ -21,12 +21,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 from app.media import art
-from app.api import library, stream, player
+from app.api import library, stream, player, search
 
 app.include_router(art.router)
 app.include_router(library.router)
 app.include_router(stream.router)
 app.include_router(player.router)
+app.include_router(search.router)
 
 @app.post("/api/scan")
 async def trigger_scan(background_tasks: BackgroundTasks):
