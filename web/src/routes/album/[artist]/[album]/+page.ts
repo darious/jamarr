@@ -6,12 +6,13 @@ export const load: PageLoad = async ({ params, fetch }) => {
   const artist = decodeURIComponent(params.artist);
   const album = decodeURIComponent(params.album);
 
-  const [tracks, albums] = await Promise.all([
-    fetchTracks({ album, artist }, fetch),
-    fetchAlbums({ artist }, fetch)
-  ]);
+  const tracks = await fetchTracks({ album, artist }, fetch);
+  const albumMbid = tracks?.[0]?.mb_release_group_id || tracks?.[0]?.mb_release_id;
+  const albums = await fetchAlbums(albumMbid ? { albumMbid } : { artist }, fetch);
 
-  const albumMeta: Album | undefined = albums.find((a) => a.album.toLowerCase() === album.toLowerCase());
+  const albumMeta: Album | undefined = albumMbid
+    ? albums.find((a) => (a as any).mbid === albumMbid || a.mb_release_id === albumMbid || a.album.toLowerCase() === album.toLowerCase())
+    : albums.find((a) => a.album.toLowerCase() === album.toLowerCase());
 
   return {
     artist,

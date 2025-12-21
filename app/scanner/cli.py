@@ -57,7 +57,8 @@ async def main():
     subparsers.add_parser("prune", help="Remove orphaned database entries and artwork", parents=[parent_parser])
 
     # Command: FULL
-    subparsers.add_parser("full", help="Full Library Scan & Update", parents=[parent_parser])
+    full_parser = subparsers.add_parser("full", help="Full Library Scan & Update", parents=[parent_parser])
+    full_parser.add_argument("--force", action="store_true", help="Force filesystem rescan and full metadata update (otherwise fills only missing metadata)")
 
     args = parser.parse_args()
 
@@ -117,8 +118,14 @@ async def main():
              console=console
         ) as progress:
              scanner.scan_logger = CLILogger(progress)
-             await scanner.scan_filesystem()
-             await scanner.update_metadata()
+             force_flag = getattr(args, "force", False)
+             metadata_missing_only = not force_flag
+             artist_mbids = await scanner.scan_filesystem(force_rescan=force_flag) or set()
+             mbid_filter = None if force_flag else {mb for mb, _ in artist_mbids if mb}
+             if not force_flag and not mbid_filter:
+                 console.print("[yellow]No new/updated artists detected; skipping metadata.[/yellow]")
+             else:
+                 await scanner.update_metadata(missing_only=metadata_missing_only, mbid_filter=mbid_filter)
              await scanner.prune_library()
              console.print("[green]Full Library Update Complete![/green]")
     

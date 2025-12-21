@@ -141,11 +141,19 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
         return artists
 
 @router.get("/api/albums")
-async def get_albums(artist: str = None, db: aiosqlite.Connection = Depends(get_db)):
+async def get_albums(artist: str = None, album_mbid: str = None, db: aiosqlite.Connection = Depends(get_db)):
     # 1. If artist is provided, find their MBID to classify 'main' vs 'appears_on'
     target_mbid = None
     if artist:
-        async with db.execute("SELECT mbid FROM artists WHERE name = ?", (artist,)) as cursor:
+        async with db.execute(
+            """
+            SELECT mbid 
+            FROM artists 
+            WHERE LOWER(REPLACE(name, '‐', '-')) = LOWER(REPLACE(?, '‐', '-'))
+            LIMIT 1
+            """,
+            (artist,),
+        ) as cursor:
             row = await cursor.fetchone()
             if row:
                 target_mbid = row[0]
@@ -161,26 +169,37 @@ async def get_albums(artist: str = None, db: aiosqlite.Connection = Depends(get_
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
             MAX(t.mb_release_id) as mb_release_id,
+            COALESCE(al_rg.mbid, al_title.mbid) as album_mbid,
+            MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as mb_link,
             CASE 
                 WHEN ? IS NOT NULL AND (t.mb_album_artist_id LIKE ? || '%' OR t.mb_album_artist_id = ?) THEN 'main'
                 ELSE 'appears_on' 
             END as type
         FROM tracks t
         LEFT JOIN artwork a ON t.art_id = a.id
+        LEFT JOIN albums al_rg ON al_rg.mbid = t.mb_release_group_id
+        LEFT JOIN albums al_title ON al_title.title = t.album
+        LEFT JOIN external_links el ON el.entity_type = 'album' AND el.entity_id = COALESCE(al_rg.mbid, al_title.mbid)
     """
     params = [target_mbid, target_mbid, target_mbid]
     
+    filters = []
     if artist:
         # Filter by any artist associated with the tracks via track_artists
         query += """
             JOIN track_artists ta ON t.id = ta.track_id
             JOIN artists ar ON ta.mbid = ar.mbid
-            WHERE ar.name = ?
         """
+        filters.append("LOWER(REPLACE(ar.name, '‐', '-')) = LOWER(REPLACE(?, '‐', '-'))")
         params.append(artist)
+    if album_mbid:
+        filters.append("(t.mb_release_group_id = ? OR t.mb_release_id = ?)")
+        params.extend([album_mbid, album_mbid])
+    if filters:
+        query += " WHERE " + " AND ".join(filters)
     else:
         query += " WHERE t.album IS NOT NULL"
-        
+
     query += " GROUP BY t.album ORDER BY year ASC"
     
 
@@ -192,11 +211,15 @@ async def get_albums(artist: str = None, db: aiosqlite.Connection = Depends(get_
             d = dict(row)
             if d.get("mb_release_id"):
                 d["musicbrainz_url"] = f"{mb_root}/release/{d['mb_release_id']}"
+            elif d.get("mb_link"):
+                d["musicbrainz_url"] = d["mb_link"]
+            elif d.get("album_mbid"):
+                d["musicbrainz_url"] = f"{mb_root}/release-group/{d['album_mbid']}"
             results.append(d)
         return results
 
 @router.get("/api/tracks")
-async def get_tracks(album: str = None, artist: str = None, db: aiosqlite.Connection = Depends(get_db)):
+async def get_tracks(album: str = None, artist: str = None, album_mbid: str = None, db: aiosqlite.Connection = Depends(get_db)):
     # Base query
     # Use subquery to aggregate all artists for the track (Main + Feature)
     # This ensures "Taylor Swift, Ed Sheeran" is returned instead of just "Taylor Swift" tag
@@ -214,9 +237,11 @@ async def get_tracks(album: str = None, artist: str = None, db: aiosqlite.Connec
     
     query += " WHERE 1=1"
     
+    if album_mbid:
+        query += " AND (t.mb_release_group_id = ? OR t.mb_release_id = ?)"
+        params.extend([album_mbid, album_mbid])
     if artist:
         # Relaxed filtering: Match Album Artist (tag), Artist (tag), or Linked Artist (DB)
-        # This ensures tracks where the main artist is just the 'Album Artist' (e.g. tracks by guests) are included.
         query += """ AND (
             t.album_artist = ? 
             OR t.artist = ?
@@ -228,7 +253,7 @@ async def get_tracks(album: str = None, artist: str = None, db: aiosqlite.Connec
             )
         )"""
         params.extend([artist, artist, artist, artist])
-        
+    
     if album:
         query += " AND t.album = ?"
         params.append(album)
