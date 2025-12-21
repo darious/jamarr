@@ -445,25 +445,67 @@ class Scanner:
         self.stats["current_status"] = "Updating Metadata"
         async for db in get_db():
             # Get artists
-            query = "SELECT mbid, name, last_updated FROM artists"
+            query = """
+                SELECT a.mbid, a.name, a.last_updated, a.sort_name, a.bio, a.image_url, 
+                       COUNT(el.id) as link_count
+                FROM artists a
+                LEFT JOIN external_links el 
+                    ON el.entity_type='artist' AND el.entity_id = a.mbid
+            """
             params = []
+            clauses = []
             if mbid_filter:
-                query += " WHERE mbid = ?"
-                params.append(mbid_filter)
+                if isinstance(mbid_filter, (list, set, tuple)):
+                    filtered = [m for m in mbid_filter if m]
+                    if filtered:
+                        placeholders = ",".join(["?"] * len(filtered))
+                        clauses.append(f"mbid IN ({placeholders})")
+                        params.extend(filtered)
+                else:
+                    clauses.append("mbid = ?")
+                    params.append(mbid_filter)
             elif artist_filter:
-                query += " WHERE name LIKE ?"
+                clauses.append("name LIKE ?")
                 params.append(f"%{artist_filter}%")
+            elif missing_only:
+                clauses.append(
+                    "(name IS NULL OR name = '' OR sort_name IS NULL OR sort_name = '' OR bio IS NULL OR bio = '' OR image_url IS NULL OR image_url = '')"
+                )
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " GROUP BY a.mbid"
             
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
+
+            def has_gaps(row):
+                _, name, _, sort_name, bio, image_url, link_count = row
+                return (
+                    not name or not str(name).strip()
+                    or not sort_name or not str(sort_name).strip()
+                    or not bio or not str(bio).strip()
+                    or not image_url or not str(image_url).strip()
+                    or (link_count or 0) == 0
+                )
+
+            # If filtered query (artist/mbid) was used with missing_only, reapply gap check client-side
+            if missing_only:
+                rows = [r for r in rows if has_gaps(r)]
             
             total = len(rows)
             logger.info(f"Found {total} artists to update.")
             processed = 0
             
             for row in rows:
-                mbid, name, last_updated = row
+                if self._stop_event.is_set():
+                    logger.info("Metadata update cancelled by stop signal.")
+                    raise asyncio.CancelledError()
+
+                mbid, name, last_updated, sort_name, bio, image_url, link_count = row
                 if not mbid: continue
+
+                if missing_only and not has_gaps(row):
+                    continue
                 
                 # Emit initial "Fetching..." if name is unknown, or name if known
                 display_name = name or "Fetching..."
@@ -531,6 +573,13 @@ class Scanner:
                 await db.execute("DELETE FROM external_links WHERE entity_type='artist' AND entity_id=?", (mbid,))
                 
                 artist_links = []
+                # Always include MusicBrainz link for this artist using MBID
+                try:
+                    from app.config import get_musicbrainz_root_url
+                    mb_url = f"{get_musicbrainz_root_url()}/artist/{mbid}"
+                    artist_links.append(("musicbrainz", mb_url))
+                except Exception:
+                    logger.debug("Could not build MusicBrainz link for %s", mbid)
                 if meta.get("spotify_url"): artist_links.append(("spotify", meta["spotify_url"]))
                 if meta.get("tidal_url"): artist_links.append(("tidal", meta["tidal_url"]))
                 if meta.get("qobuz_url"): artist_links.append(("qobuz", meta["qobuz_url"]))
@@ -613,6 +662,19 @@ class Scanner:
                     r_date = release["date"]
                     r_links = release.get("links") or []
                     r_release_ids = release.get("release_ids") or []
+                    r_primary_release = release.get("primary_release_id")
+                    # Prefer release IDs from our tagged tracks
+                    tagged_release_ids = []
+                    async with db.execute(
+                        "SELECT DISTINCT mb_release_id FROM tracks WHERE mb_release_group_id = ? AND mb_release_id IS NOT NULL",
+                        (r_mbid,),
+                    ) as cursor:
+                        rows = await cursor.fetchall()
+                        tagged_release_ids = [row[0] for row in rows if row and row[0]]
+                    # Use tagged release IDs as highest priority
+                    if tagged_release_ids:
+                        r_primary_release = tagged_release_ids[0]
+                        r_release_ids = tagged_release_ids
                     
                     # Upsert Album
                     await db.execute("""
@@ -634,10 +696,23 @@ class Scanner:
                                      (mbid, r_mbid, 'primary'))
                     
                     # Album Links
+                    from app.config import get_musicbrainz_root_url
+                    mb_release_link = None
+                    if r_primary_release:
+                        mb_release_link = f"{get_musicbrainz_root_url()}/release/{r_primary_release}"
+                    elif r_release_ids:
+                        mb_release_link = f"{get_musicbrainz_root_url()}/release/{r_release_ids[0]}"
+                    link_payloads = []
+                    if mb_release_link:
+                        link_payloads.append({"type": "musicbrainz", "url": mb_release_link})
+                    link_payloads.extend(r_links)
+
                     await db.execute("DELETE FROM external_links WHERE entity_type='album' AND entity_id=?", (r_mbid,))
-                    for link in r_links:
-                        await db.execute("INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)",
-                                         ('album', r_mbid, link["type"], link["url"]))
+                    for link in link_payloads:
+                        await db.execute(
+                            "INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)",
+                            ("album", r_mbid, link["type"], link["url"]),
+                        )
                 await db.commit()
                 processed += 1
                 if self.scan_logger:

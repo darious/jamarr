@@ -73,6 +73,23 @@
       }, 2000);
     }
   }
+
+  function handleWindowClick(e: MouseEvent) {
+    if (
+      showRenderers &&
+      renderersContainer &&
+      !renderersContainer.contains(e.target as Node)
+    ) {
+      showRenderers = false;
+    }
+    if (
+      showSettings &&
+      settingsContainer &&
+      !settingsContainer.contains(e.target as Node)
+    ) {
+      showSettings = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -90,24 +107,7 @@
   />
 </svelte:head>
 
-<svelte:window
-  on:click={(e) => {
-    if (
-      showRenderers &&
-      renderersContainer &&
-      !renderersContainer.contains(e.target)
-    ) {
-      showRenderers = false;
-    }
-    if (
-      showSettings &&
-      settingsContainer &&
-      !settingsContainer.contains(e.target)
-    ) {
-      showSettings = false;
-    }
-  }}
-/>
+<svelte:window on:click={handleWindowClick} />
 
 <div class="min-h-screen text-white">
   <header
@@ -251,16 +251,13 @@
               class="absolute right-0 mt-2 w-56 rounded-lg border border-white/10 bg-black/75 backdrop-blur-md shadow-xl z-50"
             >
               <div class="p-2">
-                <button
-                  class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
-                  on:click={() => {
-                    scanLibrary();
-                    showSettings = false;
-                  }}
-                  disabled={isScanning}
+                <a
+                  class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
+                  href="/settings/library"
+                  on:click={() => (showSettings = false)}
                 >
-                  {isScanning ? "Scanning..." : "Scan Library"}
-                </button>
+                  Library Management
+                </a>
                 <button
                   class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
                   on:click={() => {
