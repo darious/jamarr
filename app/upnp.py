@@ -39,6 +39,10 @@ class UPnPManager:
             while True:
                 try:
                     self.log("Starting background discovery...")
+                    
+                    if loop_count == 0:
+                        await self.load_persisted_renderers()
+                        
                     await self.discover(timeout=5)
                     
                     # Every 5th loop (approx 5 mins), perform active scan if few renderers found
@@ -168,7 +172,7 @@ class UPnPManager:
                     if device:
                         name = device.findtext('{urn:schemas-upnp-org:device-1-0}friendlyName') or device.findtext('friendlyName') or "Unknown"
                         udn = device.findtext('{urn:schemas-upnp-org:device-1-0}UDN') or device.findtext('UDN')
-                        self.log(f"Found Device: {name} (UDN: {udn})")
+                        # self.log(f"Found Device: {name} (UDN: {udn})")
                         
                         # Find AVTransport Control URL
                         services = device.findall('.//{urn:schemas-upnp-org:device-1-0}service')
@@ -201,7 +205,7 @@ class UPnPManager:
                                         rendering_control_url = '/' + rendering_control_url
                                     rendering_control_url = base + rendering_control_url
 
-                            self.renderers[udn] = {
+                            renderer_data = {
                                 'udn': udn,
                                 'name': name,
                                 'location': location,
@@ -209,7 +213,12 @@ class UPnPManager:
                                 'rendering_control_url': rendering_control_url,
                                 'ip': parsed.hostname
                             }
-                            self.log(f"Added Renderer: {name} at {control_url}")
+                            
+                            self.renderers[udn] = renderer_data
+                            # Persist
+                            await self.save_renderer(renderer_data)
+                            
+                            self.log(f"Added/Updated Renderer: {name} ({parsed.hostname})")
                             logger.info(f"Discovered UPnP Renderer: {name} at {control_url}")
                         else:
                             self.log(f"Missing UDN or ControlURL. UDN: {udn}, Ctrl: {control_url}")
@@ -221,6 +230,53 @@ class UPnPManager:
         except Exception as e:
             self.log(f"Failed to add renderer from {location}: {e}")
             logger.warning(f"Failed to add renderer from {location}: {e}")
+
+    async def load_persisted_renderers(self):
+        """Load renderers from DB on startup, check if they are alive, remove dead ones."""
+        self.log("Loading persisted renderers...")
+        async for db in get_db():
+             rows = await db.execute_fetchall("SELECT * FROM renderers")
+             for row in rows:
+                 r = dict(row)
+                 # Map db columns back to internal struct if needed
+                 # Schema: friendly_name, udn, location_url, last_seen, control_url, rendering_control_url, ip
+                 data = {
+                     'udn': r['udn'],
+                     'name': r['friendly_name'],
+                     'location': r['location_url'],
+                     'control_url': r['control_url'],
+                     'rendering_control_url': r['rendering_control_url'],
+                     'ip': r['ip']
+                 }
+                 
+                 # Optimistic verification
+                 is_alive = await self.verify_device(data)
+                 if is_alive:
+                     self.renderers[data['udn']] = data
+                     self.log(f"Restored renderer: {data['name']}")
+                 else:
+                     self.log(f"Removing dead renderer: {data['name']}")
+                     await db.execute("DELETE FROM renderers WHERE udn = ?", (data['udn'],))
+                     await db.commit()
+
+    async def verify_device(self, r):
+        """Quick check if device is reachable."""
+        try:
+             async with httpx.AsyncClient() as client:
+                 resp = await client.get(r['location'], timeout=2.0)
+                 return resp.status_code == 200
+        except:
+            return False
+
+    async def save_renderer(self, r):
+        import time
+        async for db in get_db():
+            await db.execute("""
+                INSERT OR REPLACE INTO renderers 
+                (udn, friendly_name, location_url, control_url, rendering_control_url, ip, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (r['udn'], r['name'], r['location'], r['control_url'], r['rendering_control_url'], r['ip'], time.time()))
+            await db.commit()
 
     async def add_device_by_ip(self, ip: str):
         """Manually access UPnP device via Unicast M-SEARCH and HTTP Probing."""
