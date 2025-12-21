@@ -311,14 +311,17 @@
       </div>
 
       <div class="flex flex-wrap gap-2">
-        {#if artist?.spotify_url}
+        {#if artist?.musicbrainz_url}
           <a
             class="pill hover:bg-white/15"
             target="_blank"
-            href={artist.spotify_url}
+            href={artist.musicbrainz_url}
           >
-            <img src="/assets/logo-spotify.svg" alt="Spotify" class="h-4 w-4" />
-            Spotify
+            <img
+              src="/assets/logo-musicbrainz.svg"
+              alt="MusicBrainz"
+              class="h-4 w-4"
+            /> MusicBrainz
           </a>
         {/if}
         {#if artist?.wikipedia_url}
@@ -334,19 +337,16 @@
             /> Wiki
           </a>
         {/if}
-        {#if artist?.musicbrainz_url}
+        {#if artist?.tidal_url}
           <a
             class="pill hover:bg-white/15"
             target="_blank"
-            href={artist.musicbrainz_url}
+            href={artist.tidal_url}
           >
-            <img
-              src="/assets/logo-musicbrainz.svg"
-              alt="MusicBrainz"
-              class="h-4 w-4"
-            /> MusicBrainz
+            <img src="/assets/logo-tidal.png" alt="Tidal" class="h-4 w-4" /> Tidal
           </a>
         {/if}
+
         {#if artist?.qobuz_url}
           <a
             class="pill hover:bg-white/15"
@@ -354,6 +354,16 @@
             href={artist.qobuz_url}
           >
             <img src="/assets/logo-qobuz.png" alt="Qobuz" class="h-4 w-4" /> Qobuz
+          </a>
+        {/if}
+        {#if artist?.spotify_url}
+          <a
+            class="pill hover:bg-white/15"
+            target="_blank"
+            href={artist.spotify_url}
+          >
+            <img src="/assets/logo-spotify.svg" alt="Spotify" class="h-4 w-4" />
+            Spotify
           </a>
         {/if}
       </div>

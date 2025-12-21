@@ -65,6 +65,7 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
         "homepage": None,
         "wikipedia_url": None,
         "qobuz_url": None,
+        "tidal_url": None,
         "musicbrainz_url": None,
         "similar_artists": [],
         "top_tracks": [],
@@ -132,6 +133,8 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                         metadata["homepage"] = target
                     elif type_ == "wikidata":
                         wikidata_url = target
+                    elif "tidal.com" in target:
+                        metadata["tidal_url"] = target
                     elif type_ == "purchase for download" and "qobuz.com" in target:
                         # Logic: Find the best Qobuz link. Prioritize one with a numeric ID.
                         current_qobuz = metadata.get("qobuz_url")
@@ -507,6 +510,7 @@ async def _process_single_album(rg, artist_name, client):
     
     qobuz_url = None
     qobuz_id = None
+    tidal_url = None
     
     # 1. MusicBrainz Direct Lookup
     try:
@@ -551,6 +555,10 @@ async def _process_single_album(rg, artist_name, client):
                     r_data = r_resp.json()
                     for relation in r_data.get("relations", []):
                         res_url = relation.get("url", {}).get("resource", "")
+                        
+                        if "tidal.com" in res_url:
+                            tidal_url = res_url
+
                         if "qobuz.com" in res_url and "/album/" in res_url:
                             if "open.qobuz.com" in res_url or "play.qobuz.com" in res_url or "www.qobuz.com" in res_url:
                                     parts = res_url.split("/")
@@ -560,7 +568,7 @@ async def _process_single_album(rg, artist_name, client):
                                         qobuz_url = f"https://play.qobuz.com/album/{qobuz_id}"
                                         logger.debug(f"Resolved Qobuz ID from MusicBrainz relation: {qobuz_id}")
                                         break
-                    if qobuz_id: break
+                    if qobuz_id and tidal_url: break
                     
     except Exception as e:
         logger.warning(f"MB Qobuz lookup failed for {title}: {e}")
