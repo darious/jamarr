@@ -49,7 +49,7 @@ function getClientId(): string {
     return id;
 }
 
-function getHeaders(): HeadersInit {
+export function getHeaders(): HeadersInit {
     return {
         'Content-Type': 'application/json',
         'X-Jamarr-Client-Id': getClientId()

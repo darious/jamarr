@@ -1,219 +1,71 @@
+# Jamarr - System Architecture
 
-# Web-Based UPnP Music Controller – v1 Outline
+## Overview
+Jamarr is a web-based music controller designed to provide a rich, fast, and reliable music playback experience, primarily targeting UPnP renderers like the Naim Uniti Atom. It combines a robust Python backend for metadata management and playback control with a modern, responsive SvelteKit frontend.
 
-## Goal
-Build an **open-source, web-based music controller** that:
-- Scans a local music library
-- Caches rich metadata (including hi‑res info)
-- Presents a fast, Qobuz-style web UI
-- Plays music to a **Naim Uniti Atom** via UPnP with artwork & metadata visible on the device
+## Core Components
 
-This document describes a **minimal but correct v1** implementation.
+### 1. Backend (Python/FastAPI)
+The backend is the brain of the operation, responsible for:
+-   **Library Scanning**: Recursively scans the filesystem, extracts tags (mutagen), and caches metadata in SQLite.
+-   **Metadata Enrichment**: Fetches high-quality metadata (artist bios, images, album details) from MusicBrainz and Spotify.
+-   **UPnP Control**: Acts as a Control Point, managing playback state, volume, and queue for UPnP devices.
+-   **Queue Management**: Maintains the active play queue and playback state in the database (`renderer_states`) to ensure persistence and reliability even if the frontend disconnects.
+-   **Tidal Integration**: Maps local artists/albums to Tidal URLs for external listening.
+-   **API**: Exposes REST endpoints for the frontend.
 
----
+### 2. Database (SQLite)
+A local SQLite database (`cache/library.sqlite`) serves as the single source of truth for:
+-   **Library**: Tracks, Artists, Albums, and Artwork.
+-   **State**: Current queue, active renderer, and playback position per device.
+-   **History**: Log of played tracks.
+-   **Search Index**: FTS5 virtual tables for instant full-text search.
 
-## 1. Backend Architecture (Python)
+### 3. Frontend (SvelteKit)
+The frontend provides a polished, app-like user experience:
+-   **Responsive UI**: Built with SvelteKit, Skeleton UI, and Tailwind CSS.
+-   **Real-time State**: Polls the backend for playback status (position, track, transport state).
+-   **Optimistic UI**: Updates the UI immediately on user actions while syncing with the backend.
+-   **Visuals**: high-resolution artwork, dark mode, and smooth transitions.
 
-### Tech Choices
-- **FastAPI** – HTTP API + frontend hosting
-- **SQLite** – local metadata cache
-- **mutagen** – tags & embedded artwork
-- **ffprobe (ffmpeg)** – codec, sample rate, bit depth, duration
-- **async-upnp-client** – UPnP discovery & AVTransport control
-- **uvicorn** – ASGI server
+## Key Workflows
 
-### Core Responsibilities
-1. Scan filesystem and extract metadata
-2. Cache metadata/artwork in SQLite
-3. Serve audio & artwork over HTTP
-4. Act as a UPnP Control Point for the Naim Atom
-5. Provide a simple web UI
+### Library Scanning
+1.  **Walk**: The scanner traverses the configured music directory.
+2.  **Extract**: Reads tags (ID3, FLAC, Vorbis) and checks for changes via `mtime`.
+3.  **Enrich**:
+    -   Lookup artist metadata on MusicBrainz/Spotify.
+    -   Download and cache artist images.
+    -   Identify Tidal links.
+4.  **Index**: Updates SQLite tables and FTS search index.
 
----
+### Playback & Queue
+1.  **Selection**: User clicks "Play" or "Queue" on a track/album.
+2.  **State Update**: Frontend sends the new queue to the Backend API.
+3.  **Persistence**: Backend updates `renderer_states` table.
+4.  **Control**:
+    -   **Local**: Frontend uses `<audio>` element to play the stream.
+    -   **UPnP**: Backend sends `SetAVTransportURI` and `Play` commands to the device.
+5.  **Monitoring**:
+    -   Backend runs a background task to poll the UPnP device for position and transport state (`STOPPED`, `PLAYING`).
+    -   **Auto-Advance**: When the backend detects the UPnP device has `STOPPED` (and queue has more tracks), it automatically initiates playback of the next track.
 
-## 2. SQLite Data Model
-
-### tracks
-- id (PK)
-- path (unique)
-- mtime
-- title
-- artist
-- album
-- album_artist
-- track_no
-- disc_no
-- date
-- genre
-- duration_seconds
-- codec
-- sample_rate_hz
-- bit_depth
-- channels
-- art_id (FK)
-
-### artwork
-- id (PK)
-- sha1 (unique, dedupe)
-- mime
-- width
-- height
-- path_on_disk
-
-### renderers
-- id (PK)
-- friendly_name
-- udn (unique)
-- location_url
-- last_seen
-
----
-
-## 3. Library Scanning
-
-### Supported Formats (initial)
-- FLAC, WAV, AIFF, ALAC, MP3, OGG, DSF/DFF (optional)
-
-### Scan Flow
-1. Walk configured music roots
-2. Detect new/changed files via mtime
-3. Extract:
-   - Tags (mutagen)
-   - Embedded artwork or folder.jpg / cover.jpg
-   - Technical info (ffprobe)
-4. Cache artwork files
-5. Update SQLite
-
-### Notes
-- Bit depth is best-effort (format-dependent)
-- Artwork deduplicated by hash
-- Thumbnail generation can be deferred
-
----
-
-## 4. Media Hosting
-
-### HTTP Endpoints
-- `/stream/{track_id}`
-  - Must support **HTTP Range requests**
-  - Correct MIME types
-- `/art/{art_id}`
-  - Serves original or cached artwork
-
-Renderers (including the Atom) **pull** audio over HTTP.
-
----
-
-## 5. UPnP Playback (Naim Atom)
-
-### Control Point Actions
-- Discover Atom via SSDP
-- Use:
-  - AVTransport.SetAVTransportURI
-  - AVTransport.Play / Pause / Stop
-  - (Optional) RenderingControl.SetVolume
-
-### Playback Flow
-1. Build stream URL:
-   - http://SERVER_IP:PORT/stream/{track_id}
-2. Build artwork URL:
-   - http://SERVER_IP:PORT/art/{art_id}
-3. Generate DIDL-Lite metadata:
-   - dc:title
-   - upnp:artist
-   - upnp:album
-   - upnp:albumArtURI
-   - res (with protocolInfo)
-4. Call SetAVTransportURI with metadata
-5. Call Play
-
-### Important
-- Well-formed DIDL-Lite is critical for artwork display
-- Range support is mandatory for reliable playback
-
----
-
-## 6. Backend API (v1)
-
-### Library
-- `POST /api/scan`
-- `GET /api/tracks?query=&limit=&offset=`
-- `GET /api/tracks/{id}`
-
-### Media
-- `GET /stream/{track_id}`
-- `GET /art/{art_id}`
-
-### Renderers
-- `GET /api/renderers`
-- `POST /api/renderers/{id}/play`
-- Optional:
-  - `/pause`
-  - `/stop`
-  - `/seek`
-
----
-
-## 7. Frontend Web UI (v1)
-
-### Features
-- Renderer selector (Naim Atom)
-- Search-first track browser
-- Artwork thumbnails
-- Display:
-  - Title / Artist / Album
-  - Sample rate / Bit depth
-- Play button per track
-
-### Tech
-- Simple HTML + JS (no build tooling)
-- Or React/Vite later
-
----
-
-## 8. Project Structure
+## Directory Structure
 
 ```
-app/
-  main.py
-  db.py
-  models.py
-  scanner/
-    scan.py
-    tags.py
-    probe.py
-    artwork.py
-  upnp/
-    discover.py
-    control.py
-    didl.py
-  media/
-    stream.py
-    art.py
-web/
-  index.html
-  app.js
-  styles.css
-cache/
-  art/
-library.sqlite
+├── app/                  # Python Backend
+│   ├── api/              # FastAPI Routers (library, player, etc.)
+│   ├── scanner/          # Library Scanning Logic
+│   ├── upnp/             # UPnP Manager & Control Logic
+│   ├── main.py           # App Entrypoint
+│   └── db.py             # Database Models & Connection
+├── web/                  # SvelteKit Frontend
+│   ├── src/
+│   │   ├── routes/       # Pages (Home, Artist, Queue, etc.)
+│   │   ├── lib/          # Components, Stores, API helpers
+│   └── static/           # Static assets
+├── cache/                # Data Directory
+│   ├── library.sqlite    # SQLite DB
+│   └── art/              # Cached Images
+└── docker-compose.yml    # Deployment Config
 ```
-
----
-
-## 9. v1 Milestones
-
-1. Scan small library into SQLite
-2. Serve artwork & audio over HTTP
-3. Discover Atom via UPnP
-4. Play a track from web UI
-5. Verify artwork & metadata on Atom screen
-6. Optimise for large libraries later
-
----
-
-## Philosophy
-- **Your app owns the library**
-- UPnP is used only for transport/control
-- UI speed comes from your DB, not ContentDirectory
-- Open, debuggable, vendor-neutral

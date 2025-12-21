@@ -9,6 +9,7 @@
     pause,
     resume,
     seek,
+    getHeaders,
   } from "$stores/player";
   import { onMount } from "svelte";
   import { page } from "$app/stores";
@@ -254,7 +255,9 @@
         $playerState.is_playing
       ) {
         try {
-          const res = await fetch("/api/player/state");
+          const res = await fetch("/api/player/state", {
+            headers: getHeaders(),
+          });
           if (res.ok) {
             const state = await res.json();
             progress = state.position_seconds;
@@ -282,9 +285,9 @@
                 lastTransportState !== "TRANSITIONING"
               ) {
                 console.log(
-                  "[PlayerBar] Remote track finished (STOPPED), calling next()",
+                  "[PlayerBar] Remote track finished (STOPPED). Waiting for backend to auto-advance.",
                 );
-                next();
+                // next(); // Handled by backend now
               }
             }
             lastTransportState = state.transport_state;
