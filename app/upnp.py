@@ -533,7 +533,7 @@ class UPnPManager:
         """
         
         # Log the full request body for debugging
-        logger.info(f"SOAP Request Body ({action}):\n{body}")
+        # logger.debug(f"SOAP Request Body ({action}):\n{body}")
 
         headers = {
             'Content-Type': 'text/xml; charset="utf-8"',
@@ -549,7 +549,7 @@ class UPnPManager:
                     logger.error(f"SOAP Action {action} failed: {resp.status_code} {resp.text}")
                 else:
                     self.log(f"SOAP Action {action} SUCCESS")
-                    logger.info(f"SOAP Action {action} Response:\n{resp.text}")
+                    logger.debug(f"SOAP Action {action} Response:\n{resp.text}")
         except Exception as e:
             self.log(f"SOAP Action {action} ERROR: {e}")
             logger.exception(f"SOAP Action {action} Exception")
