@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS artists (
     last_updated REAL,
     wikipedia_url TEXT,
     qobuz_url TEXT,
+    tidal_url TEXT,
     musicbrainz_url TEXT,
     albums TEXT,
     FOREIGN KEY(art_id) REFERENCES artwork(id)
@@ -134,6 +135,7 @@ async def init_db():
         migrations = [
             "ALTER TABLE artists ADD COLUMN wikipedia_url TEXT",
             "ALTER TABLE artists ADD COLUMN qobuz_url TEXT",
+            "ALTER TABLE artists ADD COLUMN tidal_url TEXT",
             "ALTER TABLE artists ADD COLUMN musicbrainz_url TEXT",
             "ALTER TABLE artists ADD COLUMN art_id INTEGER REFERENCES artwork(id)",
             "ALTER TABLE artists ADD COLUMN singles TEXT",
