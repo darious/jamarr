@@ -25,17 +25,32 @@ class UPnPManager:
         self.local_ip = self._get_local_ip()
         self.base_url = None
         self._bg_task = None
+        self.is_scanning_subnet = False
+        self.scan_progress = 0
+        self.scan_msg = ""
 
     def start_background_scan(self):
         if not self._bg_task:
             self._bg_task = asyncio.create_task(self._discovery_loop())
 
     async def _discovery_loop(self):
+        loop_count = 0
         try:
             while True:
                 try:
                     self.log("Starting background discovery...")
+                    
+                    if loop_count == 0:
+                        await self.load_persisted_renderers()
+                        
                     await self.discover(timeout=5)
+                    
+                    # Every 5th loop (approx 5 mins), perform active scan if few renderers found
+                    # or just always do it if users have trouble
+                    loop_count += 1
+                    if loop_count % 5 == 1: 
+                        await self.scan_subnet()
+                        
                 except Exception as e:
                     self.log(f"Background discovery error: {e}")
                 
@@ -86,21 +101,36 @@ class UPnPManager:
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('0.0.0.0', 0)) # Bind to any free port
         
-        # Explicit usage probe for user's Naim Atom
-        asyncio.create_task(self.add_device_by_ip('REDACTED_IP'))
+        # Bind to 0.0.0.0 to listen for responses on the ephemeral port
+        try:
+            sock.bind(('0.0.0.0', 0)) 
+        except Exception as e:
+            self.log(f"Failed to bind discovery socket: {e}")
+            return []
 
         # Send
-        sock.sendto(MSEARCH, ('239.255.255.250', 1900))
+        try:
+            sock.sendto(MSEARCH, ('239.255.255.250', 1900))
+        except Exception as e:
+             self.log(f"Failed to send M-SEARCH: {e}")
+             
         sock.setblocking(False)
 
         start = asyncio.get_event_loop().time()
         
-        while asyncio.get_event_loop().time() - start < timeout:
+        while True:
+            time_left = timeout - (asyncio.get_event_loop().time() - start)
+            if time_left <= 0:
+                break
             try:
-                data, addr = await asyncio.get_event_loop().sock_recv(sock, 1024)
+                data, addr = await asyncio.wait_for(
+                    asyncio.get_event_loop().sock_recv(sock, 1024), 
+                    timeout=time_left
+                )
                 await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), addr)
+            except asyncio.TimeoutError:
+                break
             except Exception:
                 await asyncio.sleep(0.1)
         
@@ -128,6 +158,10 @@ class UPnPManager:
                 resp = await client.get(location, timeout=5.0) # Increased timeout
                 if resp.status_code == 200:
                     xml = resp.text
+                    if not xml or not xml.strip():
+                        # self.log(f"Empty XML from {location}")
+                        return
+                        
                     root = ET.fromstring(xml)
                     
                     # Extract Device Info
@@ -138,7 +172,7 @@ class UPnPManager:
                     if device:
                         name = device.findtext('{urn:schemas-upnp-org:device-1-0}friendlyName') or device.findtext('friendlyName') or "Unknown"
                         udn = device.findtext('{urn:schemas-upnp-org:device-1-0}UDN') or device.findtext('UDN')
-                        self.log(f"Found Device: {name} (UDN: {udn})")
+                        # self.log(f"Found Device: {name} (UDN: {udn})")
                         
                         # Find AVTransport Control URL
                         services = device.findall('.//{urn:schemas-upnp-org:device-1-0}service')
@@ -171,7 +205,7 @@ class UPnPManager:
                                         rendering_control_url = '/' + rendering_control_url
                                     rendering_control_url = base + rendering_control_url
 
-                            self.renderers[udn] = {
+                            renderer_data = {
                                 'udn': udn,
                                 'name': name,
                                 'location': location,
@@ -179,7 +213,12 @@ class UPnPManager:
                                 'rendering_control_url': rendering_control_url,
                                 'ip': parsed.hostname
                             }
-                            self.log(f"Added Renderer: {name} at {control_url}")
+                            
+                            self.renderers[udn] = renderer_data
+                            # Persist
+                            await self.save_renderer(renderer_data)
+                            
+                            self.log(f"Added/Updated Renderer: {name} ({parsed.hostname})")
                             logger.info(f"Discovered UPnP Renderer: {name} at {control_url}")
                         else:
                             self.log(f"Missing UDN or ControlURL. UDN: {udn}, Ctrl: {control_url}")
@@ -192,10 +231,57 @@ class UPnPManager:
             self.log(f"Failed to add renderer from {location}: {e}")
             logger.warning(f"Failed to add renderer from {location}: {e}")
 
+    async def load_persisted_renderers(self):
+        """Load renderers from DB on startup, check if they are alive, remove dead ones."""
+        self.log("Loading persisted renderers...")
+        async for db in get_db():
+             rows = await db.execute_fetchall("SELECT * FROM renderers")
+             for row in rows:
+                 r = dict(row)
+                 # Map db columns back to internal struct if needed
+                 # Schema: friendly_name, udn, location_url, last_seen, control_url, rendering_control_url, ip
+                 data = {
+                     'udn': r['udn'],
+                     'name': r['friendly_name'],
+                     'location': r['location_url'],
+                     'control_url': r['control_url'],
+                     'rendering_control_url': r['rendering_control_url'],
+                     'ip': r['ip']
+                 }
+                 
+                 # Optimistic verification
+                 is_alive = await self.verify_device(data)
+                 if is_alive:
+                     self.renderers[data['udn']] = data
+                     self.log(f"Restored renderer: {data['name']}")
+                 else:
+                     self.log(f"Removing dead renderer: {data['name']}")
+                     await db.execute("DELETE FROM renderers WHERE udn = ?", (data['udn'],))
+                     await db.commit()
+
+    async def verify_device(self, r):
+        """Quick check if device is reachable."""
+        try:
+             async with httpx.AsyncClient() as client:
+                 resp = await client.get(r['location'], timeout=2.0)
+                 return resp.status_code == 200
+        except:
+            return False
+
+    async def save_renderer(self, r):
+        import time
+        async for db in get_db():
+            await db.execute("""
+                INSERT OR REPLACE INTO renderers 
+                (udn, friendly_name, location_url, control_url, rendering_control_url, ip, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (r['udn'], r['name'], r['location'], r['control_url'], r['rendering_control_url'], r['ip'], time.time()))
+            await db.commit()
+
     async def add_device_by_ip(self, ip: str):
         """Manually access UPnP device via Unicast M-SEARCH and HTTP Probing."""
         # 1. Try Unicast M-SEARCH (Standard compliant way for known IP)
-        logger.info(f"Probing IP {ip} via Unicast M-SEARCH...")
+        # Fast fail (0.5s) to avoid delaying fallback
         try:
              MSEARCH = (
                 'M-SEARCH * HTTP/1.1\r\n'
@@ -207,54 +293,120 @@ class UPnPManager:
              ).encode('utf-8')
 
              sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+             sock.setblocking(False)
              sock.bind(('0.0.0.0', 0))
              sock.sendto(MSEARCH, (ip, 1900))
-             sock.setblocking(False)
 
-             start = asyncio.get_event_loop().time()
-             while asyncio.get_event_loop().time() - start < 3:
-                 try:
-                     # sock_recv returns bytes
-                     data = await asyncio.get_event_loop().sock_recv(sock, 2048)
-                     # We trust it comes from the IP we sent to (or use sock.recvfrom in executor)
-                     # Parse logic
-                     await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), (ip, 1900))
-                     sock.close()
-                     return True
-                 except BlockingIOError:
-                     await asyncio.sleep(0.1)
+             try:
+                 data = await asyncio.wait_for(
+                    asyncio.get_event_loop().sock_recv(sock, 2048),
+                    timeout=1.5 # Increased from 0.3s for slower devices like Naim
+                 )
+                 await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), (ip, 1900))
+                 sock.close()
+                 return True
+             except:
+                 pass
              sock.close()
-        except Exception as e:
-             logger.warning(f"Unicast M-SEARCH failed: {e}")
+        except:
+             pass
 
-        # 2. Fallback to HTTP Port Scan
-        logger.info(f"Unicast failed. Probing common ports on {ip}...")
-        ports = [8080, 80, 55000, 5000, 5050]
-        paths = ['/description.xml', '/device-desc.xml', '/dd.xml']
+        # 2. Fallback to HTTP Port Scan (Parallelized)
+        ports = [8080, 80, 55000, 5000, 5050, 1400, 54380]
+        paths = ['/description.xml', '/device-desc.xml', '/dd.xml', '/xml/device_description.xml', '/MediaRenderer_TA-AN1000.xml', '/dmr.xml']
         
-        found = False
+        # Helper to check a specific url
+        async def check_url(client, url):
+            try:
+                resp = await client.get(url, timeout=1.0)
+                if resp.status_code == 200 and ('device' in resp.text or 'root' in resp.text):
+                     return url
+            except:
+                pass
+            return None
+
+        # Gather all probes
+        probe_tasks = []
         async with httpx.AsyncClient() as client:
             for port in ports:
+                # Optimization: Try to connect to port first? 
+                # Actually, blindly firing 42 requests in parallel is fine for async, 
+                # as long as we don't wait sequentially.
                 for path in paths:
                     url = f"http://{ip}:{port}{path}"
-                    try:
-                        resp = await client.get(url, timeout=1.0)
-                        if resp.status_code == 200 and 'device' in resp.text:
-                            logger.info(f"Found Device at {url}")
-                            await self._add_renderer(url)
-                            found = True
-                            break
-                    except Exception:
-                        pass
-                if found: break
+                    probe_tasks.append(check_url(client, url))
+            
+            # Run all probes for this IP in parallel
+            results = await asyncio.gather(*probe_tasks)
+            
+            for url in results:
+                if url:
+                    logger.info(f"Found Device at {url}")
+                    await self._add_renderer(url)
+                    return True
         
-        return found
+        return False
+    
+    async def scan_subnet(self):
+        """Active scan of the local subnet and common home subnets."""
+        if self.is_scanning_subnet:
+            return
+
+        self.is_scanning_subnet = True
+        self.scan_progress = 0
+        self.scan_msg = "Starting active scan..."
+        self.log("Starting active subnet scan...")
+        
+        try:
+            subnets = set()
+            local_ip = self.local_ip
+            if local_ip and local_ip != '127.0.0.1':
+                subnets.add('.'.join(local_ip.split('.')[:-1]))
+            subnets.add('192.168.0')
+            subnets.add('192.168.1')
+            
+            total_ips = len(subnets) * 254
+            processed_ips = 0
+
+            tasks = []
+            chunk_size = 10 
+            
+            for idx, subnet in enumerate(subnets):
+                self.log(f"Scanning subnet {subnet}.x ...")
+                
+                for i in range(1, 255):
+                    processed_ips += 1
+                    # Update progress every 2 IPs
+                    if i % 2 == 0:
+                        pct = int((processed_ips / total_ips) * 100)
+                        self.scan_progress = pct
+                        self.scan_msg = f"Scanning {subnet}.{i} ({pct}%)"
+
+                    target_ip = f"{subnet}.{i}"
+                    if target_ip == local_ip: continue
+                    
+                    tasks.append(self.add_device_by_ip(target_ip))
+                    
+                    if len(tasks) >= chunk_size:
+                        await asyncio.gather(*tasks)
+                        tasks = []
+                        await asyncio.sleep(0.01)
+                
+                if tasks:
+                    await asyncio.gather(*tasks)
+                    tasks = []
+                
+            self.log("Active subnet scan completed.")
+            self.scan_progress = 100
+            self.scan_msg = "Scan complete."
+        finally:
+            self.is_scanning_subnet = False
+            self.scan_progress = 0
+            self.scan_msg = ""
                             
     # --- Control Actions ---
 
     async def get_renderers(self):
-        if not self.renderers:
-            await self.discover()
         return list(self.renderers.values())
 
     async def set_renderer(self, udn):
@@ -365,11 +517,16 @@ class UPnPManager:
 
     async def _soap_action(self, url, action, args):
         self.log(f"SOAP Action: {action} to {url}")
+        # Helper to escape values
+        import html
+        def escape_val(val):
+            return html.escape(str(val))
+
         body = f"""<?xml version="1.0"?>
         <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
             <s:Body>
                 <u:{action} xmlns:u="urn:schemas-upnp-org:service:AVTransport:1" xmlns:r="urn:schemas-upnp-org:service:RenderingControl:1">
-                    {''.join([f"<{k}>{v}</{k}>" for k, v in args.items()])}
+                    {''.join([f"<{k}>{escape_val(v)}</{k}>" for k, v in args.items()])}
                 </u:{action}>
             </s:Body>
         </s:Envelope>
