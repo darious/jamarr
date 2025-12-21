@@ -191,9 +191,17 @@ async def init_db():
                 current_index INTEGER DEFAULT -1,
                 position_seconds REAL DEFAULT 0,
                 is_playing BOOLEAN DEFAULT 0,
+                transport_state TEXT DEFAULT 'STOPPED',
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Migration: Add transport_state if missing
+        try:
+             await db.execute("ALTER TABLE renderer_states ADD COLUMN transport_state TEXT")
+             await db.commit()
+        except:
+             pass
 
         # Playback History
         await db.execute("""

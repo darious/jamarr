@@ -68,7 +68,7 @@ class UPnPManager:
     def log(self, msg):
         import datetime
         ts = datetime.datetime.now().isoformat()
-        print(f"[UPnP] {msg}")
+        # print(f"[UPnP] {msg}")
         self.debug_log.append(f"[{ts}] {msg}")
         if len(self.debug_log) > 50: self.debug_log.pop(0)
 

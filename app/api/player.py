@@ -18,22 +18,121 @@ upnp = UPnPManager.get_instance()
 # Global map to track Playback Monitor Tasks (UDN -> Task)
 playback_monitors: Dict[str, asyncio.Task] = {}
 
+async def play_next_track_internal(udn: str):
+    """Internal helper to advance queue and play next track."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        state = await get_renderer_state_db(db, udn)
+        queue = state['queue']
+        current_index = state['current_index']
+        
+        next_index = current_index + 1
+        if 0 <= next_index < len(queue):
+            track = queue[next_index]
+            print(f"[Player] Auto-advancing to track {next_index}: {track['title']}")
+            
+            # Setup UPnP
+            # Note: We assume UPnPManager needs active renderer set. 
+            # This follows the pattern in play_track endpoint.
+            await upnp.set_renderer(udn)
+            
+            # Use stored IP/Port if possible, or attempt to reconstruct
+            # Since this is a background task, accessing request.url is hard.
+            # We rely on UPnPManager's existing base_url or reconstruct it.
+            # If base_url is missing, art might break.
+            upnp.base_url = f"http://{upnp.local_ip}:8111"
+
+            # Check if mime is present, else guess
+            if 'mime' not in track or not track['mime']:
+                 mime, _ = mimetypes.guess_type(track.get('path', ''))
+                 if not mime:
+                     ext = os.path.splitext(track.get('path', ''))[1].lower()
+                     if ext == '.flac': mime = "audio/flac"
+                     elif ext == '.mp3': mime = "audio/mpeg"
+                     elif ext == '.m4a': mime = "audio/mp4"
+                     elif ext == '.wav': mime = "audio/wav"
+                     elif ext == '.ogg': mime = "audio/ogg"
+                     else: mime = "audio/flac"
+                 track['mime'] = mime
+
+            await upnp.play_track(track['id'], track['path'], track)
+            
+            # Update DB
+            state['current_index'] = next_index
+            state['is_playing'] = True
+            state['position_seconds'] = 0
+            state['transport_state'] = "PLAYING" # Optimistic
+            await update_renderer_state_db(db, udn, state)
+            
+            # Log history (using localhost/system as source)
+            await log_history(db, track['id'], "127.0.0.1", "System Auto-Advance")
+            
+        else:
+            print("[Player] End of queue reached.")
+            state['is_playing'] = False
+            state['position_seconds'] = 0
+            # state['transport_state'] = "STOPPED" # Already stopped
+            await update_renderer_state_db(db, udn, state)
+
 async def monitor_upnp_playback(udn: str):
     """Background task to poll UPnP device for position and update DB."""
     print(f"[Player] Starting UPnP monitor for {udn}")
     try:
         while True:
-            # 1. Fetch position from UPnP
+            # 1. Fetch position & transport from UPnP
             rel_time, _ = await upnp.get_position(udn)
-            print(f"[Player] Monitor {udn} fetched position: {rel_time}")
+            transport_state = await upnp.get_transport_info(udn)
+            
+            # print(f"[Player] Monitor {udn}: {transport_state} @ {rel_time}s")
             
             # 2. Update DB
             async with aiosqlite.connect(DB_PATH) as db:
-                 await db.execute(
-                    "UPDATE renderer_states SET position_seconds = ?, updated_at = CURRENT_TIMESTAMP WHERE renderer_udn = ?", 
-                    (rel_time, udn)
-                )
-                 await db.commit()
+                 # Check what we *think* we are doing
+                 state = await get_renderer_state_db(db, udn)
+                 was_playing = state['is_playing']
+                 
+                 # Update Live Stats
+                 state['position_seconds'] = rel_time
+                 state['transport_state'] = transport_state
+                 # Don't overwrite is_playing yet, logic below decides
+                 
+                 # Save partial update (position/transport)
+                 # await update_renderer_state_db(db, udn, state) 
+                 # Optimization: Batch update at end? No, we need fresh state for logic.
+                 
+                 # --- Auto-Advance Logic ---
+                 # If we think we are playing, but device says STOPPED (and position is near 0 or we don't care),
+                 # it implies track finished.
+                 # Note: "NO_MEDIA_PRESENT" or "TRANSITIONING" handling?
+                 
+                 if was_playing:
+                     if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
+                         print(f"[Player] Track finished detection: State={transport_state}, Expected=Playing")
+                         # Trigger Next Track
+                         # We must run this OUTSIDE the current DB transaction if helper uses its own?
+                         # Helper `play_next_track_internal` opens its own connection. 
+                         # We should close this one or just run helper after.
+                         pass
+                     else:
+                         # Still playing or paused or buffering
+                         # If Paused, do we set is_playing=False? 
+                         # If user paused via remote, transport is PAUSED_PLAYBACK.
+                         # We should sync is_playing to False?
+                         if "PAUSE" in transport_state:
+                             state['is_playing'] = False
+                         
+                         await update_renderer_state_db(db, udn, state)
+            
+            # Execute Side Effects outside DB context
+            if was_playing and transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
+                 # Double check we didn't just start? 
+                 # Ideally we'd validte track duration vs position, but STOPPED is strong signal.
+                 # Debounce? UPnP might report STOPPED briefly between tracks if we are fast?
+                 # If we just sent a Play command, we might see STOPPED for a split second.
+                 # BUT `play_track` waits for `Play` SOAP action. 
+                 # So it should be PLAYING or TRANSITIONING.
+                 
+                 await play_next_track_internal(udn)
+                 await asyncio.sleep(2) # Wait a bit to let new track start
             
             await asyncio.sleep(1)
             
@@ -41,6 +140,8 @@ async def monitor_upnp_playback(udn: str):
         logger.info(f"UPnP monitor for {udn} cancelled")
     except Exception as e:
         logger.error(f"UPnP monitor error for {udn}: {e}")
+        import traceback
+        traceback.print_exc()
 
 # --- Pydantic Models ---
 
@@ -67,7 +168,7 @@ class PlayerState(BaseModel):
     position_seconds: float
     is_playing: bool
     renderer: str # UDN
-    transport_state: Optional[str] = None
+    transport_state: Optional[str] = "STOPPED"
 
 class QueueUpdate(BaseModel):
     queue: List[Track]
@@ -124,7 +225,7 @@ async def get_active_renderer(db: aiosqlite.Connection, client_id: str) -> str:
 
 async def get_renderer_state_db(db: aiosqlite.Connection, udn: str) -> Dict[str, Any]:
     """Get state from DB for a renderer. Returns default if not found."""
-    async with db.execute("SELECT queue, current_index, position_seconds, is_playing FROM renderer_states WHERE renderer_udn = ?", (udn,)) as cursor:
+    async with db.execute("SELECT queue, current_index, position_seconds, is_playing, transport_state FROM renderer_states WHERE renderer_udn = ?", (udn,)) as cursor:
         row = await cursor.fetchone()
         if row:
             try:
@@ -135,28 +236,31 @@ async def get_renderer_state_db(db: aiosqlite.Connection, udn: str) -> Dict[str,
                 "queue": queue,
                 "current_index": row[1],
                 "position_seconds": row[2],
-                "is_playing": bool(row[3])
+                "is_playing": bool(row[3]),
+                "transport_state": row[4] if len(row) > 4 else "STOPPED" 
             }
     return {
         "queue": [],
         "current_index": -1,
         "position_seconds": 0,
-        "is_playing": False
+        "is_playing": False,
+        "transport_state": "STOPPED"
     }
 
 async def update_renderer_state_db(db: aiosqlite.Connection, udn: str, state: Dict[str, Any]):
     """Upsert renderer state."""
     queue_json = json.dumps(state.get("queue", []))
     await db.execute("""
-        INSERT INTO renderer_states (renderer_udn, queue, current_index, position_seconds, is_playing, updated_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO renderer_states (renderer_udn, queue, current_index, position_seconds, is_playing, transport_state, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(renderer_udn) DO UPDATE SET
             queue = excluded.queue,
             current_index = excluded.current_index,
             position_seconds = excluded.position_seconds,
             is_playing = excluded.is_playing,
+            transport_state = excluded.transport_state,
             updated_at = CURRENT_TIMESTAMP
-    """, (udn, queue_json, state.get("current_index", -1), state.get("position_seconds", 0), 1 if state.get("is_playing") else 0))
+    """, (udn, queue_json, state.get("current_index", -1), state.get("position_seconds", 0), 1 if state.get("is_playing") else 0, state.get("transport_state", "STOPPED")))
     await db.commit()
 
 async def log_history(db: aiosqlite.Connection, track_id: int, client_ip: str, hostname: str = None):
@@ -278,7 +382,8 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
                     playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
 
         if state['is_playing']:
-             print(f"[Player] Returning state for {udn}: pos={state['position_seconds']}")
+             # print(f"[Player] Returning state for {udn}: pos={state['position_seconds']}")
+             pass
              
         return {
             "queue": state['queue'],
@@ -286,7 +391,7 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
             "position_seconds": state['position_seconds'],
             "is_playing": state['is_playing'],
             "renderer": udn,
-            "transport_state": transport_state # TODO: Fetch live?
+            "transport_state": state.get('transport_state', 'STOPPED')
         }
     return PlayerState(queue=[], current_index=-1, position_seconds=0, is_playing=False, renderer=f"local:{client_id}")
 
