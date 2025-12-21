@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request, HTTPException, Header
 import os
 import asyncio
-from app.db import get_db
+from app.db import get_db, DB_PATH
 import aiosqlite
 from app.upnp import UPnPManager
 import mimetypes
@@ -14,6 +14,33 @@ import logging
 router = APIRouter()
 logger = logging.getLogger(__name__)
 upnp = UPnPManager.get_instance()
+
+# Global map to track Playback Monitor Tasks (UDN -> Task)
+playback_monitors: Dict[str, asyncio.Task] = {}
+
+async def monitor_upnp_playback(udn: str):
+    """Background task to poll UPnP device for position and update DB."""
+    print(f"[Player] Starting UPnP monitor for {udn}")
+    try:
+        while True:
+            # 1. Fetch position from UPnP
+            rel_time, _ = await upnp.get_position(udn)
+            print(f"[Player] Monitor {udn} fetched position: {rel_time}")
+            
+            # 2. Update DB
+            async with aiosqlite.connect(DB_PATH) as db:
+                 await db.execute(
+                    "UPDATE renderer_states SET position_seconds = ?, updated_at = CURRENT_TIMESTAMP WHERE renderer_udn = ?", 
+                    (rel_time, udn)
+                )
+                 await db.commit()
+            
+            await asyncio.sleep(1)
+            
+    except asyncio.CancelledError:
+        logger.info(f"UPnP monitor for {udn} cancelled")
+    except Exception as e:
+        logger.error(f"UPnP monitor error for {udn}: {e}")
 
 # --- Pydantic Models ---
 
@@ -243,6 +270,16 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
             # Let's stick to DB state. If polling updates it, great.
             pass
 
+        if is_upnp:
+            # Robustness: Ensure monitor is running if playing
+            if state['is_playing']:
+                if udn not in playback_monitors or playback_monitors[udn].done():
+                    print(f"[Player] Auto-restarting monitor for {udn}")
+                    playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+
+        if state['is_playing']:
+             print(f"[Player] Returning state for {udn}: pos={state['position_seconds']}")
+             
         return {
             "queue": state['queue'],
             "current_index": state['current_index'],
@@ -423,6 +460,11 @@ async def play_track(data: dict, request: Request, client_id: str = Depends(get_
             
             await upnp.play_track(track['id'], track['path'], track)
             
+            # Start/Restart Monitor
+            if udn in playback_monitors:
+                playback_monitors[udn].cancel()
+            playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+            
             # Update DB state
             state = await get_renderer_state_db(db, udn)
             state['is_playing'] = True
@@ -454,6 +496,11 @@ async def pause_playback(client_id: str = Depends(get_client_id)):
             await upnp.set_renderer(udn)
             await upnp.pause()
             
+            # Cancel monitor on pause
+            if udn in playback_monitors:
+                playback_monitors[udn].cancel()
+                del playback_monitors[udn]
+            
     return {"status": "ok"}
 
 @router.post("/api/player/resume")
@@ -468,6 +515,10 @@ async def resume_playback(client_id: str = Depends(get_client_id)):
         if not udn.startswith("local:"):
             await upnp.set_renderer(udn)
             await upnp.resume()
+            
+            # Ensure monitor is running
+            if udn not in playback_monitors or playback_monitors[udn].done():
+                playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
             
     return {"status": "ok"}
 
