@@ -76,6 +76,12 @@ async def play_next_track_internal(udn: str):
 async def monitor_upnp_playback(udn: str):
     """Background task to poll UPnP device for position and update DB."""
     logger.info(f"[Player] Starting UPnP monitor for {udn}")
+    
+    # Grace period: Wait for device to react to Play command before polling
+    # This prevents detecting "STOPPED" immediately after a manual Play/Skip.
+    await asyncio.sleep(3)
+    
+    was_playing = False # Initialize to prevent UnboundLocalError
     try:
         while True:
             # 1. Fetch position & transport from UPnP
@@ -132,7 +138,7 @@ async def monitor_upnp_playback(udn: str):
                  # So it should be PLAYING or TRANSITIONING.
                  
                  await play_next_track_internal(udn)
-                 await asyncio.sleep(2) # Wait a bit to let new track start
+                 await asyncio.sleep(4) # Wait a bit to let new track start
             
             await asyncio.sleep(1)
             
