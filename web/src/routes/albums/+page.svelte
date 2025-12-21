@@ -113,22 +113,18 @@
           </div>
         </button>
         <div class="space-y-1">
-          <p
-            class="text-lg font-semibold truncate hover:underline cursor-pointer"
-            on:click={() =>
-              goto(
-                `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-              )}
+          <a
+            href={`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+            class="text-lg font-semibold truncate hover:underline cursor-pointer block"
           >
             {album.album}
-          </p>
-          <p
-            class="text-sm text-white/60 truncate hover:text-white cursor-pointer"
-            on:click={() =>
-              goto(`/artist/${encodeURIComponent(album.artist_name)}`)}
+          </a>
+          <a
+            href={`/artist/${encodeURIComponent(album.artist_name)}`}
+            class="text-sm text-white/60 truncate hover:text-white cursor-pointer block"
           >
             {album.artist_name}
-          </p>
+          </a>
           <p class="text-xs text-white/60">
             {album.year ? album.year.substring(0, 4) : "—"} • {album.track_count ||
               0} tracks
