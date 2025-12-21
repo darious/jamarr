@@ -12,6 +12,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Filter out /api/player/state from access logs (too chatty due to polling)
+import logging
+class EndpointFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.getMessage().find("/api/player/state") == -1
+
+logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+
 
 
 from fastapi import BackgroundTasks

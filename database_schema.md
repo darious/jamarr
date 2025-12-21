@@ -29,6 +29,9 @@ Stores metadata for individual audio files.
 | `label` | TEXT | Record label. |
 | `mb_artist_id` | TEXT | MusicBrainz Artist ID. |
 | `mb_album_artist_id` | TEXT | MusicBrainz Album Artist ID. |
+| `mb_track_id` | TEXT | MusicBrainz Track ID. |
+| `mb_release_track_id` | TEXT | MusicBrainz Release Track ID. |
+| `mb_release_id` | TEXT | MusicBrainz Release ID. |
 | `art_id` | INTEGER | Foreign Key referencing `artwork.id`. |
 
 ### `artists`
@@ -50,6 +53,8 @@ Stores rich metadata for artists, fetched from external sources (MusicBrainz, Sp
 | `wikipedia_url` | TEXT | URL to Wikipedia page. |
 | `qobuz_url` | TEXT | URL to Qobuz artist page. |
 | `musicbrainz_url` | TEXT | URL to MusicBrainz artist page. |
+| `singles` | TEXT | JSON string of artist singles. |
+| `albums` | TEXT | JSON string of artist albums. |
 
 ### `artwork`
 Stores unique artwork to avoid duplication. Artwork files are organized in subdirectories based on the first 2 characters of the SHA1 hash.
@@ -78,9 +83,35 @@ Stores discovered UPnP/DLNA renderers.
 | `udn` | TEXT | Unique Device Name (UUID). Unique. |
 | `location_url` | TEXT | URL to the device description. |
 | `last_seen` | REAL | Timestamp when the device was last seen. |
+| `control_url` | TEXT | UPnP AVTransport control URL. |
+| `rendering_control_url` | TEXT | UPnP RenderingControl URL. |
+| `ip` | TEXT | IP address of the device. |
 
-### `playback_state`
-Singleton table (row id=1) storing the current playback status for persistence across reloads.
+### `renderer_states`
+Stores the current playback state for each renderer (local or UPnP). This allows persistent state and queue management.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `renderer_udn` | TEXT | Primary Key. UDN of the renderer. |
+| `queue` | TEXT | JSON list of tracks in the queue. |
+| `current_index` | INTEGER | Index of the currently playing track. |
+| `position_seconds` | REAL | Last saved playback position. |
+| `is_playing` | BOOLEAN | Whether playback is active. |
+| `transport_state` | TEXT | UPnP Transport State (e.g., PLAYING, STOPPED). |
+| `updated_at` | DATETIME | Timestamp of last update. |
+
+### `client_sessions`
+Maps client IDs to their active renderer UDN.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `client_id` | TEXT | Primary Key. UUID of the client. |
+| `active_renderer_udn` | TEXT | UDN of the renderer the client is controlling. |
+| `last_seen` | DATETIME | Timestamp of last activity. |
+
+### `playback_state` (Deprecated)
+*Legacy table, superseded by `renderer_states`.*
+Singleton table (row id=1) storing the current playback status.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
@@ -135,10 +166,3 @@ JOIN tracks_fts ON tracks_fts.rowid = t.id
 WHERE tracks_fts MATCH 'love'
 ORDER BY rank;
 ```
-
-The FTS5 table is automatically kept in sync with the `tracks` table via triggers.
-
-### Database Configuration
-
-- **Journal Mode**: WAL (Write-Ahead Logging) for better concurrency
-- **Transactions**: All batch inserts use transactions for performance
