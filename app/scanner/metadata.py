@@ -6,6 +6,8 @@ from bs4 import BeautifulSoup
 import logging
 import base64
 import re
+import difflib
+import math
 from app.config import get_spotify_credentials, get_musicbrainz_root_url, get_musicbrainz_rate_limit, get_qobuz_region
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,72 @@ async def get_spotify_token(client: httpx.AsyncClient):
     except Exception as e:
         logger.error(f"Spotify Auth Error: {e}")
     return None
+
+def _normalize_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.lower()) if name else ""
+
+def _similarity(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, _normalize_name(a), _normalize_name(b)).ratio()
+
+async def _evaluate_spotify_candidate(client: httpx.AsyncClient, headers: dict, candidate_id: str, target_name: str):
+    try:
+        resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{candidate_id}", headers=headers)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        name = data.get("name") or ""
+        pop = data.get("popularity") or 0
+        followers = data.get("followers", {}).get("total") or 0
+
+        name_score = _similarity(name, target_name)
+        pop_score = min(max(pop, 0), 100) / 100
+        # Normalize followers with log scale to keep within 0-1
+        followers_score = min(math.log10(followers + 1) / 7, 1) if followers else 0
+        final_score = name_score * 0.7 + pop_score * 0.2 + followers_score * 0.1
+
+        return {
+            "id": candidate_id,
+            "url": data.get("external_urls", {}).get("spotify"),
+            "name": name,
+            "popularity": pop,
+            "followers": followers,
+            "name_score": name_score,
+            "final_score": final_score,
+        }
+    except Exception as e:
+        logger.debug(f"Failed to evaluate Spotify candidate {candidate_id}: {e}")
+        return None
+
+async def _pick_best_spotify_candidate(client: httpx.AsyncClient, headers: dict, candidates: list, target_name: str):
+    """
+    Given candidate Spotify IDs, pick the best match using name similarity + popularity.
+    Returns (id, url) or (None, None) if no safe match.
+    """
+    scored = []
+    for cid, _url in candidates:
+        res = await _evaluate_spotify_candidate(client, headers, cid, target_name)
+        if res:
+            scored.append(res)
+
+    if not scored:
+        return None, None
+
+    # Filter out very low name matches
+    scored = [c for c in scored if c["name_score"] >= 0.55]
+    if not scored:
+        return None, None
+
+    # Sort by final_score, then popularity, then followers
+    scored.sort(key=lambda x: (x["final_score"], x["popularity"], x["followers"]), reverse=True)
+    best = scored[0]
+
+    # If Spotify API didn't return a URL, fall back to the MB-provided one for this ID
+    if not best.get("url"):
+        for cid, url in candidates:
+            if cid == best["id"]:
+                return best["id"], url
+
+    return best["id"], best.get("url")
 
 async def match_track_to_library(db, artist_mbid, track_name, album_name=None):
     """
@@ -157,6 +225,7 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
 
             wikidata_url = None
             spotify_id = None
+            spotify_candidates = []
             
             if mb_data:
                 # Update Core Info
@@ -186,12 +255,13 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
                          metadata["qobuz_url"] = target
                          logger.debug(f"data source: MusicBrainz (Qobuz) -> {target}")
                     elif "spotify.com" in target and type_ in ("streaming", "free streaming"):
-                         metadata["spotify_url"] = target
-                         logger.debug(f"data source: MusicBrainz (Spotify) -> {target}")
-                         # Extract ID
+                         # Collect all candidate Spotify URLs/IDs from MB
                          parts = target.split("/")
                          if parts:
-                             spotify_id = parts[-1].split("?")[0]
+                             cand_id = parts[-1].split("?")[0]
+                             if cand_id and not any(cand_id == c[0] for c in spotify_candidates):
+                                 spotify_candidates.append((cand_id, target))
+                                 logger.debug(f"data source: MusicBrainz (Spotify candidate) -> {target}")
             
             # 2. Wikipedia (Bio via Wikidata)
             if wikidata_url:
@@ -234,25 +304,41 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
             token = await get_spotify_token(client)
             if token:
                 sp_headers = {"Authorization": f"Bearer {token}"}
-                
-                # If no ID from MB, try to search (Exact match only? Or best guess?)
-                # Safety: If we search, we must be careful.
-                # Use strict search: "artist:Name"
+
+                # If we have multiple candidates from MB, pick the best one using Spotify metadata
+                if spotify_candidates:
+                    try:
+                        picked_id, picked_url = await _pick_best_spotify_candidate(
+                            client, sp_headers, spotify_candidates, metadata["name"]
+                        )
+                        if picked_id and picked_url:
+                            spotify_id = picked_id
+                            metadata["spotify_url"] = picked_url
+                            logger.debug(f"Selected Spotify candidate from MB list: {spotify_id}")
+                    except Exception as e:
+                        logger.warning(f"Spotify candidate selection failed: {e}")
+
+                # If no ID chosen yet, try a strict search
                 if not spotify_id:
                      try:
                         logger.debug(f"No Spotify ID found in MB. Searching Spotify for 'artist:{metadata['name']}'...")
                         from urllib.parse import quote
                         q = quote(metadata["name"])
-                        search_url = f"{SPOTIFY_API_ROOT}/search?q=artist:{q}&type=artist&limit=1"
+                        search_url = f"{SPOTIFY_API_ROOT}/search?q=artist:{q}&type=artist&limit=3"
                         s_resp = await client.get(search_url, headers=sp_headers)
                         if s_resp.status_code == 200:
                              items = s_resp.json().get("artists", {}).get("items", [])
                              if items:
-                                 # Safety Check: Is name close enough?
-                                 if items[0]["name"].lower() == metadata["name"].lower():
-                                      spotify_id = items[0]["id"]
-                                      metadata["spotify_url"] = items[0]["external_urls"]["spotify"]
-                                      logger.debug(f"Found match: {spotify_id}")
+                                 # Choose the best search result by name similarity
+                                 scored = []
+                                 for it in items:
+                                     scored.append(( _similarity(it["name"], metadata["name"]), it))
+                                 scored.sort(key=lambda x: (x[0], x[1].get("popularity", 0)), reverse=True)
+                                 best = scored[0]
+                                 if best[0] >= 0.6:
+                                      spotify_id = best[1]["id"]
+                                      metadata["spotify_url"] = best[1]["external_urls"]["spotify"]
+                                      logger.debug(f"Found match via search: {spotify_id}")
                      except Exception as e:
                          logger.warning(f"Spotify Search Failed: {e}")
 
@@ -326,6 +412,9 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
                          logger.warning(f"Spotify Data Fetch Failed: {e}")
             else:
                 logger.debug("No Spotify token available (credentials missing or failed).")
+                # Fallback: if only one MB candidate, preserve that URL even without token
+                if spotify_candidates and len(spotify_candidates) == 1 and not metadata["spotify_url"]:
+                    metadata["spotify_url"] = spotify_candidates[0][1]
 
             # 4. MusicBrainz Singles & Albums (Release Groups)
             # Fetch directly from MB
@@ -346,6 +435,7 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
                  res = await fetch_best_release_match(a['mbid'], client)
                  a['links'] = res['links']
                  a['release_ids'] = res['release_ids']
+                 a['primary_release_id'] = res.get('primary_release_id')
             metadata["albums"] = albums
             
             logger.debug("Fetching EPs (Release Groups) from MusicBrainz...")
@@ -357,6 +447,7 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
                      res = await fetch_best_release_match(e['mbid'], client)
                      e['links'] = res['links']
                      e['release_ids'] = res['release_ids']
+                     e['primary_release_id'] = res.get('primary_release_id')
                  else:
                      # logger.debug(f"Skipping links for EP (Remote): {e['title']}")
                      pass
@@ -478,6 +569,7 @@ async def fetch_best_release_match(rg_id: str, client: httpx.AsyncClient):
         releases.sort(key=lambda x: (score_release(x), x.get("date", "")), reverse=True)
         
         best = releases[0]
+        best_release_id = best.get("id")
         
         # Extract Links
         links = []
@@ -488,20 +580,21 @@ async def fetch_best_release_match(rg_id: str, client: httpx.AsyncClient):
                  links.append({"type": "tidal", "url": target})
              elif "qobuz.com" in target:
                  links.append({"type": "qobuz", "url": target})
-             elif "spotify.com" in target:
-                 links.append({"type": "spotify", "url": target})
+             elif "musicbrainz.org" in target:
+                 links.append({"type": "musicbrainz", "url": target})
         
         # Collect ALL release IDs associated with this group for backfilling
         release_ids = [r["id"] for r in releases]
         
         return {
             "links": links,
-            "release_ids": release_ids
+            "release_ids": release_ids,
+            "primary_release_id": best_release_id,
         }
         
     except Exception as e:
         logger.warning(f"Error resolving release links for {rg_id}: {e}")
-        return {"links": [], "release_ids": []}
+        return {"links": [], "release_ids": [], "primary_release_id": None}
 
 async def fetch_track_credits(mb_recording_id: str, mb_release_track_id: str = None):
     """

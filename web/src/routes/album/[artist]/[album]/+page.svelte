@@ -18,6 +18,15 @@
     return withArt?.art_id ? `/art/${withArt.art_id}` : "/assets/logo.png";
   };
 
+  const getMusicBrainzUrl = () => {
+    if (data.albumMeta?.musicbrainz_url) return data.albumMeta.musicbrainz_url;
+    const track = data.tracks?.[0];
+    const mbBase = "http://musicbrainz.org";
+    if (track?.mb_release_id) return `${mbBase}/release/${track.mb_release_id}`;
+    if (track?.mb_release_group_id) return `${mbBase}/release-group/${track.mb_release_group_id}`;
+    return null;
+  };
+
   const totalDuration = () =>
     Math.round(
       (data.tracks || []).reduce(
@@ -136,11 +145,11 @@
         <p class="pill w-max bg-white/10 text-white/70 backdrop-blur-md">
           Album
         </p>
-        {#if data.albumMeta?.musicbrainz_url}
+        {#if getMusicBrainzUrl()}
           <a
             class="pill hover:bg-white/15"
             target="_blank"
-            href={data.albumMeta.musicbrainz_url}
+            href={getMusicBrainzUrl()}
           >
             <img
               src="/assets/logo-musicbrainz.svg"
