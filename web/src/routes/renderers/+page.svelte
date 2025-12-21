@@ -25,10 +25,66 @@
     }
 
     onMount(() => {
-        fetchRenderers(false); // Initial load without partial block, or should we?
-        // Let's do a refresh on mount to be sure we see new things, but maybe just normal fetch first
-        fetchRenderers(true);
+        fetchRenderers(false);
+        checkScanStatus();
     });
+
+    let scanStatus = "";
+    let scanProgress = 0;
+    let scanLogs: string[] = [];
+    let isScanning = false;
+    let pollInterval: any;
+
+    async function checkScanStatus() {
+        try {
+            const res = await fetch("/api/scan-status");
+            const data = await res.json();
+            if (data.is_scanning) {
+                isScanning = true;
+                startPolling();
+            }
+        } catch (e) {
+            console.error("Status check error", e);
+        }
+    }
+
+    async function startScan() {
+        // Trigger scan
+        fetchRenderers(true);
+        // Start polling
+        isScanning = true;
+        scanProgress = 0;
+        scanLogs = [];
+        startPolling();
+    }
+
+    function startPolling() {
+        if (pollInterval) clearInterval(pollInterval);
+
+        pollInterval = setInterval(async () => {
+            try {
+                const res = await fetch("/api/scan-status");
+                const data = await res.json();
+                isScanning = data.is_scanning;
+                scanStatus = data.message;
+                scanProgress = data.progress || 0;
+                scanLogs = (data.logs || []).reverse(); // Newest first for this view style
+
+                if (!isScanning) {
+                    clearInterval(pollInterval);
+                    scanStatus = "Scan complete.";
+                    scanProgress = 100;
+                    setTimeout(() => {
+                        scanStatus = "";
+                        scanProgress = 0;
+                    }, 3000);
+                    fetchRenderers(false); // Refresh list one last time
+                }
+            } catch (e) {
+                console.error("Poll error", e);
+            }
+        }, 1000);
+    }
 </script>
 
 <div class="container mx-auto max-w-5xl px-6 py-8">
@@ -36,16 +92,40 @@
         <h1 class="text-3xl font-bold">Network Renderers</h1>
         <button
             class="btn border border-white/10 bg-white/5 hover:bg-white/10"
-            on:click={() => fetchRenderers(true)}
-            disabled={loading}
+            on:click={startScan}
+            disabled={loading || isScanning}
         >
-            {#if loading}
+            {#if loading || isScanning}
                 Scanning...
             {:else}
                 Refresh Discovery
             {/if}
         </button>
     </div>
+
+    {#if isScanning || scanStatus}
+        <div class="mb-6 space-y-2">
+            <div
+                class="flex justify-between text-sm text-primary-400 font-mono"
+            >
+                <span>{scanStatus}</span>
+                <span>{scanProgress}%</span>
+            </div>
+            <progress
+                class="progress progress-primary w-full h-2 bg-surface-700"
+                value={scanProgress}
+                max="100"
+            ></progress>
+
+            <div
+                class="mt-4 p-4 rounded bg-black/30 font-mono text-xs text-white/50 h-32 overflow-y-auto space-y-1"
+            >
+                {#each scanLogs as log}
+                    <div class="truncate">{log}</div>
+                {/each}
+            </div>
+        </div>
+    {/if}
 
     {#if error}
         <div class="alert alert-error mb-4">
