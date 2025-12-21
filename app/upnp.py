@@ -567,12 +567,13 @@ class UPnPManager:
             pass
         return 0
 
-    async def get_position(self):
-        """Get current position and duration from active renderer."""
-        if not self.active_renderer:
+    async def get_position(self, udn=None):
+        """Get current position and duration from active renderer or specified udn."""
+        target_udn = udn or self.active_renderer
+        if not target_udn or target_udn not in self.renderers:
             return 0, 0
         
-        r = self.renderers[self.active_renderer]
+        r = self.renderers[target_udn]
         url = r['control_url']
         
         try:
@@ -620,12 +621,13 @@ class UPnPManager:
             
         return 0, 0
 
-    async def get_transport_info(self):
+    async def get_transport_info(self, udn=None):
         """Get CurrentTransportState (PLAYING, STOPPED, PAUSED_PLAYBACK, etc)."""
-        if not self.active_renderer:
+        target_udn = udn or self.active_renderer
+        if not target_udn or target_udn not in self.renderers:
             return "STOPPED"
         
-        r = self.renderers[self.active_renderer]
+        r = self.renderers[target_udn]
         url = r['control_url']
         
         try:
