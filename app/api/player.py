@@ -28,7 +28,7 @@ async def play_next_track_internal(udn: str):
         next_index = current_index + 1
         if 0 <= next_index < len(queue):
             track = queue[next_index]
-            print(f"[Player] Auto-advancing to track {next_index}: {track['title']}")
+            logger.info(f"[Player] Auto-advancing to track {next_index}: {track['title']}")
             
             # Setup UPnP
             # Note: We assume UPnPManager needs active renderer set. 
@@ -67,7 +67,7 @@ async def play_next_track_internal(udn: str):
             await log_history(db, track['id'], "127.0.0.1", "System Auto-Advance")
             
         else:
-            print("[Player] End of queue reached.")
+            logger.info("[Player] End of queue reached.")
             state['is_playing'] = False
             state['position_seconds'] = 0
             # state['transport_state'] = "STOPPED" # Already stopped
@@ -75,7 +75,7 @@ async def play_next_track_internal(udn: str):
 
 async def monitor_upnp_playback(udn: str):
     """Background task to poll UPnP device for position and update DB."""
-    print(f"[Player] Starting UPnP monitor for {udn}")
+    logger.info(f"[Player] Starting UPnP monitor for {udn}")
     try:
         while True:
             # 1. Fetch position & transport from UPnP
@@ -106,7 +106,7 @@ async def monitor_upnp_playback(udn: str):
                  
                  if was_playing:
                      if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
-                         print(f"[Player] Track finished detection: State={transport_state}, Expected=Playing")
+                         logger.info(f"[Player] Track finished detection: State={transport_state}, Expected=Playing")
                          # Trigger Next Track
                          # We must run this OUTSIDE the current DB transaction if helper uses its own?
                          # Helper `play_next_track_internal` opens its own connection. 
@@ -378,7 +378,7 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
             # Robustness: Ensure monitor is running if playing
             if state['is_playing']:
                 if udn not in playback_monitors or playback_monitors[udn].done():
-                    print(f"[Player] Auto-restarting monitor for {udn}")
+                    logger.info(f"[Player] Auto-restarting monitor for {udn}")
                     playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
 
         if state['is_playing']:
