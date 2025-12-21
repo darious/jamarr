@@ -302,6 +302,20 @@
   });
 
   function togglePlay() {
+    // Remote / UPnP Logic
+    if (!$playerState.renderer.startsWith("local")) {
+      if ($playerState.is_playing) {
+        console.log("[PlayerBar] Remote: pausing");
+        pause();
+        isPlaying = false; // Optimistic update
+      } else {
+        console.log("[PlayerBar] Remote: resuming");
+        resume();
+        isPlaying = true; // Optimistic update
+      }
+      return;
+    }
+
     console.log(
       "[PlayerBar] togglePlay called, audio.src:",
       audio?.src,
@@ -324,20 +338,6 @@
         );
       } else {
         console.error("[PlayerBar] togglePlay: no currentTrack to play");
-      }
-      return;
-    }
-
-    // Remote / UPnP Logic
-    if (!$playerState.renderer.startsWith("local")) {
-      if ($playerState.is_playing) {
-        console.log("[PlayerBar] Remote: pausing");
-        pause();
-        isPlaying = false; // Optimistic update
-      } else {
-        console.log("[PlayerBar] Remote: resuming");
-        resume();
-        isPlaying = true; // Optimistic update
       }
       return;
     }
