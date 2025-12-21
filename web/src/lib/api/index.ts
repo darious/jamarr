@@ -4,15 +4,42 @@ export interface Artist {
     art_id: number | null;
     art_sha1?: string | null;
     bio: string | null;
-    similar_artists: string[];
-    top_tracks: { name: string; album: string; date: string; duration_ms: number }[];
-    singles?: { mbid: string; title: string; date: string; artist: string }[];
+    similar_artists: {
+        name: string;
+        mbid?: string | null;
+        image_url?: string | null;
+        art_id?: number | null;
+        art_sha1?: string | null;
+    }[];
+    top_tracks: {
+        name: string;
+        album: string;
+        date: string;
+        duration_ms: number;
+        popularity?: number;
+        local_track_id?: number | null;
+        codec?: string | null;
+        bit_depth?: number | null;
+        sample_rate_hz?: number | null;
+        duration_seconds?: number | null;
+    }[];
+    singles?: {
+        mbid: string;
+        title: string;
+        date: string;
+        artist: string;
+        local_track_id?: number | null;
+        codec?: string | null;
+        bit_depth?: number | null;
+        sample_rate_hz?: number | null;
+    }[];
     sort_name: string;
     homepage: string | null;
     spotify_url: string | null;
     wikipedia_url: string | null;
     qobuz_url: string | null;
     musicbrainz_url: string | null;
+    tidal_url?: string | null;
     albums?: {
         mbid: string;
         title: string;

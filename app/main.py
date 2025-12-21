@@ -43,7 +43,7 @@ logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 
 from fastapi import BackgroundTasks
-from app.scanner.scan import scan_library
+from app.scanner.core import Scanner
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -57,23 +57,35 @@ app.include_router(stream.router)
 app.include_router(player.router)
 app.include_router(search.router)
 
+async def run_full_scan(force_rescan: bool = False):
+    scanner = Scanner()
+    await scanner.scan_filesystem(force_rescan=force_rescan)
+    await scanner.update_metadata()
+    await scanner.prune_library()
+
 @app.post("/api/scan")
 async def trigger_scan(background_tasks: BackgroundTasks, force_rescan: bool = False):
-    from app.config import get_music_path
-    background_tasks.add_task(scan_library, get_music_path(), force_metadata=False, force_rescan=force_rescan)
+    background_tasks.add_task(run_full_scan, force_rescan)
     return {"message": "Scan started", "force_rescan": force_rescan}
 
 @app.post("/api/scan_artist")
-async def trigger_artist_scan(artist_name: str):
-    from app.scanner.scan import refresh_artist_metadata
-    await refresh_artist_metadata(artist_name)
-    return {"message": f"Metadata refresh completed for {artist_name}"}
+async def trigger_artist_scan(artist_name: str, background_tasks: BackgroundTasks):
+    async def _scan_artist(name):
+        scanner = Scanner()
+        await scanner.update_metadata(artist_filter=name)
+        
+    background_tasks.add_task(_scan_artist, artist_name)
+    return {"message": f"Metadata refresh queued for {artist_name}"}
 
 @app.post("/api/scan_artist_singles")
-async def trigger_artist_singles_scan(artist_name: str):
-    from app.scanner.scan import refresh_artist_singles_only
-    await refresh_artist_singles_only(artist_name)
-    return {"message": f"Singles refresh completed for {artist_name}"}
+async def trigger_artist_singles_scan(artist_name: str, background_tasks: BackgroundTasks):
+    # Map to standard metadata update as singles logic is now integrated/optimized
+    async def _scan_artist(name):
+        scanner = Scanner()
+        await scanner.update_metadata(artist_filter=name)
+
+    background_tasks.add_task(_scan_artist, artist_name)
+    return {"message": f"Single refresh queued for {artist_name}"}
 
 # Serve built SvelteKit frontend (output lives in web/build)
 build_dir = Path("web/build")
