@@ -152,6 +152,13 @@ async def init_db():
         except Exception:
             pass # Column likely exists
 
+        # Migration: Add renderer columns
+        for col in ["control_url", "rendering_control_url", "ip"]:
+             try:
+                 await db.execute(f"ALTER TABLE renderers ADD COLUMN {col} TEXT")
+             except:
+                 pass
+
         # Playback State (Single row enforced) - DEPRECATED in favor of renderer_states
         # Kept for backward compat or migration if needed, but we will use renderer_states now.
         await db.execute("""
