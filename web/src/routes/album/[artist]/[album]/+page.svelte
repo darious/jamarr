@@ -18,6 +18,15 @@
     return withArt?.art_id ? `/art/${withArt.art_id}` : "/assets/logo.png";
   };
 
+  const getMusicBrainzUrl = () => {
+    if (data.albumMeta?.musicbrainz_url) return data.albumMeta.musicbrainz_url;
+    const track = data.tracks?.[0];
+    const mbBase = "http://musicbrainz.org";
+    if (track?.mb_release_id) return `${mbBase}/release/${track.mb_release_id}`;
+    if (track?.mb_release_group_id) return `${mbBase}/release-group/${track.mb_release_group_id}`;
+    return null;
+  };
+
   const totalDuration = () =>
     Math.round(
       (data.tracks || []).reduce(
@@ -64,14 +73,8 @@
   }
 
   function playTrack(track: Track) {
-    // Find index in the FULL list to ensure playback order is preserved across discs
-    // But we probably want to play from this track onwards?
-    // The current implementation of setQueue takes the full list and an index.
-    // So we just need to find the index of this track in data.tracks
-    const idx = data.tracks.findIndex((t) => t.id === track.id);
-    if (idx !== -1) {
-      void setQueue(data.tracks, idx);
-    }
+    // Play just the selected track
+    void setQueue([track], 0);
   }
 </script>
 
@@ -136,11 +139,11 @@
         <p class="pill w-max bg-white/10 text-white/70 backdrop-blur-md">
           Album
         </p>
-        {#if data.albumMeta?.musicbrainz_url}
+        {#if getMusicBrainzUrl()}
           <a
             class="pill hover:bg-white/15"
             target="_blank"
-            href={data.albumMeta.musicbrainz_url}
+            href={getMusicBrainzUrl()}
           >
             <img
               src="/assets/logo-musicbrainz.svg"

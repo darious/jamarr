@@ -6,9 +6,13 @@ from app.db import init_db
 async def lifespan(app: FastAPI):
     await init_db()
     from app.upnp import UPnPManager
+    from app.scanner.scan_manager import ScanManager
     UPnPManager.get_instance().start_background_scan()
+    # ScanManager is lazy initialized but good to have it ready
+    ScanManager.get_instance()
     yield
     UPnPManager.get_instance().stop_background_scan()
+    await ScanManager.get_instance().stop_scan()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -43,37 +47,22 @@ logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 
 from fastapi import BackgroundTasks
-from app.scanner.scan import scan_library
+
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 from app.media import art
-from app.api import library, stream, player, search
+from app.api import library, stream, player, search, scan
 
 app.include_router(art.router)
 app.include_router(library.router)
 app.include_router(stream.router)
 app.include_router(player.router)
 app.include_router(search.router)
+app.include_router(scan.router)
 
-@app.post("/api/scan")
-async def trigger_scan(background_tasks: BackgroundTasks, force_rescan: bool = False):
-    from app.config import get_music_path
-    background_tasks.add_task(scan_library, get_music_path(), force_metadata=False, force_rescan=force_rescan)
-    return {"message": "Scan started", "force_rescan": force_rescan}
 
-@app.post("/api/scan_artist")
-async def trigger_artist_scan(artist_name: str):
-    from app.scanner.scan import refresh_artist_metadata
-    await refresh_artist_metadata(artist_name)
-    return {"message": f"Metadata refresh completed for {artist_name}"}
-
-@app.post("/api/scan_artist_singles")
-async def trigger_artist_singles_scan(artist_name: str):
-    from app.scanner.scan import refresh_artist_singles_only
-    await refresh_artist_singles_only(artist_name)
-    return {"message": f"Singles refresh completed for {artist_name}"}
 
 # Serve built SvelteKit frontend (output lives in web/build)
 build_dir = Path("web/build")

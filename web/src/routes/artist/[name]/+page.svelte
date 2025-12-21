@@ -74,106 +74,92 @@
 
   $: displayedTopTracks = (() => {
     const fromMeta = artist?.top_tracks || [];
-    // Return all top tracks (limit to 50 if needed, but scrolling handles it)
     return fromMeta.map((t) => {
-      const local = tracks.find(
-        (lt) => lt.title.toLowerCase() === (t.name || "").toLowerCase(),
-      );
-      return (
-        local || {
+      if (t.local_track_id) {
+        // Track is in library - find full track object
+        const local = tracks.find((lt) => lt.id === t.local_track_id);
+        if (local) return local;
+
+        // Fallback if track not loaded yet - use API data
+        return {
+          id: t.local_track_id,
+          title: t.name,
+          album: t.album || "",
+          artist: artist?.name || "",
+          duration_seconds:
+            t.duration_seconds ||
+            (t.duration_ms ? Math.round(t.duration_ms / 1000) : null),
+          codec: t.codec,
+          bit_depth: t.bit_depth,
+          sample_rate_hz: t.sample_rate_hz,
+        };
+      } else {
+        // Track not in library - return placeholder
+        return {
           id: -1,
           title: t.name,
           album: t.album || "",
-          artist: t.artist || artist?.name || "",
+          artist: artist?.name || "",
           duration_seconds: t.duration_ms
             ? Math.round(t.duration_ms / 1000)
             : null,
-        }
-      );
+        };
+      }
     });
   })();
 
   $: displayedSimilarArtists = (() => {
-    return data.similarArtists || [];
+    return artist?.similar_artists || [];
   })();
 
   $: displayedSingles = (() => {
     const singles = artist?.singles || [];
-    const processed = singles.map((s) => {
-      // Check if we have this single in our library (as an album OR as a track)
-      // 1. Check albums (exact match)
-      let localAlbum = data.albums.find(
-        (a) => a.album.toLowerCase() === s.title.toLowerCase(),
-      );
+    return singles
+      .map((s) => {
+        let tracksToPlay: Track[] = [];
+        let techData = {};
+        let localId = null;
+        let navAlbum = null;
+        let art_id = null;
+        let art_sha1 = null;
 
-      // Helper to get tech data from a track
-      let techData = {};
-      let tracksToPlay: Track[] = [];
+        if (s.local_track_id) {
+          // Single is in library - find the track
+          const localTrack = tracks.find((t) => t.id === s.local_track_id);
+          if (localTrack) {
+            localId = s.title; // Use title as ID
+            navAlbum = localTrack.album;
+            tracksToPlay = [localTrack];
+            techData = {
+              codec: s.codec || localTrack.codec,
+              bit_depth: s.bit_depth || localTrack.bit_depth,
+              sample_rate_hz: s.sample_rate_hz || localTrack.sample_rate_hz,
+            };
 
-      if (localAlbum) {
-        // If we matched an album, try to find a track from it to get tech data
-        // Ideally we'd have album-level tech data, but we can infer from a track
-        const albumTracks = tracks.filter((t) => t.album === localAlbum.album);
-        if (albumTracks.length > 0) {
-          const track = albumTracks[0];
-          techData = {
-            codec: track.codec,
-            bit_depth: track.bit_depth,
-            sample_rate_hz: track.sample_rate_hz,
-          };
-          // If it's a "Single" type release, we probably want to play all tracks (usually 1-2)
-          // But if we matched a full album by name accident, we might want to be careful.
-          // For now, let's assume if it matched a single name, we play the album tracks.
-          tracksToPlay = albumTracks;
+            // Get artwork from album
+            const album = data.albums.find((a) => a.album === localTrack.album);
+            if (album) {
+              art_id = album.art_id;
+              art_sha1 = album.art_sha1;
+            }
+          }
         }
-      } else {
-        const localTrack = tracks.find(
-          (t) => t.title.toLowerCase() === s.title.toLowerCase(),
-        );
-        if (localTrack) {
-          // Construct a fake album object to allow navigation/artwork
-          localAlbum = {
-            album: localTrack.album,
-            artist_name: localTrack.artist,
-            art_id: data.albums.find((a) => a.album === localTrack.album)
-              ?.art_id,
-            art_sha1: data.albums.find((a) => a.album === localTrack.album)
-              ?.art_sha1,
-            year: localTrack.date,
-            track_count: 1,
-            is_hires: 0,
-            total_duration: localTrack.duration_seconds || 0,
-            type: "appears_on",
-          } as Album;
-          techData = {
-            codec: localTrack.codec,
-            bit_depth: localTrack.bit_depth,
-            sample_rate_hz: localTrack.sample_rate_hz,
-          };
-          tracksToPlay = [localTrack];
-        }
-      }
 
-      return {
-        ...s,
-        localId: localAlbum ? localAlbum.album : null, // Use album name as ID for navigation
-        art_id: localAlbum?.art_id,
-        art_sha1: localAlbum?.art_sha1,
-        // If we matched a track, we might want to navigate to that track's album
-        navAlbum: localAlbum?.album,
-        ...techData,
-        tracksToPlay,
-      };
-    });
-
-    // Sort by date ascending (oldest first)
-    processed.sort((a, b) => {
-      const dateA = a.date || "";
-      const dateB = b.date || "";
-      return dateA.localeCompare(dateB);
-    });
-
-    return processed;
+        return {
+          ...s,
+          localId,
+          art_id,
+          art_sha1,
+          navAlbum,
+          ...techData,
+          tracksToPlay,
+        };
+      })
+      .sort((a, b) => {
+        const dateA = a.date || "";
+        const dateB = b.date || "";
+        return dateA.localeCompare(dateB);
+      });
   })();
 
   $: displayedMissingAlbums = (() => {
@@ -311,6 +297,18 @@
       </div>
 
       <div class="flex flex-wrap gap-2">
+        {#if artist?.homepage}
+          <a
+            class="pill hover:bg-white/15"
+            target="_blank"
+            href={artist.homepage}
+          >
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
+            </svg>
+            Homepage
+          </a>
+        {/if}
         {#if artist?.musicbrainz_url}
           <a
             class="pill hover:bg-white/15"
@@ -400,10 +398,6 @@
           <p class="text-sm uppercase tracking-wide text-white/60">Essential</p>
           <h3 class="text-xl font-semibold">Top tracks</h3>
         </div>
-        <a
-          class="btn btn-ghost btn-sm"
-          href={`/album/${encodeURIComponent(data.name)}`}>View albums</a
-        >
       </div>
       <div class="glass-panel flex-1 min-h-0 overflow-hidden flex flex-col">
         <div class="overflow-y-auto max-h-[360px] divide-y divide-white/5">
@@ -521,22 +515,13 @@
           <p class="text-sm uppercase tracking-wide text-white/60">Releases</p>
           <h3 class="text-xl font-semibold">Singles</h3>
         </div>
-        <div class="flex gap-2">
-          <button
-            class="btn btn-ghost btn-sm"
-            on:click={playAllSingles}
-            title="Play All Singles"
-          >
-            ▶ Play All
-          </button>
-          <button
-            class="btn btn-ghost btn-sm"
-            on:click={refreshSingles}
-            disabled={refreshingSingles}
-          >
-            {refreshingSingles ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
+        <button
+          class="btn btn-ghost btn-sm"
+          on:click={playAllSingles}
+          title="Play All Singles"
+        >
+          ▶ Play All
+        </button>
       </div>
       <div class="glass-panel flex-1 min-h-0 overflow-hidden flex flex-col">
         <div class="overflow-y-auto max-h-[360px] divide-y divide-white/5">
@@ -666,7 +651,7 @@
       </div>
       <div class="glass-panel flex-1 min-h-0 overflow-hidden flex flex-col">
         <div class="overflow-y-auto max-h-[360px] divide-y divide-white/5">
-          {#if data.similarArtists?.length}
+          {#if artist?.similar_artists?.length}
             {#each displayedSimilarArtists as sim}
               <button
                 class="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-white/5 transition-colors"
@@ -684,7 +669,7 @@
                   <div
                     class="h-12 w-12 rounded-full bg-white/10 text-center text-sm font-semibold leading-[3rem]"
                   >
-                    {sim.name.charAt(0).toUpperCase()}
+                    {sim.name ? sim.name.charAt(0).toUpperCase() : "?"}
                   </div>
                 {/if}
                 <div class="truncate text-sm font-semibold">{sim.name}</div>

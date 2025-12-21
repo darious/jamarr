@@ -306,6 +306,8 @@ async function playCurrentTrack() {
             window.dispatchEvent(new CustomEvent('jamarr:play-local', { detail: track }));
         } else {
             console.log('[playCurrentTrack] Not local playback, data:', data);
+            // Optimistically update state to Playing for remote
+            playerState.update(s => ({ ...s, is_playing: true }));
         }
     } catch (e) {
         console.error('[playCurrentTrack] Exception:', e);

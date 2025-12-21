@@ -4,15 +4,42 @@ export interface Artist {
     art_id: number | null;
     art_sha1?: string | null;
     bio: string | null;
-    similar_artists: string[];
-    top_tracks: { name: string; album: string; date: string; duration_ms: number }[];
-    singles?: { mbid: string; title: string; date: string; artist: string }[];
+    similar_artists: {
+        name: string;
+        mbid?: string | null;
+        image_url?: string | null;
+        art_id?: number | null;
+        art_sha1?: string | null;
+    }[];
+    top_tracks: {
+        name: string;
+        album: string;
+        date: string;
+        duration_ms: number;
+        popularity?: number;
+        local_track_id?: number | null;
+        codec?: string | null;
+        bit_depth?: number | null;
+        sample_rate_hz?: number | null;
+        duration_seconds?: number | null;
+    }[];
+    singles?: {
+        mbid: string;
+        title: string;
+        date: string;
+        artist: string;
+        local_track_id?: number | null;
+        codec?: string | null;
+        bit_depth?: number | null;
+        sample_rate_hz?: number | null;
+    }[];
     sort_name: string;
     homepage: string | null;
     spotify_url: string | null;
     wikipedia_url: string | null;
     qobuz_url: string | null;
     musicbrainz_url: string | null;
+    tidal_url?: string | null;
     albums?: {
         mbid: string;
         title: string;
@@ -26,6 +53,7 @@ export interface Artist {
 
 export interface Album {
     album: string;
+    mbid?: string;
     art_id: number | null;
     art_sha1?: string | null;
     artist_name: string;
@@ -68,38 +96,118 @@ export async function fetchAlbums(params: { artist?: string } = {}, fetchFn: any
     if (params.artist) {
         url += `?artist=${encodeURIComponent(params.artist)}`;
     }
+    // Support album MBID query
+    if ((params as any).albumMbid) {
+        const q = params.artist ? '&' : '?';
+        url += `${q}album_mbid=${encodeURIComponent((params as any).albumMbid)}`;
+    }
     const res = await fetchFn(url);
     if (!res.ok) throw new Error('Failed to fetch albums');
     return await res.json();
 }
 
-export async function fetchTracks(params: { album?: string, artist?: string } = {}, fetchFn: any = fetch): Promise<Track[]> {
+export async function fetchTracks(params: { album?: string, artist?: string, albumMbid?: string } = {}, fetchFn: any = fetch): Promise<Track[]> {
     // Note: Backend expects 'album' name as string, not ID.
     // The frontend route is /album/[artist]/[album], so we pass the album name.
     let url = '/api/tracks?';
     const q = new URLSearchParams();
     if (params.album) q.append('album', params.album);
     if (params.artist) q.append('artist', params.artist);
+    if (params.albumMbid) q.append('album_mbid', params.albumMbid);
 
     const res = await fetchFn(url + q.toString());
     if (!res.ok) throw new Error('Failed to fetch tracks');
     return await res.json();
 }
 
-export async function triggerScan(): Promise<void> {
-    const res = await fetch('/api/scan', { method: 'POST' });
+export async function triggerScan(forceRescan: boolean = false): Promise<void> {
+    const res = await fetch('/api/library/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'filesystem', force: forceRescan })
+    });
     if (!res.ok) throw new Error('Failed to trigger scan');
 }
 
+export async function triggerFilesystemScan(opts: { force?: boolean; path?: string } = {}): Promise<void> {
+    const res = await fetch('/api/library/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'filesystem', force: Boolean(opts.force), path: opts.path || null })
+    });
+    if (!res.ok) throw new Error('Failed to trigger scan');
+}
+
+
 export async function refreshArtistMetadata(artistName: string): Promise<void> {
-    const res = await fetch(`/api/scan_artist?artist_name=${encodeURIComponent(artistName)}`, { method: 'POST' });
+    const res = await fetch('/api/library/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'metadata', artist_filter: artistName })
+    });
     if (!res.ok) throw new Error('Failed to refresh artist metadata');
 }
 
 export async function refreshArtistSingles(artistName: string): Promise<void> {
-    const res = await fetch(`/api/scan_artist_singles?artist_name=${encodeURIComponent(artistName)}`, { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to refresh artist singles');
+    return refreshArtistMetadata(artistName);
 }
+
+export type MetadataOptions = {
+    artistFilter?: string;
+    mbidFilter?: string;
+    missingOnly?: boolean;
+    bioOnly?: boolean;
+    linksOnly?: boolean;
+};
+
+export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<void> {
+    const res = await fetch('/api/library/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            type: 'metadata',
+            artist_filter: opts.artistFilter || null,
+            mbid_filter: opts.mbidFilter || null,
+            missing_only: Boolean(opts.missingOnly),
+            bio_only: Boolean(opts.bioOnly),
+            links_only: Boolean(opts.linksOnly),
+        })
+    });
+    if (!res.ok) throw new Error('Failed to trigger metadata scan');
+}
+
+export async function cancelScan(): Promise<void> {
+    const res = await fetch('/api/library/cancel', { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to cancel scan');
+}
+
+export async function triggerFullScan(opts: { force?: boolean; path?: string } & MetadataOptions = {}): Promise<void> {
+    const res = await fetch('/api/library/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            type: 'full',
+            force: Boolean(opts.force),
+            path: opts.path || null,
+            artist_filter: opts.artistFilter || null,
+            mbid_filter: opts.mbidFilter || null,
+            missing_only: Boolean(opts.missingOnly),
+            bio_only: Boolean(opts.bioOnly),
+            links_only: Boolean(opts.linksOnly),
+        })
+    });
+    if (!res.ok) throw new Error('Failed to trigger full scan');
+}
+
+export async function triggerPrune(): Promise<void> {
+    const res = await fetch('/api/library/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'prune' })
+    });
+    if (!res.ok) throw new Error('Failed to prune library');
+}
+
 
 export async function fetchNewReleases(fetchFn: any = fetch): Promise<Album[]> {
     const res = await fetchFn('/api/home/new-releases');

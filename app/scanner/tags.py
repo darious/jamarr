@@ -75,6 +75,7 @@ def extract_tags(path: str) -> dict:
             mb_track_id = get_first(t, ["MUSICBRAINZ_TRACKID", "musicbrainz_trackid", "UFID:http://musicbrainz.org"])
             # Fallback to AlbumID as release ID if needed, though they are usually distinct concepts but mapped similarly in simple taggers
             mb_release_id = get_first(t, ["MUSICBRAINZ_ALBUMID", "musicbrainz_albumid", "MUSICBRAINZ_RELEASEID", "musicbrainz_releaseid"])
+            mb_release_group_id = get_first(t, ["MUSICBRAINZ_RELEASEGROUPID", "musicbrainz_releasegroupid"])
 
         tags.update({
             "title": title,
@@ -90,7 +91,8 @@ def extract_tags(path: str) -> dict:
             "mb_album_artist_id": mb_album_artist_id,
             "mb_track_id": mb_track_id, 
             "mb_release_track_id": mb_release_track_id,
-            "mb_release_id": mb_release_id
+            "mb_release_id": mb_release_id,
+            "mb_release_group_id": mb_release_group_id
         })
 
         return tags

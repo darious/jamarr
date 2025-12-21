@@ -3,7 +3,7 @@
 ## Scanner
 * ~~Add a sparse refresh mode that only looks for new stuff and doesn't delete old stuff~~
 * ~~make the scanner notice changed files and update them and remove files that are missing from the file system~~
-
+* make the file location relative to the config  music root varibale, so we can clone the database
 
 ## Search
 * ~~Add search box to the top of the page~~
@@ -28,5 +28,8 @@
 
 
 ## playback
-* play pause button not working for upnp post a page reload
-* fix playback pausing when browser tab does not have the focus
+* ~~play pause button not working for upnp post a page reload~~
+* ~~fix playback pausing when browser tab does not have the focus~~
+* Fix where the whole album is added to the queue when i click play on a single album track
+* fix where we're adding tracks to the history twice (front and backend I think)
+
