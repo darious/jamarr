@@ -78,30 +78,135 @@ The recommended way to run Jamarr is via Docker Compose.
 3.  Run: `npm run dev -- --host 0.0.0.0 --port 4173`
 
 
-### Running the Scanner
+### Running the Scanner (CLI)
 
-To scan your music library and populate the database (including fetching artist metadata from Spotify), run:
+Jamarr includes a powerful CLI to manage the library and metadata.
 
+**Basic Usage:**
 ```bash
-python scan.py
+python -m app.scanner.cli <command> [options]
 ```
 
-Options:
-- `-v`: Verbose mode. Shows every file being scanned.
-- `-vv`: Very verbose mode. Shows detailed API lookups and HTTP requests.
-- `--force-metadata`: Force update of artist metadata.
+## Workflow Overview
 
-Ensure your `MUSIC_PATH` environment variable is set if your music is not in the default location, or update the path in `app/scanner/scan.py`.
+The scanner uses a two-phase approach:
 
-## Project Structure
+1. **`scan`**: Extracts metadata directly from file tags (artist names, album titles, track info, MusicBrainz IDs)
+2. **`metadata`**: Enriches the database with additional data from MusicBrainz/Spotify (bios, artwork, sort names, external links)
 
-- `app/`: Backend application code (FastAPI).
-- `web/`: Frontend (SvelteKit + TypeScript + Skeleton UI).
-- `cache/`: Local database and artwork cache.
-  - `cache/library.sqlite`: SQLite database.
-  - `cache/art/album/`: Album artwork organized in subdirectories (00-ff).
-  - `cache/art/artist/`: Artist images organized in subdirectories (00-ff).
-- `requirements.txt`: Python dependencies.
+This separation ensures fast initial scans while allowing rich metadata to be fetched on-demand.
+
+**Commands:**
+
+1.  **`scan`**: Scans the filesystem for music files and adds them to the library.
+    *   Extracts all tag data: title, artist, album, track numbers, MusicBrainz IDs
+    *   Populates artist names for single-artist tracks
+    *   Creates album records from release group IDs in tags
+    *   Multi-artist collaborations will have blank names (filled by `metadata` command)
+    
+    **Options:**
+    *   `--path <path>`: Scan a specific directory (default: `MUSIC_PATH` from config)
+    *   `--force`: Force a full rescan of all files, even if unchanged
+    *   `--verbose` (`-v`): Enable detailed debug logging
+    
+    **Examples:**
+    ```bash
+    # Standard scan
+    python -m app.scanner.cli scan -v
+    
+    # Force rescan specific folder
+    python -m app.scanner.cli scan --path "/music/New Added" --force
+    ```
+
+2.  **`metadata`**: Fetches artist/album metadata from MusicBrainz & Spotify.
+    *   Fills in missing artist names (e.g., for multi-artist collaborations)
+    *   Populates `sort_name` for all artists (e.g., "Sheeran, Ed")
+    *   Fetches bios, images, and external links (Spotify, Tidal, Qobuz, Wikipedia)
+    *   **Only updates blank fields** - never overwrites tag-based names
+    
+    **Options:**
+    *   `--artist <name>`: Filter to update only artists matching this name
+    *   `--mbid <id>`: Filter to update only a specific artist by MusicBrainz ID
+    *   `--links-only`: Only update external links (Tidal/Qobuz/Wiki) without fetching bio/images
+    *   `--bio-only`: Only update bio & images (skips Album/Single fetch & Link Resolution)
+    *   `--verbose` (`-v`): Enable detailed debug logging (shows API calls)
+
+    **Examples:**
+    ```bash
+    # Update all metadata (recommended after first scan)
+    python -m app.scanner.cli metadata -v
+    
+    # Update specific artist by name
+    python -m app.scanner.cli metadata --artist "Bear's Den"
+    
+    # Update specific artist by MusicBrainz ID (useful for blank names)
+    python -m app.scanner.cli metadata --mbid ef5aab86-887d-4fc2-a883-431ef017175a
+    
+    # Find artists with blank names
+    sqlite3 cache/library.sqlite "select mbid, name from artists where name is null or name = ''"
+    ```
+
+3.  **`prune`**: Cleans up the library by removing orphaned data.
+    *   Removes database entries for files no longer on disk
+    *   Removes Artists/Albums that have no remaining tracks
+    *   Removes cached artwork files that are no longer used
+    *   *Safe to run periodically to keep the database tidy*
+
+    **Example:**
+    ```bash
+    python -m app.scanner.cli prune
+    ```
+
+4.  **`full`**: Runs `scan` followed immediately by `metadata` and then `prune`.
+    *   Equivalent to running all three commands sequentially
+    
+    **Example:**
+    ```bash
+    python -m app.scanner.cli full
+    ```
+
+## Typical Workflow
+
+```bash
+# 1. Initial scan - populates tracks, albums, and single-artist names from tags
+python -m app.scanner.cli scan
+
+# 2. Enrich with metadata - fills in missing names, sort names, bios, artwork
+python -m app.scanner.cli metadata
+
+# 3. (Optional) Clean up orphaned data
+python -m app.scanner.cli prune
+```
+
+## Database Schema
+
+The database has been normalized to improve data integrity and query performance.
+
+### Core Tables
+-   **`tracks`**: Individual audio files.
+    -   Joined to `albums` via `mb_release_group_id`.
+    -   Joined to `artists` via `track_artists` table (multi-artist support).
+-   **`albums`**: Release groups (Albums, EPs, Singles).
+    -   Stores `title`, `release_date`, `primary_type`.
+    -   Source: MusicBrainz Release Group.
+-   **`artists`**: Artist core info.
+    -   Stores `name`, `bio`, `image_url` (path to cached artwork).
+    -   Source: MusicBrainz (ID) & Spotify (Bio/Image).
+
+### Junction & Helper Tables
+-   **`artist_albums`**: Links artists to albums (Many-to-Many).
+-   **`track_artists`**: Links artists to tracks (Many-to-Many).
+-   **`external_links`**: Stores URLs for Artists and Albums.
+    -   Types: `spotify`, `tidal`, `qobuz`, `wikipedia`, `homepage`.
+    -   Supports prioritized link resolution (e.g., matching Digital Media releases).
+-   **`artwork`**: Deduplicated artwork storage.
+    -   Images stored by SHA1 hash to prevent duplicates.
+
+### State Management
+-   **`renderers`**: UPnP devices discovered on the network.
+-   **`renderer_states`**: Current playback status (queue, position, volume) for each renderer.
+-   **`client_sessions`**: Tracks active user sessions and their selected renderer.
+-   **`playback_history`**: Log of all played tracks.
 
 ## Frontend (SvelteKit + Skeleton)
 

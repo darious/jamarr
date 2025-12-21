@@ -28,16 +28,9 @@ CREATE TABLE IF NOT EXISTS tracks (
     mb_track_id TEXT,
     mb_release_track_id TEXT,
     mb_release_id TEXT,
+    mb_release_group_id TEXT,
     art_id INTEGER,
     FOREIGN KEY(art_id) REFERENCES artwork(id)
-);
-
-CREATE TABLE IF NOT EXISTS track_artists (
-    track_id INTEGER,
-    mbid TEXT,
-    PRIMARY KEY (track_id, mbid),
-    FOREIGN KEY(track_id) REFERENCES tracks(id),
-    FOREIGN KEY(mbid) REFERENCES artists(mbid)
 );
 
 CREATE TABLE IF NOT EXISTS artists (
@@ -47,18 +40,46 @@ CREATE TABLE IF NOT EXISTS artists (
     bio TEXT,
     image_url TEXT,
     art_id INTEGER,
-    spotify_url TEXT,
-    homepage TEXT,
-    similar_artists TEXT,
-    top_tracks TEXT,
-    singles TEXT,
     last_updated REAL,
-    wikipedia_url TEXT,
-    qobuz_url TEXT,
-    tidal_url TEXT,
-    musicbrainz_url TEXT,
-    albums TEXT,
+    -- Normalized data moved to linked tables
     FOREIGN KEY(art_id) REFERENCES artwork(id)
+);
+
+CREATE TABLE IF NOT EXISTS albums (
+    mbid TEXT PRIMARY KEY,
+    title TEXT,
+    release_date TEXT,
+    primary_type TEXT,
+    secondary_types TEXT,
+    art_id INTEGER,
+    last_updated REAL,
+    FOREIGN KEY(art_id) REFERENCES artwork(id)
+);
+
+CREATE TABLE IF NOT EXISTS artist_albums (
+    artist_mbid TEXT,
+    album_mbid TEXT,
+    type TEXT, -- 'primary', 'featured', etc.
+    PRIMARY KEY (artist_mbid, album_mbid),
+    FOREIGN KEY(artist_mbid) REFERENCES artists(mbid),
+    FOREIGN KEY(album_mbid) REFERENCES albums(mbid)
+);
+
+CREATE TABLE IF NOT EXISTS external_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL, -- 'artist', 'album'
+    entity_id TEXT NOT NULL, -- mbid
+    type TEXT NOT NULL, -- 'spotify', 'tidal', 'qobuz', 'wikipedia', 'homepage'
+    url TEXT NOT NULL,
+    UNIQUE(entity_type, entity_id, type)
+);
+
+CREATE TABLE IF NOT EXISTS track_artists (
+    track_id INTEGER,
+    mbid TEXT,
+    PRIMARY KEY (track_id, mbid),
+    FOREIGN KEY(track_id) REFERENCES tracks(id),
+    FOREIGN KEY(mbid) REFERENCES artists(mbid)
 );
 
 CREATE TABLE IF NOT EXISTS artwork (
@@ -76,12 +97,41 @@ CREATE TABLE IF NOT EXISTS renderers (
     friendly_name TEXT,
     udn TEXT UNIQUE NOT NULL,
     location_url TEXT,
+    ip TEXT,
+    control_url TEXT,
+    rendering_control_url TEXT,
     last_seen REAL
+);
+
+CREATE TABLE IF NOT EXISTS client_sessions (
+    client_id TEXT PRIMARY KEY,
+    active_renderer_udn TEXT,
+    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS renderer_states (
+    renderer_udn TEXT PRIMARY KEY,
+    queue TEXT DEFAULT '[]',
+    current_index INTEGER DEFAULT -1,
+    position_seconds REAL DEFAULT 0,
+    is_playing BOOLEAN DEFAULT 0,
+    transport_state TEXT DEFAULT 'STOPPED',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS playback_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER NOT NULL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    client_ip TEXT,
+    hostname TEXT,
+    FOREIGN KEY(track_id) REFERENCES tracks(id)
 );
 
 -- Indexes for integrity & joins
 CREATE INDEX IF NOT EXISTS idx_tracks_art_id ON tracks(art_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_mb_artist_id ON tracks(mb_artist_id);
+CREATE INDEX IF NOT EXISTS idx_links_entity ON external_links(entity_type, entity_id);
 
 -- Indexes for browsing (artist → album → tracks)
 CREATE INDEX IF NOT EXISTS idx_tracks_artist_album ON tracks(artist COLLATE NOCASE, album COLLATE NOCASE, disc_no, track_no);
@@ -140,7 +190,69 @@ async def init_db():
             "ALTER TABLE artists ADD COLUMN art_id INTEGER REFERENCES artwork(id)",
             "ALTER TABLE artists ADD COLUMN singles TEXT",
             "ALTER TABLE artists ADD COLUMN albums TEXT",
-            "ALTER TABLE tracks ADD COLUMN mb_release_id TEXT"
+            "ALTER TABLE tracks ADD COLUMN mb_release_id TEXT",
+            "ALTER TABLE tracks ADD COLUMN mb_release_group_id TEXT",
+            # Normalization Migration
+            """CREATE TABLE IF NOT EXISTS albums (
+                mbid TEXT PRIMARY KEY,
+                title TEXT,
+                release_date TEXT,
+                primary_type TEXT,
+                secondary_types TEXT,
+                art_id INTEGER,
+                last_updated REAL,
+                FOREIGN KEY(art_id) REFERENCES artwork(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS artist_albums (
+                artist_mbid TEXT,
+                album_mbid TEXT,
+                type TEXT,
+                PRIMARY KEY (artist_mbid, album_mbid),
+                FOREIGN KEY(artist_mbid) REFERENCES artists(mbid),
+                FOREIGN KEY(album_mbid) REFERENCES albums(mbid)
+            )""",
+            """CREATE TABLE IF NOT EXISTS external_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                url TEXT NOT NULL,
+                UNIQUE(entity_type, entity_id, type)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_links_entity ON external_links(entity_type, entity_id)",
+            # Top Tracks & Singles table
+            """CREATE TABLE IF NOT EXISTS tracks_top (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                artist_mbid TEXT NOT NULL,
+                type TEXT NOT NULL CHECK(type IN ('top', 'single')),
+                track_id INTEGER,
+                external_name TEXT NOT NULL,
+                external_album TEXT,
+                external_date TEXT,
+                external_duration_ms INTEGER,
+                external_mbid TEXT,
+                popularity INTEGER,
+                rank INTEGER,
+                last_updated REAL,
+                FOREIGN KEY(artist_mbid) REFERENCES artists(mbid),
+                FOREIGN KEY(track_id) REFERENCES tracks(id) ON DELETE SET NULL,
+                UNIQUE(artist_mbid, type, external_name, external_album)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_tracks_top_artist ON tracks_top(artist_mbid, type)",
+            "CREATE INDEX IF NOT EXISTS idx_tracks_top_track ON tracks_top(track_id)",
+            # Similar Artists table
+            """CREATE TABLE IF NOT EXISTS similar_artists (
+                artist_mbid TEXT NOT NULL,
+                similar_artist_name TEXT NOT NULL,
+                similar_artist_mbid TEXT,
+                rank INTEGER,
+                last_updated REAL,
+                PRIMARY KEY (artist_mbid, similar_artist_name),
+                FOREIGN KEY(artist_mbid) REFERENCES artists(mbid),
+                FOREIGN KEY(similar_artist_mbid) REFERENCES artists(mbid) ON DELETE SET NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_similar_artists_artist ON similar_artists(artist_mbid)",
+            "CREATE INDEX IF NOT EXISTS idx_similar_artists_similar ON similar_artists(similar_artist_mbid)"
         ]
         
         for sql in migrations:
@@ -163,18 +275,18 @@ async def init_db():
 
         # Playback State (Single row enforced) - DEPRECATED in favor of renderer_states
         # Kept for backward compat or migration if needed, but we will use renderer_states now.
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS playback_state (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                queue TEXT DEFAULT '[]',
-                current_index INTEGER DEFAULT 0,
-                position_seconds REAL DEFAULT 0,
-                is_playing BOOLEAN DEFAULT 0
-            )
-        """)
+        # await db.execute("""
+        #     CREATE TABLE IF NOT EXISTS playback_state (
+        #         id INTEGER PRIMARY KEY CHECK (id = 1),
+        #         queue TEXT DEFAULT '[]',
+        #         current_index INTEGER DEFAULT 0,
+        #         position_seconds REAL DEFAULT 0,
+        #         is_playing BOOLEAN DEFAULT 0
+        #     )
+        # """)
         
         # Ensure the single row exists
-        await db.execute("INSERT OR IGNORE INTO playback_state (id) VALUES (1)")
+        # await db.execute("INSERT OR IGNORE INTO playback_state (id) VALUES (1)")
         
         # --- Multi-User & Renderer State Tables ---
         
@@ -224,4 +336,16 @@ async def init_db():
         except Exception:
             pass  # Column likely exists
 
+        # --- Cleanup Migrations (Normalization) ---
+        # Dropping legacy columns from artists table
+        legacy_cols = ["spotify_url", "homepage", "wikipedia_url", "qobuz_url", "tidal_url", "musicbrainz_url", "singles", "albums"]
+        for col in legacy_cols:
+            try:
+                await db.execute(f"ALTER TABLE artists DROP COLUMN {col}")
+            except Exception:
+                pass # Column likely already dropped or sqlite version too old (requires 3.35+)
+        
+        # Drop deprecated playback_state table
+        await db.execute("DROP TABLE IF EXISTS playback_state")
+        
         await db.commit()
