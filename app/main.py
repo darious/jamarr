@@ -12,8 +12,28 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Filter out /api/player/state from access logs (too chatty due to polling)
+# Configure Rich Logging
 import logging
+from rich.logging import RichHandler
+
+FORMAT = "%(message)s"
+logging.basicConfig(
+    level="INFO", format=FORMAT, datefmt="[%X]", handlers=[RichHandler(rich_tracebacks=True)]
+)
+
+# Force Uvicorn to use RichHandler
+for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
+    logger = logging.getLogger(logger_name)
+    logger.handlers = [] # Remove default Uvicorn handlers
+    logger.propagate = True # Let it bubble up to root (which has RichHandler)
+
+
+# Silence chatty libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("async_upnp_client").setLevel(logging.WARNING)
+
+# Filter out /api/player/state from access logs (too chatty due to polling)
 class EndpointFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         return record.getMessage().find("/api/player/state") == -1
