@@ -25,6 +25,9 @@ class UPnPManager:
         self.local_ip = self._get_local_ip()
         self.base_url = None
         self._bg_task = None
+        self.is_scanning_subnet = False
+        self.scan_progress = 0
+        self.scan_msg = ""
 
     def start_background_scan(self):
         if not self._bg_task:
@@ -151,6 +154,10 @@ class UPnPManager:
                 resp = await client.get(location, timeout=5.0) # Increased timeout
                 if resp.status_code == 200:
                     xml = resp.text
+                    if not xml or not xml.strip():
+                        # self.log(f"Empty XML from {location}")
+                        return
+                        
                     root = ET.fromstring(xml)
                     
                     # Extract Device Info
@@ -218,7 +225,7 @@ class UPnPManager:
     async def add_device_by_ip(self, ip: str):
         """Manually access UPnP device via Unicast M-SEARCH and HTTP Probing."""
         # 1. Try Unicast M-SEARCH (Standard compliant way for known IP)
-        logger.info(f"Probing IP {ip} via Unicast M-SEARCH...")
+        # Fast fail (0.5s) to avoid delaying fallback
         try:
              MSEARCH = (
                 'M-SEARCH * HTTP/1.1\r\n'
@@ -230,96 +237,120 @@ class UPnPManager:
              ).encode('utf-8')
 
              sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+             sock.setblocking(False)
              sock.bind(('0.0.0.0', 0))
              sock.sendto(MSEARCH, (ip, 1900))
-             sock.setblocking(False)
 
-             start = asyncio.get_event_loop().time()
-             while asyncio.get_event_loop().time() - start < 2:
-                 try:
-                     # sock_recv returns bytes
-                     data = await asyncio.wait_for(
-                        asyncio.get_event_loop().sock_recv(sock, 2048),
-                        timeout=0.5
-                     )
-                     # We trust it comes from the IP we sent to (or use sock.recvfrom in executor)
-                     # Parse logic
-                     await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), (ip, 1900))
-                     sock.close()
-                     return True
-                 except (BlockingIOError, asyncio.TimeoutError):
-                     pass
-                 except Exception:
-                     break
+             try:
+                 data = await asyncio.wait_for(
+                    asyncio.get_event_loop().sock_recv(sock, 2048),
+                    timeout=1.5 # Increased from 0.3s for slower devices like Naim
+                 )
+                 await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), (ip, 1900))
+                 sock.close()
+                 return True
+             except:
+                 pass
              sock.close()
-        except Exception as e:
-             logger.warning(f"Unicast M-SEARCH failed for {ip}: {e}")
+        except:
+             pass
 
-        # 2. Fallback to HTTP Port Scan
-        logger.info(f"Unicast failed. Probing common ports on {ip}...")
-        ports = [8080, 80, 55000, 5000, 5050, 1400] # Added 1400 for Sonos
-        paths = ['/description.xml', '/device-desc.xml', '/dd.xml', '/xml/device_description.xml'] # Added Sonos path
+        # 2. Fallback to HTTP Port Scan (Parallelized)
+        ports = [8080, 80, 55000, 5000, 5050, 1400, 54380]
+        paths = ['/description.xml', '/device-desc.xml', '/dd.xml', '/xml/device_description.xml', '/MediaRenderer_TA-AN1000.xml', '/dmr.xml']
         
-        found = False
+        # Helper to check a specific url
+        async def check_url(client, url):
+            try:
+                resp = await client.get(url, timeout=1.0)
+                if resp.status_code == 200 and ('device' in resp.text or 'root' in resp.text):
+                     return url
+            except:
+                pass
+            return None
+
+        # Gather all probes
+        probe_tasks = []
         async with httpx.AsyncClient() as client:
             for port in ports:
+                # Optimization: Try to connect to port first? 
+                # Actually, blindly firing 42 requests in parallel is fine for async, 
+                # as long as we don't wait sequentially.
                 for path in paths:
                     url = f"http://{ip}:{port}{path}"
-                    try:
-                        resp = await client.get(url, timeout=0.5)
-                        if resp.status_code == 200 and ('device' in resp.text or 'root' in resp.text): # Simple check
-                            logger.info(f"Found Device at {url}")
-                            await self._add_renderer(url)
-                            found = True
-                            break
-                    except Exception:
-                        pass
-                if found: break
+                    probe_tasks.append(check_url(client, url))
+            
+            # Run all probes for this IP in parallel
+            results = await asyncio.gather(*probe_tasks)
+            
+            for url in results:
+                if url:
+                    logger.info(f"Found Device at {url}")
+                    await self._add_renderer(url)
+                    return True
         
-        return found
+        return False
     
     async def scan_subnet(self):
         """Active scan of the local subnet and common home subnets."""
+        if self.is_scanning_subnet:
+            return
+
+        self.is_scanning_subnet = True
+        self.scan_progress = 0
+        self.scan_msg = "Starting active scan..."
         self.log("Starting active subnet scan...")
         
-        subnets = set()
-        
-        # 1. Add local subnet
-        local_ip = self.local_ip
-        if local_ip and local_ip != '127.0.0.1':
-            subnets.add('.'.join(local_ip.split('.')[:-1]))
+        try:
+            subnets = set()
+            local_ip = self.local_ip
+            if local_ip and local_ip != '127.0.0.1':
+                subnets.add('.'.join(local_ip.split('.')[:-1]))
+            subnets.add('192.168.0')
+            subnets.add('192.168.1')
             
-        # 2. Add common home subnets
-        subnets.add('192.168.0')
-        subnets.add('192.168.1')
-        
-        tasks = []
-        chunk_size = 50
-        
-        for subnet in subnets:
-            self.log(f"Scanning subnet {subnet}.x ...")
-            for i in range(1, 255):
-                target_ip = f"{subnet}.{i}"
-                if target_ip == local_ip: continue
+            total_ips = len(subnets) * 254
+            processed_ips = 0
+
+            tasks = []
+            chunk_size = 10 
+            
+            for idx, subnet in enumerate(subnets):
+                self.log(f"Scanning subnet {subnet}.x ...")
                 
-                tasks.append(self.add_device_by_ip(target_ip))
+                for i in range(1, 255):
+                    processed_ips += 1
+                    # Update progress every 2 IPs
+                    if i % 2 == 0:
+                        pct = int((processed_ips / total_ips) * 100)
+                        self.scan_progress = pct
+                        self.scan_msg = f"Scanning {subnet}.{i} ({pct}%)"
+
+                    target_ip = f"{subnet}.{i}"
+                    if target_ip == local_ip: continue
+                    
+                    tasks.append(self.add_device_by_ip(target_ip))
+                    
+                    if len(tasks) >= chunk_size:
+                        await asyncio.gather(*tasks)
+                        tasks = []
+                        await asyncio.sleep(0.01)
                 
-                if len(tasks) >= chunk_size:
+                if tasks:
                     await asyncio.gather(*tasks)
                     tasks = []
-                    await asyncio.sleep(0.1)
-            
-            if tasks:
-                await asyncio.gather(*tasks)
-                tasks = []
-            
-        self.log("Active subnet scan completed.")
+                
+            self.log("Active subnet scan completed.")
+            self.scan_progress = 100
+            self.scan_msg = "Scan complete."
+        finally:
+            self.is_scanning_subnet = False
+            self.scan_progress = 0
+            self.scan_msg = ""
                             
     # --- Control Actions ---
 
     async def get_renderers(self):
-        if not self.renderers:
-            await self.discover()
         return list(self.renderers.values())
 
     async def set_renderer(self, udn):
