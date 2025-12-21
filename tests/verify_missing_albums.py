@@ -13,30 +13,40 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 async def verify():
-    # Test with Daft Punk (MBID: 056e4f3e-d505-4dad-8ec1-d04f521cbb56)
-    # Expected: "Homework", "Discovery", "Human After All", "Random Access Memories", etc.
-    mbid = "056e4f3e-d505-4dad-8ec1-d04f521cbb56"
-    name = "Daft Punk"
+    # Test with Haim (MBID: aef06569-098f-4218-a577-b413944d9493)
+    mbid = "aef06569-098f-4218-a577-b413944d9493"
+    name = "Haim"
     
     print(f"Fetching albums for {name} ({mbid})...")
     albums = await fetch_artist_albums(mbid, name)
     
-    print(f"Found {len(albums)} albums:")
-    found_discovery = False
-    
-    for a in albums:
-        print(f"- {a['date']} | {a['title']}")
-        print(f"  MB: {a['musicbrainz_url']}")
-        print(f"  Qobuz URL: {a['qobuz_url']}")
-        print(f"  Qobuz ID: {a['qobuz_id']}")
-        
-        if "Discovery" in a['title']:
-            found_discovery = True
+    found_women = False
+    correct_id_women = False
+    found_stty = False
+    correct_id_stty = False
 
-    if found_discovery:
-        print("\nSUCCESS: Found 'Discovery' album.")
+    for a in albums:
+        if "Women in Music" in a['title']: 
+             found_women = True
+             if a['qobuz_id'] == "wpwvp04bzobta":
+                 correct_id_women = True
+        
+        if "Something to Tell You" in a['title']:
+             found_stty = True
+             # We expect the ID that works with GET: 0060255775158 or similar valid one
+             print(f"DEBUG: Found STTY - ID: {a['qobuz_id']}")
+             if a['qobuz_id'] in ["0060255775158", "0060255767157"]: # Accepted IDs seen in debug
+                 correct_id_stty = True
+
+    if found_women and correct_id_women:
+        print("SUCCESS: 'Women in Music, Pt. III' verified.")
     else:
-        print("\nFAILURE: Did not find 'Discovery' album.")
+        print("FAILURE: 'Women in Music, Pt. III' check failed.")
+
+    if found_stty and correct_id_stty:
+        print("SUCCESS: 'Something to Tell You' verified.")
+    else:
+        print("FAILURE: 'Something to Tell You' check failed.")
 
 if __name__ == "__main__":
     asyncio.run(verify())

@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 import base64
 
-from app.config import get_spotify_credentials, get_musicbrainz_root_url, get_musicbrainz_rate_limit
+from app.config import get_spotify_credentials, get_musicbrainz_root_url, get_musicbrainz_rate_limit, get_qobuz_region
 
 MB_API_ROOT = f"{get_musicbrainz_root_url()}/ws/2"
 WIKI_API_ROOT = "https://en.wikipedia.org/api/rest_v1/page/summary"
@@ -350,7 +350,9 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                  # The user said "scanner to do the search".
                  # We can try to search via their public web store search which is easier to scrape:
                  # https://www.qobuz.com/us-en/search?q=Artist&i=boutique
-                 store_search_url = f"https://www.qobuz.com/us-en/search?q={encoded_name}&i=boutique"
+                 # https://www.qobuz.com/<REGION>/search?q=Artist&i=boutique
+                 region = get_qobuz_region()
+                 store_search_url = f"https://www.qobuz.com/{region}/search?q={encoded_name}&i=boutique"
                  
                  async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0"}) as resolution_client:
                     resp = await resolution_client.get(store_search_url, follow_redirects=True)
@@ -509,15 +511,37 @@ async def _process_single_album(rg, artist_name, client):
     # 1. MusicBrainz Direct Lookup
     try:
         await mb_limiter.acquire()
-        rg_details_url = f"{MB_API_ROOT}/release-group/{rg.get('id')}?inc=releases&fmt=json"
+        rg_details_url = f"{MB_API_ROOT}/release-group/{rg.get('id')}?inc=releases+media&fmt=json"
         rg_d_resp = await client.get(rg_details_url)
         
         if rg_d_resp.status_code == 200:
             rg_full = rg_d_resp.json()
             releases = rg_full.get("releases", [])
             
-            # Check first few releases
-            for rel in releases[:5]:
+            # Sort releases according to priority:
+            # 1. Digital Media first
+            # 2. Worldwide (XW) releases
+            # 3. Most recent first
+            def release_sort_key(r):
+                # Check for Digital Media
+                is_digital = 0
+                for m in r.get("media", []):
+                    if m.get("format") == "Digital Media":
+                        is_digital = 1
+                        break
+                
+                # Check for Worldwide
+                is_xw = 1 if r.get("country") == "XW" else 0
+                
+                # Date (handle None)
+                date = r.get("date", "")
+                
+                return (is_digital, is_xw, date)
+
+            releases.sort(key=release_sort_key, reverse=True)
+
+            # Check all releases
+            for rel in releases:
                 rel_id = rel.get("id")
                 await mb_limiter.acquire()
                 rel_url = f"{MB_API_ROOT}/release/{rel_id}?inc=url-rels&fmt=json"
@@ -546,7 +570,8 @@ async def _process_single_album(rg, artist_name, client):
         from urllib.parse import quote
         query = f"{title} {artist_name}"
         encoded_query = quote(query)
-        store_search_url = f"https://www.qobuz.com/us-en/search?q={encoded_query}"
+        region = get_qobuz_region()
+        store_search_url = f"https://www.qobuz.com/{region}/search?q={encoded_query}"
         
         try:
             await store_limiter.acquire()
@@ -585,9 +610,23 @@ async def _process_single_album(rg, artist_name, client):
                         best_match_id = q_id
                 
                 if best_match_id:
-                    qobuz_id = best_match_id
-                    qobuz_url = f"https://play.qobuz.com/album/{qobuz_id}"
-                    logger.debug(f"Resolved Qobuz album {title} -> {qobuz_id}")
+                    # Validate the ID (wrong link is worse than no link)
+                    region = get_qobuz_region()
+                    check_url = f"https://www.qobuz.com/{region}/album/-/{best_match_id}"
+                    try:
+                        # Use GET instead of HEAD because some IDs (UPC style) cause HEAD to disconnect
+                        val_resp = await client.get(check_url, follow_redirects=True)
+                        if val_resp.status_code == 200:
+                            qobuz_id = best_match_id
+                            qobuz_url = f"https://play.qobuz.com/album/{qobuz_id}"
+                            logger.debug(f"Resolved Qobuz album {title} -> {qobuz_id}")
+                        else:
+                             # If store page doesn't exist, the link is likely invalid/broken
+                             logger.warning(f"Discarding Qobuz ID {best_match_id} for {title}: Store verification failed ({val_resp.status_code})")
+                             qobuz_url = f"https://play.qobuz.com/search?q={encoded_query}&type=albums"
+                    except Exception as e:
+                        logger.warning(f"Validation failed for Qobuz ID {best_match_id}: {e}")
+                        qobuz_url = f"https://play.qobuz.com/search?q={encoded_query}&type=albums"
                 else:
                     qobuz_url = f"https://play.qobuz.com/search?q={encoded_query}&type=albums"
             else:

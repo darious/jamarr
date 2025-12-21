@@ -32,3 +32,6 @@ def get_musicbrainz_rate_limit():
     if str(val).lower() == "none":
         return None
     return float(val)
+
+def get_qobuz_region():
+    return load_config().get("qobuz", {}).get("region", "us-en")
