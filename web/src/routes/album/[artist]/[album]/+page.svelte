@@ -73,14 +73,8 @@
   }
 
   function playTrack(track: Track) {
-    // Find index in the FULL list to ensure playback order is preserved across discs
-    // But we probably want to play from this track onwards?
-    // The current implementation of setQueue takes the full list and an index.
-    // So we just need to find the index of this track in data.tracks
-    const idx = data.tracks.findIndex((t) => t.id === track.id);
-    if (idx !== -1) {
-      void setQueue(data.tracks, idx);
-    }
+    // Play just the selected track
+    void setQueue([track], 0);
   }
 </script>
 
