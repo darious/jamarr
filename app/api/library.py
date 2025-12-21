@@ -4,6 +4,9 @@ import aiosqlite
 import json
 from typing import List, Optional
 
+from typing import List, Optional
+from app.config import get_musicbrainz_root_url
+
 router = APIRouter()
 
 @router.get("/api/artists")
@@ -98,9 +101,17 @@ async def get_albums(artist: str = None, db: aiosqlite.Connection = Depends(get_
         
     query += " GROUP BY t.album ORDER BY year ASC"
     
+
     async with db.execute(query, params) as cursor:
         rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+        mb_root = get_musicbrainz_root_url()
+        results = []
+        for row in rows:
+            d = dict(row)
+            if d.get("mb_release_id"):
+                d["musicbrainz_url"] = f"{mb_root}/release/{d['mb_release_id']}"
+            results.append(d)
+        return results
 
 @router.get("/api/tracks")
 async def get_tracks(album: str = None, artist: str = None, db: aiosqlite.Connection = Depends(get_db)):
