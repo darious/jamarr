@@ -130,9 +130,9 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                 INSERT INTO artists (
                     mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
                     wikipedia_url, qobuz_url, tidal_url, musicbrainz_url,
-                    top_tracks, singles, albums, last_updated
+                    similar_artists, top_tracks, singles, albums, last_updated
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mbid) DO UPDATE SET
                     name=excluded.name,
                     sort_name=excluded.sort_name,
@@ -154,6 +154,7 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                 meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
                 meta["spotify_url"], meta["homepage"], 
                 meta["wikipedia_url"], meta["qobuz_url"], meta.get("tidal_url"), meta["musicbrainz_url"],
+                json.dumps(meta.get("similar_artists", [])),
                 json.dumps(meta["top_tracks"]),
                 json.dumps(meta.get("singles", [])),
                 json.dumps(meta.get("albums", [])),
@@ -174,7 +175,7 @@ async def refresh_artist_metadata(artist_name: str):
     logger.info(f"Forced metadata refresh for {artist_name}")
     async for db in get_db():
         # 1. Try to find MBID from existing artists table
-        async with db.execute("SELECT mbid FROM artists WHERE name = ?", (artist_name,)) as cursor:
+        async with db.execute("SELECT mbid FROM artists WHERE name = ? COLLATE NOCASE", (artist_name,)) as cursor:
             row = await cursor.fetchone()
             if row:
                 mbids = [row[0]]
@@ -246,7 +247,7 @@ async def refresh_artist_metadata(artist_name: str):
                          wikipedia_url, qobuz_url, tidal_url, musicbrainz_url,
                          similar_artists, top_tracks, singles, albums, last_updated
                      )
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT(mbid) DO UPDATE SET
                          name=excluded.name,
                          sort_name=excluded.sort_name,
