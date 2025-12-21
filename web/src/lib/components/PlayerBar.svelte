@@ -262,6 +262,35 @@
             const state = await res.json();
             progress = state.position_seconds;
 
+            // Sync Store (Queue, Index, IsPlaying)
+            // This ensures if backend auto-advanced, we reflect it
+            playerState.update((s) => {
+              let newState = { ...s, position_seconds: state.position_seconds };
+              let changed = false;
+
+              if (s.current_index !== state.current_index) {
+                console.log(
+                  "[PlayerBar] Remote track index changed:",
+                  state.current_index,
+                );
+                newState.current_index = state.current_index;
+                changed = true;
+              }
+
+              if (s.is_playing !== state.is_playing) {
+                newState.is_playing = state.is_playing;
+                changed = true;
+              }
+
+              // Optional: Sync queue if needed (e.g. length changed)
+              if (s.queue.length !== state.queue.length) {
+                newState.queue = state.queue;
+                changed = true;
+              }
+
+              return changed ? newState : s; // Only trigger update if changed (store might handle equality check but good to be explicit)
+            });
+
             // Check history threshold for remote playback
             checkPlayThreshold();
 
