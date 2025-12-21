@@ -126,11 +126,10 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                             async with db.execute("SELECT last_insert_rowid()") as id_cursor:
                                 art_id = (await id_cursor.fetchone())[0]
             
-            # Save to DB
             await db.execute("""
                 INSERT INTO artists (
                     mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
-                    wikipedia_url, qobuz_url, musicbrainz_url,
+                    wikipedia_url, qobuz_url, tidal_url, musicbrainz_url,
                     top_tracks, singles, albums, last_updated
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -144,6 +143,7 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
                     homepage=excluded.homepage,
                     wikipedia_url=excluded.wikipedia_url,
                     qobuz_url=excluded.qobuz_url,
+                    tidal_url=excluded.tidal_url,
                     musicbrainz_url=excluded.musicbrainz_url,
                     similar_artists=excluded.similar_artists,
                     top_tracks=excluded.top_tracks,
@@ -153,8 +153,7 @@ async def scan_library(root_path: str = None, force_metadata: bool = False, forc
             """, (
                 meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
                 meta["spotify_url"], meta["homepage"], 
-                meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
-                json.dumps(meta["similar_artists"]), 
+                meta["wikipedia_url"], meta["qobuz_url"], meta.get("tidal_url"), meta["musicbrainz_url"],
                 json.dumps(meta["top_tracks"]),
                 json.dumps(meta.get("singles", [])),
                 json.dumps(meta.get("albums", [])),
@@ -244,7 +243,7 @@ async def refresh_artist_metadata(artist_name: str):
                  await db.execute("""
                      INSERT INTO artists (
                          mbid, name, sort_name, bio, image_url, art_id, spotify_url, homepage, 
-                         wikipedia_url, qobuz_url, musicbrainz_url,
+                         wikipedia_url, qobuz_url, tidal_url, musicbrainz_url,
                          similar_artists, top_tracks, singles, albums, last_updated
                      )
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -258,6 +257,7 @@ async def refresh_artist_metadata(artist_name: str):
                          homepage=excluded.homepage,
                          wikipedia_url=excluded.wikipedia_url,
                          qobuz_url=excluded.qobuz_url,
+                          tidal_url=excluded.tidal_url,
                          musicbrainz_url=excluded.musicbrainz_url,
                          similar_artists=excluded.similar_artists,
                          top_tracks=excluded.top_tracks,
@@ -267,7 +267,7 @@ async def refresh_artist_metadata(artist_name: str):
                  """, (
                      meta["mbid"], meta["name"], meta["sort_name"], meta["bio"], meta["image_url"], art_id,
                      meta["spotify_url"], meta["homepage"], 
-                     meta["wikipedia_url"], meta["qobuz_url"], meta["musicbrainz_url"],
+                     meta["wikipedia_url"], meta["qobuz_url"], meta.get("tidal_url"), meta["musicbrainz_url"],
                      json.dumps(meta["similar_artists"]), 
                      json.dumps(meta["top_tracks"]),
                      json.dumps(meta.get("singles", [])),
