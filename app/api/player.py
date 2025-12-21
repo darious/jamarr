@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Request, HTTPException, Header
 import os
+import asyncio
 from app.db import get_db
 import aiosqlite
 from app.upnp import UPnPManager
@@ -63,7 +64,7 @@ async def get_client_id(x_jamarr_client_id: Optional[str] = Header(None)) -> str
         # For now, require it or default to a "global" session if really needed, 
         # but better to enforce check.
         # Let's default to "unknown_client" but log warning
-        logger.warning("Missing X-Jamarr-Client-Id header")
+        # logger.debug("Missing X-Jamarr-Client-Id header")
         return "unknown_client"
     return x_jamarr_client_id
 
@@ -323,10 +324,24 @@ async def update_progress(update: ProgressUpdate, client_id: str = Depends(get_c
             
     return {"status": "ok"}
 
+    return {"status": "ok"}
+
+@router.get("/api/scan-status")
+async def get_scan_status(client_id: str = Depends(get_client_id)):
+    return {
+        "is_scanning": upnp.is_scanning_subnet,
+        "message": upnp.scan_msg,
+        "progress": upnp.scan_progress,
+        "logs": upnp.debug_log[-20:]
+    }
+
 @router.get("/api/renderers")
 async def get_renderers(refresh: bool = False, client_id: str = Depends(get_client_id)):
     if refresh:
+        # Trigger standard discovery
         await upnp.discover()
+        # Also trigger active subnet scan in background (fire & forget)
+        asyncio.create_task(upnp.scan_subnet())
     renderers = await upnp.get_renderers()
     
     # Custom local device entry
