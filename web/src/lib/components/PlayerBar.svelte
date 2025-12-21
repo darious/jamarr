@@ -9,6 +9,7 @@
     pause,
     resume,
     seek,
+    getHeaders,
   } from "$stores/player";
   import { onMount } from "svelte";
   import { page } from "$app/stores";
@@ -254,7 +255,7 @@
         $playerState.is_playing
       ) {
         try {
-          const res = await fetch("/api/player/state");
+          const res = await fetch("/api/player/state", { headers: getHeaders() });
           if (res.ok) {
             const state = await res.json();
             progress = state.position_seconds;
