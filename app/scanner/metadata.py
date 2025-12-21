@@ -7,12 +7,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MB_API_ROOT = "https://musicbrainz.org/ws/2"
-WIKI_API_ROOT = "https://en.wikipedia.org/api/rest_v1/page/summary"
-
 import base64
 
-from app.config import get_spotify_credentials
+from app.config import get_spotify_credentials, get_musicbrainz_root_url
+
+MB_API_ROOT = f"{get_musicbrainz_root_url()}/ws/2"
+WIKI_API_ROOT = "https://en.wikipedia.org/api/rest_v1/page/summary"
+
 
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_API_ROOT = "https://api.spotify.com/v1"
@@ -120,7 +121,8 @@ async def fetch_artist_metadata(mbid: str, artist_name: str):
                 logger.debug(f"Found {len(relations)} relations for {artist_name}")
                 
                 # Set MusicBrainz URL
-                metadata["musicbrainz_url"] = f"https://musicbrainz.org/artist/{mbid}"
+                # Set MusicBrainz URL
+                metadata["musicbrainz_url"] = f"{get_musicbrainz_root_url()}/artist/{mbid}"
 
                 for rel in relations:
                     target = rel.get("url", {}).get("resource", "")
@@ -598,7 +600,7 @@ async def _process_single_album(rg, artist_name, client):
         "artist": artist_name,
         "qobuz_url": qobuz_url,
         "qobuz_id": qobuz_id,
-        "musicbrainz_url": f"https://musicbrainz.org/release-group/{rg.get('id')}"
+        "musicbrainz_url": f"{get_musicbrainz_root_url()}/release-group/{rg.get('id')}"
     }
 
 async def fetch_artist_albums(mbid: str, artist_name: str, client: httpx.AsyncClient = None):

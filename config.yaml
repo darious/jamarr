@@ -2,3 +2,6 @@ music_path: "/mnt/music/testing"
 spotify:
   client_id: "46650a3fe727435b89284c4362af8294"
   client_secret: "6871707a1bba4cc397531c268dfbce0c"
+
+musicbrainz:
+  root_url: "https://musicbrainz.org"
