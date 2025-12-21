@@ -136,11 +136,11 @@
         <p class="pill w-max bg-white/10 text-white/70 backdrop-blur-md">
           Album
         </p>
-        {#if data.albumMeta?.mb_release_id}
+        {#if data.albumMeta?.musicbrainz_url}
           <a
             class="pill hover:bg-white/15"
             target="_blank"
-            href={`https://musicbrainz.org/release/${data.albumMeta.mb_release_id}`}
+            href={data.albumMeta.musicbrainz_url}
           >
             <img
               src="/assets/logo-musicbrainz.svg"

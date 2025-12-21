@@ -35,6 +35,7 @@ export interface Album {
     total_duration: number;
     type: 'main' | 'appears_on';
     mb_release_id?: string;
+    musicbrainz_url?: string;
 }
 
 export interface Track {
