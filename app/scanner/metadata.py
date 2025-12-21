@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 import base64
 
-from app.config import get_spotify_credentials, get_musicbrainz_root_url
+from app.config import get_spotify_credentials, get_musicbrainz_root_url, get_musicbrainz_rate_limit
 
 MB_API_ROOT = f"{get_musicbrainz_root_url()}/ws/2"
 WIKI_API_ROOT = "https://en.wikipedia.org/api/rest_v1/page/summary"
@@ -470,6 +470,9 @@ class RateLimiter:
         self._lock = asyncio.Lock()
 
     async def acquire(self):
+        if self.rate_limit is None:
+            return
+            
         async with self._lock:
             now = time.monotonic()
             time_passed = now - self._last_update
@@ -486,7 +489,8 @@ class RateLimiter:
 
 # Global Limiters
 # MB: 1 req/sec (technically allows bursts but be safe)
-mb_limiter = RateLimiter(rate_limit=1.0, burst_limit=2)
+mb_limit_val = get_musicbrainz_rate_limit()
+mb_limiter = RateLimiter(rate_limit=mb_limit_val, burst_limit=5 if mb_limit_val is None else 2)
 # Qobuz: Unknown, be polite (2 req/sec)
 qobuz_limiter = RateLimiter(rate_limit=2.0, burst_limit=5)
 # Store Search: Be very polite (1 req/sec)
