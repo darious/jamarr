@@ -15,6 +15,9 @@
   let activeRenderer = "local";
   let unsub: (() => void) | undefined;
   let showSettings = false;
+  let settingsContainer: HTMLElement;
+  let showRenderers = false;
+  let renderersContainer: HTMLElement;
   let scanMessage = "";
   let isScanning = false;
 
@@ -87,6 +90,25 @@
   />
 </svelte:head>
 
+<svelte:window
+  on:click={(e) => {
+    if (
+      showRenderers &&
+      renderersContainer &&
+      !renderersContainer.contains(e.target)
+    ) {
+      showRenderers = false;
+    }
+    if (
+      showSettings &&
+      settingsContainer &&
+      !settingsContainer.contains(e.target)
+    ) {
+      showSettings = false;
+    }
+  }}
+/>
+
 <div class="min-h-screen text-white">
   <header
     class="sticky top-0 z-30 border-b border-white/5 bg-gradient-to-r from-black/70 via-surface-50/80 to-black/70 backdrop-blur-xl"
@@ -111,27 +133,94 @@
       </div>
 
       <div class="flex items-center gap-3">
-        <select
-          class="select select-sm border border-white/10 bg-white/5 text-white"
-          on:change={(e) => changeRenderer(e.currentTarget.value)}
-          value={activeRenderer}
-          aria-label="Renderer"
-        >
-          {#each rendererList as renderer}
-            <option
-              value={renderer.udn}
-              style="background-color: #1f2937; color: white;"
+        <div class="relative" bind:this={renderersContainer}>
+          <button
+            class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal min-w-[200px] justify-between"
+            on:click={() => {
+              showRenderers = !showRenderers;
+              if (showRenderers) {
+                refreshRenderers(false).catch((e) =>
+                  console.error("[Layout] refreshRenderers failed:", e),
+                );
+              }
+            }}
+            aria-label="Select Renderer"
+          >
+            <span class="truncate max-w-[180px]">
+              {rendererList.find((r) => r.udn === activeRenderer)?.name ||
+                "Select Player"}
+            </span>
+            <svg
+              class="h-4 w-4 opacity-50"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              {renderer.name}
-            </option>
-          {/each}
-        </select>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </button>
+          {#if showRenderers}
+            <div
+              class="absolute right-0 mt-2 w-72 rounded-lg border border-white/10 bg-black/75 backdrop-blur-md shadow-xl z-50 max-h-96 overflow-y-auto"
+            >
+              <div class="p-2 space-y-1">
+                {#each rendererList as renderer}
+                  <button
+                    class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10 flex items-center justify-between {activeRenderer ===
+                    renderer.udn
+                      ? 'bg-white/10'
+                      : ''}"
+                    on:click={() => {
+                      changeRenderer(renderer.udn);
+                      showRenderers = false;
+                    }}
+                  >
+                    <span class="truncate">{renderer.name}</span>
+                    {#if activeRenderer === renderer.udn}
+                      <svg
+                        class="h-4 w-4 text-primary-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
         <nav class="flex items-center gap-2 text-sm text-white/80">
-          <a class="btn btn-ghost btn-sm" href="/artists">Artists</a>
-          <a class="btn btn-ghost btn-sm" href="/queue">Queue</a>
-          <a class="btn btn-ghost btn-sm" href="/history">History</a>
+          <a
+            class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+            href="/albums">Albums</a
+          >
+          <a
+            class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+            href="/artists">Artists</a
+          >
+          <a
+            class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+            href="/queue">Queue</a
+          >
+          <a
+            class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+            href="/history">History</a
+          >
         </nav>
-        <div class="relative">
+        <div class="relative" bind:this={settingsContainer}>
           <button
             class="btn btn-ghost btn-sm"
             on:click={() => (showSettings = !showSettings)}
@@ -159,22 +248,35 @@
           </button>
           {#if showSettings}
             <div
-              class="absolute right-0 mt-2 w-56 rounded-lg border border-white/10 bg-surface-900 shadow-xl"
+              class="absolute right-0 mt-2 w-56 rounded-lg border border-white/10 bg-black/75 backdrop-blur-md shadow-xl z-50"
             >
               <div class="p-2">
                 <button
                   class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
-                  on:click={scanLibrary}
+                  on:click={() => {
+                    scanLibrary();
+                    showSettings = false;
+                  }}
                   disabled={isScanning}
                 >
                   {isScanning ? "Scanning..." : "Scan Library"}
                 </button>
                 <button
                   class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
-                  on:click={() => window.location.reload()}
+                  on:click={() => {
+                    window.location.reload();
+                    showSettings = false;
+                  }}
                 >
                   Refresh Metadata
                 </button>
+                <a
+                  class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
+                  href="/renderers"
+                  on:click={() => (showSettings = false)}
+                >
+                  Network Renderers
+                </a>
                 {#if scanMessage}
                   <p class="px-3 py-2 text-xs text-white/60">{scanMessage}</p>
                 {/if}

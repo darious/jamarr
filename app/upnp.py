@@ -31,11 +31,19 @@ class UPnPManager:
             self._bg_task = asyncio.create_task(self._discovery_loop())
 
     async def _discovery_loop(self):
+        loop_count = 0
         try:
             while True:
                 try:
                     self.log("Starting background discovery...")
                     await self.discover(timeout=5)
+                    
+                    # Every 5th loop (approx 5 mins), perform active scan if few renderers found
+                    # or just always do it if users have trouble
+                    loop_count += 1
+                    if loop_count % 5 == 1: 
+                        await self.scan_subnet()
+                        
                 except Exception as e:
                     self.log(f"Background discovery error: {e}")
                 
@@ -86,21 +94,36 @@ class UPnPManager:
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('0.0.0.0', 0)) # Bind to any free port
         
-        # Explicit usage probe for user's Naim Atom
-        asyncio.create_task(self.add_device_by_ip('192.168.0.123'))
+        # Bind to 0.0.0.0 to listen for responses on the ephemeral port
+        try:
+            sock.bind(('0.0.0.0', 0)) 
+        except Exception as e:
+            self.log(f"Failed to bind discovery socket: {e}")
+            return []
 
         # Send
-        sock.sendto(MSEARCH, ('239.255.255.250', 1900))
+        try:
+            sock.sendto(MSEARCH, ('239.255.255.250', 1900))
+        except Exception as e:
+             self.log(f"Failed to send M-SEARCH: {e}")
+             
         sock.setblocking(False)
 
         start = asyncio.get_event_loop().time()
         
-        while asyncio.get_event_loop().time() - start < timeout:
+        while True:
+            time_left = timeout - (asyncio.get_event_loop().time() - start)
+            if time_left <= 0:
+                break
             try:
-                data, addr = await asyncio.get_event_loop().sock_recv(sock, 1024)
+                data, addr = await asyncio.wait_for(
+                    asyncio.get_event_loop().sock_recv(sock, 1024), 
+                    timeout=time_left
+                )
                 await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), addr)
+            except asyncio.TimeoutError:
+                break
             except Exception:
                 await asyncio.sleep(0.1)
         
@@ -212,25 +235,30 @@ class UPnPManager:
              sock.setblocking(False)
 
              start = asyncio.get_event_loop().time()
-             while asyncio.get_event_loop().time() - start < 3:
+             while asyncio.get_event_loop().time() - start < 2:
                  try:
                      # sock_recv returns bytes
-                     data = await asyncio.get_event_loop().sock_recv(sock, 2048)
+                     data = await asyncio.wait_for(
+                        asyncio.get_event_loop().sock_recv(sock, 2048),
+                        timeout=0.5
+                     )
                      # We trust it comes from the IP we sent to (or use sock.recvfrom in executor)
                      # Parse logic
                      await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), (ip, 1900))
                      sock.close()
                      return True
-                 except BlockingIOError:
-                     await asyncio.sleep(0.1)
+                 except (BlockingIOError, asyncio.TimeoutError):
+                     pass
+                 except Exception:
+                     break
              sock.close()
         except Exception as e:
-             logger.warning(f"Unicast M-SEARCH failed: {e}")
+             logger.warning(f"Unicast M-SEARCH failed for {ip}: {e}")
 
         # 2. Fallback to HTTP Port Scan
         logger.info(f"Unicast failed. Probing common ports on {ip}...")
-        ports = [8080, 80, 55000, 5000, 5050]
-        paths = ['/description.xml', '/device-desc.xml', '/dd.xml']
+        ports = [8080, 80, 55000, 5000, 5050, 1400] # Added 1400 for Sonos
+        paths = ['/description.xml', '/device-desc.xml', '/dd.xml', '/xml/device_description.xml'] # Added Sonos path
         
         found = False
         async with httpx.AsyncClient() as client:
@@ -238,8 +266,8 @@ class UPnPManager:
                 for path in paths:
                     url = f"http://{ip}:{port}{path}"
                     try:
-                        resp = await client.get(url, timeout=1.0)
-                        if resp.status_code == 200 and 'device' in resp.text:
+                        resp = await client.get(url, timeout=0.5)
+                        if resp.status_code == 200 and ('device' in resp.text or 'root' in resp.text): # Simple check
                             logger.info(f"Found Device at {url}")
                             await self._add_renderer(url)
                             found = True
@@ -249,6 +277,43 @@ class UPnPManager:
                 if found: break
         
         return found
+    
+    async def scan_subnet(self):
+        """Active scan of the local subnet and common home subnets."""
+        self.log("Starting active subnet scan...")
+        
+        subnets = set()
+        
+        # 1. Add local subnet
+        local_ip = self.local_ip
+        if local_ip and local_ip != '127.0.0.1':
+            subnets.add('.'.join(local_ip.split('.')[:-1]))
+            
+        # 2. Add common home subnets
+        subnets.add('192.168.0')
+        subnets.add('192.168.1')
+        
+        tasks = []
+        chunk_size = 50
+        
+        for subnet in subnets:
+            self.log(f"Scanning subnet {subnet}.x ...")
+            for i in range(1, 255):
+                target_ip = f"{subnet}.{i}"
+                if target_ip == local_ip: continue
+                
+                tasks.append(self.add_device_by_ip(target_ip))
+                
+                if len(tasks) >= chunk_size:
+                    await asyncio.gather(*tasks)
+                    tasks = []
+                    await asyncio.sleep(0.1)
+            
+            if tasks:
+                await asyncio.gather(*tasks)
+                tasks = []
+            
+        self.log("Active subnet scan completed.")
                             
     # --- Control Actions ---
 
@@ -365,11 +430,16 @@ class UPnPManager:
 
     async def _soap_action(self, url, action, args):
         self.log(f"SOAP Action: {action} to {url}")
+        # Helper to escape values
+        import html
+        def escape_val(val):
+            return html.escape(str(val))
+
         body = f"""<?xml version="1.0"?>
         <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
             <s:Body>
                 <u:{action} xmlns:u="urn:schemas-upnp-org:service:AVTransport:1" xmlns:r="urn:schemas-upnp-org:service:RenderingControl:1">
-                    {''.join([f"<{k}>{v}</{k}>" for k, v in args.items()])}
+                    {''.join([f"<{k}>{escape_val(v)}</{k}>" for k, v in args.items()])}
                 </u:{action}>
             </s:Body>
         </s:Envelope>
