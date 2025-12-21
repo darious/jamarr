@@ -26,3 +26,12 @@ def get_spotify_credentials():
 
 def get_musicbrainz_root_url():
     return load_config().get("musicbrainz", {}).get("root_url", "https://musicbrainz.org")
+
+def get_musicbrainz_rate_limit():
+    val = load_config().get("musicbrainz", {}).get("rate_limit", 1.0)
+    if str(val).lower() == "none":
+        return None
+    return float(val)
+
+def get_qobuz_region():
+    return load_config().get("qobuz", {}).get("region", "us-en")

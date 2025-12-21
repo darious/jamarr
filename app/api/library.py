@@ -28,7 +28,8 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             a.qobuz_url,
             a.musicbrainz_url,
             a.singles,
-            a.albums
+            a.albums,
+            a.tidal_url
         FROM artists a
         JOIN track_artists ta ON a.mbid = ta.mbid
         LEFT JOIN artwork ar ON a.art_id = ar.id
@@ -53,7 +54,8 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
                 "qobuz_url": row[11],
                 "musicbrainz_url": row[12],
                 "singles": json.loads(row[13]) if row[13] else [],
-                "albums": json.loads(row[14]) if row[14] else []
+                "albums": json.loads(row[14]) if row[14] else [],
+                "tidal_url": row[15]
             } 
             for row in rows
         ]
