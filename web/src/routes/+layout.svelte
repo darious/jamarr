@@ -205,11 +205,11 @@
         <nav class="flex items-center gap-2 text-sm text-white/80">
           <a
             class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
-            href="/albums">Albums</a
+            href="/artists">Artists</a
           >
           <a
             class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
-            href="/artists">Artists</a
+            href="/albums">Albums</a
           >
           <a
             class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
