@@ -1,9 +1,12 @@
 <script lang="ts">
-  import type { Album, Artist, Track } from "$lib/api";
+  import type { Album, Artist, Track, MissingAlbum } from "$lib/api";
   import {
     fetchTracks,
     refreshArtistMetadata,
     refreshArtistSingles,
+    fetchMissingAlbums,
+    triggerMissingAlbumsScan,
+    triggerMetadataScan,
   } from "$lib/api";
   import { goto, invalidateAll } from "$app/navigation";
   import { addToQueue, loadQueueFromServer, setQueue } from "$stores/player";
@@ -28,7 +31,49 @@
   let refreshingSingles = false;
   let message = "";
   let lastKey = "";
-  // Removed unused showAll... variables
+
+  // Missing Albums State
+  let missingAlbums: MissingAlbum[] = [];
+  let loadingMissingAlbums = false;
+  let scanningMissing = false;
+
+  const loadMissingAlbums = async () => {
+    if (!artist?.mbid) return;
+    loadingMissingAlbums = true;
+    try {
+      missingAlbums = await fetchMissingAlbums(artist.mbid);
+    } catch (e) {
+      console.error("Failed to load missing albums", e);
+    } finally {
+      loadingMissingAlbums = false;
+    }
+  };
+
+  const scanMissing = async () => {
+    if (!artist?.mbid) return;
+    scanningMissing = true;
+    try {
+      await triggerMissingAlbumsScan(artist.mbid);
+      message = "Scanning for missing albums...";
+      // Poll for a bit or just wait
+      setTimeout(() => {
+        loadMissingAlbums();
+        scanningMissing = false;
+        message = "Missing albums scan complete.";
+        setTimeout(() => {
+          if (message.includes("scan complete")) message = "";
+        }, 3000);
+      }, 5000);
+    } catch (e) {
+      console.error(e);
+      scanningMissing = false;
+      message = "Failed to start scan.";
+    }
+  };
+
+  $: if (artist?.mbid) {
+    loadMissingAlbums();
+  }
 
   // Update artist when route data changes (client nav)
   $: if (data.artist !== artist) {
@@ -182,7 +227,19 @@
     refreshing = true;
     message = "Requesting fresh metadata...";
     try {
-      await refreshArtistMetadata(data.canonicalName || data.name);
+      if (artist?.mbid) {
+        // "Replace everything except missing albums"
+        // bioOnly=true fetches Bio + Images + Links, but skips Release Groups (Albums)
+        // missingOnly=false forces a refresh even if data exists
+        await triggerMetadataScan({
+          mbidFilter: artist.mbid,
+          bioOnly: true,
+          missingOnly: false,
+          linksOnly: false,
+        });
+      } else {
+        await refreshArtistMetadata(data.canonicalName || data.name);
+      }
       message = "Metadata updated. Reloading...";
       await invalidateAll();
       message = "Metadata updated successfully!";
@@ -190,6 +247,7 @@
         if (message === "Metadata updated successfully!") message = "";
       }, 3000);
     } catch (e) {
+      console.error(e);
       message = "Failed to refresh metadata.";
     } finally {
       refreshing = false;
@@ -255,6 +313,10 @@
     if (track) {
       await addToQueue([track]);
     }
+  }
+
+  function handleImageError(e: Event) {
+    (e.currentTarget as HTMLImageElement).src = "/assets/logo.png";
   }
 </script>
 
@@ -367,14 +429,30 @@
       </div>
 
       <div class="flex items-center gap-6 text-sm text-white/60">
-        <span>{data.albums.length} Albums</span>
-        <span>{loadingTracks ? "Loading…" : tracks.length} Tracks cached</span>
+        <a
+          href="#albums"
+          class="hover:text-white hover:underline transition-colors"
+          >{data.albums.length} Albums</a
+        >
+        <a
+          href="#missing-albums"
+          class="hover:text-white hover:underline transition-colors"
+          >{missingAlbums.length} Missing</a
+        >
+        <span>{loadingTracks ? "Loading…" : tracks.length} Tracks</span>
         <button
           class="btn btn-ghost btn-sm"
           on:click={refreshMeta}
           disabled={refreshing}
         >
           {refreshing ? "Refreshing…" : "Refresh Metadata"}
+        </button>
+        <button
+          class="btn btn-ghost btn-sm"
+          on:click={scanMissing}
+          disabled={scanningMissing}
+        >
+          {scanningMissing ? "Scanning..." : "Check Missing"}
         </button>
       </div>
       {#if message}
@@ -429,9 +507,7 @@
                       })()}
                       alt={track.album}
                       class="h-full w-full object-cover"
-                      on:error={(e) => {
-                        e.currentTarget.src = "/assets/logo.png";
-                      }}
+                      on:error={handleImageError}
                     />
                     <div
                       class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
@@ -690,7 +766,7 @@
   </div>
 
   {#if mainAlbums.length > 0}
-    <div class="section-head">
+    <div class="section-head" id="albums">
       <div>
         <p class="text-sm uppercase tracking-wide text-white/60">Library</p>
         <h3 class="text-xl font-semibold">Albums</h3>
@@ -829,103 +905,90 @@
     </div>
   {/if}
 
-  {#if displayedMissingAlbums.length > 0}
-    <div class="section-head mt-10">
+  {#if missingAlbums.length > 0}
+    <div class="section-head mt-10" id="missing-albums">
       <div>
-        <p class="text-sm uppercase tracking-wide text-white/60">
-          Missing from Library
-        </p>
+        <p class="text-sm uppercase tracking-wide text-white/60">Discovery</p>
         <h3 class="text-xl font-semibold">Missing Albums</h3>
       </div>
     </div>
-
-    <div class="glass-panel overflow-hidden">
-      <table class="w-full text-left text-sm">
-        <thead
-          class="bg-white/5 text-white/50 text-xs uppercase tracking-wider"
+    <div
+      class="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]"
+    >
+      {#each missingAlbums as album}
+        <article
+          class="grid-card flex flex-col gap-3 opacity-80 hover:opacity-100 transition-opacity"
         >
-          <tr>
-            <th class="px-6 py-3 font-medium">Year</th>
-            <th class="px-6 py-3 font-medium w-full">Title</th>
-            <th class="px-6 py-3 font-medium">Links</th>
-            <th class="px-6 py-3 font-medium text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-white/5">
-          {#each displayedMissingAlbums as album}
-            <tr class="group hover:bg-white/5 transition-colors">
-              <td class="px-6 py-3 text-white/60 tabular-nums">
-                {album.date ? album.date.substring(0, 4) : "—"}
-              </td>
-              <td class="px-6 py-3 font-medium text-white/90">
-                {album.title}
-              </td>
-              <td class="px-6 py-3">
-                <div class="flex items-center gap-3">
-                  {#if album.musicbrainz_url}
-                    <a
-                      href={album.musicbrainz_url}
-                      target="_blank"
-                      class="opacity-60 hover:opacity-100 transition-opacity"
-                      title="View on MusicBrainz"
-                    >
-                      <img
-                        src="/assets/logo-musicbrainz.svg"
-                        alt="MB"
-                        class="h-4 w-4"
-                      />
-                    </a>
-                  {/if}
-                  {#if album.qobuz_url}
-                    <a
-                      href={album.qobuz_url}
-                      target="_blank"
-                      class="opacity-60 hover:opacity-100 transition-opacity"
-                      title="View on Qobuz"
-                    >
-                      <img
-                        src="/assets/logo-qobuz.png"
-                        alt="Qobuz"
-                        class="h-4 w-4"
-                      />
-                    </a>
-                  {/if}
-                </div>
-              </td>
-              <td class="px-6 py-3 text-right">
-                {#if album.qobuz_id}
-                  <button
-                    class="btn btn-ghost btn-xs gap-2"
-                    on:click={() => {
-                      window.navigator.clipboard.writeText(
-                        album.qobuz_id || "",
-                      );
-                    }}
-                    title="Copy Qobuz Album ID"
-                  >
-                    <span class="opacity-60">{album.qobuz_id}</span>
-                    <svg
-                      class="h-3 w-3"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"
-                      />
-                    </svg>
-                  </button>
-                {:else}
-                  <span class="text-white/20 text-xs">—</span>
-                {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+          <div
+            class="group relative aspect-square overflow-hidden rounded-2xl bg-white/5"
+          >
+            {#if album.image_url}
+              <img
+                src={album.image_url}
+                alt={album.title}
+                class="h-full w-full object-cover"
+              />
+            {:else}
+              <div class="h-full w-full flex items-center justify-center">
+                <span class="text-4xl text-white/10">?</span>
+              </div>
+            {/if}
+
+            <div
+              class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity gap-2"
+            >
+              {#if album.tidal_url}
+                <a
+                  href={album.tidal_url}
+                  target="_blank"
+                  class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm"
+                  title="Open in Tidal"
+                >
+                  <img
+                    src="/assets/logo-tidal.png"
+                    alt="Tidal"
+                    class="h-4 w-4"
+                  />
+                </a>
+              {/if}
+              {#if album.qobuz_url}
+                <a
+                  href={album.qobuz_url}
+                  target="_blank"
+                  class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm"
+                  title="Open in Qobuz"
+                >
+                  <img
+                    src="/assets/logo-qobuz.png"
+                    alt="Qobuz"
+                    class="h-4 w-4"
+                  />
+                </a>
+              {/if}
+              {#if album.musicbrainz_url}
+                <a
+                  href={album.musicbrainz_url}
+                  target="_blank"
+                  class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm"
+                  title="Open in MusicBrainz"
+                >
+                  <img
+                    src="/assets/logo-musicbrainz.svg"
+                    alt="MB"
+                    class="h-4 w-4"
+                  />
+                </a>
+              {/if}
+            </div>
+          </div>
+          <div class="space-y-1">
+            <p class="text-base font-semibold line-clamp-1">{album.title}</p>
+            <p class="text-xs text-white/60">
+              {album.release_date ? album.release_date.substring(0, 4) : "—"} • Missing
+            </p>
+          </div>
+        </article>
+      {/each}
     </div>
   {/if}
 </section>
