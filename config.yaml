@@ -9,3 +9,7 @@ musicbrainz:
 
 qobuz:
   region: "gb-en"
+
+tidal:
+  client_id: LCyOOH2KYtx0nF88
+  client_secret: AsIV7PFmMWOb1q4m3hCYSOnpYXXOrIOCmV2BEuL3A2c=

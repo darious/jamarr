@@ -35,3 +35,7 @@ def get_musicbrainz_rate_limit():
 
 def get_qobuz_region():
     return load_config().get("qobuz", {}).get("region", "us-en")
+
+def get_tidal_credentials():
+    cfg = load_config().get("tidal", {})
+    return cfg.get("client_id"), cfg.get("client_secret")

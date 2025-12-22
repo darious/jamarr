@@ -10,6 +10,7 @@ from app.config import get_music_path
 from app.scanner.metadata import fetch_artist_metadata, fetch_track_credits
 import difflib
 import re
+from app.tidal import TidalClient, year_from_date
 
 logger = logging.getLogger(__name__)
 
@@ -877,6 +878,10 @@ class Scanner:
                     if self.scan_logger:
                          self.scan_logger.emit_progress(processed, total, f"Checking: {current_name}")
                     
+                    # Initialize Tidal Client (re-use or init once per scanner?)
+                    # Init per artist or once outside? Init is cheap.
+                    tidal_client = TidalClient()
+
                     # 2. Get Local Release Group IDs (from Albums table)
                     # We check the albums table but via artist_albums to be sure we attribute correctly
                     async with db.execute("""
@@ -916,6 +921,18 @@ class Scanner:
                                 if link["type"] == "tidal": tidal_url = link["url"]
                                 elif link["type"] == "qobuz": qobuz_url = link["url"]
                             
+                            # Fallback: Search Tidal directly
+                            if not tidal_url:
+                                try:
+                                    want_year = year_from_date(album.get("date"))
+                                    found_url = tidal_client.find_album_match(current_name, album["title"], want_year)
+                                    if found_url:
+                                        tidal_url = found_url
+                                        data_source = "Tidal Search"
+                                        # logger.info(f"Found Tidal URL for {current_name} - {album['title']}: {tidal_url}")
+                                except Exception as e:
+                                    logger.debug(f"Tidal fallback search failed: {e}")
+
                             # Insert into missing_albums
                             await db.execute("""
                                 INSERT OR REPLACE INTO missing_albums
