@@ -14,6 +14,7 @@ export interface PlayerState {
     current_index: number;
     is_playing: boolean;
     position_seconds: number;
+    volume: number | null;
 }
 
 export const playerState = writable<PlayerState>({
@@ -22,7 +23,8 @@ export const playerState = writable<PlayerState>({
     queue: [],
     current_index: -1,
     is_playing: false,
-    position_seconds: 0
+    position_seconds: 0,
+    volume: null
 });
 
 // UI: Now Playing overlay visibility
@@ -157,7 +159,8 @@ export async function loadQueueFromServer() {
                 current_index: data.current_index,
                 position_seconds: data.position_seconds,
                 is_playing: data.is_playing,
-                renderer: data.renderer || `local:${getClientId()}`
+                renderer: data.renderer || `local:${getClientId()}`,
+                volume: data.volume // May be null
             }));
             console.log('[loadQueueFromServer] State updated. Renderer:', data.renderer);
 
