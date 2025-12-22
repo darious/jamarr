@@ -150,27 +150,78 @@ async def match_track_to_library(db, artist_mbid, track_name, album_name=None):
     Match external track to local library track.
     Returns track_id if found, None otherwise.
     """
-    # Normalize for fuzzy matching
-    normalized_track = track_name.lower().strip()
-    
-    query = """
-        SELECT t.id FROM tracks t
-        JOIN track_artists ta ON t.id = ta.track_id
-        WHERE ta.mbid = ?
-        AND LOWER(TRIM(t.title)) = ?
     """
-    params = [artist_mbid, normalized_track]
+    Match external track to local library track using fuzzy matching with dynamic weighting.
+    Returns track_id if found, None otherwise.
+    """
+    # Get all tracks for this artist (including features)
+    query = """
+        SELECT t.id, t.title, t.album, t.duration_seconds
+        FROM tracks t
+        JOIN track_artists ta ON t.id = ta.track_id
+        WHERE ta.mbid = ? 
+    """
     
-    # Add album filter if provided
-    if album_name:
-        query += " AND LOWER(TRIM(t.album)) = ?"
-        params.append(album_name.lower().strip())
+    candidates = []
+    async with db.execute(query, (artist_mbid,)) as cursor:
+        candidates = await cursor.fetchall()
+        
+    if not candidates:
+        return None
+
+    # Normalize helpers
+    def normalize(s):
+        if not s: return ""
+        s = s.lower().strip()
+        # Remove typical suffixes/prefixes for cleaner matching
+        s = re.sub(r'[\(\[][^\)\]]*(feat|with|remast|deluxe|edit|mix)[^\)\]]*[\)\]]', '', s)
+        s = re.sub(r'[^\w\s]', '', s)
+        s = re.sub(r'\s+', ' ', s).strip()
+        return s
+
+    def fuzzy_score(s1, s2):
+        return difflib.SequenceMatcher(None, normalize(s1), normalize(s2)).ratio()
+
+    # Calculate scores
+    best_score = 0
+    best_match = None
     
-    query += " LIMIT 1"
-    
-    async with db.execute(query, params) as cursor:
-        row = await cursor.fetchone()
-        return row[0] if row else None
+    for row in candidates:
+        cid, ctitle, calbum, cseconds = row
+        
+        # Dynamic Weighting
+        total_weight = 0.6
+        current_score = 0
+        
+        # 1. Title Score (Base 0.6)
+        t_score = fuzzy_score(track_name, ctitle)
+        if t_score < 0.6: continue 
+        current_score += t_score * 0.6
+        
+        # 2. Album Score (Weight 0.2 if applicable)
+        if album_name and calbum:
+            total_weight += 0.2
+            a_score = fuzzy_score(album_name, calbum)
+            current_score += a_score * 0.2
+        
+        # 3. Duration Score (Weight 0.2 if applicable)
+        # We rely on caller passing correct info, but currently they pass None mostly.
+        # However, checking if duration exists in DB row is good.
+        # But we need external duration to compare against.
+        # Since the function signature doesn't support duration yet, we skip this part 
+        # basically making it Title(60%) + Album(20%) logic, which we verified works for Singles (Title 60/60 = 100%).
+        
+        # Normalize
+        final_score = current_score / total_weight
+        
+        if final_score > best_score:
+            best_score = final_score
+            best_match = cid
+
+    if best_score > 0.75:
+        return best_match
+
+    return None
 
 async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group_ids: set = None, bio_only: bool = False):
     """
@@ -463,7 +514,9 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
 async def fetch_artist_release_groups(mbid: str, type_str: str, client: httpx.AsyncClient):
     """
     Generic fetch for Release Groups (Albums or Singles).
-    Strictly filters out Compilation, Live, Remix, etc. unless it's the primary type.
+    
+    For Singles: Strictly filters for OFFICIAL releases in US/GB/XW.
+    For Others: Uses standard RG browse (filters secondary types).
     """
     results = []
     try:
@@ -471,20 +524,49 @@ async def fetch_artist_release_groups(mbid: str, type_str: str, client: httpx.As
         limit = 100
         seen_titles = set()
         
+        # Strategy Switch: "release" browse for Singles (Strict), "release-group" browse for others (Faster)
+        use_release_browse = (type_str == "single")
+        
+        base_endpoint = "release" if use_release_browse else "release-group"
+        extra_query = "&status=official" if use_release_browse else ""
+        inc_params = "release-groups+artist-credits" if use_release_browse else "artist-credits"
+        
+        # For releases, we will filter by country client-side or we could add ?country= but that only allows one?
+        # MB API doesn't support multiple countries in one param easily. We'll filter client-side.
+        
         while True:
             await mb_limiter.acquire()
-            url = f"{MB_API_ROOT}/release-group?artist={mbid}&type={type_str}&fmt=json&limit={limit}&offset={offset}&inc=artist-credits"
+            url = f"{MB_API_ROOT}/{base_endpoint}?artist={mbid}&type={type_str}&fmt=json&limit={limit}&offset={offset}&inc={inc_params}{extra_query}"
             resp = await client.get(url)
             
             if resp.status_code != 200:
                 break
                 
             data = resp.json()
-            groups = data.get("release-groups", [])
+            # Key differs based on endpoint
+            items = data.get("releases", []) if use_release_browse else data.get("release-groups", [])
             
-            for rg in groups:
-                 # 1. Primary Artist Check
-                 credits = rg.get("artist-credit", [])
+            if not items:
+                break
+            
+            for item in items:
+                 # Extract RG from item
+                 if use_release_browse:
+                     rg = item.get("release-group", {})
+                     # Check Country
+                     country = item.get("country", "")
+                     if country not in ("US", "GB", "XW"):
+                         continue
+                     release_date = item.get("date") # Use release date for sorting preference? RG date is first-release-date
+                 else:
+                     rg = item
+                     release_date = None # Will use RG first-release-date
+                 
+                 rg_id = rg.get("id")
+                 if not rg_id: continue
+
+                 # 1. Primary Artist Check (on the Item or RG)
+                 credits = item.get("artist-credit", [])
                  if not any(c.get("artist", {}).get("id") == mbid for c in credits):
                      continue
                 
@@ -501,16 +583,24 @@ async def fetch_artist_release_groups(mbid: str, type_str: str, client: httpx.As
                      continue
                  seen_titles.add(norm_title)
                  
+                 # Prefer earliest date from RG, but for ordering we might use what we have
+                 final_date = rg.get("first-release-date")
+                 
                  results.append({
-                     "mbid": rg.get("id"),
+                     "mbid": rg_id,
                      "title": title,
-                     "date": rg.get("first-release-date"),
-                     "musicbrainz_url": f"{get_musicbrainz_root_url()}/release-group/{rg.get('id')}"
+                     "date": final_date,
+                     "musicbrainz_url": f"{get_musicbrainz_root_url()}/release-group/{rg_id}"
                  })
             
-            if len(groups) < limit:
+            if len(items) < limit:
                 break
             offset += limit
+            
+            # Safety break for massive catalogues if browsing releases
+            if use_release_browse and offset > 2000:
+                logger.warning(f"Hit strict limit browsing releases for {mbid}")
+                break
             
         # Sort by date
         results.sort(key=lambda x: x["date"] or "", reverse=True)
@@ -571,17 +661,35 @@ async def fetch_best_release_match(rg_id: str, client: httpx.AsyncClient):
         best = releases[0]
         best_release_id = best.get("id")
         
-        # Extract Links
+        # Extract Links from ALL releases in the group to improve hit rate
+        # We process 'best' first to prioritize its links if duplicates (though set handles that)
+        # But actually, we just want ANY valid link.
+        
         links = []
-        for rel in best.get("relations", []):
-             target = rel.get("url", {}).get("resource", "")
-             type_ = rel.get("type", "")
-             if "tidal.com" in target:
-                 links.append({"type": "tidal", "url": target})
-             elif "qobuz.com" in target:
-                 links.append({"type": "qobuz", "url": target})
-             elif "musicbrainz.org" in target:
-                 links.append({"type": "musicbrainz", "url": target})
+        seen_urls = set()
+        
+        # Helper to add unique links
+        def add_links_from_release(release):
+            for rel in release.get("relations", []):
+                target = rel.get("url", {}).get("resource", "")
+                if not target or target in seen_urls: continue
+                
+                l_type = None
+                if "tidal.com" in target: l_type = "tidal"
+                elif "qobuz.com" in target: l_type = "qobuz"
+                elif "musicbrainz.org" in target: l_type = "musicbrainz"
+                
+                if l_type:
+                    links.append({"type": l_type, "url": target})
+                    seen_urls.add(target)
+
+        # 1. Add links from the BEST match first (highest priority if we were ranking, but we just list them)
+        add_links_from_release(best)
+        
+        # 2. Add links from all other releases
+        for rel in releases:
+            if rel.get("id") == best_release_id: continue
+            add_links_from_release(rel)
         
         # Collect ALL release IDs associated with this group for backfilling
         release_ids = [r["id"] for r in releases]

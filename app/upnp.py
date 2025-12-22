@@ -68,8 +68,8 @@ class UPnPManager:
     def log(self, msg):
         import datetime
         ts = datetime.datetime.now().isoformat()
-        # print(f"[UPnP] {msg}")
         self.debug_log.append(f"[{ts}] {msg}")
+        logger.info(f"[UPnP] {msg}")
         if len(self.debug_log) > 50: self.debug_log.pop(0)
 
     def _get_local_ip(self):
@@ -439,17 +439,19 @@ class UPnPManager:
             base = f"http://{self.local_ip}:8111"
 
         stream_url = f"{base}/api/stream/{track_id}"
-        art_url = f"{base}/art/{metadata.get('art_id')}" if metadata.get('art_id') else ""
+        # Disable album art in DIDL; some renderers reject external art URIs (e.g., Naim 701 errors)
+        art_url = None
 
         # Construct DIDL
         didl = self._create_didl(stream_url, metadata['mime'], metadata['title'], 
                                metadata['artist'], metadata['album'], art_url)
+        if os.environ.get("UPNP_LOG_DIDL"):
+            logger.info(f"DIDL sent:\n{didl}")
 
         # 1. Stop (Optional, safer) - Naim atoms prefer stop before new URI
-        try:
-            await self._soap_action(control_url, 'Stop', {'InstanceID': 0})
-        except Exception as e:
-            self.log(f"Stop command failed (ignoring): {e}")
+        ok, resp = await self._soap_action(control_url, 'Stop', {'InstanceID': 0})
+        if not ok:
+            self.log(f"Stop command failed (continuing): {resp}")
 
         await asyncio.sleep(0.2)
 
@@ -459,19 +461,24 @@ class UPnPManager:
         # 2. SetAVTransportURI
         self.log(f"Setting URI: {stream_url}")
         # self.log(f"Meta: {didl}") 
-        await self._soap_action(control_url, 'SetAVTransportURI', {
+        ok, resp = await self._soap_action(control_url, 'SetAVTransportURI', {
             'InstanceID': 0,
             'CurrentURI': stream_url,
             'CurrentURIMetaData': didl
         })
+        if not ok:
+            self.log(f"SetAVTransportURI failed, aborting Play: {resp}")
+            return
 
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.6)  # give renderer a moment to ingest metadata
 
         # 3. Play
-        await self._soap_action(control_url, 'Play', {
+        ok, resp = await self._soap_action(control_url, 'Play', {
             'InstanceID': 0,
             'Speed': 1
         })
+        if not ok:
+            self.log(f"Play failed: {resp}")
 
     async def pause(self):
         if self.active_renderer:
@@ -496,10 +503,11 @@ class UPnPManager:
             else:
                 self.log("No RenderingControl URL for active renderer")
 
-    def _create_didl(self, url, mime, title, artist, album, art_url):
+    def _create_didl(self, url, mime, title, artist, album, art_url=None):
         import html
         title = html.escape(title or "Unknown")
         artist = html.escape(artist or "Unknown")
+        album = html.escape(album or "Unknown")
         # Ensure mime is simple
         # Naim might prefer audio/mpeg or audio/x-flac or similar. Use what was passed but ensure protocolInfo format is standard.
         # Fallback to broad match if issues persist.
@@ -509,6 +517,7 @@ class UPnPManager:
             <item id="1" parentID="0" restricted="1">
                 <dc:title>{title}</dc:title>
                 <dc:creator>{artist}</dc:creator>
+                <upnp:album>{album}</upnp:album>
                 <upnp:class>object.item.audioItem.musicTrack</upnp:class>
                 <res protocolInfo="http-get:*:{mime}:*">{url}</res>
             </item>
@@ -516,6 +525,7 @@ class UPnPManager:
         """
 
     async def _soap_action(self, url, action, args):
+        """Send SOAP action and return (ok, response_text)."""
         self.log(f"SOAP Action: {action} to {url}")
         # Helper to escape values
         import html
@@ -547,13 +557,15 @@ class UPnPManager:
                 if resp.status_code != 200:
                     self.log(f"SOAP Action {action} FAILED: {resp.status_code} {resp.text}")
                     logger.error(f"SOAP Action {action} failed: {resp.status_code} {resp.text}")
+                    return False, resp.text
                 else:
                     self.log(f"SOAP Action {action} SUCCESS")
                     logger.debug(f"SOAP Action {action} Response:\n{resp.text}")
+                    return True, resp.text
         except Exception as e:
             self.log(f"SOAP Action {action} ERROR: {e}")
             logger.exception(f"SOAP Action {action} Exception")
-            raise e
+            return False, str(e)
 
     def _parse_time(self, time_str):
         if not time_str or time_str == 'NOT_IMPLEMENTED':
