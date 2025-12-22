@@ -32,10 +32,12 @@ Stores metadata for individual audio files.
 | `mb_track_id` | TEXT | MusicBrainz Track ID. |
 | `mb_release_track_id` | TEXT | MusicBrainz Release Track ID. |
 | `mb_release_id` | TEXT | MusicBrainz Release ID. |
+| `mb_release_group_id` | TEXT | MusicBrainz Release Group ID. |
 | `art_id` | INTEGER | Foreign Key referencing `artwork.id`. |
 
 ### `artists`
 Stores rich metadata for artists, fetched from external sources (MusicBrainz, Spotify, etc.).
+Normalized: External links, albums, and singles are now stored in separate tables.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
@@ -45,16 +47,77 @@ Stores rich metadata for artists, fetched from external sources (MusicBrainz, Sp
 | `bio` | TEXT | Artist biography. |
 | `image_url` | TEXT | URL to artist image (external reference). |
 | `art_id` | INTEGER | Foreign Key referencing `artwork.id` for cached artist image. |
-| `spotify_url` | TEXT | URL to Spotify artist page. |
-| `homepage` | TEXT | Artist's homepage URL. |
-| `similar_artists` | TEXT | JSON string of similar artists. |
-| `top_tracks` | TEXT | JSON string of top tracks. |
 | `last_updated` | REAL | Timestamp of last metadata update. |
-| `wikipedia_url` | TEXT | URL to Wikipedia page. |
-| `qobuz_url` | TEXT | URL to Qobuz artist page. |
-| `musicbrainz_url` | TEXT | URL to MusicBrainz artist page. |
-| `singles` | TEXT | JSON string of artist singles. |
-| `albums` | TEXT | JSON string of artist albums. |
+
+### `albums`
+Stores derived album information from MusicBrainz Release Groups.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `mbid` | TEXT | Primary Key. MusicBrainz Release Group ID. |
+| `title` | TEXT | Album title. |
+| `release_date` | TEXT | Release date. |
+| `primary_type` | TEXT | Primary type (e.g., Album, EP, Single). |
+| `secondary_types` | TEXT | Secondary types. |
+| `art_id` | INTEGER | Foreign Key referencing `artwork.id`. |
+| `last_updated` | REAL | Timestamp of last metadata update. |
+
+### `artist_albums`
+Junction table linking artists to albums (Many-to-Many).
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `artist_mbid` | TEXT | Foreign Key `artists.mbid`. |
+| `album_mbid` | TEXT | Foreign Key `albums.mbid`. |
+| `type` | TEXT | Relationship type (e.g., 'primary', 'featured'). |
+
+### `track_artists`
+Junction table linking artists to individual tracks (Many-to-Many).
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `track_id` | INTEGER | Foreign Key `tracks.id`. |
+| `mbid` | TEXT | Foreign Key `artists.mbid`. |
+
+### `external_links`
+Stores URLs for Artists and Albums (e.g., Spotify, Tidal, Wikipedia).
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | INTEGER | Primary Key. |
+| `entity_type` | TEXT | 'artist' or 'album'. |
+| `entity_id` | TEXT | MBID of the entity. |
+| `type` | TEXT | Link type ('spotify', 'tidal', 'qobuz', 'wikipedia', 'homepage'). |
+| `url` | TEXT | The external URL. |
+
+### `tracks_top`
+Stores top tracks for artists (fetched from Spotify).
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | INTEGER | Primary Key. |
+| `artist_mbid` | TEXT | Foreign Key `artists.mbid`. |
+| `type` | TEXT | 'top' or 'single'. |
+| `track_id` | INTEGER | Foreign Key `tracks.id` (if matched locally). |
+| `external_name` | TEXT | Track name from external source. |
+| `external_album` | TEXT | Album name from external source. |
+| `external_date` | TEXT | Release date. |
+| `external_duration_ms` | INTEGER | Duration in ms. |
+| `external_mbid` | TEXT | External ID (e.g., Spotify ID). |
+| `popularity` | INTEGER | Track popularity (0-100). |
+| `rank` | INTEGER | Rank in the list. |
+| `last_updated` | REAL | Timestamp of last update. |
+
+### `similar_artists`
+Stores similar artists data.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `artist_mbid` | TEXT | Source Artist MBID. |
+| `similar_artist_name` | TEXT | Name of similar artist. |
+| `similar_artist_mbid` | TEXT | MBID of similar artist (if known). |
+| `rank` | INTEGER | Similarity rank. |
+| `last_updated` | REAL | Timestamp of last update. |
 
 ### `artwork`
 Stores unique artwork to avoid duplication. Artwork files are organized in subdirectories based on the first 2 characters of the SHA1 hash.
@@ -71,7 +134,7 @@ Stores unique artwork to avoid duplication. Artwork files are organized in subdi
 | `mime` | TEXT | MIME type of the image. |
 | `width` | INTEGER | Image width in pixels. |
 | `height` | INTEGER | Image height in pixels. |
-| `path_on_disk` | TEXT | Path to the cached image file (optional/legacy). |
+| `path_on_disk` | TEXT | Path to the cached image file. |
 
 ### `renderers`
 Stores discovered UPnP/DLNA renderers.
@@ -82,10 +145,10 @@ Stores discovered UPnP/DLNA renderers.
 | `friendly_name` | TEXT | Display name of the device. |
 | `udn` | TEXT | Unique Device Name (UUID). Unique. |
 | `location_url` | TEXT | URL to the device description. |
-| `last_seen` | REAL | Timestamp when the device was last seen. |
+| `ip` | TEXT | IP address of the device. |
 | `control_url` | TEXT | UPnP AVTransport control URL. |
 | `rendering_control_url` | TEXT | UPnP RenderingControl URL. |
-| `ip` | TEXT | IP address of the device. |
+| `last_seen` | REAL | Timestamp when the device was last seen. |
 
 ### `renderer_states`
 Stores the current playback state for each renderer (local or UPnP). This allows persistent state and queue management.
@@ -109,18 +172,6 @@ Maps client IDs to their active renderer UDN.
 | `active_renderer_udn` | TEXT | UDN of the renderer the client is controlling. |
 | `last_seen` | DATETIME | Timestamp of last activity. |
 
-### `playback_state` (Deprecated)
-*Legacy table, superseded by `renderer_states`.*
-Singleton table (row id=1) storing the current playback status.
-
-| Column | Type | Description |
-| :--- | :--- | :--- |
-| `id` | INTEGER | Primary Key. Always 1. |
-| `queue` | TEXT | JSON list of tracks in the queue. |
-| `current_index` | INTEGER | Index of the currently playing track. |
-| `position_seconds` | REAL | Last saved playback position. |
-| `is_playing` | BOOLEAN | Whether playback is active. |
-
 ### `playback_history`
 Log of played tracks.
 
@@ -139,30 +190,19 @@ Log of played tracks.
 ### Indexes
 
 **Integrity & Joins:**
-- `idx_tracks_art_id` on `tracks(art_id)` - Fast artwork lookups
-- `idx_tracks_mb_artist_id` on `tracks(mb_artist_id)` - Artist metadata joins
+- `idx_tracks_art_id` on `tracks(art_id)`
+- `idx_tracks_mb_artist_id` on `tracks(mb_artist_id)`
+- `idx_links_entity` on `external_links(entity_type, entity_id)`
+- `idx_tracks_top_artist` on `tracks_top(artist_mbid, type)`
+- `idx_similar_artists_artist` on `similar_artists(artist_mbid)`
 
-**Browsing (artist → album → tracks):**
-- `idx_tracks_artist_album` on `tracks(artist COLLATE NOCASE, album COLLATE NOCASE, disc_no, track_no)` - Artist/album browsing
-- `idx_tracks_album` on `tracks(album COLLATE NOCASE, disc_no, track_no)` - Album track ordering
-- `idx_artists_name` on `artists(name COLLATE NOCASE)` - Artist list sorting
+**Browsing:**
+- `idx_tracks_artist_album` on `tracks(artist, album, disc_no, track_no)`
+- `idx_tracks_album` on `tracks(album, disc_no, track_no)`
+- `idx_artists_name` on `artists(name)`
 
 **Maintenance:**
-- `idx_tracks_mtime` on `tracks(mtime)` - Recently added/changed tracks
+- `idx_tracks_mtime` on `tracks(mtime)`
 
 ### Full-Text Search (FTS5)
-
-The `tracks_fts` virtual table provides fast full-text search across:
-- `title`
-- `artist`
-- `album`
-- `album_artist`
-
-**Usage Example:**
-```sql
--- Search for tracks matching "love"
-SELECT t.* FROM tracks t
-JOIN tracks_fts ON tracks_fts.rowid = t.id
-WHERE tracks_fts MATCH 'love'
-ORDER BY rank;
-```
+The `tracks_fts` virtual table provides fast full-text search across `title`, `artist`, `album`, and `album_artist`.

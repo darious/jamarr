@@ -13,6 +13,7 @@
     toggleNowPlaying,
   } from "$stores/player";
   import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
+  import VolumeControl from "$components/VolumeControl.svelte";
   import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
@@ -55,6 +56,30 @@
       volume = newVol;
     }
   }
+
+  // Sync local volume TO store (for initial load / browser restore)
+  // We check if we are local renderer, and if store is out of sync
+  /* 
+  $: if (
+    ($playerState.renderer.startsWith("local") || $playerState.renderer === "local") &&
+    audio &&
+    !isNaN(volume)
+  ) {
+    const vol100 = Math.round(volume * 100);
+    // CRITICAL FIX: Do NOT update store if it is null (waiting for server)
+    // Also, do NOT overwrite the store if we are just seeing the default 1.0 and store has a saved value.
+    // Ideally we only update store on user interaction. 
+    // For now, disabling this automatic sync to prevent overwriting saved volume with default 1.0.
+    // VolumeControl component handles setting the store on UI interaction.
+    
+    // if (
+    //  $playerState.volume === null ||
+    //  Math.abs($playerState.volume - vol100) > 5
+    // ) {
+    //    playerState.update(s => ({ ...s, volume: vol100 }));
+    // }
+  } 
+  */
 
   // Reset logged flag when track ID actually changes
   $: if (currentTrack && currentTrack.id !== lastLoggedTrackId) {
@@ -160,7 +185,25 @@
   }
 
   onMount(() => {
-    console.log("[PlayerBar] onMount called, setting up event listener");
+    console.log("[PlayerBar] onMount called");
+
+    // Initial Volume Sync: Capture browser-restored volume
+    if (audio) {
+      // Only update store if it has NOT been initialized yet (null)
+      // This prevents overwriting a server-fetched value with a default/local value
+      if ($playerState.volume === null) {
+        console.log(
+          "[PlayerBar] Initializing store volume from local audio:",
+          audio.volume,
+        );
+        // We update the store, and rely on `player.ts` to NOT overwrite this with null.
+        playerState.update((s) => ({
+          ...s,
+          volume: Math.round(audio.volume * 100),
+        }));
+      }
+    }
+
     window.addEventListener("jamarr:play-local", (e: CustomEvent) => {
       console.log("[PlayerBar] jamarr:play-local event received:", e.detail);
       const track = e.detail;
@@ -584,32 +627,9 @@
     <div class="w-1/3 flex justify-end items-center gap-4">
       <div class="text-xs text-white/40">{deviceName}</div>
       <div class="flex items-center gap-2 group">
-        <svg
-          class="h-5 w-5 text-white/60"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          ><path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
-          ></path></svg
-        >
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={volume}
-          on:input={(e) => {
-            const val = parseFloat(e.currentTarget.value);
-            volume = val;
-            if (!$playerState.renderer.startsWith("local")) {
-              setVolume(Math.round(val * 100)); // Convert 0-1 to 0-100
-            }
-          }}
-          class="range range-xs range-primary w-24 opacity-0 group-hover:opacity-100 transition-opacity"
+        <VolumeControl
+          showIcon={true}
+          sliderClass="range range-xs range-primary w-24 opacity-0 group-hover:opacity-100 transition-opacity"
         />
       </div>
       <button

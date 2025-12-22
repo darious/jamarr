@@ -10,6 +10,7 @@
     playFromQueue,
     toggleNowPlaying,
   } from "$stores/player";
+  import VolumeControl from "$components/VolumeControl.svelte";
   import { onMount, onDestroy } from "svelte";
 
   onMount(() => {
@@ -382,6 +383,16 @@
                     ><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg
                   >
                 </button>
+              </div>
+
+              <!-- Volume Control -->
+              <div class="w-full max-w-xs mx-auto flex justify-center">
+                <VolumeControl
+                  showIcon={true}
+                  sliderClass="range range-xs range-primary w-full"
+                  containerClass="flex items-center gap-4 w-full px-8 opacity-80 hover:opacity-100 transition-opacity"
+                  iconClass="h-5 w-5 text-white/60"
+                />
               </div>
             </div>
           </div>

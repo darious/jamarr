@@ -160,9 +160,10 @@ export async function loadQueueFromServer() {
                 position_seconds: data.position_seconds,
                 is_playing: data.is_playing,
                 renderer: data.renderer || `local:${getClientId()}`,
-                volume: data.volume // May be null
+                // If server returns null (no history), keep existing volume (e.g. locally restored)
+                // If server returns value, use it.
+                volume: (data.volume !== null && data.volume !== undefined) ? data.volume : s.volume
             }));
-            console.log('[loadQueueFromServer] State updated. Renderer:', data.renderer);
 
         } else {
             console.error('[loadQueueFromServer] Failed, status:', res.status);

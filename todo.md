@@ -1,5 +1,8 @@
 # ToDo List
 
+## General
+* Remove ffmpeg refs, we're not using it and dont need it
+
 ## Scanner
 * ~~Add a sparse refresh mode that only looks for new stuff and doesn't delete old stuff~~
 * ~~make the scanner notice changed files and update them and remove files that are missing from the file system~~
