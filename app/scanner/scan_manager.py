@@ -279,3 +279,40 @@ class ScanManager:
             # We don't await cancellation here, we let the task handle the event check
             # But we can await the task if we want to ensure it stopped before returning
             # return await self._current_task
+
+    async def start_missing_albums_scan(self, artist_filter=None, mbid_filter=None):
+        async with self._lock:
+            if self._current_task and not self._current_task.done():
+                raise RuntimeError("Scan already in progress")
+            
+            self._stop_event.clear()
+            self._status = "Scanning Missing Albums..."
+            self._phase = "missing_albums"
+            self.scanner.scan_logger = self.ManagerLogger(self)
+            
+            self._current_task = asyncio.create_task(self._run_missing_albums_scan(artist_filter, mbid_filter))
+            return self._current_task
+
+    async def _run_missing_albums_scan(self, artist_filter, mbid_filter):
+        try:
+            self._broadcast({"type": "start", "mode": "missing_albums", "phase": self._phase})
+            self._log_message(f"Starting Missing Albums Scan. Filter: {artist_filter or mbid_filter or 'All'}")
+            
+            self.scanner._stop_event = self._stop_event
+            await self.scanner.scan_missing_albums(artist_filter=artist_filter, mbid_filter=mbid_filter)
+            
+            self._status = "Idle"
+            self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
+            self._log_message("Missing Albums Scan complete.")
+        except asyncio.CancelledError:
+            self._status = "Idle"
+            self._broadcast({"type": "complete", "status": "cancelled", "phase": self._phase})
+            self._log_message("Missing Albums Scan cancelled.")
+        except Exception as e:
+            logger.exception("Missing Albums Scan failed")
+            self._status = "Idle"
+            self._broadcast({"type": "complete", "status": "error", "error": str(e), "phase": self._phase})
+            self._log_message(f"Missing Albums Scan failed: {e}")
+        finally:
+            self._current_task = None
+            self._phase = None
