@@ -661,17 +661,35 @@ async def fetch_best_release_match(rg_id: str, client: httpx.AsyncClient):
         best = releases[0]
         best_release_id = best.get("id")
         
-        # Extract Links
+        # Extract Links from ALL releases in the group to improve hit rate
+        # We process 'best' first to prioritize its links if duplicates (though set handles that)
+        # But actually, we just want ANY valid link.
+        
         links = []
-        for rel in best.get("relations", []):
-             target = rel.get("url", {}).get("resource", "")
-             type_ = rel.get("type", "")
-             if "tidal.com" in target:
-                 links.append({"type": "tidal", "url": target})
-             elif "qobuz.com" in target:
-                 links.append({"type": "qobuz", "url": target})
-             elif "musicbrainz.org" in target:
-                 links.append({"type": "musicbrainz", "url": target})
+        seen_urls = set()
+        
+        # Helper to add unique links
+        def add_links_from_release(release):
+            for rel in release.get("relations", []):
+                target = rel.get("url", {}).get("resource", "")
+                if not target or target in seen_urls: continue
+                
+                l_type = None
+                if "tidal.com" in target: l_type = "tidal"
+                elif "qobuz.com" in target: l_type = "qobuz"
+                elif "musicbrainz.org" in target: l_type = "musicbrainz"
+                
+                if l_type:
+                    links.append({"type": l_type, "url": target})
+                    seen_urls.add(target)
+
+        # 1. Add links from the BEST match first (highest priority if we were ranking, but we just list them)
+        add_links_from_release(best)
+        
+        # 2. Add links from all other releases
+        for rel in releases:
+            if rel.get("id") == best_release_id: continue
+            add_links_from_release(rel)
         
         # Collect ALL release IDs associated with this group for backfilling
         release_ids = [r["id"] for r in releases]
