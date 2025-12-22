@@ -10,7 +10,9 @@
     resume,
     seek,
     getHeaders,
+    toggleNowPlaying,
   } from "$stores/player";
+  import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
   import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
@@ -197,6 +199,18 @@
       }
     });
 
+    window.addEventListener("jamarr:seek", (e: CustomEvent) => {
+      console.log("[PlayerBar] jamarr:seek event received:", e.detail);
+      if (!$playerState.renderer.startsWith("local") || !audio) return;
+
+      const pos = e.detail.position;
+      if (typeof pos === "number" && !isNaN(pos)) {
+        audio.currentTime = pos;
+        progress = pos; // Update local state immediately
+        updateProgress(pos, isPlaying);
+      }
+    });
+
     if (audio) {
       console.log(
         "[PlayerBar] Audio element found, adding timeupdate and ended listeners",
@@ -208,6 +222,12 @@
         const oldProgress = progress;
         progress = audio.currentTime;
         duration = audio.duration;
+        // Keep shared store in sync for overlays/UI
+        playerState.update((s) => ({
+          ...s,
+          position_seconds: progress,
+          is_playing: !audio.paused,
+        }));
 
         // Log every 5 seconds to avoid spam
         if (
@@ -584,6 +604,24 @@
       </div>
       <button
         class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
+        title="Now Playing"
+        on:click={toggleNowPlaying}
+      >
+        <svg
+          class="h-5 w-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          ><path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M4 8h16M4 16h10m-6-8v8"
+          ></path></svg
+        >
+      </button>
+      <button
+        class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
         title="Queue"
         on:click={toggleQueue}
       >
@@ -605,3 +643,5 @@
 
   <audio bind:this={audio} bind:volume />
 </div>
+
+<NowPlayingOverlay />

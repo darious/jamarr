@@ -11,6 +11,7 @@
 * ~~it should return results live as i type~~
 * ~~it should group the results into artists, albums, and tracks~~
 * ~~and should jump to the relevant artist or album page, when they are selected and have play and queue icons for each~~
+* make serach work at any part of the search term, right now "Ed Shee" works but "Sheeran" does not
 
 
 ## multi user
@@ -30,6 +31,6 @@
 ## playback
 * ~~play pause button not working for upnp post a page reload~~
 * ~~fix playback pausing when browser tab does not have the focus~~
-* Fix where the whole album is added to the queue when i click play on a single album track
+* ~~Fix where the whole album is added to the queue when i click play on a single album track~~
 * fix where we're adding tracks to the history twice (front and backend I think)
 
