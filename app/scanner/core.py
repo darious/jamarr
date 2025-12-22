@@ -8,6 +8,8 @@ from app.scanner.tags import extract_tags
 from app.scanner.artwork import extract_and_save_artwork, download_and_save_artwork, cleanup_orphaned_artwork
 from app.config import get_music_path
 from app.scanner.metadata import fetch_artist_metadata, fetch_track_credits
+import difflib
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -311,20 +313,70 @@ class Scanner:
                  track_album = tags.get("album", "").strip().lower()
                  
                  for mbid in aa_ids:
-                     # Try to link Top Tracks
-                     # We use external_name matching. 
-                     # Only match if external_album is missing OR matches local album
-                     await db.execute("""
-                        UPDATE tracks_top
-                        SET track_id = ?, last_updated = ?
-                        WHERE artist_mbid = ?
-                        AND LOWER(TRIM(external_name)) = ?
-                        AND (
-                            external_album IS NULL 
-                            OR external_album = '' 
-                            OR LOWER(TRIM(external_album)) = ?
-                        )
-                     """, (track_id, time.time(), mbid, track_title, track_album))
+                     # Fetch Top Tracks for this artist
+                     top_tracks = []
+                     async with db.execute("""
+                         SELECT id, external_name, external_album, external_duration_ms
+                         FROM tracks_top
+                         WHERE artist_mbid = ? AND track_id IS NULL
+                     """, (mbid,)) as cursor:
+                          top_tracks = await cursor.fetchall()
+                          
+                     if not top_tracks:
+                         continue
+
+                     # Fuzzy Match Logic
+                     def normalize(s):
+                         if not s: return ""
+                         s = s.lower().strip()
+                         s = re.sub(r'[\(\[][^\)\]]*(feat|with|remast|deluxe|edit|mix)[^\)\]]*[\)\]]', '', s)
+                         s = re.sub(r'[^\w\s]', '', s)
+                         s = re.sub(r'\s+', ' ', s).strip()
+                         return s
+
+                     def fuzzy_score(s1, s2):
+                         return difflib.SequenceMatcher(None, normalize(s1), normalize(s2)).ratio()
+                     
+                     # Original track_title was lowered, get raw for fuzzy
+                     curr_title = tags.get("title", "")
+                     curr_album = tags.get("album", "")
+                     curr_duration = tags.get("duration", 0) # seconds
+
+                     for tt in top_tracks:
+                         tt_id, tt_name, tt_album, tt_dur_ms = tt
+                         
+                         # Dynamic Weighting
+                         total_weight = 0.6
+                         current_score = 0
+                         
+                         # 1. Title
+                         t_score = fuzzy_score(tt_name, curr_title)
+                         if t_score < 0.6: continue
+                         current_score += t_score * 0.6
+                         
+                         # 2. Album
+                         if tt_album and curr_album:
+                             total_weight += 0.2
+                             a_score = fuzzy_score(tt_album, curr_album)
+                             current_score += a_score * 0.2
+                         
+                         # 3. Duration
+                         if tt_dur_ms and curr_duration:
+                             total_weight += 0.2
+                             diff = abs((tt_dur_ms / 1000) - curr_duration)
+                             if diff < 5:
+                                 current_score += 0.2
+                             elif diff < 15:
+                                 current_score += 0.1
+                         
+                         final_score = current_score / total_weight
+                         
+                         if final_score > 0.75:
+                              await db.execute("""
+                                 UPDATE tracks_top
+                                 SET track_id = ?, last_updated = ?
+                                 WHERE id = ?
+                              """, (track_id, time.time(), tt_id))
 
     async def _cleanup_orphans(self, db, root_path, seen_paths):
         music_root = get_music_path()
