@@ -912,83 +912,87 @@
         <h3 class="text-xl font-semibold">Missing Albums</h3>
       </div>
     </div>
-    <div
-      class="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]"
-    >
-      {#each missingAlbums as album}
-        <article
-          class="grid-card flex flex-col gap-3 opacity-80 hover:opacity-100 transition-opacity"
-        >
-          <div
-            class="group relative aspect-square overflow-hidden rounded-2xl bg-white/5"
-          >
-            {#if album.image_url}
-              <img
-                src={album.image_url}
-                alt={album.title}
-                class="h-full w-full object-cover"
-              />
-            {:else}
-              <div class="h-full w-full flex items-center justify-center">
-                <span class="text-4xl text-white/10">?</span>
-              </div>
-            {/if}
 
-            <div
-              class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity gap-2"
-            >
-              {#if album.tidal_url}
-                <a
-                  href={album.tidal_url}
-                  target="_blank"
-                  class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm"
-                  title="Open in Tidal"
-                >
-                  <img
-                    src="/assets/logo-tidal.png"
-                    alt="Tidal"
-                    class="h-4 w-4"
-                  />
-                </a>
-              {/if}
-              {#if album.qobuz_url}
-                <a
-                  href={album.qobuz_url}
-                  target="_blank"
-                  class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm"
-                  title="Open in Qobuz"
-                >
-                  <img
-                    src="/assets/logo-qobuz.png"
-                    alt="Qobuz"
-                    class="h-4 w-4"
-                  />
-                </a>
-              {/if}
-              {#if album.musicbrainz_url}
-                <a
-                  href={album.musicbrainz_url}
-                  target="_blank"
-                  class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm"
-                  title="Open in MusicBrainz"
-                >
-                  <img
-                    src="/assets/logo-musicbrainz.svg"
-                    alt="MB"
-                    class="h-4 w-4"
-                  />
-                </a>
-              {/if}
-            </div>
-          </div>
-          <div class="space-y-1">
-            <p class="text-base font-semibold line-clamp-1">{album.title}</p>
-            <p class="text-xs text-white/60">
-              {album.release_date ? album.release_date.substring(0, 4) : "—"} • Missing
-            </p>
-          </div>
-        </article>
-      {/each}
+    <div class="glass-panel overflow-hidden">
+      <table class="w-full text-left text-sm">
+        <thead
+          class="bg-white/5 text-white/40 uppercase text-xs tracking-wider font-medium"
+        >
+          <tr>
+            <th class="px-4 py-2">Album</th>
+            <th class="px-4 py-2 w-32">Released</th>
+            <th class="px-2 py-2 w-10 text-center" title="MusicBrainz">MB</th>
+            <th class="px-2 py-2 w-10 text-center" title="Tidal">Ti</th>
+            <th class="px-2 py-2 w-10 text-center" title="Qobuz">Qo</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-white/5">
+          {#each missingAlbums.sort( (a, b) => (b.release_date || "").localeCompare(a.release_date || ""), ) as album}
+            <tr class="group hover:bg-white/5 transition-colors">
+              <td class="px-4 py-2 font-medium text-white/90">
+                {album.title}
+              </td>
+              <td class="px-4 py-2 text-white/60">
+                {album.release_date || "—"}
+              </td>
+
+              <!-- MusicBrainz -->
+              <td class="px-2 py-2 text-center">
+                {#if album.musicbrainz_url}
+                  <a
+                    href={album.musicbrainz_url}
+                    target="_blank"
+                    class="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 transition-colors mx-auto text-white/60 hover:text-white"
+                    title="Open in MusicBrainz"
+                  >
+                    <img
+                      src="/assets/logo-musicbrainz.svg"
+                      alt="MB"
+                      class="h-4 w-4 object-contain"
+                    />
+                  </a>
+                {/if}
+              </td>
+
+              <!-- Tidal -->
+              <td class="px-2 py-2 text-center">
+                {#if album.tidal_url}
+                  <a
+                    href={album.tidal_url}
+                    target="_blank"
+                    class="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 transition-colors mx-auto"
+                    title="Open in Tidal"
+                  >
+                    <img
+                      src="/assets/logo-tidal.png"
+                      alt="Tidal"
+                      class="h-4 w-4 object-contain"
+                    />
+                  </a>
+                {/if}
+              </td>
+
+              <!-- Qobuz -->
+              <td class="px-2 py-2 text-center">
+                {#if album.qobuz_url}
+                  <a
+                    href={album.qobuz_url}
+                    target="_blank"
+                    class="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 transition-colors mx-auto"
+                    title="Open in Qobuz"
+                  >
+                    <img
+                      src="/assets/logo-qobuz.png"
+                      alt="Qobuz"
+                      class="h-4 w-4 object-contain"
+                    />
+                  </a>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
     </div>
   {/if}
 </section>
