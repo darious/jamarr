@@ -357,7 +357,7 @@
 
                 <div class="flex gap-4">
                     <button
-                        class="btn btn-primary flex-1"
+                        class="btn w-full border border-white/10 bg-white/10 text-white hover:bg-white/20 normal-case font-normal"
                         on:click={startFilesystemScan}
                         disabled={isRunning}
                     >

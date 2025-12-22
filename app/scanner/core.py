@@ -842,23 +842,33 @@ class Scanner:
 
         async for db in get_db():
             # 1. Get List of Artists to Check
-            query = "SELECT mbid, name FROM artists"
+            # Filter: Must be a primary artist on at least one album (present in artist_albums)
+            # UNLESS we are specifically asking for an artist/mbid
+            
+            query = "SELECT DISTINCT a.mbid, a.name FROM artists a"
             params = []
             clauses = []
+            joins = []
             
             if mbid_filter:
                if isinstance(mbid_filter, (list, set, tuple)):
                    filtered = [m for m in mbid_filter if m]
                    if filtered:
                        placeholders = ",".join(["?"] * len(filtered))
-                       clauses.append(f"mbid IN ({placeholders})")
+                       clauses.append(f"a.mbid IN ({placeholders})")
                        params.extend(filtered)
                else:
-                   clauses.append("mbid = ?")
+                   clauses.append("a.mbid = ?")
                    params.append(mbid_filter)
             elif artist_filter:
-                clauses.append("name LIKE ?")
+                clauses.append("a.name LIKE ?")
                 params.append(f"%{artist_filter}%")
+            else:
+                # Only enforce "has albums" rule if doing a bulk scan
+                joins.append("JOIN artist_albums aa ON a.mbid = aa.artist_mbid")
+            
+            if joins:
+                query += " " + " ".join(joins)
             
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
