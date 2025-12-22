@@ -68,7 +68,7 @@
           {#if album.is_hires}
             <img
               src="/assets/logo-hires.png"
-              class="absolute right-3 top-3 h-10 w-10"
+              class="absolute right-2 bottom-2 h-8 w-8"
               alt="Hi-res"
             />
           {/if}

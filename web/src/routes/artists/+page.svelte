@@ -27,7 +27,7 @@
 
 <section class="mx-auto flex w-full max-w-[1700px] flex-col gap-10 px-8 py-10">
   <div
-    class="section-head sticky top-0 z-40 bg-surface-50/80 backdrop-blur-xl py-4 -mx-4 px-4 rounded-b-2xl transition-all border-b border-white/5 shadow-lg"
+    class="section-head sticky top-0 z-20 bg-surface-50/80 backdrop-blur-xl py-4 -mx-4 px-4 rounded-b-2xl transition-all border-b border-white/5 shadow-lg"
   >
     <div>
       <p class="text-sm uppercase tracking-wide text-white/60">Browse</p>

@@ -43,14 +43,17 @@
       (r) => r.udn === $playerState.renderer,
     );
     deviceName = r ? r.name : "Local";
-
-    // Check for switch to "Office"
-    if (deviceName === "Office" && lastDeviceName !== "Office") {
-      console.log("[PlayerBar] Switched to Office, defaulting volume to 20%");
-      volume = 0.2;
-      setVolume(20);
-    }
     lastDeviceName = deviceName;
+  }
+
+  // Sync volume from store if provided
+  $: if ($playerState.volume !== null && $playerState.volume !== undefined) {
+    // Avoid jitter if we are dragging (maybe check drift?)
+    // API volume is 0-100, local volume is 0.0-1.0
+    const newVol = $playerState.volume / 100;
+    if (Math.abs(volume - newVol) > 0.05) {
+      volume = newVol;
+    }
   }
 
   // Reset logged flag when track ID actually changes
@@ -87,13 +90,16 @@
     if (!track || hasLoggedCurrentTrack) return;
 
     try {
-      const hostname = window.location.hostname;
+      // Use getHeaders() to ensure Client ID is sent
+      const headers = {
+        "Content-Type": "application/json",
+        ...getHeaders(),
+      };
       await fetch("/api/player/log-play", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           track_id: track.id,
-          hostname,
         }),
       });
       hasLoggedCurrentTrack = true;
@@ -287,6 +293,10 @@
             playerState.update((s) => {
               let newState = { ...s, position_seconds: state.position_seconds };
               let changed = false;
+
+              if (s.position_seconds !== state.position_seconds) {
+                changed = true;
+              }
 
               if (s.current_index !== state.current_index) {
                 console.log(

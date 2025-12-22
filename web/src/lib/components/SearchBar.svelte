@@ -230,9 +230,13 @@
                                 >
                                     {album.title}
                                 </div>
-                                <div class="truncate text-xs text-white/60">
+                                <a
+                                    href={`/artist/${encodeURIComponent(album.artist)}`}
+                                    class="truncate text-xs text-white/60 hover:text-white hover:underline block"
+                                    on:click|stopPropagation={clearSearch}
+                                >
                                     {album.artist}
-                                </div>
+                                </a>
                             </div>
                         </button>
                     {/each}
@@ -284,8 +288,24 @@
                                 >
                                     {track.title}
                                 </div>
-                                <div class="truncate text-xs text-white/60">
-                                    {track.artist} • {track.album}
+                                <div
+                                    class="truncate text-xs text-white/60 flex items-center gap-1"
+                                >
+                                    <a
+                                        href={`/artist/${encodeURIComponent(track.artist)}`}
+                                        class="hover:text-white hover:underline"
+                                        on:click|stopPropagation={clearSearch}
+                                    >
+                                        {track.artist}
+                                    </a>
+                                    <span>•</span>
+                                    <a
+                                        href={`/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album)}`}
+                                        class="hover:text-white hover:underline"
+                                        on:click|stopPropagation={clearSearch}
+                                    >
+                                        {track.album}
+                                    </a>
                                 </div>
                             </div>
                         </button>
