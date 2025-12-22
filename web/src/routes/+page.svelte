@@ -68,7 +68,7 @@
                 <h2 class="text-2xl font-semibold">New Releases</h2>
             </div>
             <div
-                class="flex gap-6 overflow-x-auto pb-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
+                class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
                 on:wheel={handleScroll}
             >
                 {#each newReleases as album}
@@ -129,7 +129,7 @@
                                 <img
                                     src="/assets/logo-hires.png"
                                     alt="Hi-Res"
-                                    class="absolute left-2 bottom-2 h-6 w-auto opacity-90 pointer-events-none"
+                                    class="absolute right-2 bottom-2 h-8 w-8 opacity-90 pointer-events-none"
                                 />
                             {/if}
                         </div>
@@ -161,7 +161,7 @@
         <div class="space-y-4">
             <h2 class="text-2xl font-semibold">Recently Added Albums</h2>
             <div
-                class="flex gap-6 overflow-x-auto pb-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
+                class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
                 on:wheel={handleScroll}
             >
                 {#each recentlyAddedAlbums as album}
@@ -222,7 +222,7 @@
                                 <img
                                     src="/assets/logo-hires.png"
                                     alt="Hi-Res"
-                                    class="absolute left-2 bottom-2 h-6 w-auto opacity-90 pointer-events-none"
+                                    class="absolute right-2 bottom-2 h-8 w-8 opacity-90 pointer-events-none"
                                 />
                             {/if}
                         </div>
@@ -311,7 +311,7 @@
                                 <img
                                     src="/assets/logo-hires.png"
                                     alt="Hi-Res"
-                                    class="absolute left-2 bottom-2 h-6 w-auto opacity-90 pointer-events-none"
+                                    class="absolute right-2 bottom-2 h-8 w-8 opacity-90 pointer-events-none"
                                 />
                             {/if}
                         </div>
@@ -337,11 +337,9 @@
     <!-- Discover - Newly Added Artists -->
     {#if discoverArtists.length > 0}
         <div class="space-y-4">
-            <h2 class="text-2xl font-semibold">
-                Discover Artists (Newly Added)
-            </h2>
+            <h2 class="text-2xl font-semibold">Newly Added Artists</h2>
             <div
-                class="flex gap-6 overflow-x-auto pb-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
+                class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
                 on:wheel={handleScroll}
             >
                 {#each discoverArtists as artist}
@@ -370,11 +368,6 @@
                             >
                                 {artist.name}
                             </h3>
-                            <p
-                                class="text-xs text-white/50 bg-white/10 px-2 py-0.5 rounded-full mt-1"
-                            >
-                                New
-                            </p>
                         </div>
                     </a>
                 {/each}
@@ -388,7 +381,7 @@
         <div class="space-y-4">
             <h2 class="text-2xl font-semibold">Recently Played Artists</h2>
             <div
-                class="flex gap-6 overflow-x-auto pb-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
+                class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
                 on:wheel={handleScroll}
             >
                 {#each recentlyPlayedArtists as artist}
@@ -397,7 +390,7 @@
                         class="group relative min-w-[200px] w-[200px] snap-start flex flex-col items-center text-center"
                     >
                         <div
-                            class="aspect-square w-full overflow-hidden rounded-full bg-white/5 relative shadow-lg border border-white/5 transition-transform duration-300 group-hover:scale-105 opacity-80 group-hover:opacity-100"
+                            class="aspect-square w-full overflow-hidden rounded-full bg-white/5 relative shadow-lg border border-white/5 transition-transform duration-300 group-hover:scale-105"
                         >
                             <img
                                 src={artist.art_sha1
@@ -406,7 +399,7 @@
                                       ? `/art/${artist.art_id}`
                                       : "/assets/default-artist.svg"}
                                 alt={artist.name}
-                                class="h-full w-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
+                                class="h-full w-full object-cover transition-all duration-500"
                                 loading="lazy"
                             />
                         </div>

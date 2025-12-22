@@ -46,7 +46,7 @@ async def search(q: str, db: aiosqlite.Connection = Depends(get_db)):
         LIMIT 5
     """
     artists = []
-    async with db.execute(artists_query, (f"{q}%",)) as cursor:
+    async with db.execute(artists_query, (f"%{q}%",)) as cursor:
         async for row in cursor:
             artists.append(SearchResultArtist(
                 name=row['name'],

@@ -466,7 +466,13 @@
                   <div
                     class={`flex items-center gap-2 text-xs mt-0.5 ${track.id > 0 ? "text-white/50" : "text-white/20 line-through"}`}
                   >
-                    <span>{track.album}</span>
+                    <a
+                      href={`/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(track.album)}`}
+                      class="hover:text-white hover:underline"
+                      on:click|stopPropagation
+                    >
+                      {track.album}
+                    </a>
                     {#if track.codec}
                       <span class="text-white/30">•</span>
                       <span class="uppercase">{track.codec}</span>

@@ -115,8 +115,11 @@ class Scanner:
     async def _process_file(self, path, db, artist_mbids, force_rescan):
         try:
             # Check modification time
+            music_root = get_music_path()
+            rel_path = os.path.relpath(path, music_root)
+            
             mtime = os.path.getmtime(path)
-            async with db.execute("SELECT id, mtime FROM tracks WHERE path = ?", (path,)) as cursor:
+            async with db.execute("SELECT id, mtime FROM tracks WHERE path = ?", (rel_path,)) as cursor:
                 row = await cursor.fetchone()
                 if not force_rescan and row and row[1] == mtime:
                     return # Unchanged
@@ -145,7 +148,7 @@ class Scanner:
                     "mb_artist_id", "mb_album_artist_id", "mb_track_id", "mb_release_track_id", "mb_release_id", "mb_release_group_id", "art_id"]
             
             values = [
-                path, mtime, tags.get("title"), tags.get("artist"), tags.get("album"), 
+                rel_path, mtime, tags.get("title"), tags.get("artist"), tags.get("album"), 
                 tags.get("album_artist"), tags.get("track_no"), tags.get("disc_no"), 
                 tags.get("date"), tags.get("genre"), tags.get("duration_seconds"),
                 tags.get("codec"), tags.get("sample_rate_hz"), tags.get("bit_depth"),
@@ -297,14 +300,24 @@ class Scanner:
                      """, (mbid, mb_rg_id, 'primary'))
 
     async def _cleanup_orphans(self, db, root_path, seen_paths):
-        scan_root_wildcard = root_path if root_path.endswith(os.sep) else root_path + os.sep
-        scan_root_wildcard += "%"
+        music_root = get_music_path()
+        # Convert seen_paths (absolute) to relative
+        seen_rel_paths = {os.path.relpath(p, music_root) for p in seen_paths}
+        
+        # Calculate relative scan root for DB query
+        if os.path.abspath(root_path) == os.path.abspath(music_root):
+            scan_root_wildcard = "%"
+        else:
+            rel_root = os.path.relpath(root_path, music_root)
+            if rel_root == ".": rel_root = ""
+            scan_root_wildcard = rel_root + os.sep + "%" if rel_root else "%"
+
         
         async with db.execute("SELECT path FROM tracks WHERE path LIKE ?", (scan_root_wildcard,)) as cursor:
             rows = await cursor.fetchall()
             db_paths = {row[0] for row in rows}
             
-        orphans = db_paths - seen_paths
+        orphans = db_paths - seen_rel_paths
         if orphans:
             logger.info(f"Removing {len(orphans)} orphaned tracks.")
             for orphan in orphans:
@@ -329,9 +342,11 @@ class Scanner:
             async with db.execute("SELECT id, path FROM tracks") as cursor:
                 rows = await cursor.fetchall()
             
+            music_root = get_music_path()
             deleted_tracks = 0
-            for track_id, path in rows:
-                if not os.path.exists(path):
+            for track_id, rel_path in rows:
+                abs_path = os.path.join(music_root, rel_path)
+                if not os.path.exists(abs_path):
                     # logger.debug(f"Pruning missing file: {path}")
                     await db.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
                     deleted_tracks += 1
