@@ -253,6 +253,25 @@ async def init_db():
             )""",
             "CREATE INDEX IF NOT EXISTS idx_similar_artists_artist ON similar_artists(artist_mbid)",
             "CREATE INDEX IF NOT EXISTS idx_similar_artists_similar ON similar_artists(similar_artist_mbid)"
+            "CREATE INDEX IF NOT EXISTS idx_similar_artists_artist ON similar_artists(artist_mbid)",
+            "CREATE INDEX IF NOT EXISTS idx_similar_artists_similar ON similar_artists(similar_artist_mbid)",
+            # Missing Albums table
+            """CREATE TABLE IF NOT EXISTS missing_albums (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                artist_mbid TEXT NOT NULL,
+                release_group_mbid TEXT NOT NULL,
+                title TEXT NOT NULL,
+                release_date TEXT,
+                primary_type TEXT,
+                image_url TEXT,
+                musicbrainz_url TEXT,
+                tidal_url TEXT,
+                qobuz_url TEXT,
+                last_updated REAL,
+                UNIQUE(artist_mbid, release_group_mbid),
+                FOREIGN KEY(artist_mbid) REFERENCES artists(mbid)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_missing_albums_artist ON missing_albums(artist_mbid)"
         ]
         
         for sql in migrations:

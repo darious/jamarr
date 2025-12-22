@@ -1,4 +1,5 @@
 export interface Artist {
+    mbid?: string;
     name: string;
     image_url: string | null;
     art_id: number | null;
@@ -239,4 +240,32 @@ export async function fetchDiscoverArtists(fetchFn: any = fetch): Promise<Artist
     const res = await fetchFn('/api/home/discover-artists');
     if (!res.ok) throw new Error('Failed to fetch discover artists');
     return await res.json();
+}
+
+export interface MissingAlbum {
+    mbid: string;
+    title: string;
+    release_date: string;
+    primary_type: string;
+    image_url: string | null;
+    musicbrainz_url: string | null;
+    tidal_url: string | null;
+    qobuz_url: string | null;
+}
+
+export async function fetchMissingAlbums(mbid: string, fetchFn: any = fetch): Promise<MissingAlbum[]> {
+    const res = await fetchFn(`/api/artists/${mbid}/missing`);
+    if (!res.ok) throw new Error('Failed to fetch missing albums');
+    return await res.json();
+}
+
+export async function triggerMissingAlbumsScan(mbid?: string, artistName?: string): Promise<void> {
+    const params = new URLSearchParams();
+    if (mbid) params.append('mbid', mbid);
+    if (artistName) params.append('artist', artistName);
+
+    const res = await fetch(`/api/scan/missing?${params.toString()}`, {
+        method: 'POST',
+    });
+    if (!res.ok) throw new Error('Failed to trigger missing albums scan');
 }
