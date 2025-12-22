@@ -306,6 +306,7 @@ async def init_db():
                 position_seconds REAL DEFAULT 0,
                 is_playing BOOLEAN DEFAULT 0,
                 transport_state TEXT DEFAULT 'STOPPED',
+                volume INTEGER,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -313,6 +314,13 @@ async def init_db():
         # Migration: Add transport_state if missing
         try:
              await db.execute("ALTER TABLE renderer_states ADD COLUMN transport_state TEXT")
+             await db.commit()
+        except:
+             pass
+
+        # Migration: Add volume if missing
+        try:
+             await db.execute("ALTER TABLE renderer_states ADD COLUMN volume INTEGER")
              await db.commit()
         except:
              pass

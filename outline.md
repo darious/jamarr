@@ -56,6 +56,10 @@ The frontend provides a polished, app-like user experience:
 ├── app/                  # Python Backend
 │   ├── api/              # FastAPI Routers (library, player, etc.)
 │   ├── scanner/          # Library Scanning Logic
+│   │   ├── cli.py        # CLI Entrypoint
+│   │   ├── core.py       # Core Scanner Logic
+│   │   ├── metadata.py   # Metadata Fetching (MusicBrainz/Spotify)
+│   │   └── tags.py       # Tag Extraction
 │   ├── upnp/             # UPnP Manager & Control Logic
 │   ├── main.py           # App Entrypoint
 │   └── db.py             # Database Models & Connection
