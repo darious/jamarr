@@ -83,6 +83,8 @@ export interface Track {
     bitrate: number | null;
     sample_rate_hz: number | null;
     bit_depth: number | null;
+    mb_release_id?: string | null;
+    mb_release_group_id?: string | null;
 }
 
 export async function fetchArtists(fetchFn: any = fetch): Promise<Artist[]> {
