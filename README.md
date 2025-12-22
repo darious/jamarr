@@ -14,6 +14,7 @@ It supports **gapless playback** (via UPnP queue management), **instant search**
 - **Modern UI**: Dark-themed, responsive SvelteKit interface.
 - **Playback History**: Tracks listening history for both local and remote playback.
 - **Tidal Integration**: Links artists and albums to Tidal for external playback.
+- **Top Tracks & Similar Artists**: Fetches and stores popular tracks and related artists.
 - **Queue Persistence**: Playback state and queue are saved to the database, ensuring seamless resumption.
 
 For a detailed system overview, see [Architecture & Outline](outline.md).
@@ -23,7 +24,7 @@ For database details, see [Database Schema](database_schema.md).
 
 ### Prerequisites
 - Python 3.9+
-- `ffmpeg` (for `ffprobe`) - *Coming soon for scanning*
+- `ffmpeg` (for `ffprobe`) - *Required for scanning and analysis*
 
 ### Installation
 
