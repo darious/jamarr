@@ -1,9 +1,13 @@
 # ToDo List
 
+## General
+* Remove ffmpeg refs, we're not using it and dont need it
+
 ## Scanner
 * ~~Add a sparse refresh mode that only looks for new stuff and doesn't delete old stuff~~
 * ~~make the scanner notice changed files and update them and remove files that are missing from the file system~~
-* make the file location relative to the config  music root varibale, so we can clone the database
+* ~~make the file location relative to the config  music root varibale, so we can clone the database~~
+* improve matching of top tracks and singles
 
 ## Search
 * ~~Add search box to the top of the page~~
@@ -11,7 +15,11 @@
 * ~~it should return results live as i type~~
 * ~~it should group the results into artists, albums, and tracks~~
 * ~~and should jump to the relevant artist or album page, when they are selected and have play and queue icons for each~~
+* make serach work at any part of the search term, right now "Ed Shee" works but "Sheeran" does not
 
+
+## homepage
+* add a popular artists based on played in the history in the last 30 days
 
 ## multi user
 * ~~allow some sort of fingerprinting so that client and server can serve multiple users~~
@@ -30,6 +38,10 @@
 ## playback
 * ~~play pause button not working for upnp post a page reload~~
 * ~~fix playback pausing when browser tab does not have the focus~~
-* Fix where the whole album is added to the queue when i click play on a single album track
-* fix where we're adding tracks to the history twice (front and backend I think)
+* ~~Fix where the whole album is added to the queue when i click play on a single album track~~
+* ~~fix where we're adding tracks to the history twice (front and backend I think)~~
+* ~~volume changes as we reload and move thru the pages when playing over upnp~~
+* fix history tracking on docker when playing over upnp
 
+## infill
+* improve lookup of links to qobiz and tidal, mant are missing from musicbrainz, so we need to implement our own process to try and find things

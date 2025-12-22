@@ -10,7 +10,10 @@
     resume,
     seek,
     getHeaders,
+    toggleNowPlaying,
   } from "$stores/player";
+  import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
+  import VolumeControl from "$components/VolumeControl.svelte";
   import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
@@ -41,15 +44,42 @@
       (r) => r.udn === $playerState.renderer,
     );
     deviceName = r ? r.name : "Local";
-
-    // Check for switch to "Office"
-    if (deviceName === "Office" && lastDeviceName !== "Office") {
-      console.log("[PlayerBar] Switched to Office, defaulting volume to 20%");
-      volume = 0.2;
-      setVolume(20);
-    }
     lastDeviceName = deviceName;
   }
+
+  // Sync volume from store if provided
+  $: if ($playerState.volume !== null && $playerState.volume !== undefined) {
+    // Avoid jitter if we are dragging (maybe check drift?)
+    // API volume is 0-100, local volume is 0.0-1.0
+    const newVol = $playerState.volume / 100;
+    if (Math.abs(volume - newVol) > 0.05) {
+      volume = newVol;
+    }
+  }
+
+  // Sync local volume TO store (for initial load / browser restore)
+  // We check if we are local renderer, and if store is out of sync
+  /* 
+  $: if (
+    ($playerState.renderer.startsWith("local") || $playerState.renderer === "local") &&
+    audio &&
+    !isNaN(volume)
+  ) {
+    const vol100 = Math.round(volume * 100);
+    // CRITICAL FIX: Do NOT update store if it is null (waiting for server)
+    // Also, do NOT overwrite the store if we are just seeing the default 1.0 and store has a saved value.
+    // Ideally we only update store on user interaction. 
+    // For now, disabling this automatic sync to prevent overwriting saved volume with default 1.0.
+    // VolumeControl component handles setting the store on UI interaction.
+    
+    // if (
+    //  $playerState.volume === null ||
+    //  Math.abs($playerState.volume - vol100) > 5
+    // ) {
+    //    playerState.update(s => ({ ...s, volume: vol100 }));
+    // }
+  } 
+  */
 
   // Reset logged flag when track ID actually changes
   $: if (currentTrack && currentTrack.id !== lastLoggedTrackId) {
@@ -85,13 +115,16 @@
     if (!track || hasLoggedCurrentTrack) return;
 
     try {
-      const hostname = window.location.hostname;
+      // Use getHeaders() to ensure Client ID is sent
+      const headers = {
+        "Content-Type": "application/json",
+        ...getHeaders(),
+      };
       await fetch("/api/player/log-play", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           track_id: track.id,
-          hostname,
         }),
       });
       hasLoggedCurrentTrack = true;
@@ -152,7 +185,25 @@
   }
 
   onMount(() => {
-    console.log("[PlayerBar] onMount called, setting up event listener");
+    console.log("[PlayerBar] onMount called");
+
+    // Initial Volume Sync: Capture browser-restored volume
+    if (audio) {
+      // Only update store if it has NOT been initialized yet (null)
+      // This prevents overwriting a server-fetched value with a default/local value
+      if ($playerState.volume === null) {
+        console.log(
+          "[PlayerBar] Initializing store volume from local audio:",
+          audio.volume,
+        );
+        // We update the store, and rely on `player.ts` to NOT overwrite this with null.
+        playerState.update((s) => ({
+          ...s,
+          volume: Math.round(audio.volume * 100),
+        }));
+      }
+    }
+
     window.addEventListener("jamarr:play-local", (e: CustomEvent) => {
       console.log("[PlayerBar] jamarr:play-local event received:", e.detail);
       const track = e.detail;
@@ -197,6 +248,18 @@
       }
     });
 
+    window.addEventListener("jamarr:seek", (e: CustomEvent) => {
+      console.log("[PlayerBar] jamarr:seek event received:", e.detail);
+      if (!$playerState.renderer.startsWith("local") || !audio) return;
+
+      const pos = e.detail.position;
+      if (typeof pos === "number" && !isNaN(pos)) {
+        audio.currentTime = pos;
+        progress = pos; // Update local state immediately
+        updateProgress(pos, isPlaying);
+      }
+    });
+
     if (audio) {
       console.log(
         "[PlayerBar] Audio element found, adding timeupdate and ended listeners",
@@ -208,6 +271,12 @@
         const oldProgress = progress;
         progress = audio.currentTime;
         duration = audio.duration;
+        // Keep shared store in sync for overlays/UI
+        playerState.update((s) => ({
+          ...s,
+          position_seconds: progress,
+          is_playing: !audio.paused,
+        }));
 
         // Log every 5 seconds to avoid spam
         if (
@@ -267,6 +336,10 @@
             playerState.update((s) => {
               let newState = { ...s, position_seconds: state.position_seconds };
               let changed = false;
+
+              if (s.position_seconds !== state.position_seconds) {
+                changed = true;
+              }
 
               if (s.current_index !== state.current_index) {
                 console.log(
@@ -554,8 +627,18 @@
     <div class="w-1/3 flex justify-end items-center gap-4">
       <div class="text-xs text-white/40">{deviceName}</div>
       <div class="flex items-center gap-2 group">
+        <VolumeControl
+          showIcon={true}
+          sliderClass="range range-xs range-primary w-24 opacity-0 group-hover:opacity-100 transition-opacity"
+        />
+      </div>
+      <button
+        class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
+        title="Now Playing"
+        on:click={toggleNowPlaying}
+      >
         <svg
-          class="h-5 w-5 text-white/60"
+          class="h-5 w-5"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -563,25 +646,10 @@
             stroke-linecap="round"
             stroke-linejoin="round"
             stroke-width="2"
-            d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+            d="M4 8h16M4 16h10m-6-8v8"
           ></path></svg
         >
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={volume}
-          on:input={(e) => {
-            const val = parseFloat(e.currentTarget.value);
-            volume = val;
-            if (!$playerState.renderer.startsWith("local")) {
-              setVolume(Math.round(val * 100)); // Convert 0-1 to 0-100
-            }
-          }}
-          class="range range-xs range-primary w-24 opacity-0 group-hover:opacity-100 transition-opacity"
-        />
-      </div>
+      </button>
       <button
         class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
         title="Queue"
@@ -605,3 +673,5 @@
 
   <audio bind:this={audio} bind:volume />
 </div>
+
+<NowPlayingOverlay />

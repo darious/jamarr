@@ -6,8 +6,42 @@ from typing import List, Optional
 
 from typing import List, Optional
 from app.config import get_musicbrainz_root_url
+from app.scanner.scan_manager import ScanManager
 
 router = APIRouter()
+
+@router.post("/api/scan/missing")
+async def scan_missing_albums(artist: str = None, mbid: str = None):
+    try:
+        scan_manager = ScanManager.get_instance()
+        await scan_manager.start_missing_albums_scan(artist_filter=artist, mbid_filter=mbid)
+        return {"status": "started", "message": "Missing albums scan started"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/api/artists/{mbid}/missing")
+async def get_missing_albums(mbid: str, db: aiosqlite.Connection = Depends(get_db)):
+    query = """
+        SELECT 
+            release_group_mbid as mbid,
+            title,
+            release_date,
+            primary_type,
+            image_url,
+            musicbrainz_url,
+            tidal_url,
+            qobuz_url
+        FROM missing_albums
+        WHERE artist_mbid = ?
+        ORDER BY release_date DESC
+    """
+    async with db.execute(query, (mbid,)) as cursor:
+        rows = await cursor.fetchall()
+        
+        # Add MusicBrainz root URL if stored link is relative or just ensure it's correct
+        # Currently we store full URLs in the scanner logic, so we can just return them.
+        
+        return [dict(row) for row in rows]
 
 @router.get("/api/artists")
 async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
@@ -120,6 +154,7 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
                 ]
             
             artists.append({
+                "mbid": row[0],
                 "name": row[1], 
                 "image_url": row[2], 
                 "art_id": row[3],

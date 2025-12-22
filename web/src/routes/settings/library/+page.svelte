@@ -7,6 +7,7 @@
         triggerPrune,
         cancelScan,
         fetchArtists,
+        triggerMissingAlbumsScan,
     } from "$lib/api";
 
     let status = "Idle";
@@ -28,6 +29,7 @@
     let artistFilter = "";
     let mbidFilter = "";
     let missingOnly = false;
+    let missingAlbumsOnly = false;
     let bioOnly = false;
     let linksOnly = false;
     let artistOptions: string[] = [];
@@ -166,13 +168,20 @@
 
     async function startMetadataScan() {
         try {
-            await triggerMetadataScan({
-                artistFilter: artistFilter || undefined,
-                mbidFilter: mbidFilter || undefined,
-                missingOnly,
-                bioOnly,
-                linksOnly,
-            });
+            if (missingAlbumsOnly) {
+                await triggerMissingAlbumsScan(
+                    mbidFilter || undefined,
+                    artistFilter || undefined,
+                );
+            } else {
+                await triggerMetadataScan({
+                    artistFilter: artistFilter || undefined,
+                    mbidFilter: mbidFilter || undefined,
+                    missingOnly,
+                    bioOnly,
+                    linksOnly,
+                });
+            }
         } catch (e) {
             addLog(`Error starting metadata update: ${e}`);
         }
@@ -388,11 +397,9 @@
                             type="text"
                             bind:value={artistFilter}
                             list="artist-list"
-                            placeholder={
-                                artistsLoaded
-                                    ? "Type to filter (blank = all)"
-                                    : "Loading artists..."
-                            }
+                            placeholder={artistsLoaded
+                                ? "Type to filter (blank = all)"
+                                : "Loading artists..."}
                             class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
                         />
                         <datalist id="artist-list">
@@ -423,6 +430,19 @@
                             />
                             <span class="label-text text-white"
                                 >Missing Metadata Only</span
+                            >
+                        </label>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-4">
+                            <input
+                                type="checkbox"
+                                bind:checked={missingAlbumsOnly}
+                                class="checkbox checkbox-accent"
+                            />
+                            <span class="label-text text-white"
+                                >Scan Missing Albums (Discovery)</span
                             >
                         </label>
                     </div>
@@ -502,11 +522,13 @@
             >
                 <div class="flex justify-between items-center mb-2">
                     <div class="flex flex-col">
-                        <span class="text-xs uppercase tracking-wide text-primary-300"
+                        <span
+                            class="text-xs uppercase tracking-wide text-primary-300"
                             >{stats.phase || "idle"}</span
                         >
                         <span class="text-sm font-medium text-white/80"
-                            >{stats.message || (stats.completed ? "Done" : "Ready")}</span
+                            >{stats.message ||
+                                (stats.completed ? "Done" : "Ready")}</span
                         >
                     </div>
                     <span class="text-xs font-mono text-primary-400"
@@ -520,7 +542,9 @@
                 ></progress>
 
                 {#if stats.completed}
-                    <div class="mt-3 flex items-center justify-between text-xs text-white/70 bg-white/5 rounded-lg px-3 py-2 border border-white/10">
+                    <div
+                        class="mt-3 flex items-center justify-between text-xs text-white/70 bg-white/5 rounded-lg px-3 py-2 border border-white/10"
+                    >
                         <span>Scan complete ({stats.completedStatus})</span>
                         <button
                             class="btn btn-ghost btn-xs text-white/80 border border-white/10 bg-white/5 hover:bg-white/10"

@@ -61,9 +61,23 @@
           </div>
           <div class="min-w-0 flex-1">
             <p class="truncate text-sm font-semibold">{track.title}</p>
-            <p class="text-xs text-white/60 truncate">
-              {track.artist} • {track.album}
-            </p>
+            <div class="text-xs text-white/60 truncate flex items-center gap-1">
+              <a
+                href={`/artist/${encodeURIComponent(track.artist)}`}
+                class="hover:text-white hover:underline"
+                on:click|stopPropagation
+              >
+                {track.artist}
+              </a>
+              <span>•</span>
+              <a
+                href={`/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album)}`}
+                class="hover:text-white hover:underline"
+                on:click|stopPropagation
+              >
+                {track.album}
+              </a>
+            </div>
             <div class="flex items-center gap-2 text-xs text-white/40 mt-0.5">
               {#if track.codec}
                 <span class="uppercase">{track.codec}</span>

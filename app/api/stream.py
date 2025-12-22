@@ -15,7 +15,11 @@ async def stream_track(track_id: int, db: aiosqlite.Connection = Depends(get_db)
         if not row:
             raise HTTPException(status_code=404, detail="Track not found")
         
+        from app.config import get_music_path
+        
         path = row[0]
+        if not os.path.isabs(path):
+            path = os.path.join(get_music_path(), path)
         
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="File not found on disk")

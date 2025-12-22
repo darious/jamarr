@@ -14,6 +14,7 @@ export interface PlayerState {
     current_index: number;
     is_playing: boolean;
     position_seconds: number;
+    volume: number | null;
 }
 
 export const playerState = writable<PlayerState>({
@@ -22,8 +23,12 @@ export const playerState = writable<PlayerState>({
     queue: [],
     current_index: -1,
     is_playing: false,
-    position_seconds: 0
+    position_seconds: 0,
+    volume: null
 });
+
+// UI: Now Playing overlay visibility
+export const nowPlayingVisible = writable<boolean>(false);
 
 // --- Client ID Logic ---
 function uuidv4() {
@@ -154,9 +159,11 @@ export async function loadQueueFromServer() {
                 current_index: data.current_index,
                 position_seconds: data.position_seconds,
                 is_playing: data.is_playing,
-                renderer: data.renderer || `local:${getClientId()}`
+                renderer: data.renderer || `local:${getClientId()}`,
+                // If server returns null (no history), keep existing volume (e.g. locally restored)
+                // If server returns value, use it.
+                volume: (data.volume !== null && data.volume !== undefined) ? data.volume : s.volume
             }));
-            console.log('[loadQueueFromServer] State updated. Renderer:', data.renderer);
 
         } else {
             console.error('[loadQueueFromServer] Failed, status:', res.status);
@@ -326,6 +333,14 @@ export async function setVolume(percent: number) {
     }
 }
 
+export function toggleNowPlaying() {
+    nowPlayingVisible.update(v => !v);
+}
+
+export function showNowPlaying(force: boolean) {
+    nowPlayingVisible.set(force);
+}
+
 export async function pause() {
     try {
         await fetch('/api/player/pause', {
@@ -351,6 +366,14 @@ export async function resume() {
 }
 
 export async function seek(seconds: number) {
+    const s = get(playerState);
+    if (s.renderer.startsWith('local')) {
+        console.log('[playerStore] Local seek, dispatching jamarr:seek', seconds);
+        window.dispatchEvent(new CustomEvent('jamarr:seek', { detail: { position: seconds } }));
+        playerState.update(state => ({ ...state, position_seconds: seconds }));
+        return;
+    }
+
     try {
         await fetch('/api/player/seek', {
             method: 'POST',

@@ -23,7 +23,8 @@
     const track = data.tracks?.[0];
     const mbBase = "http://musicbrainz.org";
     if (track?.mb_release_id) return `${mbBase}/release/${track.mb_release_id}`;
-    if (track?.mb_release_group_id) return `${mbBase}/release-group/${track.mb_release_group_id}`;
+    if (track?.mb_release_group_id)
+      return `${mbBase}/release-group/${track.mb_release_group_id}`;
     return null;
   };
 
@@ -248,7 +249,13 @@
                 <div
                   class="flex items-center gap-2 text-xs text-white/50 mt-0.5"
                 >
-                  <span>{track.artist}</span>
+                  <a
+                    href={`/artist/${encodeURIComponent(track.artist)}`}
+                    class="hover:underline hover:text-white"
+                    on:click|stopPropagation
+                  >
+                    {track.artist}
+                  </a>
                   {#if track.codec}
                     <span class="text-white/30">•</span>
                     <span class="uppercase">{track.codec}</span>

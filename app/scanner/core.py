@@ -115,8 +115,11 @@ class Scanner:
     async def _process_file(self, path, db, artist_mbids, force_rescan):
         try:
             # Check modification time
+            music_root = get_music_path()
+            rel_path = os.path.relpath(path, music_root)
+            
             mtime = os.path.getmtime(path)
-            async with db.execute("SELECT id, mtime FROM tracks WHERE path = ?", (path,)) as cursor:
+            async with db.execute("SELECT id, mtime FROM tracks WHERE path = ?", (rel_path,)) as cursor:
                 row = await cursor.fetchone()
                 if not force_rescan and row and row[1] == mtime:
                     return # Unchanged
@@ -145,7 +148,7 @@ class Scanner:
                     "mb_artist_id", "mb_album_artist_id", "mb_track_id", "mb_release_track_id", "mb_release_id", "mb_release_group_id", "art_id"]
             
             values = [
-                path, mtime, tags.get("title"), tags.get("artist"), tags.get("album"), 
+                rel_path, mtime, tags.get("title"), tags.get("artist"), tags.get("album"), 
                 tags.get("album_artist"), tags.get("track_no"), tags.get("disc_no"), 
                 tags.get("date"), tags.get("genre"), tags.get("duration_seconds"),
                 tags.get("codec"), tags.get("sample_rate_hz"), tags.get("bit_depth"),
@@ -160,7 +163,6 @@ class Scanner:
             sql = f"INSERT OR REPLACE INTO tracks ({columns}) VALUES ({placeholders})"
             cursor = await db.execute(sql, values)
             track_id = cursor.lastrowid
-            await db.commit()
             
             if row: self.stats["updated"] += 1
             else: self.stats["added"] += 1
@@ -181,12 +183,17 @@ class Scanner:
                             release_date=COALESCE(excluded.release_date, release_date),
                             art_id=COALESCE(excluded.art_id, art_id)
                      """, (mb_rg_id, album_title, tags.get("date"), 'Album', art_id, time.time()))
+
+                     # Remove from missing_albums if we have it now
+                     await db.execute("DELETE FROM missing_albums WHERE release_group_mbid = ?", (mb_rg_id,))
                  except Exception as e:
                      logger.warning(f"Error upserting album {album_title}: {e}")
 
             # 2. Handle Artists & Junctions
             if track_id:
                 await self._process_track_artists(db, track_id, tags, artist_mbids, mb_rg_id)
+
+            await db.commit()
 
         except Exception as e:
             logger.error(f"Failed to process {path}: {e}")
@@ -296,15 +303,48 @@ class Scanner:
                         VALUES (?, ?, ?)
                      """, (mbid, mb_rg_id, 'primary'))
 
+             # Update tracks_top if this track is a match
+             # This ensures that if we just added a file that appears in the artist's top tracks,
+             # it gets linked immediately without needing a full metadata refresh.
+             if tags.get("title"):
+                 track_title = tags.get("title").strip().lower()
+                 track_album = tags.get("album", "").strip().lower()
+                 
+                 for mbid in aa_ids:
+                     # Try to link Top Tracks
+                     # We use external_name matching. 
+                     # Only match if external_album is missing OR matches local album
+                     await db.execute("""
+                        UPDATE tracks_top
+                        SET track_id = ?, last_updated = ?
+                        WHERE artist_mbid = ?
+                        AND LOWER(TRIM(external_name)) = ?
+                        AND (
+                            external_album IS NULL 
+                            OR external_album = '' 
+                            OR LOWER(TRIM(external_album)) = ?
+                        )
+                     """, (track_id, time.time(), mbid, track_title, track_album))
+
     async def _cleanup_orphans(self, db, root_path, seen_paths):
-        scan_root_wildcard = root_path if root_path.endswith(os.sep) else root_path + os.sep
-        scan_root_wildcard += "%"
+        music_root = get_music_path()
+        # Convert seen_paths (absolute) to relative
+        seen_rel_paths = {os.path.relpath(p, music_root) for p in seen_paths}
+        
+        # Calculate relative scan root for DB query
+        if os.path.abspath(root_path) == os.path.abspath(music_root):
+            scan_root_wildcard = "%"
+        else:
+            rel_root = os.path.relpath(root_path, music_root)
+            if rel_root == ".": rel_root = ""
+            scan_root_wildcard = rel_root + os.sep + "%" if rel_root else "%"
+
         
         async with db.execute("SELECT path FROM tracks WHERE path LIKE ?", (scan_root_wildcard,)) as cursor:
             rows = await cursor.fetchall()
             db_paths = {row[0] for row in rows}
             
-        orphans = db_paths - seen_paths
+        orphans = db_paths - seen_rel_paths
         if orphans:
             logger.info(f"Removing {len(orphans)} orphaned tracks.")
             for orphan in orphans:
@@ -329,9 +369,11 @@ class Scanner:
             async with db.execute("SELECT id, path FROM tracks") as cursor:
                 rows = await cursor.fetchall()
             
+            music_root = get_music_path()
             deleted_tracks = 0
-            for track_id, path in rows:
-                if not os.path.exists(path):
+            for track_id, rel_path in rows:
+                abs_path = os.path.join(music_root, rel_path)
+                if not os.path.exists(abs_path):
                     # logger.debug(f"Pruning missing file: {path}")
                     await db.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
                     deleted_tracks += 1
@@ -508,7 +550,7 @@ class Scanner:
                     continue
                 
                 # Emit initial "Fetching..." if name is unknown, or name if known
-                display_name = name or "Fetching..."
+                display_name = name or f"Artist ({mbid[:8]})"
                 if self.scan_logger: self.scan_logger.emit_progress(processed, total, f"Metadata: {display_name}")
                 
                 # Check recent update?
@@ -732,4 +774,113 @@ class Scanner:
         # The update_metadata SQL uses COALESCE so it won't overwrite valid with null, 
         # but if we want to Refresh links, we probably want to update them regardless.
         # But for Phase 1, simply calling update_metadata is likely sufficient as it fetches fresh data.
-        await self.update_metadata(artist_filter=artist_filter, mbid_filter=mbid_filter) 
+        await self.update_metadata(artist_filter=artist_filter, mbid_filter=mbid_filter)
+
+    async def scan_missing_albums(self, artist_filter=None, mbid_filter=None):
+        """
+        Scans for missing albums (Release Groups) from MusicBrainz for local artists.
+        Populates missing_albums table.
+        """
+        self.stats["current_status"] = "Scanning Missing Albums"
+        logger.info("Starting Missing Albums Scan...")
+
+        from app.scanner.metadata import fetch_artist_release_groups, fetch_best_release_match
+        import httpx
+
+        async for db in get_db():
+            # 1. Get List of Artists to Check
+            query = "SELECT mbid, name FROM artists"
+            params = []
+            clauses = []
+            
+            if mbid_filter:
+               if isinstance(mbid_filter, (list, set, tuple)):
+                   filtered = [m for m in mbid_filter if m]
+                   if filtered:
+                       placeholders = ",".join(["?"] * len(filtered))
+                       clauses.append(f"mbid IN ({placeholders})")
+                       params.extend(filtered)
+               else:
+                   clauses.append("mbid = ?")
+                   params.append(mbid_filter)
+            elif artist_filter:
+                clauses.append("name LIKE ?")
+                params.append(f"%{artist_filter}%")
+            
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+                
+            async with db.execute(query, params) as cursor:
+                artists = await cursor.fetchall()
+
+            total = len(artists)
+            processed = 0
+            
+            async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
+                for row in artists:
+                    if self._stop_event.is_set(): break
+                    
+                    mbid, name = row
+                    current_name = name or "Unknown"
+                    if self.scan_logger:
+                         self.scan_logger.emit_progress(processed, total, f"Checking: {current_name}")
+                    
+                    # 2. Get Local Release Group IDs (from Albums table)
+                    # We check the albums table but via artist_albums to be sure we attribute correctly
+                    async with db.execute("""
+                        SELECT album_mbid FROM artist_albums WHERE artist_mbid = ?
+                    """, (mbid,)) as cursor:
+                        local_rgs = {r[0] for r in await cursor.fetchall()}
+
+
+
+                    # 3. Clear Old Missing entries for this artist
+                    await db.execute("DELETE FROM missing_albums WHERE artist_mbid = ?", (mbid,))
+                    
+                    # 4. Fetch All Release Groups from MB
+                    try:
+                        # Fetch Albums
+                        mb_albums = await fetch_artist_release_groups(mbid, "album", client)
+                        # Fetch Singles (?) - User said "albums only, no eps" but MB calls them singles sometimes
+                        # User request: "albums only, no eps, no album+ live etc.."
+                        # fetch_artist_release_groups already filters out secondary types (Live, etc)
+                        # We just need to stick to "album" type_str.
+                        
+                        for album in mb_albums:
+                            rg_id = album["mbid"]
+                            
+                            if rg_id in local_rgs:
+                                continue # We have it
+                                
+                            # It is missing!
+                            # Resolve Links (Tidal, Qobuz)
+                            # This is the "slow" part
+                            match = await fetch_best_release_match(rg_id, client)
+                            
+                            tidal_url = None
+                            qobuz_url = None
+                            
+                            for link in match.get("links", []):
+                                if link["type"] == "tidal": tidal_url = link["url"]
+                                elif link["type"] == "qobuz": qobuz_url = link["url"]
+                            
+                            # Insert into missing_albums
+                            await db.execute("""
+                                INSERT OR REPLACE INTO missing_albums
+                                (artist_mbid, release_group_mbid, title, release_date, primary_type, image_url, musicbrainz_url, tidal_url, qobuz_url, last_updated)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                mbid, rg_id, album["title"], album["date"], 'Album', 
+                                None, # Image URL? We didn't fetch cover art, maybe unnecessary for list? Or use placeholder.
+                                album.get("musicbrainz_url"),
+                                tidal_url, qobuz_url,
+                                time.time()
+                            ))
+                            
+                        await db.commit()
+                        
+                    except Exception as e:
+                        logger.error(f"Error checking missing albums for {current_name}: {e}")
+                    
+                    processed += 1
+ 
