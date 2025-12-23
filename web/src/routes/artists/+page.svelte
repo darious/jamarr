@@ -6,14 +6,24 @@
   export let data: { artists: Artist[] };
 
   let artists: Artist[] = data.artists;
+  let showAllArtists = false;
+  let visibleArtists: Artist[] = artists;
+  let groupedArtists: [string, Artist[]][] = [];
 
   onMount(() => {
     artists = data.artists || [];
   });
 
-  const grouped = () => {
+  const isPrimaryArtist = (artist: Artist) => {
+    if (artist.primary_album_count === undefined || artist.primary_album_count === null) {
+      return true;
+    }
+    return artist.primary_album_count > 0;
+  };
+
+  const groupArtists = (list: Artist[]) => {
     const buckets: Record<string, Artist[]> = {};
-    artists.forEach((artist) => {
+    list.forEach((artist) => {
       const char = (artist.sort_name || artist.name || "#")
         .charAt(0)
         .toUpperCase();
@@ -23,28 +33,45 @@
     });
     return Object.entries(buckets).sort((a, b) => a[0].localeCompare(b[0]));
   };
+
+  $: visibleArtists = showAllArtists ? artists : artists.filter(isPrimaryArtist);
+  $: groupedArtists = groupArtists(visibleArtists);
 </script>
 
 <section class="mx-auto flex w-full max-w-[1700px] flex-col gap-10 px-8 py-10">
   <div
     class="section-head sticky top-0 z-20 bg-surface-50/80 backdrop-blur-xl py-4 -mx-4 px-4 rounded-b-2xl transition-all border-b border-white/5 shadow-lg"
   >
-    <div>
-      <p class="text-sm uppercase tracking-wide text-white/60">Browse</p>
-      <h2 class="text-2xl font-semibold">Artists A–Z</h2>
-    </div>
-    <div class="flex flex-wrap gap-2">
-      {#each grouped() as [letter]}
-        <a
-          href={`#group-${letter}`}
-          class="pill hover:bg-white/10 transition-colors">{letter}</a
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <p class="text-sm uppercase tracking-wide text-white/60">Browse</p>
+        <h2 class="text-2xl font-semibold">Artists A–Z</h2>
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          class={`pill flex items-center gap-2 ${showAllArtists ? "bg-white/15 text-white" : "bg-white/5 text-white/70 hover:text-white"}`}
+          on:click={() => (showAllArtists = !showAllArtists)}
+          title="Toggle between primary artists and all artists"
         >
-      {/each}
+          <span
+            class={`h-2.5 w-2.5 rounded-full ${showAllArtists ? "bg-primary-300 shadow-[0_0_0_3px_rgba(255,255,255,0.12)]" : "bg-white/30"}`}
+          ></span>
+          {showAllArtists ? "Showing all artists" : "Primary only"}
+        </button>
+        <div class="flex flex-wrap gap-2">
+          {#each groupedArtists as [letter]}
+            <a
+              href={`#group-${letter}`}
+              class="pill hover:bg-white/10 transition-colors">{letter}</a
+            >
+          {/each}
+        </div>
+      </div>
     </div>
   </div>
 
   <div class="flex flex-col gap-10">
-    {#each grouped() as [letter, list]}
+    {#each groupedArtists as [letter, list]}
       <div id={`group-${letter}`} class="space-y-4">
         <div class="flex items-center gap-3">
           <div
