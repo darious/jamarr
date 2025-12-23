@@ -11,3 +11,4 @@ PyYAML
 rich
 argon2-cffi
 email-validator
+Pillow

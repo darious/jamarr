@@ -89,7 +89,11 @@ CREATE TABLE IF NOT EXISTS artwork (
     mime TEXT,
     width INTEGER,
     height INTEGER,
-    path_on_disk TEXT
+    path_on_disk TEXT,
+    filesize_bytes INTEGER,
+    image_format TEXT,
+    checked_at REAL,
+    check_errors TEXT
 );
 
 CREATE TABLE IF NOT EXISTS renderers (
@@ -129,6 +133,18 @@ CREATE TABLE IF NOT EXISTS playback_history (
     user_id INTEGER,
     FOREIGN KEY(track_id) REFERENCES tracks(id)
 );
+
+CREATE TABLE IF NOT EXISTS media_quality_issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    issue_code TEXT NOT NULL,
+    details TEXT,
+    created_at REAL DEFAULT (strftime('%s','now')),
+    resolved_at REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_media_quality_open ON media_quality_issues(entity_type, issue_code) WHERE resolved_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,6 +235,11 @@ async def init_db():
             "ALTER TABLE artists ADD COLUMN albums TEXT",
             "ALTER TABLE tracks ADD COLUMN mb_release_id TEXT",
             "ALTER TABLE tracks ADD COLUMN mb_release_group_id TEXT",
+            "ALTER TABLE artwork ADD COLUMN path_on_disk TEXT",
+            "ALTER TABLE artwork ADD COLUMN filesize_bytes INTEGER",
+            "ALTER TABLE artwork ADD COLUMN image_format TEXT",
+            "ALTER TABLE artwork ADD COLUMN checked_at REAL",
+            "ALTER TABLE artwork ADD COLUMN check_errors TEXT",
             # Normalization Migration
             """CREATE TABLE IF NOT EXISTS albums (
                 mbid TEXT PRIMARY KEY,
@@ -298,7 +319,17 @@ async def init_db():
                 UNIQUE(artist_mbid, release_group_mbid),
                 FOREIGN KEY(artist_mbid) REFERENCES artists(mbid)
             )""",
-            "CREATE INDEX IF NOT EXISTS idx_missing_albums_artist ON missing_albums(artist_mbid)"
+            "CREATE INDEX IF NOT EXISTS idx_missing_albums_artist ON missing_albums(artist_mbid)",
+            """CREATE TABLE IF NOT EXISTS media_quality_issues (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT,
+                issue_code TEXT NOT NULL,
+                details TEXT,
+                created_at REAL DEFAULT (strftime('%s','now')),
+                resolved_at REAL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_media_quality_open ON media_quality_issues(entity_type, issue_code) WHERE resolved_at IS NULL"
         ]
         
         for sql in migrations:

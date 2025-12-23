@@ -135,6 +135,10 @@ Stores unique artwork to avoid duplication. Artwork files are organized in subdi
 | `width` | INTEGER | Image width in pixels. |
 | `height` | INTEGER | Image height in pixels. |
 | `path_on_disk` | TEXT | Path to the cached image file. |
+| `filesize_bytes` | INTEGER | Cached file size. |
+| `image_format` | TEXT | Image format reported by Pillow. |
+| `checked_at` | REAL | Unix timestamp of last quality check. |
+| `check_errors` | TEXT | JSON array of issue codes/details from the last check. |
 
 ### `renderers`
 Stores discovered UPnP/DLNA renderers.
@@ -171,6 +175,19 @@ Maps client IDs to their active renderer UDN.
 | `client_id` | TEXT | Primary Key. UUID of the client. |
 | `active_renderer_udn` | TEXT | UDN of the renderer the client is controlling. |
 | `last_seen` | DATETIME | Timestamp of last activity. |
+
+### `media_quality_issues`
+Stores outstanding media quality findings across artwork, tracks, albums, and artists.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | INTEGER | Primary Key. |
+| `entity_type` | TEXT | Entity type (`artwork`, `track`, `album`, `artist`, `cache_file`). |
+| `entity_id` | TEXT | Identifier for the entity (artwork id, track id, MBID, sha1). |
+| `issue_code` | TEXT | Code for the detected issue. |
+| `details` | TEXT | JSON payload with extra details. |
+| `created_at` | REAL | Unix timestamp when issue was recorded. |
+| `resolved_at` | REAL | Unix timestamp when issue was resolved (NULL if open). |
 
 ### `playback_history`
 Log of played tracks.
