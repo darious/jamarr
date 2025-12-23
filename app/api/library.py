@@ -60,11 +60,23 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             MAX(CASE WHEN el.type = 'wikipedia' THEN el.url END) as wikipedia_url,
             MAX(CASE WHEN el.type = 'qobuz' THEN el.url END) as qobuz_url,
             MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as musicbrainz_url,
-            MAX(CASE WHEN el.type = 'tidal' THEN el.url END) as tidal_url
+            MAX(CASE WHEN el.type = 'tidal' THEN el.url END) as tidal_url,
+            COALESCE(ac.primary_album_count, 0) as primary_album_count,
+            COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
         FROM artists a
         JOIN track_artists ta ON a.mbid = ta.mbid
         LEFT JOIN artwork ar ON a.art_id = ar.id
         LEFT JOIN external_links el ON a.mbid = el.entity_id AND el.entity_type = 'artist'
+        LEFT JOIN (
+            SELECT 
+                ta.mbid as artist_mbid,
+                COUNT(DISTINCT CASE WHEN t.mb_album_artist_id LIKE ta.mbid || '%' OR t.mb_album_artist_id = ta.mbid THEN t.album END) as primary_album_count,
+                COUNT(DISTINCT CASE WHEN NOT (t.mb_album_artist_id LIKE ta.mbid || '%' OR t.mb_album_artist_id = ta.mbid) THEN t.album END) as appears_on_album_count
+            FROM tracks t
+            JOIN track_artists ta ON t.id = ta.track_id
+            WHERE t.album IS NOT NULL
+            GROUP BY ta.mbid
+        ) ac ON ac.artist_mbid = a.mbid
         WHERE a.name IS NOT NULL 
         GROUP BY a.mbid
         ORDER BY a.sort_name COLLATE NOCASE
@@ -169,6 +181,8 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
                 "qobuz_url": row[10],
                 "musicbrainz_url": row[11],
                 "tidal_url": row[12],
+                "primary_album_count": row[13],
+                "appears_on_album_count": row[14],
                 "singles": singles,
                 "albums": []  # Deprecated
             })

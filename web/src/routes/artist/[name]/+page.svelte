@@ -271,6 +271,18 @@
     }
   }
 
+  async function playAllTopTracks() {
+    const playableTracks: Track[] = displayedTopTracks
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (playableTracks.length > 0) {
+      await setQueue(playableTracks, 0);
+    }
+  }
+
   async function playAllSingles() {
     const allSingleTracks: Track[] = [];
     for (const single of displayedSingles) {
@@ -476,6 +488,13 @@
           <p class="text-sm uppercase tracking-wide text-white/60">Essential</p>
           <h3 class="text-xl font-semibold">Top tracks</h3>
         </div>
+        <button
+          class="btn btn-ghost btn-sm"
+          on:click={playAllTopTracks}
+          title="Play All Top Tracks"
+        >
+          ▶ Play All
+        </button>
       </div>
       <div class="glass-panel flex-1 min-h-0 overflow-hidden flex flex-col">
         <div class="overflow-y-auto max-h-[360px] divide-y divide-white/5">
