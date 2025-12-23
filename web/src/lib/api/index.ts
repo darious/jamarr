@@ -161,6 +161,7 @@ export type MetadataOptions = {
     missingOnly?: boolean;
     bioOnly?: boolean;
     linksOnly?: boolean;
+    updateTopTracks?: boolean;
 };
 
 export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<void> {
@@ -174,6 +175,7 @@ export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<v
             missing_only: Boolean(opts.missingOnly),
             bio_only: Boolean(opts.bioOnly),
             links_only: Boolean(opts.linksOnly),
+            refresh_top_tracks: Boolean(opts.updateTopTracks),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger metadata scan');
@@ -197,6 +199,7 @@ export async function triggerFullScan(opts: { force?: boolean; path?: string } &
             missing_only: Boolean(opts.missingOnly),
             bio_only: Boolean(opts.bioOnly),
             links_only: Boolean(opts.linksOnly),
+            refresh_top_tracks: Boolean(opts.updateTopTracks),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger full scan');
