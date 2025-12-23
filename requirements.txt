@@ -9,3 +9,5 @@ httpx
 beautifulsoup4
 PyYAML
 rich
+argon2-cffi
+email-validator
