@@ -1,10 +1,21 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
 from app.db import get_db
 import os
+import base64
+import io
+
+def _build_test_art_bytes():
+    """Generate a 600x600 JPEG test image; Pillow is required for the larger size."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (600, 600), (200, 50, 50)).save(buf, format="JPEG", quality=85)
+    return buf.getvalue()
 
 router = APIRouter()
 CACHE_DIR = "cache/art"
+_TEST_ART_BYTES = _build_test_art_bytes()
 
 def _get_art_path(sha1: str, art_type: str) -> str:
     """Compute path for artwork file using subdirectory distribution."""
@@ -62,3 +73,12 @@ async def get_artwork_by_sha1(sha1: str):
             return response
     
     raise HTTPException(status_code=500, detail="Database error")
+
+@router.get("/art/test")
+async def get_test_artwork():
+    """Serve a JPEG for UPnP album art testing (generated if Pillow is available)."""
+    response = Response(content=_TEST_ART_BYTES, media_type="image/jpeg")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
