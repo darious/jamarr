@@ -35,6 +35,8 @@ export interface Artist {
         sample_rate_hz?: number | null;
     }[];
     sort_name: string;
+    primary_album_count?: number;
+    appears_on_album_count?: number;
     homepage: string | null;
     spotify_url: string | null;
     wikipedia_url: string | null;
