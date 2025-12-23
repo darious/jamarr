@@ -111,30 +111,6 @@
     }
   }
 
-  async function logPlayToHistory(track: any) {
-    if (!track || hasLoggedCurrentTrack) return;
-
-    try {
-      // Use getHeaders() to ensure Client ID is sent
-      const headers = {
-        "Content-Type": "application/json",
-        ...getHeaders(),
-      };
-      await fetch("/api/player/log-play", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          track_id: track.id,
-        }),
-      });
-      hasLoggedCurrentTrack = true;
-      lastLoggedTrackId = track.id;
-      console.log("[PlayerBar] Logged play to history:", track.title);
-    } catch (e) {
-      console.error("[PlayerBar] Failed to log play:", e);
-    }
-  }
-
   function handleSeek(e: MouseEvent & { currentTarget: HTMLDivElement }) {
     if (!$playerState.queue.length && !$playerState.renderer) return;
 
@@ -168,7 +144,7 @@
   }
 
   function checkPlayThreshold() {
-    if (!currentTrack || hasLoggedCurrentTrack) return;
+    if (!currentTrack) return;
 
     // Use 'progress' which handles both local (updated via timeupdate) and remote (updated via polling)
     const playedSeconds = progress;
@@ -176,12 +152,9 @@
 
     if (!totalSeconds || totalSeconds === 0) return;
 
-    // Log if played for 30 seconds OR 20% of track length, whichever is shorter
+    // Threshold check is retained for potential future UI actions; history logging is server-side.
     const threshold = Math.min(30, totalSeconds * 0.2);
-
-    if (playedSeconds >= threshold) {
-      logPlayToHistory(currentTrack);
-    }
+    const _passed = playedSeconds >= threshold;
   }
 
   onMount(() => {

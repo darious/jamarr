@@ -532,10 +532,11 @@ class Scanner:
             
             logger.info("Library Prune Complete.")
 
-    async def update_metadata(self, artist_filter=None, mbid_filter=None, specific_fields=None, missing_only=False, bio_only=False):
+    async def update_metadata(self, artist_filter=None, mbid_filter=None, specific_fields=None, missing_only=False, bio_only=False, refresh_top_tracks=True):
         """
         Updates artist metadata.
         Can filter by artist name (--artist) or MusicBrainz ID (--mbid).
+        If refresh_top_tracks is True, run top tracks/singles refresh even when metadata is otherwise complete.
         """
         self.stats["current_status"] = "Updating Metadata"
         async for db in get_db():
@@ -562,7 +563,7 @@ class Scanner:
             elif artist_filter:
                 clauses.append("name LIKE ?")
                 params.append(f"%{artist_filter}%")
-            elif missing_only:
+            elif missing_only and not refresh_top_tracks:
                 clauses.append(
                     "(name IS NULL OR name = '' OR sort_name IS NULL OR sort_name = '' OR bio IS NULL OR bio = '' OR image_url IS NULL OR image_url = '')"
                 )
@@ -584,7 +585,7 @@ class Scanner:
                 )
 
             # If filtered query (artist/mbid) was used with missing_only, reapply gap check client-side
-            if missing_only:
+            if missing_only and not refresh_top_tracks:
                 rows = [r for r in rows if has_gaps(r)]
             
             total = len(rows)
@@ -599,7 +600,7 @@ class Scanner:
                 mbid, name, last_updated, sort_name, bio, image_url, link_count = row
                 if not mbid: continue
 
-                if missing_only and not has_gaps(row):
+                if missing_only and not refresh_top_tracks and not has_gaps(row):
                     continue
                 
                 # Emit initial "Fetching..." if name is unknown, or name if known
@@ -685,39 +686,49 @@ class Scanner:
                     await db.execute("INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)", 
                                      ('artist', mbid, l_type, l_url))
 
-                # 2. Top Tracks & Singles
-                from app.scanner.metadata import match_track_to_library
-                
-                # Clear existing top tracks/singles for this artist
-                await db.execute("DELETE FROM tracks_top WHERE artist_mbid=?", (mbid,))
-                
-                # Store top tracks
-                for idx, track in enumerate(meta.get("top_tracks", [])):
-                    track_id = await match_track_to_library(
-                        db, mbid, track["name"], track.get("album")
-                    )
+                # 2. Top Tracks & Singles (optional)
+                # Always fetch for artists that have no existing top-track entries (new artists),
+                # otherwise only when refresh_top_tracks is True.
+                should_refresh_top_tracks = refresh_top_tracks
+                if not should_refresh_top_tracks:
+                    async with db.execute("SELECT COUNT(1) FROM tracks_top WHERE artist_mbid=?", (mbid,)) as c:
+                        row = await c.fetchone()
+                        if row and row[0] == 0:
+                            should_refresh_top_tracks = True
+
+                if should_refresh_top_tracks:
+                    from app.scanner.metadata import match_track_to_library
                     
-                    await db.execute("""
-                        INSERT OR REPLACE INTO tracks_top 
-                        (artist_mbid, type, track_id, external_name, external_album, 
-                         external_date, external_duration_ms, popularity, rank, last_updated)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (mbid, 'top', track_id, track["name"], track.get("album"), 
-                          track.get("date"), track.get("duration_ms"), track.get("popularity"), idx + 1, time.time()))
-                
-                # Store singles
-                for single in meta.get("singles", []):
-                    track_id = await match_track_to_library(
-                        db, mbid, single["title"], None
-                    )
+                    # Clear existing top tracks/singles for this artist
+                    await db.execute("DELETE FROM tracks_top WHERE artist_mbid=?", (mbid,))
                     
-                    await db.execute("""
-                        INSERT OR REPLACE INTO tracks_top 
-                        (artist_mbid, type, track_id, external_name, external_album, 
-                         external_date, external_mbid, last_updated)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (mbid, 'single', track_id, single["title"], single.get("album"),
-                          single["date"], single.get("mbid"), time.time()))
+                    # Store top tracks
+                    for idx, track in enumerate(meta.get("top_tracks", [])):
+                        track_id = await match_track_to_library(
+                            db, mbid, track["name"], track.get("album")
+                        )
+                        
+                        await db.execute("""
+                            INSERT OR REPLACE INTO tracks_top 
+                            (artist_mbid, type, track_id, external_name, external_album, 
+                             external_date, external_duration_ms, popularity, rank, last_updated)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (mbid, 'top', track_id, track["name"], track.get("album"), 
+                              track.get("date"), track.get("duration_ms"), track.get("popularity"), idx + 1, time.time()))
+                    
+                    # Store singles
+                    for single in meta.get("singles", []):
+                        track_id = await match_track_to_library(
+                            db, mbid, single["title"], None
+                        )
+                        
+                        await db.execute("""
+                            INSERT OR REPLACE INTO tracks_top 
+                            (artist_mbid, type, track_id, external_name, external_album, 
+                             external_date, external_mbid, last_updated)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (mbid, 'single', track_id, single["title"], single.get("album"),
+                              single["date"], single.get("mbid"), time.time()))
 
                 # 3. Similar Artists
                 # Clear existing similar artists
@@ -827,7 +838,39 @@ class Scanner:
         # The update_metadata SQL uses COALESCE so it won't overwrite valid with null, 
         # but if we want to Refresh links, we probably want to update them regardless.
         # But for Phase 1, simply calling update_metadata is likely sufficient as it fetches fresh data.
-        await self.update_metadata(artist_filter=artist_filter, mbid_filter=mbid_filter)
+        await self.update_metadata(artist_filter=artist_filter, mbid_filter=mbid_filter, refresh_top_tracks=False)
+
+    async def rematch_tracks_top(self, artist_mbids: set):
+        """
+        Re-run matching of existing top tracks/singles to local library for the given artists.
+        Only fills missing track_id values using current library contents.
+        """
+        artist_ids = {mb for mb, _ in artist_mbids if mb} if artist_mbids else set()
+        if not artist_ids:
+            return
+
+        async for db in get_db():
+            from app.scanner.metadata import match_track_to_library
+            for mbid in artist_ids:
+                async with db.execute("""
+                    SELECT id, external_name, external_album
+                    FROM tracks_top
+                    WHERE artist_mbid = ? AND track_id IS NULL
+                """, (mbid,)) as cursor:
+                    rows = await cursor.fetchall()
+
+                if not rows:
+                    continue
+
+                for row in rows:
+                    tt_id, name, album = row
+                    track_id = await match_track_to_library(db, mbid, name, album)
+                    if track_id:
+                        await db.execute(
+                            "UPDATE tracks_top SET track_id = ?, last_updated = ? WHERE id = ?",
+                            (track_id, time.time(), tt_id),
+                        )
+            await db.commit()
 
     async def scan_missing_albums(self, artist_filter=None, mbid_filter=None):
         """
