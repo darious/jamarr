@@ -32,6 +32,7 @@
     let missingAlbumsOnly = false;
     let bioOnly = false;
     let linksOnly = false;
+    let updateTopTracks = false;
     let artistOptions: string[] = [];
     let artistsLoaded = false;
 
@@ -180,6 +181,7 @@
                     missingOnly,
                     bioOnly,
                     linksOnly,
+                    updateTopTracks,
                 });
             }
         } catch (e) {
@@ -212,6 +214,7 @@
                 missingOnly: metadataMissingOnly,
                 bioOnly,
                 linksOnly,
+                updateTopTracks,
             });
         } catch (e) {
             addLog(`Error starting full run: ${e}`);
@@ -432,6 +435,22 @@
                                 >Missing Metadata Only</span
                             >
                         </label>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-4">
+                            <input
+                                type="checkbox"
+                                bind:checked={updateTopTracks}
+                                class="checkbox checkbox-secondary"
+                            />
+                            <span class="label-text text-white"
+                                >Refresh Top Tracks & Singles</span
+                            >
+                        </label>
+                        <p class="text-xs text-white/60 mt-1 ml-8">
+                            Re-fetch Spotify top tracks and MusicBrainz singles for the filtered artist or all artists, even if other metadata is complete.
+                        </p>
                     </div>
 
                     <div class="form-control">

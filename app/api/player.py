@@ -10,6 +10,7 @@ from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 import json
 import logging
+import time
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -139,6 +140,17 @@ async def monitor_upnp_playback(udn: str):
                              WHERE renderer_udn = ?
                          """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
                          await db.commit()
+
+                 # History logging for remote playback (based on renderer state queue)
+                 if state['is_playing'] and state['current_index'] is not None and state['current_index'] >= 0:
+                     queue = state.get("queue") or []
+                     if 0 <= state['current_index'] < len(queue):
+                         track = queue[state['current_index']]
+                         track_id = track.get("id")
+                         duration = track.get("duration_seconds") or 0
+                         renderer_ip = upnp.renderers.get(udn, {}).get("ip") if upnp.renderers else None
+                         if _should_log_history(udn, track_id, rel_time, duration):
+                             await log_history(db, track_id, client_ip=renderer_ip or "unknown", client_id=udn)
             
             # Execute Side Effects outside DB context
             if was_playing and transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
@@ -284,6 +296,37 @@ async def update_renderer_state_db(db: aiosqlite.Connection, udn: str, state: Di
     """, (udn, queue_json, state.get("current_index", -1), state.get("position_seconds", 0), 1 if state.get("is_playing") else 0, state.get("transport_state", "STOPPED"), volume))
     await db.commit()
 
+def _reset_history_tracker(key: str):
+    if key in _history_tracker:
+        del _history_tracker[key]
+
+def _should_log_history(key: str, track_id: int, position: float, duration: float) -> bool:
+    """
+    Decide if we should log history for this renderer/client and track at given position.
+    Uses a simple memory guard per key to avoid duplicate logs per track.
+    """
+    if not track_id:
+        return False
+    prev = _history_tracker.get(key)
+    if prev and prev.get("track_id") == track_id:
+        # Already logged this track for this key
+        return False
+
+    # Threshold: 30s or 20% of track, whichever is smaller
+    if duration and duration > 0:
+        threshold = min(30, duration * 0.2)
+    else:
+        threshold = 30
+
+    if position >= threshold:
+        _history_tracker[key] = {"track_id": track_id, "logged_at": time.time()}
+        return True
+    return False
+
+# In-memory tracker to avoid duplicate history inserts within a play session.
+# Keyed by renderer UDN (for remote) or client_id (for local).
+_history_tracker = {}
+
 async def log_history(db: aiosqlite.Connection, track_id: int, client_ip: str, client_id: str = None):
     if track_id and track_id > 0:
         try:
@@ -410,6 +453,7 @@ async def append_queue(update: AppendQueue, client_id: str = Depends(get_client_
         state['queue'] = state['queue'] + new_tracks
         
         await update_renderer_state_db(db, udn, state)
+        _reset_history_tracker(client_id if udn.startswith("local") else udn)
     return {"status": "ok"}
 
 @router.post("/api/player/index")
@@ -423,24 +467,49 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
         state['is_playing'] = True # Assume play on skip
         
         await update_renderer_state_db(db, udn, state)
+        _reset_history_tracker(client_id if udn.startswith("local") else udn)
     return {"status": "ok"}
 
 @router.post("/api/player/log-play")
 async def log_play(update: LogPlayRequest, request: Request, client_id: str = Depends(get_client_id)):
-    ip = get_client_ip(request)
-    async for db in get_db():
-        await log_history(db, update.track_id, ip, client_id)
+    """
+    Client-initiated logging is now a no-op; history is recorded server-side from
+    playback state to avoid double entries. We still return success for backward
+    compatibility with older clients.
+    """
     return {"status": "ok"}
 
 @router.post("/api/player/progress")
-async def update_progress(update: ProgressUpdate, client_id: str = Depends(get_client_id)):
+async def update_progress(update: ProgressUpdate, request: Request, client_id: str = Depends(get_client_id)):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
+        client_ip = get_client_ip(request)
         if udn.startswith("local:"):
             state = await get_renderer_state_db(db, udn)
             state['position_seconds'] = update.position_seconds
             state['is_playing'] = update.is_playing
             await update_renderer_state_db(db, udn, state)
+
+            # Server-side history logging for local playback
+            if state['current_index'] is not None and state['current_index'] >= 0:
+                queue = state.get("queue") or []
+                if 0 <= state['current_index'] < len(queue):
+                    track = queue[state['current_index']]
+                    track_id = track.get("id")
+                    duration = track.get("duration_seconds") or 0
+                    if _should_log_history(client_id, track_id, update.position_seconds, duration):
+                        await log_history(db, track_id, client_ip=client_ip, client_id=client_id)
+        else:
+            # For remote renderers, also evaluate logging on progress updates if ever sent
+            state = await get_renderer_state_db(db, udn)
+            if state['current_index'] is not None and state['current_index'] >= 0:
+                queue = state.get("queue") or []
+                if 0 <= state['current_index'] < len(queue):
+                    track = queue[state['current_index']]
+                    track_id = track.get("id")
+                    duration = track.get("duration_seconds") or 0
+                    if _should_log_history(udn, track_id, update.position_seconds, duration):
+                        await log_history(db, track_id, client_ip=client_ip or "unknown", client_id=udn)
     return {"status": "ok"}
 
 @router.get("/api/scan-status")

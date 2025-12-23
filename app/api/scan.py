@@ -18,6 +18,7 @@ class ScanRequest(BaseModel):
     missing_only: bool = False
     bio_only: bool = False
     links_only: bool = False
+    refresh_top_tracks: bool = False
 
 @router.post("/api/library/scan")
 async def trigger_scan(request: ScanRequest):
@@ -35,6 +36,7 @@ async def trigger_scan(request: ScanRequest):
                 missing_only=request.missing_only,
                 bio_only=request.bio_only,
                 links_only=request.links_only,
+                refresh_top_tracks=request.refresh_top_tracks,
             )
             return {"message": "Metadata update started"}
 
@@ -47,6 +49,7 @@ async def trigger_scan(request: ScanRequest):
                 missing_only=request.missing_only,
                 bio_only=request.bio_only,
                 links_only=request.links_only,
+                refresh_top_tracks=request.refresh_top_tracks,
             )
             return {"message": "Full library refresh started"}
             
