@@ -344,6 +344,13 @@
                   >
                     Library Management
                   </a>
+                  <a
+                    class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
+                    href="/settings/media-quality"
+                    on:click={() => (showSettings = false)}
+                  >
+                    Media Quality
+                  </a>
                   <button
                     class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
                     on:click={() => {
