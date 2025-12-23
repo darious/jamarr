@@ -88,6 +88,15 @@ export interface Track {
     mb_release_group_id?: string | null;
 }
 
+export interface User {
+    id: number;
+    username: string;
+    email: string;
+    display_name: string;
+    created_at?: string | null;
+    last_login?: string | null;
+}
+
 export async function fetchArtists(fetchFn: any = fetch): Promise<Artist[]> {
     const res = await fetchFn('/api/artists');
     if (!res.ok) throw new Error('Failed to fetch artists');
@@ -271,4 +280,75 @@ export async function triggerMissingAlbumsScan(mbid?: string, artistName?: strin
         method: 'POST',
     });
     if (!res.ok) throw new Error('Failed to trigger missing albums scan');
+}
+
+export async function signup(
+    data: { username: string; email: string; password: string; display_name?: string },
+): Promise<User> {
+    const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to sign up');
+    }
+    return await res.json();
+}
+
+export async function login(data: { username: string; password: string }): Promise<User> {
+    const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Invalid credentials');
+    }
+    return await res.json();
+}
+
+export async function logout(): Promise<void> {
+    await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include'
+    });
+}
+
+export async function fetchCurrentUser(fetchFn: any = fetch): Promise<User | null> {
+    const res = await fetchFn('/api/auth/me', { credentials: 'include' });
+    if (res.status === 401) return null;
+    if (!res.ok) throw new Error('Failed to fetch current user');
+    return await res.json();
+}
+
+export async function updateProfile(data: { email: string; display_name?: string }): Promise<User> {
+    const res = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to update profile');
+    }
+    return await res.json();
+}
+
+export async function changePassword(data: { current_password: string; new_password: string }): Promise<void> {
+    const res = await fetch('/api/auth/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to update password');
+    }
 }

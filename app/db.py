@@ -125,8 +125,35 @@ CREATE TABLE IF NOT EXISTS playback_history (
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     client_ip TEXT,
     hostname TEXT,
+    client_id TEXT,
+    user_id INTEGER,
     FOREIGN KEY(track_id) REFERENCES tracks(id)
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_login DATETIME,
+    is_active BOOLEAN DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    user_agent TEXT,
+    ip TEXT,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
 -- Indexes for integrity & joins
 CREATE INDEX IF NOT EXISTS idx_tracks_art_id ON tracks(art_id);
@@ -352,13 +379,52 @@ async def init_db():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 client_ip TEXT,
                 hostname TEXT,
+                client_id TEXT,
+                user_id INTEGER,
                 FOREIGN KEY(track_id) REFERENCES tracks(id)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                display_name TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_login DATETIME,
+                is_active BOOLEAN DEFAULT 1
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME NOT NULL,
+                user_agent TEXT,
+                ip TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         
         # Migration: Add hostname column if it doesn't exist
         try:
             await db.execute("ALTER TABLE playback_history ADD COLUMN hostname TEXT")
+            await db.commit()
+        except Exception:
+            pass  # Column likely exists
+        try:
+            await db.execute("ALTER TABLE playback_history ADD COLUMN client_id TEXT")
+            await db.commit()
+        except Exception:
+            pass  # Column likely exists
+        try:
+            await db.execute("ALTER TABLE playback_history ADD COLUMN user_id INTEGER")
             await db.commit()
         except Exception:
             pass  # Column likely exists
