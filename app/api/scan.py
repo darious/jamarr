@@ -16,9 +16,14 @@ class ScanRequest(BaseModel):
     artist_filter: Optional[str] = None
     mbid_filter: Optional[str] = None
     missing_only: bool = False
-    bio_only: bool = False
-    links_only: bool = False
+    bio_only: bool = False  # deprecated; use fetch_bio
+    links_only: bool = False  # deprecated; use fetch_links
     refresh_top_tracks: bool = False
+    refresh_singles: bool = False
+    fetch_metadata: bool = True
+    fetch_bio: bool = True
+    fetch_artwork: bool = True
+    fetch_links: bool = True
 
 @router.post("/api/library/scan")
 async def trigger_scan(request: ScanRequest):
@@ -34,9 +39,14 @@ async def trigger_scan(request: ScanRequest):
                 artist_filter=request.artist_filter, 
                 mbid_filter=request.mbid_filter,
                 missing_only=request.missing_only,
-                bio_only=request.bio_only,
-                links_only=request.links_only,
+                bio_only=request.bio_only or request.fetch_bio,
+                links_only=request.links_only or (not request.fetch_links and False),
                 refresh_top_tracks=request.refresh_top_tracks,
+                refresh_singles=request.refresh_singles,
+                fetch_metadata=request.fetch_metadata,
+                fetch_bio=request.fetch_bio,
+                fetch_artwork=request.fetch_artwork,
+                fetch_links=request.fetch_links,
             )
             return {"message": "Metadata update started"}
 
@@ -47,8 +57,8 @@ async def trigger_scan(request: ScanRequest):
                 artist_filter=request.artist_filter,
                 mbid_filter=request.mbid_filter,
                 missing_only=request.missing_only,
-                bio_only=request.bio_only,
-                links_only=request.links_only,
+                bio_only=request.bio_only or request.fetch_bio,
+                links_only=request.links_only or (not request.fetch_links and False),
                 refresh_top_tracks=request.refresh_top_tracks,
             )
             return {"message": "Full library refresh started"}
