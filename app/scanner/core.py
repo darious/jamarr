@@ -618,13 +618,14 @@ class Scanner:
                     mbid,
                     name,
                     local_release_group_ids=local_release_group_ids,
-                    bio_only=bio_only and not fetch_links and not fetch_singles,
+                    bio_only=bio_only and not fetch_links and not refresh_singles,
                     fetch_metadata=fetch_metadata,
                     fetch_bio=fetch_bio,
                     fetch_artwork=fetch_artwork,
                     fetch_links=fetch_links,
                     fetch_top_tracks=refresh_top_tracks,
                     fetch_singles=refresh_singles,
+                    known_wikipedia_url=None, # We'll need to fetch this from DB first if we want to use it
                 )
                 
                 # Save Artwork if new
@@ -744,12 +745,9 @@ class Scanner:
                     
                 # Store singles from MusicBrainz
                 if refresh_singles:
-                    if missing_only:
-                        async with db.execute("SELECT COUNT(1) FROM tracks_top WHERE artist_mbid=? AND type='single'", (mbid,)) as c:
-                            row = await c.fetchone()
-                            if row and row[0] > 0:
-                                meta["singles"] = []
-                    # If we skipped fetching singles, ensure meta.singles exists
+                    # Always replace existing singles when refreshing
+                    await db.execute("DELETE FROM tracks_top WHERE artist_mbid=? AND type='single'", (mbid,))
+
                     for single in meta.get("singles", []):
                         track_id = await match_track_to_library(
                             db, mbid, single["title"], None
@@ -763,29 +761,27 @@ class Scanner:
                         """, (mbid, 'single', track_id, single["title"], single.get("album"),
                               single["date"], single.get("mbid"), time.time()))
 
-                # 3. Similar Artists
-                # Clear existing similar artists
-                await db.execute("DELETE FROM similar_artists WHERE artist_mbid=?", (mbid,))
-                
-                # Debug: Check if similar_artists data exists
-                similar_count = len(meta.get("similar_artists", []))
-                logger.debug(f"Storing {similar_count} similar artists for {mbid}")
-                
-                # Store similar artists with library matching
-                for idx, similar_name in enumerate(meta.get("similar_artists", [])):
-                    # Try to find MBID if artist is in our library
-                    async with db.execute(
-                        "SELECT mbid FROM artists WHERE LOWER(TRIM(name)) = ? LIMIT 1",
-                        (similar_name.lower().strip(),)
-                    ) as cursor:
-                        row = await cursor.fetchone()
-                        similar_mbid = row[0] if row else None
+                # 3. Similar Artists (only when full metadata/top-tracks requested)
+                if fetch_metadata or refresh_top_tracks:
+                    await db.execute("DELETE FROM similar_artists WHERE artist_mbid=?", (mbid,))
                     
-                    await db.execute("""
-                        INSERT OR REPLACE INTO similar_artists 
-                        (artist_mbid, similar_artist_name, similar_artist_mbid, rank, last_updated)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (mbid, similar_name, similar_mbid, idx + 1, time.time()))
+                    similar_count = len(meta.get("similar_artists", []))
+                    logger.debug(f"Storing {similar_count} similar artists for {mbid}")
+                    
+                    for idx, similar_name in enumerate(meta.get("similar_artists", [])):
+                        # Try to find MBID if artist is in our library
+                        async with db.execute(
+                            "SELECT mbid FROM artists WHERE LOWER(TRIM(name)) = ? LIMIT 1",
+                            (similar_name.lower().strip(),)
+                        ) as cursor:
+                            row = await cursor.fetchone()
+                            similar_mbid = row[0] if row else None
+                        
+                        await db.execute("""
+                            INSERT OR REPLACE INTO similar_artists 
+                            (artist_mbid, similar_artist_name, similar_artist_mbid, rank, last_updated)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (mbid, similar_name, similar_mbid, idx + 1, time.time()))
 
                 # 4. Albums & Singles (Release Groups)
                 all_releases = meta.get("albums", []) + meta.get("singles", [])
