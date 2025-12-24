@@ -334,8 +334,16 @@
 
 <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
   <div
-    class="absolute inset-0 bg-cover bg-center blur-3xl opacity-30 scale-110"
-    style={`background-image:url('${artist?.art_sha1 ? `/art/file/${artist.art_sha1}` : artist?.art_id ? `/art/${artist.art_id}` : "/assets/default-artist.svg"}')`}
+    class="absolute inset-0 bg-cover bg-center blur-lg opacity-50 scale-102"
+    style={`background-image:url('${artist?.background_sha1
+      ? `/art/file/${artist.background_sha1}`
+      : artist?.background_art_id
+        ? `/art/${artist.background_art_id}`
+        : artist?.art_sha1
+          ? `/art/file/${artist.art_sha1}`
+          : artist?.art_id
+            ? `/art/${artist.art_id}`
+            : "/assets/default-artist.svg"}')`}
   ></div>
   <div
     class="absolute inset-0 bg-gradient-to-b from-surface-900/50 via-surface-900/80 to-surface-900"

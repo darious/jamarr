@@ -12,7 +12,7 @@ import difflib
 import re
 from app.tidal import TidalClient, year_from_date
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("scanner.core")
 
 SUPPORTED_EXTENSIONS = {".flac", ".mp3", ".m4a", ".ogg", ".wav", ".aiff"}
 
@@ -120,11 +120,13 @@ class Scanner:
             # Check modification time
             music_root = get_music_path()
             rel_path = os.path.relpath(path, music_root)
+            logger.debug(f"[filesystem] Processing file: {rel_path}")
             
             mtime = os.path.getmtime(path)
             async with db.execute("SELECT id, mtime FROM tracks WHERE path = ?", (rel_path,)) as cursor:
                 row = await cursor.fetchone()
                 if not force_rescan and row and row[1] == mtime:
+                    logger.debug(f"[filesystem] Skipping unchanged file: {rel_path}")
                     return # Unchanged
 
             # Extract Tags
@@ -140,6 +142,7 @@ class Scanner:
                     art_result.get("sha1"),
                     meta=art_result.get("meta"),
                 )
+                logger.debug(f"[filesystem] Artwork cached for {rel_path} sha1={art_result.get('sha1')}")
 
             mb_rg_id = tags.get("mb_release_group_id")
 
@@ -166,8 +169,11 @@ class Scanner:
             cursor = await db.execute(sql, values)
             track_id = cursor.lastrowid
             
-            if row: self.stats["updated"] += 1
-            else: self.stats["added"] += 1
+            if row:
+                self.stats["updated"] += 1
+            else:
+                self.stats["added"] += 1
+            logger.debug(f"[filesystem] Upserted track id={track_id} path={rel_path}")
 
             # Map artwork to album or track fallback
             if art_id:
@@ -512,17 +518,20 @@ class Scanner:
             
             logger.info("Library Prune Complete.")
 
-    async def update_metadata(self, artist_filter=None, mbid_filter=None, specific_fields=None, missing_only=False, bio_only=False, refresh_top_tracks=True):
+    async def update_metadata(self, artist_filter=None, mbid_filter=None, specific_fields=None, missing_only=False, bio_only=False, refresh_top_tracks=True, refresh_singles=True, fetch_metadata=True, fetch_bio=True, fetch_artwork=True, fetch_links=True):
         """
         Updates artist metadata.
         Can filter by artist name (--artist) or MusicBrainz ID (--mbid).
         If refresh_top_tracks is True, run top tracks/singles refresh even when metadata is otherwise complete.
         """
+        from app.scanner.metadata import match_track_to_library
+
         self.stats["current_status"] = "Updating Metadata"
         async for db in get_db():
             # Get artists
             query = """
                 SELECT a.mbid, a.name, a.last_updated, a.sort_name, a.bio, a.image_url, 
+                       a.art_id,
                        COUNT(el.id) as link_count
                 FROM artists a
                 LEFT JOIN external_links el 
@@ -554,19 +563,22 @@ class Scanner:
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
 
-            def has_gaps(row):
-                _, name, _, sort_name, bio, image_url, link_count = row
-                return (
-                    not name or not str(name).strip()
-                    or not sort_name or not str(sort_name).strip()
-                    or not bio or not str(bio).strip()
-                    or not image_url or not str(image_url).strip()
-                    or (link_count or 0) == 0
-                )
+            def has_selected_gaps(row):
+                _, name, _, sort_name, bio, image_url, art_id, link_count = row
+                checks = []
+                if fetch_metadata:
+                    checks.append(not name or not str(name).strip() or not sort_name or not str(sort_name).strip())
+                if fetch_bio:
+                    checks.append(not bio or not str(bio).strip())
+                if fetch_artwork:
+                    checks.append(not art_id or (not image_url))
+                if fetch_links:
+                    checks.append((link_count or 0) == 0)
+                return any(checks)
 
             # If filtered query (artist/mbid) was used with missing_only, reapply gap check client-side
-            if missing_only and not refresh_top_tracks:
-                rows = [r for r in rows if has_gaps(r)]
+            if missing_only and not refresh_top_tracks and not refresh_singles:
+                rows = [r for r in rows if has_selected_gaps(r)]
             
             total = len(rows)
             logger.info(f"Found {total} artists to update.")
@@ -577,10 +589,10 @@ class Scanner:
                     logger.info("Metadata update cancelled by stop signal.")
                     raise asyncio.CancelledError()
 
-                mbid, name, last_updated, sort_name, bio, image_url, link_count = row
+                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, link_count = row
                 if not mbid: continue
 
-                if missing_only and not refresh_top_tracks and not has_gaps(row):
+                if missing_only and not refresh_top_tracks and not refresh_singles and not has_selected_gaps(row):
                     continue
                 
                 # Emit initial "Fetching..." if name is unknown, or name if known
@@ -601,7 +613,19 @@ class Scanner:
                     local_rg_rows = await cursor.fetchall()
                     local_release_group_ids = {r[0] for r in local_rg_rows}
 
-                meta = await fetch_artist_metadata(mbid, name, local_release_group_ids=local_release_group_ids, bio_only=bio_only)
+                logger.debug(f"[metadata] Fetching artist meta mbid={mbid} name={name}")
+                meta = await fetch_artist_metadata(
+                    mbid,
+                    name,
+                    local_release_group_ids=local_release_group_ids,
+                    bio_only=bio_only and not fetch_links and not fetch_singles,
+                    fetch_metadata=fetch_metadata,
+                    fetch_bio=fetch_bio,
+                    fetch_artwork=fetch_artwork,
+                    fetch_links=fetch_links,
+                    fetch_top_tracks=refresh_top_tracks,
+                    fetch_singles=refresh_singles,
+                )
                 
                 # Save Artwork if new
                 art_id = None
@@ -610,7 +634,7 @@ class Scanner:
                 current_name = meta.get("name") or name or "Unknown"
                 if self.scan_logger: self.scan_logger.emit_progress(processed, total, f"Metadata: {current_name}")
 
-                if meta.get("image_url"):
+                if fetch_artwork and meta.get("image_url"):
                     art_download = await download_and_save_artwork(meta["image_url"], art_type='artistthumb')
                     if art_download:
                         art_id = await upsert_artwork_record(
@@ -622,6 +646,18 @@ class Scanner:
                         )
                         if art_id:
                             await upsert_image_mapping(db, art_id, "artist", mbid, "artistthumb", meta.get("image_score"))
+                if fetch_artwork and meta.get("background_url"):
+                    bg_download = await download_and_save_artwork(meta["background_url"], art_type='artistthumb')
+                    if bg_download:
+                        bg_art_id = await upsert_artwork_record(
+                            db,
+                            bg_download.get("sha1"),
+                            meta=bg_download.get("meta"),
+                            source=meta.get("background_source"),
+                            source_url=bg_download.get("source_url") or meta.get("background_url"),
+                        )
+                        if bg_art_id:
+                            await upsert_image_mapping(db, bg_art_id, "artist", mbid, "artistbackground", meta.get("background_score"))
 
                 # Update DB
                 # Update Artists Table (Core Info)
@@ -637,8 +673,11 @@ class Scanner:
                         last_updated=?
                     WHERE mbid=?
                 """, (
-                    meta.get("name"), meta.get("sort_name"),
-                    meta.get("bio"), meta.get("image_url"), art_id,
+                    meta.get("name") if fetch_metadata else name,
+                    meta.get("sort_name") if fetch_metadata else sort_name,
+                    meta.get("bio") if fetch_bio else bio,
+                    meta.get("image_url") if fetch_artwork else image_url,
+                    art_id,
                     meta["last_updated"],
                     mbid
                 ))
@@ -646,32 +685,38 @@ class Scanner:
                 # --- Update Normalized Tables ---
                 
                 # 1. External Links (Artist)
-                # Clear existing for full refresh validity
-                await db.execute("DELETE FROM external_links WHERE entity_type='artist' AND entity_id=?", (mbid,))
-                
-                artist_links = []
-                # Always include MusicBrainz link for this artist using MBID
-                try:
-                    from app.config import get_musicbrainz_root_url
-                    mb_url = f"{get_musicbrainz_root_url()}/artist/{mbid}"
-                    artist_links.append(("musicbrainz", mb_url))
-                except Exception:
-                    logger.debug("Could not build MusicBrainz link for %s", mbid)
-                if meta.get("spotify_url"): artist_links.append(("spotify", meta["spotify_url"]))
-                if meta.get("tidal_url"): artist_links.append(("tidal", meta["tidal_url"]))
-                if meta.get("qobuz_url"): artist_links.append(("qobuz", meta["qobuz_url"]))
-                if meta.get("wikipedia_url"): artist_links.append(("wikipedia", meta["wikipedia_url"]))
-                if meta.get("homepage"): artist_links.append(("homepage", meta["homepage"]))
-                
-                for l_type, l_url in artist_links:
-                    await db.execute("INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)", 
-                                     ('artist', mbid, l_type, l_url))
+                if fetch_links:
+                    # Clear existing for full refresh validity
+                    await db.execute("DELETE FROM external_links WHERE entity_type='artist' AND entity_id=?", (mbid,))
+                    
+                    artist_links = []
+                    # Always include MusicBrainz link for this artist using MBID
+                    try:
+                        from app.config import get_musicbrainz_root_url
+                        mb_url = f"{get_musicbrainz_root_url()}/artist/{mbid}"
+                        artist_links.append(("musicbrainz", mb_url))
+                    except Exception:
+                        logger.debug("Could not build MusicBrainz link for %s", mbid)
+                    if meta.get("spotify_url"): artist_links.append(("spotify", meta["spotify_url"]))
+                    if meta.get("tidal_url"): artist_links.append(("tidal", meta["tidal_url"]))
+                    if meta.get("qobuz_url"): artist_links.append(("qobuz", meta["qobuz_url"]))
+                    if meta.get("wikipedia_url"): artist_links.append(("wikipedia", meta["wikipedia_url"]))
+                    if meta.get("homepage"): artist_links.append(("homepage", meta["homepage"]))
+                    
+                    for l_type, l_url in artist_links:
+                        await db.execute("INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)", 
+                                         ('artist', mbid, l_type, l_url))
 
                 # 2. Top Tracks & Singles (optional)
                 # Always fetch for artists that have no existing top-track entries (new artists),
                 # otherwise only when refresh_top_tracks is True.
                 should_refresh_top_tracks = refresh_top_tracks and not SPOTIFY_SCANNING_DISABLED
-                if not should_refresh_top_tracks:
+                if missing_only and refresh_top_tracks:
+                    async with db.execute("SELECT COUNT(1) FROM tracks_top WHERE artist_mbid=? AND type='top'", (mbid,)) as c:
+                        row = await c.fetchone()
+                        if row and row[0] > 0:
+                            should_refresh_top_tracks = False
+                if not should_refresh_top_tracks and not missing_only:
                     async with db.execute("SELECT COUNT(1) FROM tracks_top WHERE artist_mbid=?", (mbid,)) as c:
                         row = await c.fetchone()
                         if row and row[0] == 0:
@@ -697,7 +742,14 @@ class Scanner:
                         """, (mbid, 'top', track_id, track["name"], track.get("album"), 
                               track.get("date"), track.get("duration_ms"), track.get("popularity"), idx + 1, time.time()))
                     
-                    # Store singles
+                # Store singles from MusicBrainz
+                if refresh_singles:
+                    if missing_only:
+                        async with db.execute("SELECT COUNT(1) FROM tracks_top WHERE artist_mbid=? AND type='single'", (mbid,)) as c:
+                            row = await c.fetchone()
+                            if row and row[0] > 0:
+                                meta["singles"] = []
+                    # If we skipped fetching singles, ensure meta.singles exists
                     for single in meta.get("singles", []):
                         track_id = await match_track_to_library(
                             db, mbid, single["title"], None
@@ -802,6 +854,7 @@ class Scanner:
                         )
                 await db.commit()
                 processed += 1
+                logger.debug(f"[metadata] Updated artist mbid={mbid} name={current_name}")
                 if self.scan_logger:
                     self.scan_logger.emit_progress(processed, total, f"Metadata: {current_name}")
                     # Allow UI to render
