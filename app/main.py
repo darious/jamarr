@@ -11,8 +11,8 @@ async def lifespan(app: FastAPI):
     # ScanManager is lazy initialized but good to have it ready
     ScanManager.get_instance()
     yield
-    UPnPManager.get_instance().stop_background_scan()
-    await ScanManager.get_instance().stop_scan()
+    await UPnPManager.get_instance().stop_background_scan()
+    await ScanManager.get_instance().shutdown()
 
 app = FastAPI(lifespan=lifespan)
 

@@ -1,241 +1,228 @@
-import json
 from typing import Any, Dict, List, Optional
-
-from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from fastapi import APIRouter
 from app.db import get_db
-from app.media.quality import run_media_quality_checks
 
 router = APIRouter()
 
 
-class QualityRunRequest(BaseModel):
-    force: bool = False
+class EntityItem(BaseModel):
+    name: str
+    mbid: str
+    image_url: Optional[str] = None
+    artist_name: Optional[str] = None
 
 
-@router.post("/api/media-quality/run")
-async def trigger_media_quality_run(request: QualityRunRequest):
-    try:
-        stats = await run_media_quality_checks(force=request.force)
-        return {"status": "ok", "stats": stats}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def _safe_json_load(data: str | None) -> Dict[str, Any]:
-    if not data:
-        return {}
-    try:
-        return json.loads(data)
-    except Exception:
-        return {}
-
-
-async def _fetch_context_maps(db, issues: List[Dict[str, Any]]):
-    track_ids = []
-    artwork_ids = []
-    artist_ids = []
-    album_ids = []
-
-    for issue in issues:
-        etype = issue["entity_type"]
-        eid = issue["entity_id"]
-        if not eid:
-            continue
-        if etype == "track":
-            try:
-                track_ids.append(int(eid))
-            except ValueError:
-                pass
-        elif etype == "artwork":
-            try:
-                artwork_ids.append(int(eid))
-            except ValueError:
-                pass
-        elif etype == "artist":
-            artist_ids.append(eid)
-        elif etype == "album":
-            album_ids.append(eid)
-
-    track_map: Dict[int, Dict[str, Any]] = {}
-    if track_ids:
-        placeholders = ",".join("?" * len(track_ids))
-        async with db.execute(
-            f"SELECT id, title, artist, album, art_id FROM tracks WHERE id IN ({placeholders})",
-            track_ids,
-        ) as cursor:
-            for row in await cursor.fetchall():
-                track_map[row["id"]] = {
-                    "title": row["title"],
-                    "artist": row["artist"],
-                    "album": row["album"],
-                    "art_id": row["art_id"],
-                }
-
-    artwork_map: Dict[int, Dict[str, Any]] = {}
-    if artwork_ids:
-        placeholders = ",".join("?" * len(artwork_ids))
-        async with db.execute(
-            f"""
-            SELECT id, sha1, type, width, height, filesize_bytes, image_format, mime, path_on_disk, check_errors
-            FROM artwork WHERE id IN ({placeholders})
-            """,
-            artwork_ids,
-        ) as cursor:
-            for row in await cursor.fetchall():
-                context = {
-                    "sha1": row["sha1"],
-                    "type": row["type"] or "album",
-                    "width": row["width"],
-                    "height": row["height"],
-                    "filesize_bytes": row["filesize_bytes"],
-                    "image_format": row["image_format"],
-                    "mime": row["mime"],
-                    "path_on_disk": row["path_on_disk"],
-                    "check_errors": _safe_json_load(row["check_errors"]),
-                }
-                # Attach a sample track using this artwork for easier linking
-                async with db.execute(
-                    """
-                    SELECT title, artist, album, album_artist
-                    FROM tracks
-                    WHERE art_id = ?
-                    LIMIT 1
-                    """,
-                    (row["id"],),
-                ) as tcur:
-                    trow = await tcur.fetchone()
-                    if trow:
-                        context["sample_track"] = {
-                            "title": trow["title"],
-                            "artist": trow["artist"],
-                            "album": trow["album"],
-                            "album_artist": trow["album_artist"],
-                        }
-
-                artwork_map[row["id"]] = context
-
-    artist_map: Dict[str, Dict[str, Any]] = {}
-    if artist_ids:
-        placeholders = ",".join("?" * len(artist_ids))
-        async with db.execute(
-            f"SELECT mbid, name, art_id FROM artists WHERE mbid IN ({placeholders})", artist_ids
-        ) as cursor:
-            for row in await cursor.fetchall():
-                artist_map[row["mbid"]] = {"name": row["name"], "art_id": row["art_id"]}
-
-    album_map: Dict[str, Dict[str, Any]] = {}
-    if album_ids:
-        placeholders = ",".join("?" * len(album_ids))
-        async with db.execute(
-            f"""
-            SELECT al.mbid, al.title, al.art_id,
-                   (SELECT COALESCE(t.album_artist, t.artist)
-                    FROM tracks t
-                    WHERE t.mb_release_group_id = al.mbid OR t.album = al.title
-                    LIMIT 1) AS album_artist
-            FROM albums al
-            WHERE al.mbid IN ({placeholders})
-            """,
-            album_ids,
-        ) as cursor:
-            for row in await cursor.fetchall():
-                album_map[row["mbid"]] = {
-                    "title": row["title"],
-                    "art_id": row["art_id"],
-                    "album_artist": row["album_artist"],
-                }
-
-    return track_map, artwork_map, artist_map, album_map
-
-
-@router.get("/api/media-quality/issues")
-async def list_media_quality_issues(
-    entity_type: Optional[str] = None,
-    issue_code: Optional[str] = None,
-    include_resolved: bool = False,
-    limit: int = 200,
+@router.get("/api/media-quality/items", response_model=List[EntityItem])
+async def list_media_quality_items(
+    category: str,  # 'all' or 'primary'
+    filter_type: str,  # 'total', 'background', 'source', 'link_type'
+    filter_value: Optional[str] = None,
 ):
+    items = []
     async for db in get_db():
-        clauses = []
-        params: List[Any] = []
-        query = "SELECT id, entity_type, entity_id, issue_code, details, created_at, resolved_at FROM media_quality_issues"
+        # Base query
+        # Base query
+        group_by = ""
+        
+        if category == "album":
+             query = """
+                SELECT al.mbid, al.title as name, NULL as image_url, ar.name as artist_name, al.art_id 
+                FROM albums al
+                LEFT JOIN artist_albums aa ON al.mbid = aa.album_mbid AND aa.type='primary'
+                LEFT JOIN artists ar ON aa.artist_mbid = ar.mbid
+             """
+             group_by = " GROUP BY al.mbid"
+             tbl = "al"
+        else:
+             query = "SELECT mbid, name, image_url, art_id FROM artists ar"
+             tbl = "ar"
+        
+        where_clauses = []
+        params = []
 
-        if not include_resolved:
-            clauses.append("resolved_at IS NULL")
-        if entity_type:
-            clauses.append("entity_type = ?")
-            params.append(entity_type)
-        if issue_code:
-            clauses.append("issue_code = ?")
-            params.append(issue_code)
+        # 1. Category Filter
+        if category == "primary":
+            where_clauses.append(f"{tbl}.mbid IN (SELECT DISTINCT artist_mbid FROM artist_albums WHERE type='primary')")
+        
+        # 2. Specific Filter Logic
+        if filter_type == "total":
+             pass # No extra filter needed beyond category
+        
+        elif filter_type == "background":
+            if category == "album":
+                 pass
+            else:
+                where_clauses.append(f"""
+                    {tbl}.mbid IN (
+                        SELECT entity_id FROM image_mapping 
+                        WHERE entity_type='artist' AND image_type='artistbackground'
+                    )
+                """)
+        
+        elif filter_type == "artwork":
+             if filter_value == "missing":
+                  where_clauses.append(f"{tbl}.art_id IS NULL")
+             elif filter_value == "present":
+                  where_clauses.append(f"{tbl}.art_id IS NOT NULL")
 
-        if clauses:
-            query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
+        elif filter_type == "source":
+            if filter_value == "None":
+                 where_clauses.append(f"{tbl}.art_id IS NULL")
+            elif filter_value == "Fanart":
+                 where_clauses.append(f"{tbl}.art_id IN (SELECT id FROM artwork WHERE source LIKE '%fanart%')")
+            elif filter_value == "Spotify":
+                 where_clauses.append(f"{tbl}.art_id IN (SELECT id FROM artwork WHERE source LIKE '%spotify%')")
+            else:
+                 where_clauses.append(f"{tbl}.art_id IS NOT NULL")
+                 where_clauses.append(f"{tbl}.art_id NOT IN (SELECT id FROM artwork WHERE source LIKE '%fanart%' OR source LIKE '%spotify%')")
+
+        elif filter_type == "link_type":
+             entity_type = 'album' if category == 'album' else 'artist'
+             if filter_value:
+                 where_clauses.append(f"{tbl}.mbid IN (SELECT entity_id FROM external_links WHERE type='{filter_value}' AND entity_type='{entity_type}')")
+
+        elif filter_type == "missing_link_type":
+             entity_type = 'album' if category == 'album' else 'artist'
+             if filter_value:
+                 where_clauses.append(f"{tbl}.mbid NOT IN (SELECT entity_id FROM external_links WHERE type='{filter_value}' AND entity_type='{entity_type}')")
+
+        # Construct final SQL
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+        
+        if group_by:
+            query += group_by
+
+        if category == "album":
+             query += " ORDER BY al.title ASC LIMIT 500"
+        else:
+             query += " ORDER BY ar.sort_name ASC LIMIT 500"
 
         async with db.execute(query, params) as cursor:
             rows = await cursor.fetchall()
-
-        issues = [
-            {
-                "id": row["id"],
-                "entity_type": row["entity_type"],
-                "entity_id": row["entity_id"],
-                "issue_code": row["issue_code"],
-                "details": _safe_json_load(row["details"]),
-                "created_at": row["created_at"],
-                "resolved_at": row["resolved_at"],
-            }
-            for row in rows
-        ]
-
-        track_map, artwork_map, artist_map, album_map = await _fetch_context_maps(db, issues)
-
-        for issue in issues:
-            etype = issue["entity_type"]
-            eid = issue["entity_id"]
-            if etype == "track" and eid:
-                try:
-                    issue["context"] = track_map.get(int(eid))
-                except ValueError:
-                    issue["context"] = None
-            elif etype == "artwork" and eid:
-                try:
-                    issue["context"] = artwork_map.get(int(eid))
-                except ValueError:
-                    issue["context"] = None
-            elif etype == "artist" and eid:
-                issue["context"] = artist_map.get(eid)
-            elif etype == "album" and eid:
-                issue["context"] = album_map.get(eid)
-            else:
-                issue["context"] = None
-
-        return {"issues": issues}
+            for row in rows:
+                items.append({
+                    "name": row["name"] or "Unknown",
+                    "mbid": row["mbid"],
+                    "image_url": row["image_url"],
+                    "artist_name": row["artist_name"] if "artist_name" in row.keys() else None
+                })
+    
+    return items
 
 
 @router.get("/api/media-quality/summary")
 async def media_quality_summary():
     async for db in get_db():
-        summary: Dict[str, Any] = {"issue_counts": {}, "pending_artwork": 0, "artwork_with_issues": 0}
+        stats = {
+            "all": {"total": 0, "with_background": 0, "sources": {}, "link_stats": {}},
+            "primary": {"total": 0, "with_background": 0, "sources": {}, "link_stats": {}},
+        }
+
+        # --- ALL ARTISTS ---
+        async with db.execute("SELECT COUNT(*) FROM artists") as cursor:
+            row = await cursor.fetchone()
+            if row:
+                stats["all"]["total"] = row[0]
 
         async with db.execute(
-            "SELECT issue_code, COUNT(*) as cnt FROM media_quality_issues WHERE resolved_at IS NULL GROUP BY issue_code"
+            "SELECT COUNT(DISTINCT entity_id) FROM image_mapping WHERE entity_type='artist' AND image_type='artistbackground'"
         ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                stats["all"]["with_background"] = row[0]
+
+        async with db.execute("""
+            SELECT 
+                CASE 
+                    WHEN art_id IS NULL THEN 'None'
+                    WHEN a.source LIKE '%fanart%' THEN 'Fanart'
+                    WHEN a.source LIKE '%spotify%' THEN 'Spotify'
+                    ELSE 'Other'
+                END as src,
+                COUNT(*)
+            FROM artists ar
+            LEFT JOIN artwork a ON ar.art_id = a.id
+            GROUP BY src
+        """) as cursor:
             for row in await cursor.fetchall():
-                summary["issue_counts"][row["issue_code"]] = row["cnt"]
+                stats["all"]["sources"][row[0]] = row[1]
 
-        async with db.execute("SELECT COUNT(*) FROM artwork WHERE checked_at IS NULL") as cursor:
+        async with db.execute("""
+            SELECT type, COUNT(*) 
+            FROM external_links 
+            WHERE entity_type='artist' 
+            GROUP BY type
+        """) as cursor:
+            for row in await cursor.fetchall():
+                stats["all"]["link_stats"][row[0]] = row[1]
+
+        # --- PRIMARY ARTISTS ---
+        # Filter artists that have at least one album where they are 'primary'
+        primary_filter = "mbid IN (SELECT DISTINCT artist_mbid FROM artist_albums WHERE type='primary')"
+        
+        async with db.execute(f"SELECT COUNT(*) FROM artists WHERE {primary_filter}") as cursor:
             row = await cursor.fetchone()
-            summary["pending_artwork"] = row[0] if row else 0
+            if row:
+                stats["primary"]["total"] = row[0]
 
         async with db.execute(
-            "SELECT COUNT(*) FROM artwork WHERE check_errors IS NOT NULL AND TRIM(check_errors) <> '' AND check_errors <> '[]'"
+            f"SELECT COUNT(DISTINCT entity_id) FROM image_mapping WHERE entity_type='artist' AND image_type='artistbackground' AND entity_id IN (SELECT mbid FROM artists WHERE {primary_filter})"
         ) as cursor:
             row = await cursor.fetchone()
-            summary["artwork_with_issues"] = row[0] if row else 0
+            if row:
+                stats["primary"]["with_background"] = row[0]
 
-        return summary
+        async with db.execute(f"""
+            SELECT 
+                CASE 
+                    WHEN art_id IS NULL THEN 'None'
+                    WHEN a.source LIKE '%fanart%' THEN 'Fanart'
+                    WHEN a.source LIKE '%spotify%' THEN 'Spotify'
+                    ELSE 'Other'
+                END as src,
+                COUNT(*)
+            FROM artists ar
+            LEFT JOIN artwork a ON ar.art_id = a.id
+            WHERE {primary_filter}
+            GROUP BY src
+        """) as cursor:
+            for row in await cursor.fetchall():
+                stats["primary"]["sources"][row[0]] = row[1]
+
+        async with db.execute(f"""
+            SELECT el.type, COUNT(*) 
+            FROM external_links el
+            WHERE el.entity_type='artist' AND el.entity_id IN (
+                SELECT DISTINCT artist_mbid FROM artist_albums WHERE type='primary'
+            )
+            GROUP BY el.type
+        """) as cursor:
+            for row in await cursor.fetchall():
+                stats["primary"]["link_stats"][row[0]] = row[1]
+
+        # --- ALBUMS ---
+        stats["album_stats"] = {"total": 0, "with_artwork": 0, "sources": {}, "link_stats": {}}
+        
+        async with db.execute("SELECT COUNT(*) FROM albums") as cursor:
+            row = await cursor.fetchone()
+            if row:
+                stats["album_stats"]["total"] = row[0]
+
+        async with db.execute("SELECT COUNT(*) FROM albums WHERE art_id IS NOT NULL") as cursor:
+            row = await cursor.fetchone()
+            if row:
+                stats["album_stats"]["with_artwork"] = row[0]
+
+        async with db.execute("""
+            SELECT type, COUNT(*) 
+            FROM external_links 
+            WHERE entity_type='album' 
+            GROUP BY type
+        """) as cursor:
+            for row in await cursor.fetchall():
+                stats["album_stats"]["link_stats"][row[0]] = row[1]
+
+        return {"artist_stats": stats, "album_stats": stats["album_stats"]}

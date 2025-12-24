@@ -45,8 +45,14 @@ async def get_missing_albums(mbid: str, db: aiosqlite.Connection = Depends(get_d
         return [dict(row) for row in rows]
 
 @router.get("/api/artists")
-async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
-    # Return distinct artists with metadata
+async def get_artists(
+    limit: int = 1000, 
+    offset: int = 0, 
+    name: Optional[str] = None, 
+    mbid: Optional[str] = None, 
+    db: aiosqlite.Connection = Depends(get_db)
+):
+    # Base query for artist info
     query = """
         SELECT DISTINCT 
             a.mbid,
@@ -62,6 +68,7 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             MAX(CASE WHEN el.type = 'qobuz' THEN el.url END) as qobuz_url,
             MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as musicbrainz_url,
             MAX(CASE WHEN el.type = 'tidal' THEN el.url END) as tidal_url,
+            MAX(CASE WHEN el.type = 'lastfm' THEN el.url END) as lastfm_url,
             COALESCE(ac.primary_album_count, 0) as primary_album_count,
             COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
         FROM artists a
@@ -79,123 +86,170 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             GROUP BY ta.mbid
         ) ac ON ac.artist_mbid = a.mbid
         WHERE a.name IS NOT NULL 
-        GROUP BY a.mbid
-        ORDER BY a.sort_name COLLATE NOCASE
     """
-    async with db.execute(query) as cursor:
+    
+    params = []
+    if name:
+        # Normalize name for case-insensitive comparison
+        query += " AND LOWER(REPLACE(a.name, '‐', '-')) = LOWER(REPLACE(?, '‐', '-'))"
+        params.append(name)
+    if mbid:
+        query += " AND a.mbid = ?"
+        params.append(mbid)
+        
+    query += " GROUP BY a.mbid ORDER BY a.sort_name COLLATE NOCASE"
+    
+    # Apply limit/offset only if not filtering by specific artist (which usually returns 1)
+    if not name and not mbid:
+        query += " LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+    async with db.execute(query, params) as cursor:
         rows = await cursor.fetchall()
 
-        artist_images = await fetch_primary_images(db, "artist", [r["mbid"] for r in rows], "artistthumb")
-        artist_backgrounds = await fetch_primary_images(db, "artist", [r["mbid"] for r in rows], "artistbackground")
+        artist_ids = [r["mbid"] for r in rows]
+        if not artist_ids:
+            return []
+
+        # Optimization: Only fetch primary images if we are returning a list
+        # For single artist details, we might want backgrounds too
+        artist_images = await fetch_primary_images(db, "artist", artist_ids, "artistthumb")
+        
+        # Only fetch background art if we are fetching a single artist or small number
+        artist_backgrounds = {}
+        if len(rows) <= 1: 
+             artist_backgrounds = await fetch_primary_images(db, "artist", artist_ids, "artistbackground")
+
         artists = []
         for row in rows:
-            mbid = row["mbid"]
-            art_info = artist_images.get(mbid, {})
-            bg_info = artist_backgrounds.get(mbid, {})
+            mbid_val = row["mbid"]
+            art_info = artist_images.get(mbid_val, {})
+            bg_info = artist_backgrounds.get(mbid_val, {})
             
-            # Fetch top tracks for this artist
-            top_tracks_query = """
-                SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec, 
-                       t.bit_depth, t.sample_rate_hz, t.duration_seconds
-                FROM tracks_top tt
-                LEFT JOIN tracks t ON tt.track_id = t.id
-                WHERE tt.artist_mbid = ? AND tt.type = 'top'
-                ORDER BY tt.rank
-                LIMIT 50
-            """
-            async with db.execute(top_tracks_query, (mbid,)) as tt_cursor:
-                tt_rows = await tt_cursor.fetchall()
-                top_tracks = [
-                    {
-                        "name": tt_row["external_name"],
-                        "album": tt_row["external_album"],
-                        "date": tt_row["external_date"],
-                        "duration_ms": tt_row["external_duration_ms"],
-                        "popularity": tt_row["popularity"],
-                        "local_track_id": tt_row["local_track_id"],
-                        "codec": tt_row["codec"],
-                        "bit_depth": tt_row["bit_depth"],
-                        "sample_rate_hz": tt_row["sample_rate_hz"],
-                        "duration_seconds": tt_row["duration_seconds"]
-                    }
-                    for tt_row in tt_rows
-                ]
-            
-            # Fetch singles for this artist
-            singles_query = """
-                SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
-                       t.bit_depth, t.sample_rate_hz
-                FROM tracks_top tt
-                LEFT JOIN tracks t ON tt.track_id = t.id
-                WHERE tt.artist_mbid = ? AND tt.type = 'single'
-                ORDER BY tt.external_date DESC
-            """
-            async with db.execute(singles_query, (mbid,)) as s_cursor:
-                s_rows = await s_cursor.fetchall()
-                singles = [
-                    {
-                        "mbid": s_row["external_mbid"],
-                        "title": s_row["external_name"],
-                        "date": s_row["external_date"],
-                        "artist": row["name"],  # artist name
-                        "local_track_id": s_row["local_track_id"],
-                        "codec": s_row["codec"],
-                        "bit_depth": s_row["bit_depth"],
-                        "sample_rate_hz": s_row["sample_rate_hz"]
-                    }
-                    for s_row in s_rows
-                ]
-            
-            # Fetch similar artists for this artist
-            similar_query = """
-                SELECT sa.similar_artist_name, sa.similar_artist_mbid, 
-                       a.image_url, a.art_id, ar.sha1 as art_sha1
-                FROM similar_artists sa
-                LEFT JOIN artists a ON sa.similar_artist_mbid = a.mbid
-                LEFT JOIN artwork ar ON a.art_id = ar.id
-                WHERE sa.artist_mbid = ?
-                ORDER BY sa.rank
-                LIMIT 10
-            """
-            async with db.execute(similar_query, (mbid,)) as sim_cursor:
-                sim_rows = await sim_cursor.fetchall()
-                sim_mbids = [r["similar_artist_mbid"] for r in sim_rows if r["similar_artist_mbid"]]
-                sim_images = await fetch_primary_images(db, "artist", sim_mbids, "artistthumb") if sim_mbids else {}
-                similar_artists = []
-                for sim_row in sim_rows:
-                    sim_mbid = sim_row["similar_artist_mbid"]
-                    sim_art = sim_images.get(sim_mbid, {}) if sim_mbid else {}
-                    similar_artists.append({
-                        "name": sim_row["similar_artist_name"],
-                        "mbid": sim_mbid,
-                        "image_url": sim_row["image_url"],
-                        "art_id": sim_art.get("art_id") or sim_row["art_id"],
-                        "art_sha1": sim_art.get("art_sha1") or sim_row["art_sha1"],
-                    })
-            
-            artists.append({
+            artist_data = {
                 "mbid": row["mbid"],
                 "name": row["name"], 
                 "image_url": row["image_url"], 
                 "art_id": art_info.get("art_id") or row["art_id"],
                 "art_sha1": art_info.get("art_sha1") or row["art_sha1"],
                 "bio": row["bio"], 
-                "similar_artists": similar_artists,
-                "top_tracks": top_tracks,
-                "sort_name": row["sort_name"] or row["name"], # Fallback to name
+                "sort_name": row["sort_name"] or row["name"],
                 "homepage": row["homepage"],
                 "spotify_url": row["spotify_url"],
                 "wikipedia_url": row["wikipedia_url"],
                 "qobuz_url": row["qobuz_url"],
+                "lastfm_url": row["lastfm_url"],
                 "musicbrainz_url": row["musicbrainz_url"],
                 "tidal_url": row["tidal_url"],
                 "primary_album_count": row["primary_album_count"],
                 "appears_on_album_count": row["appears_on_album_count"],
-                "singles": singles,
                 "albums": [],  # Deprecated
                 "background_art_id": bg_info.get("art_id"),
                 "background_sha1": bg_info.get("art_sha1"),
-            })
+            }
+
+            # If we are fetching a specific artist, populate the heavy details
+            # Or if the result set is very small (1), we can assume it's a detail fetch
+            if len(rows) == 1:
+                # Fetch top tracks
+                top_tracks_query = """
+                    SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec, 
+                        t.bit_depth, t.sample_rate_hz, t.duration_seconds
+                    FROM tracks_top tt
+                    LEFT JOIN tracks t ON tt.track_id = t.id
+                    WHERE tt.artist_mbid = ? AND tt.type = 'top'
+                    ORDER BY tt.rank
+                    LIMIT 50
+                """
+                async with db.execute(top_tracks_query, (mbid_val,)) as tt_cursor:
+                    tt_rows = await tt_cursor.fetchall()
+                    artist_data["top_tracks"] = [
+                        {
+                            "name": tt_row["external_name"],
+                            "album": tt_row["external_album"],
+                            "date": tt_row["external_date"],
+                            "duration_ms": tt_row["external_duration_ms"],
+                            "popularity": tt_row["popularity"],
+                            "local_track_id": tt_row["local_track_id"],
+                            "codec": tt_row["codec"],
+                            "bit_depth": tt_row["bit_depth"],
+                            "sample_rate_hz": tt_row["sample_rate_hz"],
+                            "duration_seconds": tt_row["duration_seconds"]
+                        }
+                        for tt_row in tt_rows
+                    ]
+                
+                # Fetch singles
+                singles_query = """
+                    SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
+                        t.bit_depth, t.sample_rate_hz
+                    FROM tracks_top tt
+                    LEFT JOIN tracks t ON tt.track_id = t.id
+                    WHERE tt.artist_mbid = ? AND tt.type = 'single'
+                    ORDER BY tt.external_date DESC
+                """
+                async with db.execute(singles_query, (mbid_val,)) as s_cursor:
+                    s_rows = await s_cursor.fetchall()
+                    artist_data["singles"] = [
+                        {
+                            "mbid": s_row["external_mbid"],
+                            "title": s_row["external_name"],
+                            "date": s_row["external_date"],
+                            "artist": row["name"],
+                            "local_track_id": s_row["local_track_id"],
+                            "codec": s_row["codec"],
+                            "bit_depth": s_row["bit_depth"],
+                            "sample_rate_hz": s_row["sample_rate_hz"]
+                        }
+                        for s_row in s_rows
+                    ]
+                
+                # Fetch similar artists
+                similar_query = """
+                    SELECT sa.similar_artist_name, sa.similar_artist_mbid, 
+                        a.image_url, a.art_id, ar.sha1 as art_sha1
+                    FROM similar_artists sa
+                    LEFT JOIN artists a ON sa.similar_artist_mbid = a.mbid
+                    LEFT JOIN artwork ar ON a.art_id = ar.id
+                    WHERE sa.artist_mbid = ?
+                    ORDER BY sa.rank
+                    LIMIT 10
+                """
+                async with db.execute(similar_query, (mbid_val,)) as sim_cursor:
+                    sim_rows = await sim_cursor.fetchall()
+                    sim_mbids = [r["similar_artist_mbid"] for r in sim_rows if r["similar_artist_mbid"]]
+                    sim_images = await fetch_primary_images(db, "artist", sim_mbids, "artistthumb") if sim_mbids else {}
+                    artist_data["similar_artists"] = []
+                    for sim_row in sim_rows:
+                        sim_mbid = sim_row["similar_artist_mbid"]
+                        sim_art = sim_images.get(sim_mbid, {}) if sim_mbid else {}
+                        artist_data["similar_artists"].append({
+                            "name": sim_row["similar_artist_name"],
+                            "mbid": sim_mbid,
+                            "image_url": sim_row["image_url"],
+                            "art_id": sim_art.get("art_id") or sim_row["art_id"],
+                            "art_sha1": sim_art.get("art_sha1") or sim_row["art_sha1"],
+                        })
+
+                # Fetch genres
+                genres_query = """
+                    SELECT genre, count 
+                    FROM artist_genres 
+                    WHERE artist_mbid = ? 
+                    ORDER BY count DESC
+                """
+                async with db.execute(genres_query, (mbid_val,)) as g_cursor:
+                    g_rows = await g_cursor.fetchall()
+                    artist_data["genres"] = [{"name": r["genre"], "count": r["count"]} for r in g_rows]
+            
+            else:
+                # Lightweight response for lists
+                artist_data["top_tracks"] = []
+                artist_data["singles"] = []
+                artist_data["similar_artists"] = []
+                artist_data["genres"] = []
+            
+            artists.append(artist_data)
         
         return artists
 

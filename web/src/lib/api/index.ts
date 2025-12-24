@@ -14,6 +14,10 @@ export interface Artist {
         art_id?: number | null;
         art_sha1?: string | null;
     }[];
+    genres?: {
+        name: string;
+        count: number;
+    }[];
     top_tracks: {
         name: string;
         album: string;
@@ -45,6 +49,7 @@ export interface Artist {
     qobuz_url: string | null;
     musicbrainz_url: string | null;
     tidal_url?: string | null;
+    lastfm_url?: string | null;
     albums?: {
         mbid: string;
         title: string;
@@ -90,6 +95,7 @@ export interface Track {
     bit_depth: number | null;
     mb_release_id?: string | null;
     mb_release_group_id?: string | null;
+    popularity?: number;
 }
 
 export interface User {
@@ -101,8 +107,17 @@ export interface User {
     last_login?: string | null;
 }
 
-export async function fetchArtists(fetchFn: any = fetch): Promise<Artist[]> {
-    const res = await fetchFn('/api/artists');
+export async function fetchArtists(
+    fetchFn: any = fetch,
+    options: { limit?: number; offset?: number; name?: string; mbid?: string } = {}
+): Promise<Artist[]> {
+    const params = new URLSearchParams();
+    if (options.limit !== undefined) params.append('limit', options.limit.toString());
+    if (options.offset !== undefined) params.append('offset', options.offset.toString());
+    if (options.name !== undefined) params.append('name', options.name);
+    if (options.mbid !== undefined) params.append('mbid', options.mbid);
+
+    const res = await fetchFn(`/api/artists?${params.toString()}`);
     if (!res.ok) throw new Error('Failed to fetch artists');
     return await res.json();
 }
@@ -179,6 +194,7 @@ export type MetadataOptions = {
     fetchLinks?: boolean;
     refreshTopTracks?: boolean;
     refreshSingles?: boolean;
+    fetchSimilarArtists?: boolean;
 };
 
 export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<void> {
@@ -197,6 +213,7 @@ export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<v
             fetch_links: opts.fetchLinks !== undefined ? opts.fetchLinks : (opts.fetchMetadata !== false),
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
+            fetch_similar_artists: Boolean(opts.fetchSimilarArtists),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger metadata scan');
@@ -225,6 +242,7 @@ export async function triggerFullScan(opts: { force?: boolean; path?: string } &
             fetch_links: opts.fetchLinks !== undefined ? opts.fetchLinks : (opts.fetchMetadata !== false),
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
+            fetch_similar_artists: Boolean(opts.fetchSimilarArtists),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger full scan');
@@ -369,50 +387,47 @@ export async function changePassword(data: { current_password: string; new_passw
     }
 }
 
-export type MediaQualityIssue = {
-    id: number;
-    entity_type: string;
-    entity_id: string | null;
-    issue_code: string;
-    details: Record<string, any>;
-    created_at: number | null;
-    resolved_at: number | null;
-    context?: Record<string, any> | null;
+export type ArtistStats = {
+    total: number;
+    with_background: number;
+    sources: Record<string, number>;
+    link_stats: Record<string, number>;
+};
+
+export type AlbumStats = {
+    total: number;
+    with_artwork: number;
+    link_stats: Record<string, number>;
 };
 
 export type MediaQualitySummary = {
-    issue_counts: Record<string, number>;
-    pending_artwork: number;
-    artwork_with_issues: number;
+    artist_stats: {
+        all: ArtistStats;
+        primary: ArtistStats;
+    };
+    album_stats: AlbumStats;
 };
 
-export async function runMediaQualityCheck(force = false): Promise<{ status: string; stats: any }> {
-    const res = await fetch('/api/media-quality/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force }),
-    });
-    if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        throw new Error(detail.detail || 'Failed to run media quality checks');
-    }
-    return await res.json();
-}
+export type EntityItem = {
+    name: string;
+    mbid: string;
+    image_url: string | null;
+    artist_name?: string | null;
+};
 
-export async function fetchMediaQualityIssues(
-    params: { entityType?: string; issueCode?: string; includeResolved?: boolean; limit?: number } = {},
-    fetchFn: any = fetch,
-): Promise<MediaQualityIssue[]> {
+export async function fetchMediaQualityItems(
+    category: string,
+    filterType: string,
+    filterValue?: string
+): Promise<EntityItem[]> {
     const search = new URLSearchParams();
-    if (params.entityType) search.append('entity_type', params.entityType);
-    if (params.issueCode) search.append('issue_code', params.issueCode);
-    if (params.includeResolved) search.append('include_resolved', 'true');
-    if (params.limit) search.append('limit', String(params.limit));
+    search.append('category', category);
+    search.append('filter_type', filterType);
+    if (filterValue) search.append('filter_value', filterValue);
 
-    const res = await fetchFn(`/api/media-quality/issues?${search.toString()}`);
-    if (!res.ok) throw new Error('Failed to fetch media quality issues');
-    const data = await res.json();
-    return data.issues || [];
+    const res = await fetch(`/api/media-quality/items?${search.toString()}`);
+    if (!res.ok) throw new Error('Failed to fetch media quality items');
+    return await res.json();
 }
 
 export async function fetchMediaQualitySummary(fetchFn: any = fetch): Promise<MediaQualitySummary> {

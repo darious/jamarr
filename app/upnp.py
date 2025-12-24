@@ -60,9 +60,13 @@ class UPnPManager:
             self.log("Background discovery cancelled")
             raise
 
-    def stop_background_scan(self):
+    async def stop_background_scan(self):
         if self._bg_task:
             self._bg_task.cancel()
+            try:
+                await self._bg_task
+            except asyncio.CancelledError:
+                pass
             self._bg_task = None
 
     def log(self, msg):
@@ -102,39 +106,39 @@ class UPnPManager:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         
-        # Bind to 0.0.0.0 to listen for responses on the ephemeral port
         try:
-            sock.bind(('0.0.0.0', 0)) 
-        except Exception as e:
-            self.log(f"Failed to bind discovery socket: {e}")
-            return []
-
-        # Send
-        try:
-            sock.sendto(MSEARCH, ('239.255.255.250', 1900))
-        except Exception as e:
-             self.log(f"Failed to send M-SEARCH: {e}")
-             
-        sock.setblocking(False)
-
-        start = asyncio.get_event_loop().time()
-        
-        while True:
-            time_left = timeout - (asyncio.get_event_loop().time() - start)
-            if time_left <= 0:
-                break
             try:
-                data, addr = await asyncio.wait_for(
-                    asyncio.get_event_loop().sock_recv(sock, 1024), 
-                    timeout=time_left
-                )
-                await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), addr)
-            except asyncio.TimeoutError:
-                break
-            except Exception:
-                await asyncio.sleep(0.1)
-        
-        sock.close()
+                sock.bind(('0.0.0.0', 0)) 
+            except Exception as e:
+                self.log(f"Failed to bind discovery socket: {e}")
+                return []
+
+            # Send
+            try:
+                sock.sendto(MSEARCH, ('239.255.255.250', 1900))
+            except Exception as e:
+                 self.log(f"Failed to send M-SEARCH: {e}")
+                 
+            sock.setblocking(False)
+
+            start = asyncio.get_event_loop().time()
+            
+            while True:
+                time_left = timeout - (asyncio.get_event_loop().time() - start)
+                if time_left <= 0:
+                    break
+                try:
+                    data, addr = await asyncio.wait_for(
+                        asyncio.get_event_loop().sock_recv(sock, 1024), 
+                        timeout=time_left
+                    )
+                    await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), addr)
+                except asyncio.TimeoutError:
+                    break
+                except Exception:
+                    await asyncio.sleep(0.1)
+        finally:
+            sock.close()
         return list(self.renderers.values())
 
     async def _process_ssdp_packet(self, data, addr):
@@ -294,21 +298,22 @@ class UPnPManager:
 
              sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
              sock.setblocking(False)
-             sock.bind(('0.0.0.0', 0))
-             sock.sendto(MSEARCH, (ip, 1900))
-
              try:
-                 data = await asyncio.wait_for(
-                    asyncio.get_event_loop().sock_recv(sock, 2048),
-                    timeout=1.5 # Increased from 0.3s for slower devices like Naim
-                 )
-                 await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), (ip, 1900))
+                 sock.bind(('0.0.0.0', 0))
+                 sock.sendto(MSEARCH, (ip, 1900))
+
+                 try:
+                     data = await asyncio.wait_for(
+                        asyncio.get_event_loop().sock_recv(sock, 2048),
+                        timeout=1.5 # Increased from 0.3s for slower devices like Naim
+                     )
+                     await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), (ip, 1900))
+                     return True
+                 except Exception:
+                     pass
+             finally:
                  sock.close()
-                 return True
-             except:
-                 pass
-             sock.close()
-        except:
+        except Exception:
              pass
 
         # 2. Fallback to HTTP Port Scan (Parallelized)
@@ -321,7 +326,7 @@ class UPnPManager:
                 resp = await client.get(url, timeout=1.0)
                 if resp.status_code == 200 and ('device' in resp.text or 'root' in resp.text):
                      return url
-            except:
+            except Exception:
                 pass
             return None
 
@@ -583,7 +588,7 @@ class UPnPManager:
             if len(parts) == 3:
                 h, m, s = map(float, parts)
                 return h * 3600 + m * 60 + s
-        except:
+        except Exception:
             pass
         return 0
 

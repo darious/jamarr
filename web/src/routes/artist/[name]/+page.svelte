@@ -141,6 +141,13 @@
     }
   }
 
+  const formatPlays = (plays?: number) => {
+    if (!plays) return "";
+    if (plays >= 1000000) return `${(plays / 1000000).toFixed(1)}M plays`;
+    if (plays >= 1000) return `${(plays / 1000).toFixed(1)}K plays`;
+    return `${plays} plays`;
+  };
+
   const formatDuration = (seconds?: number | null) => {
     if (!seconds) return "—";
     const mins = Math.floor(seconds / 60);
@@ -153,36 +160,58 @@
   $: displayedTopTracks = (() => {
     const fromMeta = artist?.top_tracks || [];
     return fromMeta.map((t) => {
+      let result: Track;
       if (t.local_track_id) {
         // Track is in library - find full track object
         const local = tracks.find((lt) => lt.id === t.local_track_id);
-        if (local) return local;
-
-        // Fallback if track not loaded yet - use API data
-        return {
-          id: t.local_track_id,
-          title: t.name,
-          album: t.album || "",
-          artist: artist?.name || "",
-          duration_seconds:
-            t.duration_seconds ||
-            (t.duration_ms ? Math.round(t.duration_ms / 1000) : null),
-          codec: t.codec,
-          bit_depth: t.bit_depth,
-          sample_rate_hz: t.sample_rate_hz,
-        };
+        if (local) {
+          result = { ...local };
+        } else {
+          // Fallback if track not loaded yet - use API data
+          result = {
+            id: t.local_track_id,
+            path: "",
+            title: t.name,
+            artist: artist?.name || "",
+            album: t.album || "",
+            album_artist: artist?.name || "",
+            track_no: null,
+            disc_no: null,
+            date: t.date,
+            duration_seconds:
+              t.duration_seconds ||
+              (t.duration_ms ? Math.round(t.duration_ms / 1000) : 0),
+            art_id: null,
+            codec: t.codec || null,
+            bitrate: null,
+            sample_rate_hz: t.sample_rate_hz || null,
+            bit_depth: t.bit_depth || null,
+          };
+        }
       } else {
         // Track not in library - return placeholder
-        return {
+        result = {
           id: -1,
+          path: "",
           title: t.name,
-          album: t.album || "",
           artist: artist?.name || "",
+          album: t.album || "",
+          album_artist: artist?.name || "",
+          track_no: null,
+          disc_no: null,
+          date: t.date,
           duration_seconds: t.duration_ms
             ? Math.round(t.duration_ms / 1000)
-            : null,
+            : 0,
+          art_id: null,
+          codec: null,
+          bitrate: null,
+          sample_rate_hz: null,
+          bit_depth: null,
         };
       }
+      if (t.popularity) result.popularity = t.popularity;
+      return result;
     });
   })();
 
@@ -433,6 +462,18 @@
               {artist?.bio || "No biography available yet."}
             </p>
           </div>
+
+          {#if artist?.genres?.length}
+            <div class="flex flex-wrap gap-2">
+              {#each artist.genres.slice(0, 8) as genre}
+                <span
+                  class="px-3 py-1 text-xs font-medium text-white/80 bg-white/5 border border-white/10 rounded-full backdrop-blur-sm cursor-default hover:bg-white/10 hover:border-white/20 transition-colors"
+                >
+                  {genre.name}
+                </span>
+              {/each}
+            </div>
+          {/if}
         </div>
 
         <!-- Links (Right Side) -->
@@ -440,7 +481,7 @@
           <div class="flex flex-wrap justify-end gap-2">
             {#if artist?.homepage}
               <a
-                class="btn-icon btn-icon-sm variant-filled-surface hover:variant-filled-primary transition-all"
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#3b82f6] hover:bg-[#3b82f6] hover:text-white transition-all border border-transparent"
                 target="_blank"
                 href={artist.homepage}
                 title="Homepage"
@@ -472,6 +513,20 @@
                 title="Tidal"
               >
                 <img src="/assets/logo-tidal.png" alt="Tidal" class="h-5 w-5" />
+              </a>
+            {/if}
+            {#if artist?.lastfm_url}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#D51007] hover:bg-[#D51007] hover:text-white transition-all border border-transparent"
+                target="_blank"
+                href={artist.lastfm_url}
+                title="Last.fm"
+              >
+                <img
+                  src="/assets/logo-lastfm.png"
+                  alt="Last.fm"
+                  class="h-5 w-5"
+                />
               </a>
             {/if}
             {#if artist?.qobuz_url}
@@ -664,7 +719,7 @@
 
               <div class="flex-1 min-w-0">
                 <p
-                  class={`text-sm font-medium truncate ${track.id > 0 ? "text-white" : "text-white/40"}`}
+                  class={`text-sm font-medium truncate ${track.id > 0 ? "text-white" : "text-white/40 line-through"}`}
                 >
                   {track.title}
                 </p>
@@ -674,6 +729,10 @@
                     class="hover:text-white hover:underline truncate max-w-[150px]"
                     >{track.album}</a
                   >
+                  {#if track.popularity}
+                    <span class="opacity-30">•</span>
+                    <span>{formatPlays(track.popularity)}</span>
+                  {/if}
                   {#if track.codec}
                     <span class="opacity-30">•</span>
                     <span class="uppercase">{track.codec}</span>
@@ -760,7 +819,7 @@
 
                 <div class="flex-1 min-w-0">
                   <p
-                    class={`text-sm font-medium truncate ${single.localId ? "text-white" : "text-white/40"}`}
+                    class={`text-sm font-medium truncate ${single.localId ? "text-white" : "text-white/40 line-through"}`}
                   >
                     {single.title}
                   </p>

@@ -4,15 +4,19 @@ import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ params, fetch }) => {
   const name = params.name; // SvelteKit already decodes params
+  // Fetch specific artist by name
   let artists: Artist[] = [];
   try {
-    artists = await fetchArtists(fetch);
+    const fetchedArtists = await fetchArtists(fetch, { name });
+    if (fetchedArtists.length > 0) {
+      // The API performs normalized matching, so the first result is our artist
+      artists = [fetchedArtists[0]];
+    }
   } catch (e) {
-    console.error('Failed to fetch artists list', e);
+    console.error('Failed to fetch artist details', e);
   }
 
-  const normalize = (str: string) => str.replace(/[’']/g, "'").toLowerCase();
-  const artist = artists.find((a) => normalize(a.name) === normalize(name));
+  const artist = artists[0];
   const canonicalName = (artist?.name ?? name).trim();
 
   let albums: Album[] = [];
@@ -23,21 +27,12 @@ export const load: PageLoad = async ({ params, fetch }) => {
   }
 
   const similarArtists = (artist?.similar_artists || []).map((sim) => {
-    // sim is now an object with {name, mbid, image_url, art_id, art_sha1}
-    // If sim already has library data, use it; otherwise try to find a match
-    if (sim.mbid || sim.art_id) {
-      return sim; // Already has library data from API
-    }
-    // Try to find in local artists list
-    const libMatch = artists.find((a) => normalize(a.name) === normalize(sim.name));
     return {
       name: sim.name,
-      mbid: libMatch?.mbid,
-      art_id: libMatch?.art_id,
-      art_sha1: libMatch?.art_sha1,
-      background_art_id: libMatch?.background_art_id,
-      background_sha1: libMatch?.background_sha1,
-      image_url: libMatch?.image_url
+      mbid: sim.mbid,
+      art_id: sim.art_id,
+      art_sha1: sim.art_sha1,
+      image_url: sim.image_url
     };
   });
 
