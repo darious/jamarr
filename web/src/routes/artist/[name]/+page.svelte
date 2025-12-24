@@ -141,6 +141,13 @@
     }
   }
 
+  const formatPlays = (plays?: number) => {
+    if (!plays) return "";
+    if (plays >= 1000000) return `${(plays / 1000000).toFixed(1)}M plays`;
+    if (plays >= 1000) return `${(plays / 1000).toFixed(1)}K plays`;
+    return `${plays} plays`;
+  };
+
   const formatDuration = (seconds?: number | null) => {
     if (!seconds) return "—";
     const mins = Math.floor(seconds / 60);
@@ -153,36 +160,58 @@
   $: displayedTopTracks = (() => {
     const fromMeta = artist?.top_tracks || [];
     return fromMeta.map((t) => {
+      let result: Track;
       if (t.local_track_id) {
         // Track is in library - find full track object
         const local = tracks.find((lt) => lt.id === t.local_track_id);
-        if (local) return local;
-
-        // Fallback if track not loaded yet - use API data
-        return {
-          id: t.local_track_id,
-          title: t.name,
-          album: t.album || "",
-          artist: artist?.name || "",
-          duration_seconds:
-            t.duration_seconds ||
-            (t.duration_ms ? Math.round(t.duration_ms / 1000) : null),
-          codec: t.codec,
-          bit_depth: t.bit_depth,
-          sample_rate_hz: t.sample_rate_hz,
-        };
+        if (local) {
+          result = { ...local };
+        } else {
+          // Fallback if track not loaded yet - use API data
+          result = {
+            id: t.local_track_id,
+            path: "",
+            title: t.name,
+            artist: artist?.name || "",
+            album: t.album || "",
+            album_artist: artist?.name || "",
+            track_no: null,
+            disc_no: null,
+            date: t.date,
+            duration_seconds:
+              t.duration_seconds ||
+              (t.duration_ms ? Math.round(t.duration_ms / 1000) : 0),
+            art_id: null,
+            codec: t.codec || null,
+            bitrate: null,
+            sample_rate_hz: t.sample_rate_hz || null,
+            bit_depth: t.bit_depth || null,
+          };
+        }
       } else {
         // Track not in library - return placeholder
-        return {
+        result = {
           id: -1,
+          path: "",
           title: t.name,
-          album: t.album || "",
           artist: artist?.name || "",
+          album: t.album || "",
+          album_artist: artist?.name || "",
+          track_no: null,
+          disc_no: null,
+          date: t.date,
           duration_seconds: t.duration_ms
             ? Math.round(t.duration_ms / 1000)
-            : null,
+            : 0,
+          art_id: null,
+          codec: null,
+          bitrate: null,
+          sample_rate_hz: null,
+          bit_depth: null,
         };
       }
+      if (t.popularity) result.popularity = t.popularity;
+      return result;
     });
   })();
 
@@ -674,6 +703,10 @@
                     class="hover:text-white hover:underline truncate max-w-[150px]"
                     >{track.album}</a
                   >
+                  {#if track.popularity}
+                    <span class="opacity-30">•</span>
+                    <span>{formatPlays(track.popularity)}</span>
+                  {/if}
                   {#if track.codec}
                     <span class="opacity-30">•</span>
                     <span class="uppercase">{track.codec}</span>

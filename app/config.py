@@ -43,3 +43,11 @@ def get_tidal_credentials():
 def get_fanarttv_api_key():
     """Return the configured Fanart.tv API key, if provided."""
     return load_config().get("fanarttv", {}).get("apikey")
+
+def get_lastfm_credentials():
+    config = load_config()
+    lastfm = config.get('lastfm', {})
+    return lastfm.get('apikey'), lastfm.get('sharedsecret')
+
+def get_max_workers():
+    return load_config().get("max_workers", 4)
