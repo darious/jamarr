@@ -518,7 +518,7 @@ class Scanner:
             
             logger.info("Library Prune Complete.")
 
-    async def update_metadata(self, artist_filter=None, mbid_filter=None, specific_fields=None, missing_only=False, bio_only=False, refresh_top_tracks=True, refresh_singles=True, fetch_metadata=True, fetch_bio=True, fetch_artwork=True, fetch_spotify_artwork=False, fetch_links=True):
+    async def update_metadata(self, artist_filter=None, mbid_filter=None, specific_fields=None, missing_only=False, bio_only=False, refresh_top_tracks=True, refresh_singles=True, fetch_metadata=True, fetch_bio=True, fetch_artwork=True, fetch_spotify_artwork=False, fetch_links=True, fetch_similar_artists=False):
         """
         Updates artist metadata.
         Can filter by artist name (--artist) or MusicBrainz ID (--mbid).
@@ -611,6 +611,7 @@ class Scanner:
                 eff_refresh_top_tracks = refresh_top_tracks
                 eff_refresh_singles = refresh_singles
                 eff_fetch_spotify_artwork = fetch_spotify_artwork
+                eff_fetch_similar_artists = fetch_similar_artists
 
 
 
@@ -685,13 +686,14 @@ class Scanner:
                     eff_fetch_links, 
                     eff_refresh_top_tracks, 
                     eff_refresh_singles,
-                    eff_fetch_spotify_artwork
+                    eff_fetch_spotify_artwork,
+                    eff_fetch_similar_artists
                 ])
                 
                 if any_work:
                     tasks_to_run.append({
                         "row": row,
-                        "flags": (eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork)
+                        "flags": (eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists)
                     })
 
             total = len(tasks_to_run)
@@ -700,7 +702,7 @@ class Scanner:
             
             for task in tasks_to_run:
                 row = task["row"]
-                eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork = task["flags"]
+                eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists = task["flags"]
 
                 if self._stop_event.is_set():
                     logger.info("Metadata update cancelled by stop signal.")
@@ -741,13 +743,13 @@ class Scanner:
                          if has_singles: eff_refresh_singles = False
                          
                          # If checking this disabled the only work left, skip!
-                         if not any([eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork]):
+                         if not any([eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists]):
                              # Adjust total? Too late for log, but we can skip processing (progress bar will jump or stall slightly but better than fetching)
                              # Or we effectively just run with nothing.
                              continue
 
                 # Calculate if this is effectively a bio-only request (to skip MB core fetch if possible)
-                is_bio_only_request = eff_fetch_bio and not eff_fetch_metadata and not eff_fetch_links and not eff_refresh_top_tracks and not eff_refresh_singles and not eff_fetch_artwork and not eff_fetch_spotify_artwork
+                is_bio_only_request = eff_fetch_bio and not eff_fetch_metadata and not eff_fetch_links and not eff_refresh_top_tracks and not eff_refresh_singles and not eff_fetch_artwork and not eff_fetch_spotify_artwork and not eff_fetch_similar_artists
 
                 # OPTIMIZATION: If bio_only request, check if we already have a wikipedia link to avoid MB lookup
                 known_wikipedia_url = None
@@ -772,6 +774,7 @@ class Scanner:
                     fetch_singles=eff_refresh_singles,
                     known_wikipedia_url=known_wikipedia_url,
                     known_spotify_url=spotify_link_existing,
+                    fetch_similar_artists=eff_fetch_similar_artists,
                 )
                 
                 # Save Artwork if new
@@ -878,7 +881,7 @@ class Scanner:
                     # Store top tracks
                     for idx, track in enumerate(meta.get("top_tracks", [])):
                         track_id = await match_track_to_library(
-                            db, mbid, track["name"], track.get("album")
+                            db, mbid, track["name"], track.get("album"), track.get("mbid")
                         )
                         
                         await db.execute("""
@@ -914,20 +917,31 @@ class Scanner:
                     similar_count = len(meta.get("similar_artists", []))
                     logger.debug(f"Storing {similar_count} similar artists for {mbid}")
                     
-                    for idx, similar_name in enumerate(meta.get("similar_artists", [])):
-                        # Try to find MBID if artist is in our library
-                        async with db.execute(
-                            "SELECT mbid FROM artists WHERE LOWER(TRIM(name)) = ? LIMIT 1",
-                            (similar_name.lower().strip(),)
-                        ) as cursor:
-                            row = await cursor.fetchone()
-                            similar_mbid = row[0] if row else None
+                    for idx, similar_item in enumerate(meta.get("similar_artists", [])):
+                        # Handle both string (old Spotify) and dict (Last.fm)
+                        sim_name = similar_item
+                        sim_mbid = None
+                        
+                        if isinstance(similar_item, dict):
+                            sim_name = similar_item.get("name")
+                            sim_mbid = similar_item.get("mbid")
+                        
+                        if not sim_name: continue
+
+                        # Try to find MBID if artist is in our library and we don't have it yet
+                        if not sim_mbid:
+                            async with db.execute(
+                                "SELECT mbid FROM artists WHERE LOWER(TRIM(name)) = ? LIMIT 1",
+                                (sim_name.lower().strip(),)
+                            ) as cursor:
+                                row = await cursor.fetchone()
+                                if row: sim_mbid = row[0]
                         
                         await db.execute("""
                             INSERT OR REPLACE INTO similar_artists 
                             (artist_mbid, similar_artist_name, similar_artist_mbid, rank, last_updated)
                             VALUES (?, ?, ?, ?, ?)
-                        """, (mbid, similar_name, similar_mbid, idx + 1, time.time()))
+                        """, (mbid, sim_name, sim_mbid, idx + 1, time.time()))
 
                 # 4. Albums & Singles (Release Groups)
                 all_releases = meta.get("albums", []) + meta.get("singles", [])
