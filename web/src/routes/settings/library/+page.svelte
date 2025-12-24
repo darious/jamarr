@@ -33,10 +33,13 @@
     let doMetadata = false;
     let doBio = false;
     let doArtwork = false;
+    let doSpotifyArtwork = false;
     let doTopTracks = false;
     let doSingles = false;
-    let doLinks = false;
+
+    // doLinks removed
     let doMissingAlbums = false;
+    let scanAll = false;
     let artistOptions: string[] = [];
     let artistsLoaded = false;
     let queueActive = false;
@@ -81,6 +84,9 @@
                 }
                 if (data.music_path && !scanPath) {
                     scanPath = data.music_path;
+                    if (scanPath && !scanPath.endsWith("/")) {
+                        scanPath += "/";
+                    }
                 }
             }
         } catch (e) {}
@@ -174,35 +180,64 @@
 
     function buildTasks() {
         taskQueue = [];
-        if (runFilesystem) {
+        const wantsMetadata =
+            doMetadata ||
+            doBio ||
+            doArtwork ||
+            doSpotifyArtwork ||
+            doTopTracks ||
+            doSingles ||
+            doSingles;
+
+        if (runFilesystem && wantsMetadata) {
             taskQueue.push({
-                label: "Filesystem",
+                label: "Full Scan (Filesystem + Metadata)",
                 start: () =>
-                    triggerFilesystemScan({
+                    triggerFullScan({
                         force: forceRescan,
                         path: scanPath || undefined,
-                    }),
-            });
-        }
-
-        const wantsMetadata =
-            doMetadata || doBio || doArtwork || doTopTracks || doSingles || doLinks;
-        if (wantsMetadata) {
-            taskQueue.push({
-                label: "Metadata",
-                start: () =>
-                    triggerMetadataScan({
                         artistFilter: artistFilter || undefined,
                         mbidFilter: mbidFilter || undefined,
                         missingOnly,
                         fetchMetadata: doMetadata,
                         fetchBio: doBio,
                         fetchArtwork: doArtwork,
-                        fetchLinks: doLinks,
+                        fetchSpotifyArtwork: doSpotifyArtwork,
+                        // fetchLinks implicit in backend logic for full scan or metadata
                         refreshTopTracks: doTopTracks,
                         refreshSingles: doSingles,
                     }),
             });
+        } else {
+            if (runFilesystem) {
+                taskQueue.push({
+                    label: "Filesystem",
+                    start: () =>
+                        triggerFilesystemScan({
+                            force: forceRescan,
+                            path: scanPath || undefined,
+                        }),
+                });
+            }
+
+            if (wantsMetadata) {
+                taskQueue.push({
+                    label: "Metadata",
+                    start: () =>
+                        triggerMetadataScan({
+                            artistFilter: artistFilter || undefined,
+                            mbidFilter: mbidFilter || undefined,
+                            missingOnly,
+                            fetchMetadata: doMetadata,
+                            fetchBio: doBio,
+                            fetchArtwork: doArtwork,
+                            fetchSpotifyArtwork: doSpotifyArtwork,
+                            fetchLinks: true,
+                            refreshTopTracks: doTopTracks,
+                            refreshSingles: doSingles,
+                        }),
+                });
+            }
         }
 
         if (doMissingAlbums) {
@@ -277,6 +312,55 @@
     async function handleCancel() {
         await cancelScan();
     }
+
+    function toggleScanAll() {
+        if (scanAll) {
+            runFilesystem = true;
+            doMetadata = true;
+            doBio = true;
+            doArtwork = true;
+            doSpotifyArtwork = false; // By default don't enable fallback unless explicit? Or enable it?
+            // User requirement: "looking for soptify artwork should NEVER run on all ariists... even when missing only is unchecked"
+            // Wait, logic says: "looking for soptify artwork should NEVER run on all ariists" -> this implies it's a fallback mechanism.
+            // But here we are just toggling the checkbox.
+            // If I check Scan All, should I check Spotify Art?
+            // Usually "All" means all available options.
+            // But user said: "when we so scan all, we should do the spotofy check AFTER the fanart.tv check"
+            // So enabling it is fine, the backend handles the "if missing" logic.
+            // However, "looking for soptify artwork should NEVER run on all ariists" means even if I strictly say "fetch spotify art",
+            // the backend should still check if art exists first?
+            // Yes, user said: "we should only check spotify IF we dont have a artistthumb for that artist... so we need to check that first"
+            // So it is safe to enable the flag, logic is in backend.
+            doSpotifyArtwork = true;
+            doTopTracks = true;
+            doSingles = true;
+            // doMissingAlbums remains separate as requested
+        } else {
+            runFilesystem = false;
+            doMetadata = false;
+            doBio = false;
+            doArtwork = false;
+            doSpotifyArtwork = false;
+            doTopTracks = false;
+            doSingles = false;
+        }
+    }
+
+    function updateScanAllState() {
+        if (
+            runFilesystem &&
+            doMetadata &&
+            doBio &&
+            doArtwork &&
+            doSpotifyArtwork &&
+            doTopTracks &&
+            doSingles
+        ) {
+            scanAll = true;
+        } else {
+            scanAll = false;
+        }
+    }
 </script>
 
 <div
@@ -296,57 +380,129 @@
     <div class="space-y-6">
         <!-- Status + Logs -->
         <div class="space-y-4">
-            <div class="card bg-black/40 border border-white/10 p-6 backdrop-blur-sm">
+            <div
+                class="card bg-black/40 border border-white/10 p-6 backdrop-blur-sm"
+            >
                 <div class="flex justify-between items-start gap-4">
                     <div class="flex flex-col gap-1">
-                        <span class="text-xs uppercase tracking-wide text-primary-300">
+                        <span
+                            class="text-xs uppercase tracking-wide text-primary-300"
+                        >
                             {stats.phase || (isRunning ? "running" : "idle")}
                         </span>
                         <span class="text-base font-semibold text-white">
-                            {stats.message || (stats.completed ? "Done" : "Ready")}
+                            {stats.message ||
+                                (stats.completed ? "Done" : "Ready")}
                         </span>
-                        <div class="text-xs text-white/60 flex items-center gap-3">
-                            <span>Progress: {stats.scanned}/{stats.total || "?"}</span>
-                            <span>Elapsed: {startTimestamp ? Math.max(0, Math.round((Date.now() - startTimestamp) / 1000)) + "s" : "0s"}</span>
-                            <span>ETA: {stats.total > 0 && stats.percentage > 0 ? Math.max(0, Math.round((100 - stats.percentage) * (Date.now() - startTimestamp) / Math.max(stats.percentage, 1) / 1000)) + "s" : "--"}</span>
+                        <div
+                            class="text-xs text-white/60 flex items-center gap-3"
+                        >
+                            <span
+                                >Progress: {stats.scanned}/{stats.total ||
+                                    "?"}</span
+                            >
+                            <span
+                                >Elapsed: {startTimestamp
+                                    ? Math.max(
+                                          0,
+                                          Math.round(
+                                              (Date.now() - startTimestamp) /
+                                                  1000,
+                                          ),
+                                      ) + "s"
+                                    : "0s"}</span
+                            >
+                            <span
+                                >ETA: {stats.total > 0 && stats.percentage > 0
+                                    ? Math.max(
+                                          0,
+                                          Math.round(
+                                              ((100 - stats.percentage) *
+                                                  (Date.now() -
+                                                      startTimestamp)) /
+                                                  Math.max(
+                                                      stats.percentage,
+                                                      1,
+                                                  ) /
+                                                  1000,
+                                          ),
+                                      ) + "s"
+                                    : "--"}</span
+                            >
                         </div>
                     </div>
                     <div class="flex flex-col items-end text-right">
-                        <span class="text-xs font-mono text-primary-400">{Math.round(stats.percentage)}%</span>
+                        <span class="text-xs font-mono text-primary-400"
+                            >{Math.round(stats.percentage)}%</span
+                        >
                         {#if isRunning}
-                            <button class="btn btn-xs btn-error mt-2" on:click={handleCancel}>
+                            <button
+                                class="btn btn-xs btn-error mt-2"
+                                on:click={handleCancel}
+                            >
                                 Cancel
                             </button>
                         {/if}
                     </div>
                 </div>
-                <progress class="progress progress-primary w-full mt-4" value={stats.percentage} max="100"></progress>
+                <progress
+                    class="progress progress-primary w-full mt-4"
+                    value={stats.percentage}
+                    max="100"
+                ></progress>
                 {#if stats.completed}
-                    <div class="mt-3 flex items-center justify-between text-xs text-white/70 bg-white/5 rounded-lg px-3 py-2 border border-white/10">
+                    <div
+                        class="mt-3 flex items-center justify-between text-xs text-white/70 bg-white/5 rounded-lg px-3 py-2 border border-white/10"
+                    >
                         <span>Scan complete ({stats.completedStatus})</span>
-                        <button class="btn btn-ghost btn-xs text-white/80 border border-white/10 bg-white/5 hover:bg-white/10" on:click={() => { stats.completed = false; stats.completedStatus = ""; }}>
+                        <button
+                            class="btn btn-ghost btn-xs text-white/80 border border-white/10 bg-white/5 hover:bg-white/10"
+                            on:click={() => {
+                                stats.completed = false;
+                                stats.completedStatus = "";
+                            }}
+                        >
                             Dismiss
                         </button>
                     </div>
                 {/if}
             </div>
 
-            <div class="card bg-[#0d1117] border border-white/10 overflow-hidden flex flex-col font-mono text-sm shadow-inner">
-                <div class="bg-white/5 px-4 py-2 border-b border-white/5 flex items-center justify-between">
-                    <span class="text-xs uppercase tracking-wider text-white/40">Log Output</span>
+            <div
+                class="card bg-[#0d1117] border border-white/10 overflow-hidden flex flex-col font-mono text-sm shadow-inner"
+            >
+                <div
+                    class="bg-white/5 px-4 py-2 border-b border-white/5 flex items-center justify-between"
+                >
+                    <span class="text-xs uppercase tracking-wider text-white/40"
+                        >Log Output</span
+                    >
                     <span class="flex gap-2">
-                        <div class="w-3 h-3 rounded-full bg-red-500/20 mix-blend-screen"></div>
-                        <div class="w-3 h-3 rounded-full bg-yellow-500/20 mix-blend-screen"></div>
-                        <div class="w-3 h-3 rounded-full bg-green-500/20 mix-blend-screen"></div>
+                        <div
+                            class="w-3 h-3 rounded-full bg-red-500/20 mix-blend-screen"
+                        ></div>
+                        <div
+                            class="w-3 h-3 rounded-full bg-yellow-500/20 mix-blend-screen"
+                        ></div>
+                        <div
+                            class="w-3 h-3 rounded-full bg-green-500/20 mix-blend-screen"
+                        ></div>
                     </span>
                 </div>
-                <div class="max-h-[320px] overflow-y-auto p-4 space-y-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent" bind:this={logContainer}>
+                <div
+                    class="max-h-[320px] overflow-y-auto p-4 space-y-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
+                    bind:this={logContainer}
+                >
                     {#if logs.length === 0}
                         <div class="text-white/20 italic">No logs...</div>
                     {/if}
                     {#each logs as log}
                         <div class="break-all">
-                            <span class="text-white/30 mr-2 select-none">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                            <span class="text-white/30 mr-2 select-none"
+                                >[{new Date(
+                                    log.timestamp,
+                                ).toLocaleTimeString()}]</span
+                            >
                             <span class="text-white/80">{log.message}</span>
                         </div>
                     {/each}
@@ -360,26 +516,53 @@
                 <div class="space-y-4">
                     <label class="label">
                         <span class="label-text text-white">Library Path</span>
-                        <input type="text" bind:value={scanPath} placeholder="Defaults to library root" class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full" />
+                        <input
+                            type="text"
+                            bind:value={scanPath}
+                            placeholder="Defaults to library root"
+                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
+                        />
                     </label>
                     <div class="form-control">
                         <label class="label cursor-pointer justify-start gap-3">
-                            <input type="checkbox" bind:checked={forceRescan} class="checkbox checkbox-primary" />
-                            <span class="label-text text-white">Force rescan (re-read tags)</span>
+                            <input
+                                type="checkbox"
+                                bind:checked={forceRescan}
+                                class="checkbox checkbox-primary"
+                            />
+                            <span class="label-text text-white"
+                                >Force rescan (re-read tags)</span
+                            >
                         </label>
                     </div>
                     <div class="form-control">
                         <label class="label cursor-pointer justify-start gap-3">
-                            <input type="checkbox" bind:checked={missingOnly} class="checkbox checkbox-secondary" />
-                            <span class="label-text text-white">Missing only (skip data we already have)</span>
+                            <input
+                                type="checkbox"
+                                bind:checked={missingOnly}
+                                class="checkbox checkbox-secondary"
+                            />
+                            <span class="label-text text-white"
+                                >Missing only (skip data we already have)</span
+                            >
                         </label>
                     </div>
                 </div>
 
                 <div class="space-y-3">
                     <label class="label">
-                        <span class="label-text text-white">Artist filter (optional)</span>
-                        <input type="text" bind:value={artistFilter} list="artist-list" placeholder={artistsLoaded ? "Type to filter (blank = all)" : "Loading artists..."} class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full" />
+                        <span class="label-text text-white"
+                            >Artist filter (optional)</span
+                        >
+                        <input
+                            type="text"
+                            bind:value={artistFilter}
+                            list="artist-list"
+                            placeholder={artistsLoaded
+                                ? "Type to filter (blank = all)"
+                                : "Loading artists..."}
+                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
+                        />
                         <datalist id="artist-list">
                             {#each artistOptions as artistName}
                                 <option value={artistName}></option>
@@ -387,32 +570,149 @@
                         </datalist>
                     </label>
                     <label class="label">
-                        <span class="label-text text-white">MusicBrainz ID (optional)</span>
-                        <input type="text" bind:value={mbidFilter} placeholder="e.g. ef5aab86-887d-4fc2-a883-431ef017175a" class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full" />
+                        <span class="label-text text-white"
+                            >MusicBrainz ID (optional)</span
+                        >
+                        <input
+                            type="text"
+                            bind:value={mbidFilter}
+                            placeholder="e.g. ef5aab86-887d-4fc2-a883-431ef017175a"
+                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
+                        />
                     </label>
                 </div>
             </div>
 
             <div class="mt-6 grid md:grid-cols-2 gap-4">
                 <div class="space-y-2">
-                    <div class="form-control"><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" bind:checked={runFilesystem} class="checkbox checkbox-primary" /><span class="label-text text-white">Scan & add/update files</span></label></div>
-                    <div class="form-control"><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" bind:checked={doMetadata} class="checkbox checkbox-primary" /><span class="label-text text-white">Pull artist metadata (MusicBrainz)</span></label></div>
-                    <div class="form-control"><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" bind:checked={doBio} class="checkbox checkbox-primary" /><span class="label-text text-white">Pull bios (Wikipedia)</span></label></div>
-                    <div class="form-control"><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" bind:checked={doArtwork} class="checkbox checkbox-primary" /><span class="label-text text-white">Pull artist artwork (fanart.tv)</span></label></div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={scanAll}
+                                on:change={toggleScanAll}
+                                class="checkbox checkbox-accent"
+                            /><span class="label-text text-white font-bold"
+                                >Scan All (Full Refresh)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="divider my-1"></div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={runFilesystem}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Scan & add/update files</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doMetadata}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Pull artist metadata (MusicBrainz)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doBio}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Pull bios (Wikipedia)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doArtwork}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Pull artist artwork (fanart.tv)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doSpotifyArtwork}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Pull artist artwork (Spotify)</span
+                            ></label
+                        >
+                    </div>
                 </div>
-                <div class="space-y-2">
-                    <div class="form-control"><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" bind:checked={doTopTracks} class="checkbox checkbox-primary" /><span class="label-text text-white">Refresh top tracks (Spotify)</span></label></div>
-                    <div class="form-control"><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" bind:checked={doSingles} class="checkbox checkbox-primary" /><span class="label-text text-white">Refresh singles (MusicBrainz)</span></label></div>
-                    <div class="form-control"><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" bind:checked={doLinks} class="checkbox checkbox-primary" /><span class="label-text text-white">Refresh external links</span></label></div>
-                    <div class="form-control"><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" bind:checked={doMissingAlbums} class="checkbox checkbox-primary" /><span class="label-text text-white">Scan missing albums (discovery)</span></label></div>
+                <div class="space-y-2 pt-[3.25rem]">
+                    <!-- Align with right column offset by Scan All + Divider -->
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doTopTracks}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Refresh top tracks (Spotify)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doSingles}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Refresh singles (MusicBrainz)</span
+                            ></label
+                        >
+                    </div>
+                    <!-- Links refresh is now part of metadata/implicit, removed separate checkbox -->
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doMissingAlbums}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Scan missing albums (discovery)</span
+                            ></label
+                        >
+                    </div>
                 </div>
             </div>
 
             <div class="mt-6 flex flex-wrap gap-3">
-                <button class="btn border border-white/10 bg-white/10 text-white hover:bg-white/20 normal-case font-normal" on:click={startCombined} disabled={isRunning || queueActive}>
+                <button
+                    class="btn border border-white/10 bg-white/10 text-white hover:bg-white/20 normal-case font-normal"
+                    on:click={startCombined}
+                    disabled={isRunning || queueActive}
+                >
                     Start
                 </button>
-                <button class="btn border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal" on:click={startPrune} disabled={isRunning}>
+                <button
+                    class="btn border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+                    on:click={startPrune}
+                    disabled={isRunning}
+                >
                     Prune Library
                 </button>
             </div>

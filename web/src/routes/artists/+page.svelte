@@ -15,7 +15,10 @@
   });
 
   const isPrimaryArtist = (artist: Artist) => {
-    if (artist.primary_album_count === undefined || artist.primary_album_count === null) {
+    if (
+      artist.primary_album_count === undefined ||
+      artist.primary_album_count === null
+    ) {
       return true;
     }
     return artist.primary_album_count > 0;
@@ -34,7 +37,9 @@
     return Object.entries(buckets).sort((a, b) => a[0].localeCompare(b[0]));
   };
 
-  $: visibleArtists = showAllArtists ? artists : artists.filter(isPrimaryArtist);
+  $: visibleArtists = showAllArtists
+    ? artists
+    : artists.filter(isPrimaryArtist);
   $: groupedArtists = groupArtists(visibleArtists);
 </script>
 
@@ -42,7 +47,9 @@
   <div
     class="section-head sticky top-0 z-20 bg-surface-50/80 backdrop-blur-xl py-4 -mx-4 px-4 rounded-b-2xl transition-all border-b border-white/5 shadow-lg"
   >
-    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div
+      class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
+    >
       <div>
         <p class="text-sm uppercase tracking-wide text-white/60">Browse</p>
         <h2 class="text-2xl font-semibold">Artists A–Z</h2>
@@ -96,7 +103,7 @@
                     ? `/art/file/${artist.art_sha1}`
                     : artist.art_id
                       ? `/art/${artist.art_id}`
-                      : "/assets/default-artist.svg"}
+                      : "/assets/default-artist-placeholder.svg"}
                   alt={artist.name}
                   class="aspect-square w-full rounded-2xl object-cover transition-transform duration-200 group-hover:scale-[1.03]"
                 />

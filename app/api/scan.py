@@ -23,7 +23,8 @@ class ScanRequest(BaseModel):
     fetch_metadata: bool = True
     fetch_bio: bool = True
     fetch_artwork: bool = True
-    fetch_links: bool = True
+    fetch_spotify_artwork: bool = False
+    fetch_links: bool = False
 
 @router.post("/api/library/scan")
 async def trigger_scan(request: ScanRequest):
@@ -46,6 +47,7 @@ async def trigger_scan(request: ScanRequest):
                 fetch_metadata=request.fetch_metadata,
                 fetch_bio=request.fetch_bio,
                 fetch_artwork=request.fetch_artwork,
+                fetch_spotify_artwork=request.fetch_spotify_artwork,
                 fetch_links=request.fetch_links,
             )
             return {"message": "Metadata update started"}
@@ -60,6 +62,13 @@ async def trigger_scan(request: ScanRequest):
                 bio_only=request.bio_only or request.fetch_bio,
                 links_only=request.links_only or (not request.fetch_links and False),
                 refresh_top_tracks=request.refresh_top_tracks,
+                refresh_singles=request.refresh_singles,
+                fetch_metadata=request.fetch_metadata,
+                fetch_bio=request.fetch_bio,
+                fetch_artwork=request.fetch_artwork,
+                fetch_spotify_artwork=request.fetch_spotify_artwork,
+                fetch_links=request.fetch_links,
+                prune=False # Default false for combined scan unless explicitly added later
             )
             return {"message": "Full library refresh started"}
             

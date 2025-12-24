@@ -175,6 +175,7 @@ export type MetadataOptions = {
     fetchMetadata?: boolean;
     fetchBio?: boolean;
     fetchArtwork?: boolean;
+    fetchSpotifyArtwork?: boolean;
     fetchLinks?: boolean;
     refreshTopTracks?: boolean;
     refreshSingles?: boolean;
@@ -192,7 +193,8 @@ export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<v
             fetch_metadata: opts.fetchMetadata !== false,
             fetch_bio: opts.fetchBio !== false,
             fetch_artwork: opts.fetchArtwork !== false,
-            fetch_links: opts.fetchLinks !== false,
+            fetch_spotify_artwork: Boolean(opts.fetchSpotifyArtwork),
+            fetch_links: opts.fetchLinks !== undefined ? opts.fetchLinks : (opts.fetchMetadata !== false),
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
         })
@@ -219,7 +221,8 @@ export async function triggerFullScan(opts: { force?: boolean; path?: string } &
             fetch_metadata: opts.fetchMetadata !== false,
             fetch_bio: opts.fetchBio !== false,
             fetch_artwork: opts.fetchArtwork !== false,
-            fetch_links: opts.fetchLinks !== false,
+            fetch_spotify_artwork: Boolean(opts.fetchSpotifyArtwork),
+            fetch_links: opts.fetchLinks !== undefined ? opts.fetchLinks : (opts.fetchMetadata !== false),
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
         })

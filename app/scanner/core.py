@@ -518,7 +518,7 @@ class Scanner:
             
             logger.info("Library Prune Complete.")
 
-    async def update_metadata(self, artist_filter=None, mbid_filter=None, specific_fields=None, missing_only=False, bio_only=False, refresh_top_tracks=True, refresh_singles=True, fetch_metadata=True, fetch_bio=True, fetch_artwork=True, fetch_links=True):
+    async def update_metadata(self, artist_filter=None, mbid_filter=None, specific_fields=None, missing_only=False, bio_only=False, refresh_top_tracks=True, refresh_singles=True, fetch_metadata=True, fetch_bio=True, fetch_artwork=True, fetch_spotify_artwork=False, fetch_links=True):
         """
         Updates artist metadata.
         Can filter by artist name (--artist) or MusicBrainz ID (--mbid).
@@ -531,9 +531,11 @@ class Scanner:
             # Get artists
             query = """
                 SELECT a.mbid, a.name, a.last_updated, a.sort_name, a.bio, a.image_url, 
-                       a.art_id,
-                       COUNT(el.id) as link_count
+                       a.art_id, aw.source as art_source,
+                       COUNT(el.id) as link_count,
+                       (SELECT url FROM external_links l WHERE l.entity_id=a.mbid AND l.type='spotify' LIMIT 1) as spotify_link_existing
                 FROM artists a
+                LEFT JOIN artwork aw ON a.art_id = aw.id
                 LEFT JOIN external_links el 
                     ON el.entity_type='artist' AND el.entity_id = a.mbid
             """
@@ -564,14 +566,23 @@ class Scanner:
                 rows = await cursor.fetchall()
 
             def has_selected_gaps(row):
-                _, name, _, sort_name, bio, image_url, art_id, link_count = row
+                _, name, _, sort_name, bio, image_url, art_id, art_source, link_count, spotify_link_existing = row
                 checks = []
                 if fetch_metadata:
                     checks.append(not name or not str(name).strip() or not sort_name or not str(sort_name).strip())
                 if fetch_bio:
                     checks.append(not bio or not str(bio).strip())
                 if fetch_artwork:
-                    checks.append(not art_id or (not image_url))
+                     # If we have art_id: check if we should upgrade from Spotify to Fanart
+                     # If source is spotify, but we want fanart (implied by fetch_artwork=True), treat as gap.
+                     # But only if "Missing Only" is active logic? 
+                     # Wait, this function checks simply "do we need work?".
+                     # If we have art (any source), we generally don't NEED work unless we are upgrading.
+                     # logic: if no art_id -> Gap. If art_id exists but source is spotify -> Gap (upgrade opportunity).
+                     if not art_id or not image_url:
+                         checks.append(True)
+                     elif art_source == 'spotify':
+                         checks.append(True)
                 if fetch_links:
                     checks.append((link_count or 0) == 0)
                 return any(checks)
@@ -580,20 +591,122 @@ class Scanner:
             if missing_only and not refresh_top_tracks and not refresh_singles:
                 rows = [r for r in rows if has_selected_gaps(r)]
             
-            total = len(rows)
+            tasks_to_run = []
+            
+            # Pre-calculate work to determine actual count of active tasks
+            for row in rows:
+                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, link_count, spotify_link_existing = row
+                if not mbid: continue
+
+                # Check "missing only" gaps simply first
+                if missing_only and not refresh_top_tracks and not refresh_singles and not has_selected_gaps(row):
+                    logger.debug(f"[metadata] Skipping {name or mbid} (Data complete)")
+                    continue
+
+                # Calculate effective flags (Logic copied from loop)
+                eff_fetch_metadata = fetch_metadata
+                eff_fetch_bio = fetch_bio
+                eff_fetch_artwork = fetch_artwork
+                eff_fetch_links = fetch_links
+                eff_refresh_top_tracks = refresh_top_tracks
+                eff_refresh_singles = refresh_singles
+                eff_fetch_spotify_artwork = fetch_spotify_artwork
+
+
+
+                has_artwork = bool(art_id_existing)
+                # Has fanart if art id exists and source is fanart.tv
+                has_fanart = has_artwork and art_source_existing == 'fanart.tv'
+                # Has spotify art if art id exists and source is spotify
+                has_spotify_art = has_artwork and art_source_existing == 'spotify'
+                
+                # Check for existing spotify link
+                has_spotify_link = bool(spotify_link_existing)
+
+                # Strict Logic Implementation
+                if fetch_spotify_artwork:
+                     # 1. Skip if Fanart exists (Assuming Fanart is superior)
+                     if has_fanart:
+                         eff_fetch_spotify_artwork = False
+                     
+                     # 2. Missing Only Logic
+                     # "And also skip artists with a spotify artistthumb entry"
+                     if missing_only and has_spotify_art:
+                         eff_fetch_spotify_artwork = False
+                     
+                     if missing_only and has_artwork:
+                         # Double-check: if we have artwork (e.g. local) and missing_only is True, skip?
+                         # Usually "local" is treated as good.
+                         eff_fetch_spotify_artwork = False
+
+                     # 3. Link Fetching Logic
+                     # "Refresh the links on ONLY the artists with no spotify links"
+                     # If we have a spotify link, we DON'T need to fetch links to find artwork.
+                     if has_spotify_link:
+                         eff_fetch_links = False
+                     else:
+                         # If we lack a spotify link, we MUST fetch links to find the artist on Spotify
+                         # But only if we actually Plan to fetch artwork!
+                         if eff_fetch_spotify_artwork:
+                             eff_fetch_links = True
+                         # If we aren't fetching art, do we touch links?
+                         # If missing_only=False (Refresh), user might expect links refresh?
+                         # But user said "when missing is unchecked, get as many spotify links ... where no fanart artwork".
+                         # This implies if fanart exists, we skip everything.
+                         if has_fanart:
+                             eff_fetch_links = False
+
+                has_bio = bool(bio and str(bio).strip())
+                has_meta_core = bool(name and str(name).strip() and sort_name and str(sort_name).strip())
+                has_links = (link_count or 0) > 0
+
+                if missing_only:
+                    if has_meta_core: eff_fetch_metadata = False
+                    if has_bio: eff_fetch_bio = False
+                    
+                    if has_artwork: 
+                         eff_fetch_artwork = False
+                    
+                    if has_links: eff_fetch_links = False
+                    
+                    # Logic above handles jeff_fetch_spotify_artwork adjustments for missing_only
+
+                # Final check: Is there ANY work?
+                # We need to consider top_tracks/singles might be "maybe" if we didn't check DB yet.
+                # If refresh_top_tracks is True, we assume work unless we check.
+                # Let's NOT check DB here for every row if it's slow, but 600 queries is fast.
+                # However, to be perfectly accurate for "missing only" on top tracks, we strictly need the check.
+                # Let's assume if the user ASKED for top tracks refresh, we count it.
+                
+                any_work = any([
+                    eff_fetch_metadata, 
+                    eff_fetch_bio, 
+                    eff_fetch_artwork, 
+                    eff_fetch_links, 
+                    eff_refresh_top_tracks, 
+                    eff_refresh_singles,
+                    eff_fetch_spotify_artwork
+                ])
+                
+                if any_work:
+                    tasks_to_run.append({
+                        "row": row,
+                        "flags": (eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork)
+                    })
+
+            total = len(tasks_to_run)
             logger.info(f"Found {total} artists to update.")
             processed = 0
             
-            for row in rows:
+            for task in tasks_to_run:
+                row = task["row"]
+                eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork = task["flags"]
+
                 if self._stop_event.is_set():
                     logger.info("Metadata update cancelled by stop signal.")
                     raise asyncio.CancelledError()
-
-                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, link_count = row
-                if not mbid: continue
-
-                if missing_only and not refresh_top_tracks and not refresh_singles and not has_selected_gaps(row):
-                    continue
+                
+                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, link_count, spotify_link_existing = row
                 
                 # Emit initial "Fetching..." if name is unknown, or name if known
                 display_name = name or f"Artist ({mbid[:8]})"
@@ -612,20 +725,53 @@ class Scanner:
                 """, (mbid,)) as cursor:
                     local_rg_rows = await cursor.fetchall()
                     local_release_group_ids = {r[0] for r in local_rg_rows}
+                
+                # Pre-calculated flags are used now
+                # Re-check optimization for missing_only top tracks/singles if we didn't check in pre-calc
+                if missing_only and (eff_refresh_top_tracks or eff_refresh_singles):
+                     async with db.execute("SELECT type, count(*) FROM tracks_top WHERE artist_mbid=? GROUP BY type", (mbid,)) as cursor:
+                         rows_top = await cursor.fetchall()
+                         has_top_tracks = False
+                         has_singles = False
+                         for r_type, r_count in rows_top:
+                             if r_type == 'top' and r_count > 0: has_top_tracks = True
+                             if r_type == 'single' and r_count > 0: has_singles = True
+                         
+                         if has_top_tracks: eff_refresh_top_tracks = False
+                         if has_singles: eff_refresh_singles = False
+                         
+                         # If checking this disabled the only work left, skip!
+                         if not any([eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork]):
+                             # Adjust total? Too late for log, but we can skip processing (progress bar will jump or stall slightly but better than fetching)
+                             # Or we effectively just run with nothing.
+                             continue
+
+                # Calculate if this is effectively a bio-only request (to skip MB core fetch if possible)
+                is_bio_only_request = eff_fetch_bio and not eff_fetch_metadata and not eff_fetch_links and not eff_refresh_top_tracks and not eff_refresh_singles and not eff_fetch_artwork and not eff_fetch_spotify_artwork
+
+                # OPTIMIZATION: If bio_only request, check if we already have a wikipedia link to avoid MB lookup
+                known_wikipedia_url = None
+                if is_bio_only_request:
+                    async with db.execute("SELECT url FROM external_links WHERE entity_type='artist' AND entity_id=? AND type='wikipedia'", (mbid,)) as cursor:
+                        row_wiki = await cursor.fetchone()
+                        if row_wiki:
+                            known_wikipedia_url = row_wiki[0]
 
                 logger.debug(f"[metadata] Fetching artist meta mbid={mbid} name={name}")
                 meta = await fetch_artist_metadata(
                     mbid,
                     name,
                     local_release_group_ids=local_release_group_ids,
-                    bio_only=bio_only and not fetch_links and not refresh_singles,
-                    fetch_metadata=fetch_metadata,
-                    fetch_bio=fetch_bio,
-                    fetch_artwork=fetch_artwork,
-                    fetch_links=fetch_links,
-                    fetch_top_tracks=refresh_top_tracks,
-                    fetch_singles=refresh_singles,
-                    known_wikipedia_url=None, # We'll need to fetch this from DB first if we want to use it
+                    bio_only=is_bio_only_request,
+                    fetch_metadata=eff_fetch_metadata,
+                    fetch_bio=eff_fetch_bio,
+                    fetch_artwork=eff_fetch_artwork,
+                    fetch_spotify_artwork=eff_fetch_spotify_artwork,
+                    fetch_links=eff_fetch_links,
+                    fetch_top_tracks=eff_refresh_top_tracks,
+                    fetch_singles=eff_refresh_singles,
+                    known_wikipedia_url=known_wikipedia_url,
+                    known_spotify_url=spotify_link_existing,
                 )
                 
                 # Save Artwork if new
@@ -674,19 +820,19 @@ class Scanner:
                         last_updated=?
                     WHERE mbid=?
                 """, (
-                    meta.get("name") if fetch_metadata else name,
-                    meta.get("sort_name") if fetch_metadata else sort_name,
-                    meta.get("bio") if fetch_bio else bio,
-                    meta.get("image_url") if fetch_artwork else image_url,
+                    meta.get("name") if eff_fetch_metadata else name,
+                    meta.get("sort_name") if eff_fetch_metadata else sort_name,
+                    meta.get("bio") if eff_fetch_bio else bio,
+                    meta.get("image_url") if eff_fetch_artwork else image_url,
                     art_id,
-                    meta["last_updated"],
+                    meta.get("last_updated") or time.time(), # Use provided or current
                     mbid
                 ))
 
                 # --- Update Normalized Tables ---
                 
                 # 1. External Links (Artist)
-                if fetch_links:
+                if eff_fetch_links:
                     # Clear existing for full refresh validity
                     await db.execute("DELETE FROM external_links WHERE entity_type='artist' AND entity_id=?", (mbid,))
                     
@@ -711,7 +857,7 @@ class Scanner:
                 # 2. Top Tracks & Singles (optional)
                 # Always fetch for artists that have no existing top-track entries (new artists),
                 # otherwise only when refresh_top_tracks is True.
-                should_refresh_top_tracks = refresh_top_tracks and not SPOTIFY_SCANNING_DISABLED
+                should_refresh_top_tracks = eff_refresh_top_tracks and not SPOTIFY_SCANNING_DISABLED
                 if missing_only and refresh_top_tracks:
                     async with db.execute("SELECT COUNT(1) FROM tracks_top WHERE artist_mbid=? AND type='top'", (mbid,)) as c:
                         row = await c.fetchone()
@@ -744,7 +890,7 @@ class Scanner:
                               track.get("date"), track.get("duration_ms"), track.get("popularity"), idx + 1, time.time()))
                     
                 # Store singles from MusicBrainz
-                if refresh_singles:
+                if eff_refresh_singles:
                     # Always replace existing singles when refreshing
                     await db.execute("DELETE FROM tracks_top WHERE artist_mbid=? AND type='single'", (mbid,))
 
@@ -762,7 +908,7 @@ class Scanner:
                               single["date"], single.get("mbid"), time.time()))
 
                 # 3. Similar Artists (only when full metadata/top-tracks requested)
-                if fetch_metadata or refresh_top_tracks:
+                if eff_fetch_metadata or eff_refresh_top_tracks:
                     await db.execute("DELETE FROM similar_artists WHERE artist_mbid=?", (mbid,))
                     
                     similar_count = len(meta.get("similar_artists", []))
