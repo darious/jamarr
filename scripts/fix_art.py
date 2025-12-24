@@ -71,12 +71,13 @@ def main():
     if os.path.isfile(target_path) and target_path.lower().endswith(".flac"):
         flac_files.append(target_path)
     elif os.path.isdir(target_path):
-        for root, _, files in os.walk(target_path):
-            for name in files:
+        for root, dirs, files in os.walk(target_path):
+            dirs.sort()
+            for name in sorted(files):
                 if name.lower().endswith(".flac"):
                     flac_files.append(os.path.join(root, name))
 
-    flac_files.sort()
+    flac_files.sort(key=lambda path: (os.path.dirname(path).lower(), os.path.basename(path).lower()))
 
     if not flac_files:
         console.print(f"[yellow]No FLAC files found at {target_path}[/yellow]")
