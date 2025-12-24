@@ -10,7 +10,7 @@ import difflib
 import math
 from app.config import get_spotify_credentials, get_musicbrainz_root_url, get_musicbrainz_rate_limit, get_qobuz_region, get_fanarttv_api_key
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("scanner.metadata")
 
 MB_API_ROOT = f"{get_musicbrainz_root_url()}/ws/2"
 WIKI_API_ROOT = "https://en.wikipedia.org/api/rest_v1/page/summary"
@@ -52,25 +52,18 @@ class RateLimiter:
 mb_limit_val = get_musicbrainz_rate_limit()
 mb_limiter = RateLimiter(rate_limit=mb_limit_val, burst_limit=5 if mb_limit_val is None else 2)
 
-async def fetch_fanart_artist_thumb(client: httpx.AsyncClient, mbid: str):
+async def fetch_fanart_artist_images(client: httpx.AsyncClient, mbid: str):
     """
-    Fetch the most-liked artist thumb URL from Fanart.tv for a given MusicBrainz ID.
+    Fetch best artist thumb and background URLs from Fanart.tv for a given MusicBrainz ID.
+    Returns dict with keys: thumb, background.
     """
     api_key = get_fanarttv_api_key()
     if not api_key or not mbid:
-        return None
+        return {"thumb": None, "background": None}
 
-    try:
-        resp = await client.get(f"{FANART_API_ROOT}/{mbid}", params={"api_key": api_key}, timeout=20.0)
-        if resp.status_code != 200:
-            logger.debug(f"Fanart.tv lookup failed for {mbid}: {resp.status_code}")
+    def _pick_best(entries):
+        if not entries:
             return None
-
-        data = resp.json()
-        thumbs = data.get("artistthumb") or []
-        if not thumbs:
-            return None
-
         def _score(entry):
             likes = entry.get("likes") or 0
             try:
@@ -78,15 +71,26 @@ async def fetch_fanart_artist_thumb(client: httpx.AsyncClient, mbid: str):
             except (TypeError, ValueError):
                 likes = 0
             return (likes, entry.get("url") or "")
+        best = max(entries, key=_score)
+        url = best.get("url")
+        if url and url.startswith("http://"):
+            url = "https://" + url[len("http://"):]
+        return url
 
-        best = max(thumbs, key=_score)
-        best_url = best.get("url")
-        if best_url and best_url.startswith("http://"):
-            best_url = "https://" + best_url[len("http://"):]
-        return best_url
+    try:
+        resp = await client.get(f"{FANART_API_ROOT}/{mbid}", params={"api_key": api_key}, timeout=20.0)
+        if resp.status_code != 200:
+            logger.debug(f"Fanart.tv lookup failed for {mbid}: {resp.status_code}")
+            return {"thumb": None, "background": None}
+
+        data = resp.json()
+        return {
+            "thumb": _pick_best(data.get("artistthumb") or []),
+            "background": _pick_best(data.get("artistbackground") or []),
+        }
     except Exception as e:
         logger.debug(f"Fanart.tv fetch error for {mbid}: {e}")
-        return None
+        return {"thumb": None, "background": None}
 
 async def get_spotify_token(client: httpx.AsyncClient):
     global _spotify_token, _token_expiry
@@ -261,12 +265,45 @@ async def match_track_to_library(db, artist_mbid, track_name, album_name=None):
 
     return None
 
-async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group_ids: set = None, bio_only: bool = False):
+async def fetch_artist_metadata(
+    mbid: str,
+    artist_name: str,
+    local_release_group_ids: set = None,
+    bio_only: bool = False,
+    fetch_metadata: bool = True,
+    fetch_bio: bool = True,
+    fetch_artwork: bool = True,
+    fetch_links: bool = True,
+    fetch_top_tracks: bool = True,
+    fetch_singles: bool = True,
+):
     """
     Fetches comprehensive artist metadata from MusicBrainz + Spotify + Wikidata.
     """
     if local_release_group_ids is None:
         local_release_group_ids = set()
+
+    # If nothing is requested, return immediately
+    if not any([fetch_metadata, fetch_bio, fetch_artwork, fetch_links, fetch_top_tracks, fetch_singles, bio_only]):
+        return {
+            "mbid": mbid,
+            "name": artist_name,
+            "sort_name": artist_name,
+            "last_updated": time.time(),
+            "bio": None,
+            "image_url": None,
+            "image_source": None,
+            "spotify_url": None,
+            "homepage": None,
+            "wikipedia_url": None,
+            "qobuz_url": None,
+            "tidal_url": None,
+            "musicbrainz_url": None,
+            "similar_artists": [],
+            "top_tracks": [],
+            "singles": [],
+            "albums": [],
+        }
 
     metadata = {
         "mbid": mbid,
@@ -275,6 +312,8 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
         "bio": None,
         "image_url": None,
         "image_source": None,
+        "background_url": None,
+        "background_source": None,
         "spotify_url": None,
         "homepage": None,
         "wikipedia_url": None,
@@ -288,30 +327,48 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
         "last_updated": time.time()
     }
 
+    # Fast path: artwork-only (skip MusicBrainz release/link fetch)
+    only_art = fetch_artwork and not (fetch_metadata or fetch_bio or fetch_links or fetch_top_tracks or fetch_singles or bio_only)
+    if only_art:
+        try:
+            async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
+                fanart = await fetch_fanart_artist_images(client, mbid)
+                if fanart.get("thumb"):
+                    metadata["image_url"] = fanart["thumb"]
+                    metadata["image_source"] = "fanart.tv"
+                if fanart.get("background"):
+                    metadata["background_url"] = fanart["background"]
+                    metadata["background_source"] = "fanart.tv"
+        except Exception:
+            pass
+        return metadata
+
     try:
         async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
             # 1. MusicBrainz Core Data & Relations
-            logger.debug(f"Fetching Core Data from MusicBrainz for {artist_name} ({mbid})...")
-            await mb_limiter.acquire()
-            mb_url = f"{MB_API_ROOT}/artist/{mbid}?inc=url-rels&fmt=json"
-            
+            needs_mb = fetch_metadata or fetch_links or fetch_top_tracks or fetch_singles or fetch_bio
             mb_data = None
-            for attempt in range(3):
-                try:
-                    resp = await client.get(mb_url)
-                    if resp.status_code == 200:
-                        mb_data = resp.json()
-                        break
-                    elif resp.status_code == 503:
-                        logger.debug("Rate limited by MusicBrainz, sleeping...")
-                        await asyncio.sleep(1 * (attempt + 1))
-                        continue
-                    elif resp.status_code == 404:
-                         logger.warning(f"Artist not found in MusicBrainz: {mbid}")
-                         break
-                except Exception as e:
-                     logger.warning(f"MB Fetch Error (Attempt {attempt+1}): {e}")
-                     await asyncio.sleep(1)
+            if needs_mb:
+                logger.debug(f"Fetching Core Data from MusicBrainz for {artist_name} ({mbid})...")
+                await mb_limiter.acquire()
+                mb_url = f"{MB_API_ROOT}/artist/{mbid}?inc=url-rels&fmt=json"
+                
+                for attempt in range(3):
+                    try:
+                        resp = await client.get(mb_url)
+                        if resp.status_code == 200:
+                            mb_data = resp.json()
+                            break
+                        elif resp.status_code == 503:
+                            logger.debug("Rate limited by MusicBrainz, sleeping...")
+                            await asyncio.sleep(1 * (attempt + 1))
+                            continue
+                        elif resp.status_code == 404:
+                             logger.warning(f"Artist not found in MusicBrainz: {mbid}")
+                             break
+                    except Exception as e:
+                         logger.warning(f"MB Fetch Error (Attempt {attempt+1}): {e}")
+                         await asyncio.sleep(1)
 
             wikidata_url = None
             spotify_id = None
@@ -353,13 +410,17 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
                                  spotify_candidates.append((cand_id, target))
                                  logger.debug(f"data source: MusicBrainz (Spotify candidate) -> {target}")
 
-            fanart_url = await fetch_fanart_artist_thumb(client, mbid)
-            if fanart_url:
-                metadata["image_url"] = fanart_url
-                metadata["image_source"] = "fanart.tv"
+            if fetch_artwork:
+                fanart = await fetch_fanart_artist_images(client, mbid)
+                if fanart.get("thumb"):
+                    metadata["image_url"] = fanart["thumb"]
+                    metadata["image_source"] = "fanart.tv"
+                if fanart.get("background"):
+                    metadata["background_url"] = fanart["background"]
+                    metadata["background_source"] = "fanart.tv"
             
             # 2. Wikipedia (Bio via Wikidata)
-            if wikidata_url:
+            if wikidata_url and fetch_bio:
                 try:
                     logger.debug(f"Fetching Wikipedia link via Wikidata ({wikidata_url})...")
                     qid = wikidata_url.split("/")[-1]
@@ -394,7 +455,7 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
                     logger.warning(f"Wikipedia fetch failed for {artist_name}: {e}")
 
             # 3. Spotify (Image, Similar, Top Tracks) - temporarily disabled
-            if SPOTIFY_SCANNING_DISABLED:
+            if SPOTIFY_SCANNING_DISABLED or not fetch_top_tracks:
                 logger.debug("Spotify scanning disabled; skipping Spotify API calls.")
             else:
                 logger.debug("Checking Spotify credentials...")
@@ -442,14 +503,15 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
                     if spotify_id:
                          try:
                              # Get Artist (Image)
-                             logger.debug(f"Fetching Spotify Artist details (Bio/Image) for {spotify_id}...")
-                             art_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}", headers=sp_headers)
-                             if art_resp.status_code == 200:
-                                 images = art_resp.json().get("images", [])
-                                 if images:
-                                     if not metadata["image_url"]:
-                                         metadata["image_url"] = images[0]["url"]
-                                         metadata["image_source"] = "spotify"
+                             if fetch_artwork:
+                                 logger.debug(f"Fetching Spotify Artist details (Bio/Image) for {spotify_id}...")
+                                 art_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}", headers=sp_headers)
+                                 if art_resp.status_code == 200:
+                                     images = art_resp.json().get("images", [])
+                                     if images:
+                                         if not metadata["image_url"]:
+                                             metadata["image_url"] = images[0]["url"]
+                                             metadata["image_source"] = "spotify"
 
                              # Get Related Artists
                              logger.debug(f"Fetching Related Artists for: {spotify_id}")
@@ -516,43 +578,36 @@ async def fetch_artist_metadata(mbid: str, artist_name: str, local_release_group
                         metadata["spotify_url"] = spotify_candidates[0][1]
 
             # 4. MusicBrainz Singles & Albums (Release Groups)
-            # Fetch directly from MB
-            # 4. MusicBrainz Singles & Albums (Release Groups)
-            if bio_only:
+            if bio_only and not (fetch_links or fetch_singles):
                  logger.debug("Bio-only mode: Skipping Release Groups and Link Resolution.")
                  return metadata
 
-            logger.debug("Fetching Singles (Release Groups) from MusicBrainz...")
-            singles = await fetch_artist_release_groups(mbid, "single", client)
-            # Skip link resolution for singles as per user request (optimisation)
-            metadata["singles"] = singles
-            
-            logger.debug("Fetching Albums (Release Groups) from MusicBrainz...")
-            albums = await fetch_artist_release_groups(mbid, "album", client)
-            for a in albums:
-                 logger.debug(f"Resoving links for album: {a['title']} ({a['mbid']})")
-                 res = await fetch_best_release_match(a['mbid'], client)
-                 a['links'] = res['links']
-                 a['release_ids'] = res['release_ids']
-                 a['primary_release_id'] = res.get('primary_release_id')
-            metadata["albums"] = albums
-            
-            logger.debug("Fetching EPs (Release Groups) from MusicBrainz...")
-            eps = await fetch_artist_release_groups(mbid, "ep", client)
-            for e in eps:
-                 # Only resolve links if we have files for this EP locally
-                 if e['mbid'] in local_release_group_ids:
-                     logger.debug(f"Resolving links for EP (Local): {e['title']} ({e['mbid']})")
-                     res = await fetch_best_release_match(e['mbid'], client)
-                     e['links'] = res['links']
-                     e['release_ids'] = res['release_ids']
-                     e['primary_release_id'] = res.get('primary_release_id')
-                 else:
-                     # logger.debug(f"Skipping links for EP (Remote): {e['title']}")
-                     pass
-            
-            # Merge EPs into Albums
-            metadata["albums"].extend(eps)
+            if fetch_singles:
+                logger.debug("Fetching Singles (Release Groups) from MusicBrainz...")
+                singles = await fetch_artist_release_groups(mbid, "single", client)
+                metadata["singles"] = singles
+
+            if fetch_metadata or fetch_links:
+                logger.debug("Fetching Albums (Release Groups) from MusicBrainz...")
+                albums = await fetch_artist_release_groups(mbid, "album", client)
+                for a in albums:
+                     logger.debug(f"Resolving links for album: {a['title']} ({a['mbid']})")
+                     res = await fetch_best_release_match(a['mbid'], client)
+                     a['links'] = res['links']
+                     a['release_ids'] = res['release_ids']
+                     a['primary_release_id'] = res.get('primary_release_id')
+                metadata["albums"] = albums
+
+                logger.debug("Fetching EPs (Release Groups) from MusicBrainz...")
+                eps = await fetch_artist_release_groups(mbid, "ep", client)
+                for e in eps:
+                     if e['mbid'] in local_release_group_ids:
+                         logger.debug(f"Resolving links for EP (Local): {e['title']} ({e['mbid']})")
+                         res = await fetch_best_release_match(e['mbid'], client)
+                         e['links'] = res['links']
+                         e['release_ids'] = res['release_ids']
+                         e['primary_release_id'] = res.get('primary_release_id')
+                metadata["albums"].extend(eps)
 
     except Exception as e:
         logger.error(f"Critical error fetching metadata for {artist_name}: {e}")

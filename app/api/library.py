@@ -86,10 +86,12 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
         rows = await cursor.fetchall()
 
         artist_images = await fetch_primary_images(db, "artist", [r["mbid"] for r in rows], "artistthumb")
+        artist_backgrounds = await fetch_primary_images(db, "artist", [r["mbid"] for r in rows], "artistbackground")
         artists = []
         for row in rows:
             mbid = row["mbid"]
             art_info = artist_images.get(mbid, {})
+            bg_info = artist_backgrounds.get(mbid, {})
             
             # Fetch top tracks for this artist
             top_tracks_query = """
@@ -190,7 +192,9 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
                 "primary_album_count": row["primary_album_count"],
                 "appears_on_album_count": row["appears_on_album_count"],
                 "singles": singles,
-                "albums": []  # Deprecated
+                "albums": [],  # Deprecated
+                "background_art_id": bg_info.get("art_id"),
+                "background_sha1": bg_info.get("art_sha1"),
             })
         
         return artists
