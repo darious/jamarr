@@ -17,7 +17,7 @@ WIKI_API_ROOT = "https://en.wikipedia.org/api/rest_v1/page/summary"
 SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
 SPOTIFY_API_ROOT = "https://api.spotify.com/v1"
 FANART_API_ROOT = "https://webservice.fanart.tv/v3/music"
-SPOTIFY_SCANNING_DISABLED = True  # Temporary kill switch to avoid any Spotify API calls
+SPOTIFY_SCANNING_DISABLED = False
 
 _spotify_token = None
 _token_expiry = 0
@@ -130,6 +130,8 @@ def _similarity(a: str, b: str) -> float:
 async def _evaluate_spotify_candidate(client: httpx.AsyncClient, headers: dict, candidate_id: str, target_name: str):
     try:
         resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{candidate_id}", headers=headers)
+        if resp.status_code == 429:
+             raise RuntimeError("Spotify Rate Limit Exceeded")
         if resp.status_code != 200:
             return None
         data = resp.json()
@@ -273,9 +275,12 @@ async def fetch_artist_metadata(
     fetch_metadata: bool = True,
     fetch_bio: bool = True,
     fetch_artwork: bool = True,
+    fetch_spotify_artwork: bool = False,
     fetch_links: bool = True,
     fetch_top_tracks: bool = True,
     fetch_singles: bool = True,
+    known_wikipedia_url: str = None,
+    known_spotify_url: str = None,
 ):
     """
     Fetches comprehensive artist metadata from MusicBrainz + Spotify + Wikidata.
@@ -314,9 +319,9 @@ async def fetch_artist_metadata(
         "image_source": None,
         "background_url": None,
         "background_source": None,
-        "spotify_url": None,
+        "spotify_url": known_spotify_url,
         "homepage": None,
-        "wikipedia_url": None,
+        "wikipedia_url": known_wikipedia_url,
         "qobuz_url": None,
         "tidal_url": None,
         "musicbrainz_url": None,
@@ -347,7 +352,10 @@ async def fetch_artist_metadata(
         async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
             # 1. MusicBrainz Core Data & Relations
             # For singles-only runs we don't need core artist data/relations.
-            needs_mb = fetch_metadata or fetch_links or fetch_top_tracks or fetch_bio
+            # OPTIMIZATION: If we only want Bio and we already have the URL, skip MB.
+            skip_mb_for_bio = bio_only and known_wikipedia_url
+            
+            needs_mb = (fetch_metadata or fetch_links or fetch_top_tracks or (fetch_bio and not skip_mb_for_bio))
             mb_data = None
             if needs_mb:
                 logger.debug(f"Fetching Core Data from MusicBrainz for {artist_name} ({mbid})...")
@@ -420,8 +428,15 @@ async def fetch_artist_metadata(
                     metadata["background_url"] = fanart["background"]
                     metadata["background_source"] = "fanart.tv"
             
-            # 2. Wikipedia (Bio via Wikidata)
-            if wikidata_url and fetch_bio:
+            # 2. Wikipedia (Bio via Wikidata OR Known URL)
+            # Logic: If we have a wikipedia_url (known or from relations? wait relations give wikidata not wikipedia),
+            # we need to handle that. MB relations gives Wikidata usually, not direct Wikipedia.
+            # But if known_wikipedia_url is passed, use it.
+            
+            target_wiki_url = metadata["wikipedia_url"] # Starts with known_url
+            
+            # If we have a Wikidata URL from MB, use it to resolve Wikipedia if we don't have one
+            if wikidata_url and fetch_bio and not target_wiki_url:
                 try:
                     logger.debug(f"Fetching Wikipedia link via Wikidata ({wikidata_url})...")
                     qid = wikidata_url.split("/")[-1]
@@ -436,27 +451,39 @@ async def fetch_artist_metadata(
                         wiki_title = enwiki.get("title")
                         
                         if wiki_title:
-                            metadata["wikipedia_url"] = f"https://en.wikipedia.org/wiki/{wiki_title}"
-                            
-                            # Fetch bio extract from Wikipedia REST API
-                            try:
-                                logger.debug(f"Fetching bio from Wikipedia for {wiki_title}...")
-                                from urllib.parse import quote
-                                wiki_summary_url = f"{WIKI_API_ROOT}/{quote(wiki_title)}"
-                                wiki_resp = await client.get(wiki_summary_url)
-                                if wiki_resp.status_code == 200:
-                                    wiki_data = wiki_resp.json()
-                                    extract = wiki_data.get("extract")
-                                    if extract:
-                                        metadata["bio"] = extract
-                                        logger.debug(f"Bio fetched: {len(extract)} characters")
-                            except Exception as e:
-                                logger.warning(f"Wikipedia bio fetch failed for {wiki_title}: {e}")
+                            target_wiki_url = f"https://en.wikipedia.org/wiki/{wiki_title}"
+                            metadata["wikipedia_url"] = target_wiki_url
                 except Exception as e:
-                    logger.warning(f"Wikipedia fetch failed for {artist_name}: {e}")
+                     logger.warning(f"Wikidata resolution failed: {e}")
+
+            if target_wiki_url and fetch_bio:
+                 # Fetch bio extract from Wikipedia REST API
+                 # Extract title from URL
+                 # URL format: https://en.wikipedia.org/wiki/Title_Here
+                 try:
+                     wiki_title = target_wiki_url.split("/wiki/")[-1]
+                     if wiki_title:
+                        logger.debug(f"Fetching bio from Wikipedia for {wiki_title}...")
+                        from urllib.parse import quote, unquote
+                        # Decode first in case it's encoded, then re-quote for API?
+                        # Actually the API handles it, but let's be safe.
+                        safe_title = unquote(wiki_title)
+                        
+                        wiki_summary_url = f"{WIKI_API_ROOT}/{quote(safe_title)}"
+                        wiki_resp = await client.get(wiki_summary_url)
+                        if wiki_resp.status_code == 200:
+                            wiki_data = wiki_resp.json()
+                            extract = wiki_data.get("extract")
+                            if extract:
+                                metadata["bio"] = extract
+                                logger.debug(f"Bio fetched: {len(extract)} characters")
+                 except Exception as e:
+                     logger.warning(f"Wikipedia bio fetch failed for {target_wiki_url}: {e}")
 
             # 3. Spotify (Image, Similar, Top Tracks) - only when requested
-            if fetch_top_tracks and not SPOTIFY_SCANNING_DISABLED:
+            # If we need artwork (and fanart failed or wasn't tried? logic in core handles that) OR top tracks.
+            # Core passes fetch_spotify_artwork=True only if needed.
+            if (fetch_top_tracks or fetch_spotify_artwork) and not SPOTIFY_SCANNING_DISABLED:
                 logger.debug("Checking Spotify credentials...")
                 token = await get_spotify_token(client)
                 if token:
@@ -483,6 +510,7 @@ async def fetch_artist_metadata(
                             q = quote(metadata["name"])
                             search_url = f"{SPOTIFY_API_ROOT}/search?q=artist:{q}&type=artist&limit=3"
                             s_resp = await client.get(search_url, headers=sp_headers)
+                            if s_resp.status_code == 429: raise RuntimeError("Spotify Rate Limit Exceeded")
                             if s_resp.status_code == 200:
                                  items = s_resp.json().get("artists", {}).get("items", [])
                                  if items:
@@ -505,6 +533,7 @@ async def fetch_artist_metadata(
                             if fetch_artwork:
                                 logger.debug(f"Fetching Spotify Artist details (Bio/Image) for {spotify_id}...")
                                 art_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}", headers=sp_headers)
+                                if art_resp.status_code == 429: raise RuntimeError("Spotify Rate Limit Exceeded")
                                 if art_resp.status_code == 200:
                                     images = art_resp.json().get("images", [])
                                     if images and not metadata["image_url"]:
@@ -514,6 +543,7 @@ async def fetch_artist_metadata(
                             # Get Related Artists
                             logger.debug(f"Fetching Related Artists for: {spotify_id}")
                             rel_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}/related-artists", headers=sp_headers)
+                            if rel_resp.status_code == 429: raise RuntimeError("Spotify Rate Limit Exceeded")
                             if rel_resp.status_code == 200:
                                 rel_data = rel_resp.json()
                                 metadata["similar_artists"] = [a["name"] for a in rel_data.get("artists", [])[:10]]
@@ -547,6 +577,7 @@ async def fetch_artist_metadata(
                             # Get Top Tracks
                             logger.debug("Fetching Top Tracks from Spotify...")
                             top_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}/top-tracks?market=US", headers=sp_headers)
+                            if top_resp.status_code == 429: raise RuntimeError("Spotify Rate Limit Exceeded")
                             if top_resp.status_code == 200:
                                 top_data = top_resp.json()
                                 tracks = []
@@ -560,6 +591,10 @@ async def fetch_artist_metadata(
                                         "preview_url": t["preview_url"]
                                     })
                                 metadata["top_tracks"] = tracks
+                                metadata["top_tracks"] = tracks
+                        except RuntimeError as re:
+                             # Re-raise critical errors like Rate Limit
+                             raise re
                         except Exception as e:
                             logger.warning(f"Spotify Data Fetch Failed: {e}")
                 else:
@@ -567,7 +602,7 @@ async def fetch_artist_metadata(
                     # Fallback: if only one MB candidate, preserve that URL even without token
                     if spotify_candidates and len(spotify_candidates) == 1 and not metadata["spotify_url"]:
                         metadata["spotify_url"] = spotify_candidates[0][1]
-            elif fetch_top_tracks and SPOTIFY_SCANNING_DISABLED:
+            elif (fetch_top_tracks or fetch_spotify_artwork) and SPOTIFY_SCANNING_DISABLED:
                 logger.debug("Spotify scanning disabled; skipping Spotify API calls.")
 
             # 4. MusicBrainz Singles & Albums (Release Groups)
