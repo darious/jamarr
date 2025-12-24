@@ -208,3 +208,8 @@ __marimo__/
 
 # Local cache
 cache/
+
+# Frontend build artifacts
+web/build/
+web/.svelte-kit/
+web-build/
