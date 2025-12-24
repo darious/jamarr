@@ -90,6 +90,7 @@ export interface Track {
     bit_depth: number | null;
     mb_release_id?: string | null;
     mb_release_group_id?: string | null;
+    popularity?: number;
 }
 
 export interface User {
@@ -179,6 +180,7 @@ export type MetadataOptions = {
     fetchLinks?: boolean;
     refreshTopTracks?: boolean;
     refreshSingles?: boolean;
+    fetchSimilarArtists?: boolean;
 };
 
 export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<void> {
@@ -197,6 +199,7 @@ export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<v
             fetch_links: opts.fetchLinks !== undefined ? opts.fetchLinks : (opts.fetchMetadata !== false),
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
+            fetch_similar_artists: Boolean(opts.fetchSimilarArtists),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger metadata scan');
@@ -225,6 +228,7 @@ export async function triggerFullScan(opts: { force?: boolean; path?: string } &
             fetch_links: opts.fetchLinks !== undefined ? opts.fetchLinks : (opts.fetchMetadata !== false),
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
+            fetch_similar_artists: Boolean(opts.fetchSimilarArtists),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger full scan');

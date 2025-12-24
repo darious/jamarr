@@ -36,6 +36,7 @@
     let doSpotifyArtwork = false;
     let doTopTracks = false;
     let doSingles = false;
+    let doSimilarArtists = false;
 
     // doLinks removed
     let doMissingAlbums = false;
@@ -187,7 +188,7 @@
             doSpotifyArtwork ||
             doTopTracks ||
             doSingles ||
-            doSingles;
+            doSimilarArtists;
 
         if (runFilesystem && wantsMetadata) {
             taskQueue.push({
@@ -206,6 +207,7 @@
                         // fetchLinks implicit in backend logic for full scan or metadata
                         refreshTopTracks: doTopTracks,
                         refreshSingles: doSingles,
+                        fetchSimilarArtists: doSimilarArtists,
                     }),
             });
         } else {
@@ -232,9 +234,10 @@
                             fetchBio: doBio,
                             fetchArtwork: doArtwork,
                             fetchSpotifyArtwork: doSpotifyArtwork,
-                            fetchLinks: true,
+                            fetchLinks: doMetadata,
                             refreshTopTracks: doTopTracks,
                             refreshSingles: doSingles,
+                            fetchSimilarArtists: doSimilarArtists,
                         }),
                 });
             }
@@ -334,6 +337,7 @@
             doSpotifyArtwork = true;
             doTopTracks = true;
             doSingles = true;
+            doSimilarArtists = true;
             // doMissingAlbums remains separate as requested
         } else {
             runFilesystem = false;
@@ -343,6 +347,7 @@
             doSpotifyArtwork = false;
             doTopTracks = false;
             doSingles = false;
+            doSimilarArtists = false;
         }
     }
 
@@ -354,7 +359,8 @@
             doArtwork &&
             doSpotifyArtwork &&
             doTopTracks &&
-            doSingles
+            doSingles &&
+            doSimilarArtists
         ) {
             scanAll = true;
         } else {
@@ -669,7 +675,7 @@
                                 on:change={updateScanAllState}
                                 class="checkbox checkbox-primary"
                             /><span class="label-text text-white"
-                                >Refresh top tracks (Spotify)</span
+                                >Refresh top tracks (Last.fm)</span
                             ></label
                         >
                     </div>
@@ -682,6 +688,18 @@
                                 class="checkbox checkbox-primary"
                             /><span class="label-text text-white"
                                 >Refresh singles (MusicBrainz)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doSimilarArtists}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Refresh similar artists (Last.fm)</span
                             ></label
                         >
                     </div>
