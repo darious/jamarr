@@ -27,7 +27,8 @@
 
 
 ## Artist page
-* pull all the albums for the artist and add a missing album section to the bottom of the page, ideally with a button to grab the qobuz id for the album on to the clipboard.
+* ~~pull all the albums for the artist and add a missing album section to the bottom of the page, ideally with a button to grab the qobuz id for the album on to the clipboard.~~
+* make it so when you click on the artist artwork, it zooms to a full screen version of the image
 
 
 ## Album page
@@ -44,4 +45,5 @@
 * fix history tracking on docker when playing over upnp
 
 ## infill
-* improve lookup of links to qobiz and tidal, mant are missing from musicbrainz, so we need to implement our own process to try and find things
+* ~~improve lookup of links to qobiz and tidal, mant are missing from musicbrainz, so we need to implement our own process to try and find things~~
+* add a link to send the tidal url to pearlarr

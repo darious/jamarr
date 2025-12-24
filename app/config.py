@@ -39,3 +39,7 @@ def get_qobuz_region():
 def get_tidal_credentials():
     cfg = load_config().get("tidal", {})
     return cfg.get("client_id"), cfg.get("client_secret")
+
+def get_fanarttv_api_key():
+    """Return the configured Fanart.tv API key, if provided."""
+    return load_config().get("fanarttv", {}).get("apikey")
