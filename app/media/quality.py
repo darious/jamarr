@@ -14,11 +14,9 @@ ASPECT_THRESHOLD = 2.0
 TINY_FILESIZE_BYTES = 15 * 1024
 
 
-def _compute_art_path(sha1: str, art_type: str, path_on_disk: str | None) -> str:
+def _compute_art_path(sha1: str, path_on_disk: str | None) -> str:
     """Choose the best-known path for an artwork file."""
-    if path_on_disk and os.path.exists(path_on_disk):
-        return path_on_disk
-    return _get_art_path(sha1, art_type or "album")
+    return _get_art_path(sha1, path_on_disk)
 
 
 def _check_artwork_file(path: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -123,8 +121,7 @@ async def run_media_quality_checks(force: bool = False) -> Dict[str, int]:
 
         for row in art_rows:
             art_id = row["id"]
-            art_type = row["type"] or "album"
-            path = _compute_art_path(row["sha1"], art_type, row["path_on_disk"])
+            path = _compute_art_path(row["sha1"], row["path_on_disk"])
 
             await db.execute(
                 "DELETE FROM media_quality_issues WHERE entity_type='artwork' AND entity_id = ?",
@@ -304,17 +301,14 @@ async def run_media_quality_checks(force: bool = False) -> Dict[str, int]:
                 )
 
         # --- Cache/DB consistency (orphans) ---
-        async with db.execute("SELECT sha1, type FROM artwork") as cursor:
+        async with db.execute("SELECT sha1 FROM artwork") as cursor:
             art_rows = await cursor.fetchall()
-        known_shas = {(r["sha1"], (r["type"] or "album")) for r in art_rows}
+        known_shas = {r["sha1"] for r in art_rows}
 
         cache_root = "cache/art"
-        for subdir in ("album", "artist"):
-            root = os.path.join(cache_root, subdir)
-            if not os.path.isdir(root):
-                continue
-            for bucket in os.listdir(root):
-                bucket_path = os.path.join(root, bucket)
+        if os.path.isdir(cache_root):
+            for bucket in os.listdir(cache_root):
+                bucket_path = os.path.join(cache_root, bucket)
                 if not os.path.isdir(bucket_path):
                     continue
                 for filename in os.listdir(bucket_path):
@@ -322,14 +316,14 @@ async def run_media_quality_checks(force: bool = False) -> Dict[str, int]:
                     if not os.path.isfile(file_path):
                         continue
                     sha = os.path.basename(filename)
-                    if (sha, subdir) not in known_shas:
+                    if sha not in known_shas:
                         stats["orphan_cache_files"] += 1
                         await _insert_issue(
                             db,
                             "cache_file",
                             sha,
                             "orphan_cache_file",
-                            {"path": file_path, "type": subdir},
+                            {"path": file_path, "bucket": bucket},
                         )
 
         await db.commit()

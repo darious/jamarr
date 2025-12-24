@@ -5,9 +5,9 @@ import json
 import time
 from app.db import get_db
 from app.scanner.tags import extract_tags
-from app.scanner.artwork import extract_and_save_artwork, download_and_save_artwork, cleanup_orphaned_artwork
+from app.scanner.artwork import extract_and_save_artwork, download_and_save_artwork, cleanup_orphaned_artwork, upsert_artwork_record, upsert_image_mapping
 from app.config import get_music_path
-from app.scanner.metadata import fetch_artist_metadata, fetch_track_credits
+from app.scanner.metadata import fetch_artist_metadata, fetch_track_credits, SPOTIFY_SCANNING_DISABLED
 import difflib
 import re
 from app.tidal import TidalClient, year_from_date
@@ -132,17 +132,16 @@ class Scanner:
             if not tags: return
 
             # Artwork
-            art_hash = await extract_and_save_artwork(path)
+            art_result = await extract_and_save_artwork(path)
             art_id = None
-            if art_hash:
-                async with db.execute("SELECT id FROM artwork WHERE sha1 = ?", (art_hash,)) as cursor:
-                    if row := await cursor.fetchone():
-                        art_id = row[0]
-                    else:
-                        await db.execute("INSERT INTO artwork (sha1, type) VALUES (?, ?)", (art_hash, 'album'))
-                        await db.commit()
-                        async with db.execute("SELECT last_insert_rowid()") as id_cursor:
-                            art_id = (await id_cursor.fetchone())[0]
+            if art_result:
+                art_id = await upsert_artwork_record(
+                    db,
+                    art_result.get("sha1"),
+                    meta=art_result.get("meta"),
+                )
+
+            mb_rg_id = tags.get("mb_release_group_id")
 
             # Upsert Track
             keys = ["path", "mtime", "title", "artist", "album", "album_artist", 
@@ -157,7 +156,7 @@ class Scanner:
                 tags.get("codec"), tags.get("sample_rate_hz"), tags.get("bit_depth"),
                 tags.get("bitrate"), tags.get("channels"), tags.get("label"),
                 tags.get("mb_artist_id"), tags.get("mb_album_artist_id"), 
-                tags.get("mb_track_id"), tags.get("mb_release_track_id"), tags.get("mb_release_id"), tags.get("mb_release_group_id"), art_id
+                tags.get("mb_track_id"), tags.get("mb_release_track_id"), tags.get("mb_release_id"), mb_rg_id, art_id
             ]
             
             placeholders = ", ".join(["?"] * len(keys))
@@ -169,6 +168,13 @@ class Scanner:
             
             if row: self.stats["updated"] += 1
             else: self.stats["added"] += 1
+
+            # Map artwork to album or track fallback
+            if art_id:
+                if mb_rg_id:
+                    await upsert_image_mapping(db, art_id, "album", mb_rg_id, "album")
+                else:
+                    await upsert_image_mapping(db, art_id, "track", track_id, "album")
 
             # --- Populate Normalized Tables from Tags ---
             
@@ -469,31 +475,16 @@ class Scanner:
             # 6. Prune Artwork (The big one)
             logger.info("Pruning orphaned artwork...")
             
-            # Get all used SHA1s
             used_shas = set()
-            
-            # From Tracks
-            async with db.execute("SELECT a.sha1 FROM tracks t JOIN artwork a ON t.art_id = a.id") as c:
+            async with db.execute("""
+                SELECT aw.sha1 FROM image_mapping im
+                JOIN artwork aw ON aw.id = im.artwork_id
+            """) as c:
                 used_shas.update([r[0] for r in await c.fetchall()])
-            # From Artists
-            async with db.execute("SELECT a.sha1 FROM artists t JOIN artwork a ON t.art_id = a.id") as c:
-                used_shas.update([r[0] for r in await c.fetchall()])
-            # From Albums
-            async with db.execute("SELECT a.sha1 FROM albums t JOIN artwork a ON t.art_id = a.id") as c:
-                used_shas.update([r[0] for r in await c.fetchall()])
-                
-            # Delete from DB if not used
-            await db.execute("DELETE FROM artwork WHERE sha1 NOT IN (SELECT sha1 FROM artwork WHERE sha1 IN (SELECT sha1 FROM artwork) AND sha1 IN (SELECT sha1 FROM artwork))") # Wait, easier:
-            
-            # Better: Select all artwork IDs, delete if not in used set? No, Artwork table is source of truth.
-            # Delete unused rows
-            # We can't easily pass a set to IN clause without placeholders.
-            
-            # Let's iterate Filesystem instead.
+
             art_paths = []
-            for subdir in ["artist", "album"]:
-                root = os.path.join(self.art_cache_path, subdir)
-                if not os.path.exists(root): continue
+            root = self.art_cache_path
+            if os.path.exists(root):
                 for folder in os.listdir(root):
                     folder_path = os.path.join(root, folder)
                     if not os.path.isdir(folder_path): continue
@@ -502,11 +493,6 @@ class Scanner:
             
             deleted_art = 0
             for path in art_paths:
-                # Filename (minus ext) is usually the hash?
-                # Actually, our `download_and_save_artwork` saves as cache/art/type/xx/hash.ext
-                # So filename without extension is NOT always the hash depending on naming?
-                # Wait, save_artwork uses `sha1`. So yes.
-                
                 filename = os.path.basename(path)
                 sha = os.path.splitext(filename)[0]
                 
@@ -518,15 +504,9 @@ class Scanner:
             
             logger.info(f"Deleted {deleted_art} orphaned artwork files.")
             
-            # Clean up DB rows now that files are gone (or just driven by used_shas)
-            # Delete any artwork row where SHA1 is not in used_shas
-            # Creating a temp table or passing massive list is hard.
-            # Easier: Delete unused rows based on LEFT JOINs.
             await db.execute("""
                 DELETE FROM artwork
-                WHERE id NOT IN (SELECT art_id FROM tracks WHERE art_id IS NOT NULL)
-                AND id NOT IN (SELECT art_id FROM artists WHERE art_id IS NOT NULL)
-                AND id NOT IN (SELECT art_id FROM albums WHERE art_id IS NOT NULL)
+                WHERE id NOT IN (SELECT artwork_id FROM image_mapping)
             """)
             await db.commit()
             
@@ -631,16 +611,17 @@ class Scanner:
                 if self.scan_logger: self.scan_logger.emit_progress(processed, total, f"Metadata: {current_name}")
 
                 if meta.get("image_url"):
-                     art_hash = await download_and_save_artwork(meta["image_url"], art_type='artist')
-                     if art_hash:
-                         # Get ID
-                         async with db.execute("SELECT id FROM artwork WHERE sha1 = ?", (art_hash,)) as cursor:
-                             if r := await cursor.fetchone(): art_id = r[0]
-                             else:
-                                 await db.execute("INSERT INTO artwork (sha1, type) VALUES (?, ?)", (art_hash, 'artist'))
-                                 await db.commit()
-                                 async with db.execute("SELECT last_insert_rowid()") as id_cursor:
-                                     art_id = (await id_cursor.fetchone())[0]
+                    art_download = await download_and_save_artwork(meta["image_url"], art_type='artistthumb')
+                    if art_download:
+                        art_id = await upsert_artwork_record(
+                            db,
+                            art_download.get("sha1"),
+                            meta=art_download.get("meta"),
+                            source=meta.get("image_source"),
+                            source_url=art_download.get("source_url") or meta.get("image_url"),
+                        )
+                        if art_id:
+                            await upsert_image_mapping(db, art_id, "artist", mbid, "artistthumb", meta.get("image_score"))
 
                 # Update DB
                 # Update Artists Table (Core Info)
@@ -689,14 +670,14 @@ class Scanner:
                 # 2. Top Tracks & Singles (optional)
                 # Always fetch for artists that have no existing top-track entries (new artists),
                 # otherwise only when refresh_top_tracks is True.
-                should_refresh_top_tracks = refresh_top_tracks
+                should_refresh_top_tracks = refresh_top_tracks and not SPOTIFY_SCANNING_DISABLED
                 if not should_refresh_top_tracks:
                     async with db.execute("SELECT COUNT(1) FROM tracks_top WHERE artist_mbid=?", (mbid,)) as c:
                         row = await c.fetchone()
                         if row and row[0] == 0:
-                            should_refresh_top_tracks = True
+                            should_refresh_top_tracks = not SPOTIFY_SCANNING_DISABLED
 
-                if should_refresh_top_tracks:
+                if should_refresh_top_tracks and not SPOTIFY_SCANNING_DISABLED:
                     from app.scanner.metadata import match_track_to_library
                     
                     # Clear existing top tracks/singles for this artist
