@@ -24,4 +24,4 @@ volumes:
     driver_opts:
       type: "nfs"
       o: "addr=192.168.1.201,nolock,soft,rw"
-      device: ":/mnt/tank/music/testing"
+      device: ":/mnt/tank/music/library"
