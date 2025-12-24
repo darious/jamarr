@@ -11,6 +11,7 @@
   import { goto, invalidateAll } from "$app/navigation";
   import { addToQueue, loadQueueFromServer, setQueue } from "$stores/player";
   import { browser } from "$app/environment";
+  import ColorThief from "colorthief";
 
   export let data: {
     name: string;
@@ -31,6 +32,8 @@
   let refreshingSingles = false;
   let message = "";
   let lastKey = "";
+  let accentColor: [number, number, number] | null = null;
+  let headerRef: HTMLDivElement;
 
   // Missing Albums State
   let missingAlbums: MissingAlbum[] = [];
@@ -106,6 +109,36 @@
   if (browser && !lastKey) {
     lastKey = data.canonicalName || data.name;
     void refreshTracks();
+  }
+
+  // Extract accent color
+  $: if (browser && artist) {
+    const bgUrl = artist.background_sha1
+      ? `/art/file/${artist.background_sha1}`
+      : artist.background_art_id
+        ? `/art/${artist.background_art_id}`
+        : artist.art_sha1
+          ? `/art/file/${artist.art_sha1}`
+          : artist.art_id
+            ? `/art/${artist.art_id}`
+            : null;
+
+    if (bgUrl) {
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      img.src = bgUrl;
+      img.onload = () => {
+        try {
+          const thief = new ColorThief();
+          accentColor = thief.getColor(img);
+        } catch (e) {
+          console.warn("Color extraction failed", e);
+          accentColor = null;
+        }
+      };
+    } else {
+      accentColor = null;
+    }
   }
 
   const formatDuration = (seconds?: number | null) => {
@@ -203,7 +236,7 @@
       .sort((a, b) => {
         const dateA = a.date || "";
         const dateB = b.date || "";
-        return dateA.localeCompare(dateB);
+        return dateA.localeCompare(dateB); // Oldest first
       });
   })();
 
@@ -219,7 +252,9 @@
     });
   })();
 
-  $: mainAlbums = data.albums.filter((a) => !a.type || a.type === "main");
+  $: mainAlbums = data.albums
+    .filter((a) => !a.type || a.type === "main")
+    .sort((a, b) => (b.year || "").localeCompare(a.year || "")); // Newest first
 
   $: appearsOnAlbums = data.albums.filter((a) => a.type === "appears_on");
 
@@ -228,14 +263,13 @@
     message = "Requesting fresh metadata...";
     try {
       if (artist?.mbid) {
-        // "Replace everything except missing albums"
-        // bioOnly=true fetches Bio + Images + Links, but skips Release Groups (Albums)
-        // missingOnly=false forces a refresh even if data exists
         await triggerMetadataScan({
           mbidFilter: artist.mbid,
-          bioOnly: true,
           missingOnly: false,
-          linksOnly: false,
+          fetchBio: true,
+          fetchLinks: true,
+          fetchArtwork: true,
+          fetchMetadata: true,
         });
       } else {
         await refreshArtistMetadata(data.canonicalName || data.name);
@@ -251,23 +285,6 @@
       message = "Failed to refresh metadata.";
     } finally {
       refreshing = false;
-    }
-  }
-
-  async function refreshSingles() {
-    refreshingSingles = true;
-    try {
-      await refreshArtistSingles(data.canonicalName || data.name);
-      message = "Singles updated. Reloading...";
-      await invalidateAll();
-      message = "Singles updated successfully!";
-      setTimeout(() => {
-        if (message === "Singles updated successfully!") message = "";
-      }, 3000);
-    } catch (e) {
-      message = "Failed to refresh singles.";
-    } finally {
-      refreshingSingles = false;
     }
   }
 
@@ -328,434 +345,475 @@
   }
 
   function handleImageError(e: Event) {
-    (e.currentTarget as HTMLImageElement).src = "/assets/logo.png";
+    (e.currentTarget as HTMLImageElement).src =
+      "/assets/default-artist-placeholder.svg";
   }
 </script>
 
-<div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-  <div
-    class="absolute inset-0 bg-cover bg-center blur-3xl opacity-30 scale-110"
-    style={`background-image:url('${artist?.art_sha1 ? `/art/file/${artist.art_sha1}` : artist?.art_id ? `/art/${artist.art_id}` : "/assets/default-artist.svg"}')`}
-  ></div>
-  <div
-    class="absolute inset-0 bg-gradient-to-b from-surface-900/50 via-surface-900/80 to-surface-900"
-  ></div>
-</div>
-
-<section
-  class="relative z-10 mx-auto flex w-full max-w-[1700px] flex-col gap-10 px-8 py-10"
+<div
+  class="min-h-screen bg-surface-900 pb-20 relative overflow-hidden"
+  style={accentColor ? `--accent-color: ${accentColor.join(",")}` : ""}
 >
-  <div class="grid gap-8 md:grid-cols-[300px,1fr] items-start">
+  <!-- Global Blurred Background -->
+  <div class="fixed inset-0 z-0 pointer-events-none">
     <div
-      class="relative aspect-square w-full max-w-[300px] rounded-2xl overflow-hidden shadow-2xl"
+      class="absolute inset-0 bg-cover bg-center blur-[100px] opacity-30 scale-110 saturate-[1.5]"
+      style={`background-image:url('${
+        artist?.background_sha1
+          ? `/art/file/${artist.background_sha1}`
+          : artist?.background_art_id
+            ? `/art/${artist.background_art_id}`
+            : artist?.art_sha1
+              ? `/art/file/${artist.art_sha1}`
+              : artist?.art_id
+                ? `/art/${artist.art_id}`
+                : "/assets/default-artist-placeholder.svg"
+      }')`}
+    ></div>
+    <div class="absolute inset-0 bg-surface-900/80"></div>
+  </div>
+
+  <!-- Hero Banner -->
+  <div
+    class="relative w-full h-[40vh] min-h-[350px] overflow-hidden group z-10"
+  >
+    <!-- Background Image Layers -->
+
+    <!-- Background Image Layers -->
+
+    <!-- Mask Wrapper (Static - Keeps the fade fixed) -->
+    <div
+      class="absolute inset-0"
+      style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);"
     >
-      <img
-        class="h-full w-full object-cover"
-        src={artist?.art_sha1
-          ? `/art/file/${artist.art_sha1}`
-          : artist?.art_id
-            ? `/art/${artist.art_id}`
-            : "/assets/default-artist.svg"}
-        alt={artist?.name ?? data.name}
-      />
+      <!-- Sharp Top Layer (Fades into Global Background) -->
+      <div
+        class="absolute inset-0 bg-cover bg-top transition-transform duration-1000 scale-105 group-hover:scale-100"
+        style={`background-image:url('${
+          artist?.background_sha1
+            ? `/art/file/${artist.background_sha1}`
+            : artist?.background_art_id
+              ? `/art/${artist.background_art_id}`
+              : artist?.art_sha1
+                ? `/art/file/${artist.art_sha1}`
+                : artist?.art_id
+                  ? `/art/${artist.art_id}`
+                  : "/assets/default-artist-placeholder.svg"
+        }');`}
+      >
+        <!-- Gradient Fade to Bottom (Start of merge) - Inside scaling div to match atmosphere -->
+        <div
+          class="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-surface-900/40"
+        ></div>
+      </div>
     </div>
 
-    <div class="space-y-6">
-      <div class="space-y-2">
-        <p class="pill w-max bg-white/10 text-white/70 backdrop-blur-md">
-          Artist
-        </p>
-        <h1 class="text-4xl md:text-6xl font-bold tracking-tight">
-          {artist?.name ?? data.name}
-        </h1>
-      </div>
+    <!-- Bottom Gradient to Body Color (Seamless merge) -->
+    <div
+      class="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-surface-900 via-surface-900/60 to-transparent"
+    ></div>
 
-      <div class="flex flex-wrap gap-2">
-        {#if artist?.homepage}
-          <a
-            class="pill hover:bg-white/15"
-            target="_blank"
-            href={artist.homepage}
+    <!-- Hero Content -->
+    <div class="absolute inset-0 flex items-end p-8 md:p-12 pb-16">
+      <div
+        class="w-full max-w-[1800px] mx-auto grid md:grid-cols-[1fr,auto] gap-8 items-end"
+      >
+        <div class="space-y-4 w-full">
+          <h1
+            class="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight text-white drop-shadow-xl"
           >
-            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
-            </svg>
-            Homepage
-          </a>
-        {/if}
-        {#if artist?.musicbrainz_url}
-          <a
-            class="pill hover:bg-white/15"
-            target="_blank"
-            href={artist.musicbrainz_url}
+            {artist?.name ?? data.name}
+          </h1>
+          <div
+            class="glass-surface p-4 rounded-xl border border-white/5 bg-black/20 backdrop-blur-md max-w-4xl max-h-[120px] overflow-y-auto custom-scrollbar"
           >
-            <img
-              src="/assets/logo-musicbrainz.svg"
-              alt="MusicBrainz"
-              class="h-4 w-4"
-            /> MusicBrainz
-          </a>
-        {/if}
-        {#if artist?.wikipedia_url}
-          <a
-            class="pill hover:bg-white/15"
-            target="_blank"
-            href={artist.wikipedia_url}
-          >
-            <img
-              src="/assets/logo-wikipedia.svg"
-              alt="Wikipedia"
-              class="h-4 w-4"
-            /> Wiki
-          </a>
-        {/if}
-        {#if artist?.tidal_url}
-          <a
-            class="pill hover:bg-white/15"
-            target="_blank"
-            href={artist.tidal_url}
-          >
-            <img src="/assets/logo-tidal.png" alt="Tidal" class="h-4 w-4" /> Tidal
-          </a>
-        {/if}
+            <p
+              class="text-base text-white/90 leading-relaxed whitespace-pre-wrap"
+            >
+              {artist?.bio || "No biography available yet."}
+            </p>
+          </div>
+        </div>
 
-        {#if artist?.qobuz_url}
-          <a
-            class="pill hover:bg-white/15"
-            target="_blank"
-            href={artist.qobuz_url}
-          >
-            <img src="/assets/logo-qobuz.png" alt="Qobuz" class="h-4 w-4" /> Qobuz
-          </a>
-        {/if}
-        {#if artist?.spotify_url}
-          <a
-            class="pill hover:bg-white/15"
-            target="_blank"
-            href={artist.spotify_url}
-          >
-            <img src="/assets/logo-spotify.svg" alt="Spotify" class="h-4 w-4" />
-            Spotify
-          </a>
-        {/if}
-      </div>
+        <!-- Links (Right Side) -->
+        <div class="flex flex-col items-end gap-3">
+          <div class="flex flex-wrap justify-end gap-2">
+            {#if artist?.homepage}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:variant-filled-primary transition-all"
+                target="_blank"
+                href={artist.homepage}
+                title="Homepage"
+              >
+                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
+                  ><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" /></svg
+                >
+              </a>
+            {/if}
+            {#if artist?.musicbrainz_url}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#BA478F] hover:bg-[#BA478F] hover:text-white transition-all border border-transparent"
+                target="_blank"
+                href={artist.musicbrainz_url}
+                title="MusicBrainz"
+              >
+                <img
+                  src="/assets/logo-musicbrainz.svg"
+                  alt="MB"
+                  class="h-5 w-5"
+                />
+              </a>
+            {/if}
+            {#if artist?.tidal_url}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-black hover:bg-black hover:text-white transition-all border border-transparent"
+                target="_blank"
+                href={artist.tidal_url}
+                title="Tidal"
+              >
+                <img src="/assets/logo-tidal.png" alt="Tidal" class="h-5 w-5" />
+              </a>
+            {/if}
+            {#if artist?.qobuz_url}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-black hover:bg-black hover:text-white transition-all border border-transparent"
+                target="_blank"
+                href={artist.qobuz_url}
+                title="Qobuz"
+              >
+                <img src="/assets/logo-qobuz.png" alt="Qobuz" class="h-5 w-5" />
+              </a>
+            {/if}
+            {#if artist?.spotify_url}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#1DB954] hover:bg-[#1DB954] hover:text-white transition-all border border-transparent"
+                target="_blank"
+                href={artist.spotify_url}
+                title="Spotify"
+              >
+                <img
+                  src="/assets/logo-spotify.svg"
+                  alt="Spotify"
+                  class="h-5 w-5"
+                />
+              </a>
+            {/if}
+          </div>
 
-      <div class="flex items-center gap-6 text-sm text-white/60">
-        <a
-          href="#albums"
-          class="hover:text-white hover:underline transition-colors"
-          >{data.albums.length} Albums</a
-        >
-        <a
-          href="#missing-albums"
-          class="hover:text-white hover:underline transition-colors"
-          >{missingAlbums.length} Missing</a
-        >
-        <span>{loadingTracks ? "Loading…" : tracks.length} Tracks</span>
-        <button
-          class="btn btn-ghost btn-sm"
-          on:click={refreshMeta}
-          disabled={refreshing}
-        >
-          {refreshing ? "Refreshing…" : "Refresh Metadata"}
-        </button>
-        <button
-          class="btn btn-ghost btn-sm"
-          on:click={scanMissing}
-          disabled={scanningMissing}
-        >
-          {scanningMissing ? "Scanning..." : "Check Missing"}
-        </button>
-      </div>
-      {#if message}
-        <p class="text-sm text-white/60">{message}</p>
-      {/if}
+          <div
+            class="flex gap-2 text-sm text-white/70 font-medium bg-black/30 backdrop-blur-md px-4 py-2 rounded-full border border-white/5"
+          >
+            <span>{data.albums.length} Albums</span>
+            <span class="opacity-50">•</span>
+            <span>{tracks.length} Tracks</span>
+          </div>
 
-      <div class="prose prose-invert max-w-none">
-        <p
-          class="whitespace-pre-line text-white/80 leading-relaxed line-clamp-[10] hover:line-clamp-none transition-all"
-        >
-          {artist?.bio || "No biography available yet."}
-        </p>
+          <div class="flex gap-2">
+            <button
+              class="btn btn-sm variant-ghost-surface backdrop-blur-md"
+              on:click={refreshMeta}
+              disabled={refreshing}
+            >
+              {refreshing ? "Refreshing..." : "Refresh Metadata"}
+            </button>
+            <button
+              class="btn btn-sm variant-ghost-surface backdrop-blur-md"
+              on:click={scanMissing}
+              disabled={scanningMissing}
+            >
+              {scanningMissing ? "Scanning..." : "Check Missing"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="grid gap-8 md:grid-cols-3 items-start">
-    <div class="space-y-4 h-full flex flex-col">
-      <div class="section-head">
-        <div>
-          <p class="text-sm uppercase tracking-wide text-white/60">Essential</p>
-          <h3 class="text-xl font-semibold">Top tracks</h3>
-        </div>
-        <button
-          class="btn btn-ghost btn-sm"
-          on:click={playAllTopTracks}
-          title="Play All Top Tracks"
-        >
-          ▶ Play All
-        </button>
+  <main
+    class="relative z-10 max-w-[1800px] mx-auto px-6 md:px-12 mt-8 space-y-16"
+  >
+    <!-- Albums Section -->
+    <section>
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-3xl font-bold text-white drop-shadow-md">Albums</h2>
       </div>
-      <div class="glass-panel flex-1 min-h-0 overflow-hidden flex flex-col">
-        <div class="overflow-y-auto max-h-[360px] divide-y divide-white/5">
-          {#if loadingTracks}
-            <div class="h-24 animate-pulse"></div>
-          {:else if displayedTopTracks.length === 0}
-            <div class="p-4 text-white/60">No tracks yet.</div>
-          {:else}
-            {#each displayedTopTracks as track, idx}
-              <div
-                class="group flex items-center gap-4 px-4 py-3 hover:bg-white/5 transition-colors"
-              >
-                <div class="w-8 text-center text-xs text-white/50">
-                  {idx + 1}
-                </div>
 
-                <div
-                  class="h-12 w-12 flex-shrink-0 rounded bg-white/10 overflow-hidden relative"
+      <div
+        class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+      >
+        {#each mainAlbums as album}
+          <article class="group flex flex-col gap-4">
+            <button
+              class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
+              on:click={() =>
+                goto(
+                  `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
+                )}
+            >
+              <img
+                src={album.art_sha1
+                  ? `/art/file/${album.art_sha1}`
+                  : album.art_id
+                    ? `/art/${album.art_id}`
+                    : "/assets/default-album-placeholder.svg"}
+                alt={album.album}
+                class="h-full w-full object-cover"
+                loading="lazy"
+              />
+              <!-- Play Overlay -->
+              <div
+                class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
+              >
+                <button
+                  class="btn-icon btn-icon-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                  title="Play"
+                  on:click|stopPropagation={() => playAlbum(album)}
                 >
-                  {#if track.id && track.id > 0}
-                    <img
-                      src={(() => {
-                        const alb = data.albums.find(
-                          (a) => a.album === track.album,
-                        );
-                        if (alb?.art_sha1) return `/art/file/${alb.art_sha1}`;
-                        if (alb?.art_id) return `/art/${alb.art_id}`;
-                        return "/assets/default-artist.svg"; // Fallback
-                      })()}
-                      alt={track.album}
-                      class="h-full w-full object-cover"
-                      on:error={handleImageError}
-                    />
-                    <div
-                      class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  <svg
+                    class="h-8 w-8 ml-1"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                  >
+                </button>
+                <button
+                  class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                  title="Add to Queue"
+                  on:click|stopPropagation={() => addAlbumToQueue(album)}
+                >
+                  <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
+                    ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
+                  >
+                </button>
+              </div>
+
+              <!-- Hi-Res Badge -->
+              {#if album.is_hires}
+                <img
+                  src="/assets/logo-hires.png"
+                  class="absolute bottom-3 right-3 h-6 w-auto drop-shadow-lg"
+                  alt="Hi-Res"
+                />
+              {/if}
+            </button>
+            <div class="space-y-1">
+              <h3
+                class="text-base font-bold text-white leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
+                title={album.album}
+              >
+                {album.album}
+              </h3>
+              <p class="text-sm text-white/50 font-medium">
+                {album.year ? album.year.substring(0, 4) : "Unknown"}
+                <span class="mx-1 opacity-50">•</span>
+                {album.track_count} tracks
+              </p>
+            </div>
+          </article>
+        {/each}
+      </div>
+    </section>
+
+    <!-- Bottom Grids -->
+    <div class="grid lg:grid-cols-2 xl:grid-cols-3 gap-8 items-start">
+      <!-- Top Tracks -->
+      <section
+        class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
+      >
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-bold">Top Tracks</h3>
+          <button
+            class="btn btn-sm variant-ghost-surface"
+            on:click={playAllTopTracks}>Play All</button
+          >
+        </div>
+        <div
+          class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
+        >
+          {#each displayedTopTracks as track, i}
+            <div
+              class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
+            >
+              <span
+                class="w-6 text-center text-xs text-white/40 font-mono flex-shrink-0"
+                >{i + 1}</span
+              >
+              <div class="relative w-10 h-10 flex-shrink-0">
+                <img
+                  src={(() => {
+                    const alb = data.albums.find(
+                      (a) => a.album === track.album,
+                    );
+                    if (alb?.art_sha1) return `/art/file/${alb.art_sha1}`;
+                    if (alb?.art_id) return `/art/${alb.art_id}`;
+                    return "/assets/default-artist-placeholder.svg";
+                  })()}
+                  class="w-full h-full rounded object-cover bg-surface-700"
+                  alt="Art"
+                />
+                <button
+                  class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                  on:click={() => track.id > 0 && playTrackById(track.id)}
+                >
+                  <svg
+                    class="w-5 h-5 text-white"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                  >
+                </button>
+              </div>
+
+              <div class="flex-1 min-w-0">
+                <p
+                  class={`text-sm font-medium truncate ${track.id > 0 ? "text-white" : "text-white/40"}`}
+                >
+                  {track.title}
+                </p>
+                <div class="flex items-center gap-2 text-xs text-white/40">
+                  <a
+                    href={`/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(track.album)}`}
+                    class="hover:text-white hover:underline truncate max-w-[150px]"
+                    >{track.album}</a
+                  >
+                  {#if track.codec}
+                    <span class="opacity-30">•</span>
+                    <span class="uppercase">{track.codec}</span>
+                  {/if}
+                  {#if track.bit_depth && track.sample_rate_hz}
+                    <span class="opacity-30">•</span>
+                    <span>{track.bit_depth}/{track.sample_rate_hz / 1000}</span>
+                  {/if}
+                </div>
+              </div>
+
+              {#if track.id > 0}
+                <button
+                  class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Add to Queue"
+                  on:click={() => addTrackToQueue(track.id)}
+                >
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"
+                    ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
+                  >
+                </button>
+              {/if}
+              <span
+                class="text-xs text-white/30 font-mono w-10 text-right flex-shrink-0"
+                >{formatDuration(track.duration_seconds)}</span
+              >
+            </div>
+          {/each}
+        </div>
+      </section>
+
+      <!-- Singles -->
+      <section
+        class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
+      >
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-bold">Singles</h3>
+          <button
+            class="btn btn-sm variant-ghost-surface"
+            on:click={playAllSingles}>Play All</button
+          >
+        </div>
+        <div
+          class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
+        >
+          {#if displayedSingles.length === 0}
+            <p class="text-white/40 text-sm p-4 text-center">
+              No singles found.
+            </p>
+          {:else}
+            {#each displayedSingles as single}
+              <div
+                class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
+              >
+                <div class="relative w-10 h-10 flex-shrink-0">
+                  <img
+                    src={single.art_sha1
+                      ? `/art/file/${single.art_sha1}`
+                      : single.art_id
+                        ? `/art/${single.art_id}`
+                        : "/assets/default-artist-placeholder.svg"}
+                    class="w-full h-full rounded object-cover bg-surface-700"
+                    alt="Art"
+                  />
+                  {#if single.localId}
+                    <button
+                      class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                      on:click={() => {
+                        if (
+                          single.tracksToPlay &&
+                          single.tracksToPlay.length > 0
+                        )
+                          setQueue(single.tracksToPlay, 0);
+                      }}
                     >
-                      <button
-                        class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
-                        title="Play"
-                        on:click|stopPropagation={() => playTrackById(track.id)}
+                      <svg
+                        class="w-5 h-5 text-white"
+                        fill="currentColor"
+                        viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
                       >
-                        <svg
-                          class="h-5 w-5"
-                          fill="currentColor"
-                          viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
-                        >
-                      </button>
-                    </div>
-                  {:else}
-                    <div
-                      class="h-full w-full flex items-center justify-center bg-white/5"
-                    >
-                      <span class="text-white/10 text-xs">•</span>
-                    </div>
+                    </button>
                   {/if}
                 </div>
 
                 <div class="flex-1 min-w-0">
                   <p
-                    class={`truncate text-sm font-semibold ${track.id > 0 ? "text-white/90 group-hover:text-white" : "text-white/30 line-through"}`}
-                  >
-                    {track.title}
-                  </p>
-                  <div
-                    class={`flex items-center gap-2 text-xs mt-0.5 ${track.id > 0 ? "text-white/50" : "text-white/20 line-through"}`}
-                  >
-                    <a
-                      href={`/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(track.album)}`}
-                      class="hover:text-white hover:underline"
-                      on:click|stopPropagation
-                    >
-                      {track.album}
-                    </a>
-                    {#if track.codec}
-                      <span class="text-white/30">•</span>
-                      <span class="uppercase">{track.codec}</span>
-                    {/if}
-                    {#if track.bit_depth && track.sample_rate_hz}
-                      <span class="text-white/30">•</span>
-                      <span
-                        >{track.bit_depth}bit / {track.sample_rate_hz /
-                          1000}kHz</span
-                      >
-                    {/if}
-                  </div>
-                </div>
-
-                <div class="flex items-center gap-4">
-                  {#if track.id && track.id > 0}
-                    <button
-                      class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Add to Queue"
-                      on:click|stopPropagation={() => addTrackToQueue(track.id)}
-                    >
-                      <svg
-                        class="h-4 w-4"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
-                      >
-                    </button>
-                  {/if}
-                  <div
-                    class="w-14 text-right text-xs text-white/60 font-medium tabular-nums"
-                  >
-                    {formatDuration(track.duration_seconds)}
-                  </div>
-                </div>
-              </div>
-            {/each}
-          {/if}
-        </div>
-      </div>
-    </div>
-
-    <div class="space-y-4 h-full flex flex-col">
-      <div class="section-head">
-        <div>
-          <p class="text-sm uppercase tracking-wide text-white/60">Releases</p>
-          <h3 class="text-xl font-semibold">Singles</h3>
-        </div>
-        <button
-          class="btn btn-ghost btn-sm"
-          on:click={playAllSingles}
-          title="Play All Singles"
-        >
-          ▶ Play All
-        </button>
-      </div>
-      <div class="glass-panel flex-1 min-h-0 overflow-hidden flex flex-col">
-        <div class="overflow-y-auto max-h-[360px] divide-y divide-white/5">
-          {#if artist?.singles?.length}
-            {#each displayedSingles as single}
-              <div
-                class="group flex items-center gap-4 px-4 py-3 hover:bg-white/5 transition-colors"
-              >
-                <div
-                  class="h-12 w-12 flex-shrink-0 rounded bg-white/10 overflow-hidden relative"
-                >
-                  {#if single.art_sha1 || single.art_id}
-                    <img
-                      src={single.art_sha1
-                        ? `/art/file/${single.art_sha1}`
-                        : `/art/${single.art_id}`}
-                      alt={single.title}
-                      class="h-full w-full object-cover"
-                    />
-                    {#if single.localId}
-                      <div
-                        class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <button
-                          class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
-                          title="Play"
-                          on:click|stopPropagation={() => {
-                            if (
-                              single.tracksToPlay &&
-                              single.tracksToPlay.length > 0
-                            ) {
-                              setQueue(single.tracksToPlay, 0);
-                            }
-                          }}
-                        >
-                          <svg
-                            class="h-5 w-5"
-                            fill="currentColor"
-                            viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
-                          >
-                        </button>
-                      </div>
-                    {/if}
-                  {:else}
-                    <div
-                      class="h-full w-full flex items-center justify-center bg-white/5"
-                    >
-                      <span class="text-white/10 text-xs">•</span>
-                    </div>
-                  {/if}
-                </div>
-
-                <div class="flex-1 min-w-0">
-                  <button
-                    class={`truncate text-sm font-semibold text-left w-full ${single.localId ? "text-white/90 group-hover:text-white" : "text-white/30 line-through"}`}
-                    disabled={!single.localId}
-                    on:click={() =>
-                      single.localId &&
-                      goto(
-                        `/album/${encodeURIComponent(data.name)}/${encodeURIComponent(single.title)}`,
-                      )}
+                    class={`text-sm font-medium truncate ${single.localId ? "text-white" : "text-white/40"}`}
                   >
                     {single.title}
-                  </button>
-                  <div
-                    class={`flex items-center gap-2 text-xs mt-0.5 ${single.localId ? "text-white/50" : "text-white/20 line-through"}`}
-                  >
-                    {#if single.localId}
-                      {#if single.codec}
-                        <span class="uppercase">{single.codec}</span>
-                        <span class="text-white/30">•</span>
-                      {/if}
-                      {#if single.bit_depth && single.sample_rate_hz}
-                        <span
-                          >{single.bit_depth}bit / {single.sample_rate_hz /
-                            1000}kHz</span
-                        >
-                        <span class="text-white/30">•</span>
-                      {/if}
+                  </p>
+                  <div class="flex items-center gap-2 text-xs text-white/40">
+                    <span>{single.date?.substring(0, 4) || "Unknown"}</span>
+                    {#if single.codec}
+                      <span class="opacity-30">•</span>
+                      <span class="uppercase">{single.codec}</span>
                     {/if}
-                    <span
-                      >{single.date
-                        ? single.date.substring(0, 4)
-                        : "Unknown"}</span
-                    >
+                    {#if single.bit_depth && single.sample_rate_hz}
+                      <span class="opacity-30">•</span>
+                      <span
+                        >{single.bit_depth}/{single.sample_rate_hz / 1000}</span
+                      >
+                    {/if}
                   </div>
                 </div>
 
-                <div class="flex items-center gap-4">
-                  {#if single.localId}
-                    <button
-                      class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Add to Queue"
-                      on:click|stopPropagation={() => {
-                        if (
-                          single.tracksToPlay &&
-                          single.tracksToPlay.length > 0
-                        ) {
-                          addToQueue(single.tracksToPlay);
-                        }
-                      }}
+                {#if single.localId && single.tracksToPlay && single.tracksToPlay.length > 0}
+                  <button
+                    class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Add to Queue"
+                    on:click={() => addToQueue(single.tracksToPlay)}
+                  >
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"
+                      ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
                     >
-                      <svg
-                        class="h-4 w-4"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
-                      >
-                    </button>
-                  {/if}
-                </div>
+                  </button>
+                {/if}
               </div>
             {/each}
-          {:else}
-            <div class="p-4 text-white/60">No singles recorded.</div>
           {/if}
         </div>
-      </div>
-    </div>
+      </section>
 
-    <div class="space-y-4 h-full flex flex-col">
-      <div class="section-head">
-        <div>
-          <p class="text-sm uppercase tracking-wide text-white/60">Discovery</p>
-          <h3 class="text-xl font-semibold">Similar artists</h3>
+      <!-- Similar Artists -->
+      <section
+        class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
+      >
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-bold">Similar Artists</h3>
         </div>
-      </div>
-      <div class="glass-panel flex-1 min-h-0 overflow-hidden flex flex-col">
-        <div class="overflow-y-auto max-h-[360px] divide-y divide-white/5">
-          {#if artist?.similar_artists?.length}
+        <div
+          class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
+        >
+          {#if displayedSimilarArtists.length === 0}
+            <p class="text-white/40 text-sm p-4 text-center">
+              No similar artists found.
+            </p>
+          {:else}
             {#each displayedSimilarArtists as sim}
               <button
-                class="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-white/5 transition-colors"
+                class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
                 on:click={() => goto(`/artist/${encodeURIComponent(sim.name)}`)}
               >
                 {#if sim.art_sha1 || sim.art_id}
@@ -763,255 +821,116 @@
                     src={sim.art_sha1
                       ? `/art/file/${sim.art_sha1}`
                       : `/art/${sim.art_id}`}
+                    class="w-10 h-10 rounded-full object-cover bg-surface-700"
                     alt={sim.name}
-                    class="h-12 w-12 rounded-full object-cover"
                   />
                 {:else}
                   <div
-                    class="h-12 w-12 rounded-full bg-white/10 text-center text-sm font-semibold leading-[3rem]"
+                    class="w-10 h-10 rounded-full bg-surface-700 flex items-center justify-center text-xs font-bold text-white/50"
                   >
-                    {sim.name ? sim.name.charAt(0).toUpperCase() : "?"}
+                    ?
                   </div>
                 {/if}
-                <div class="truncate text-sm font-semibold">{sim.name}</div>
+                <span
+                  class="text-sm font-medium text-white group-hover:text-primary-400 transition-colors"
+                  >{sim.name}</span
+                >
               </button>
             {/each}
-          {:else}
-            <div class="p-4 text-white/60">No similar artists recorded.</div>
           {/if}
         </div>
-      </div>
-    </div>
-  </div>
-
-  {#if mainAlbums.length > 0}
-    <div class="section-head" id="albums">
-      <div>
-        <p class="text-sm uppercase tracking-wide text-white/60">Library</p>
-        <h3 class="text-xl font-semibold">Albums</h3>
-      </div>
-    </div>
-    <div
-      class="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]"
-    >
-      {#each mainAlbums as album}
-        <article class="grid-card flex flex-col gap-3">
-          <button
-            class="group relative aspect-square overflow-hidden rounded-2xl"
-            on:click={() =>
-              goto(
-                `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-              )}
-          >
-            <img
-              src={album.art_sha1
-                ? `/art/file/${album.art_sha1}`
-                : album.art_id
-                  ? `/art/${album.art_id}`
-                  : "/assets/logo.png"}
-              alt={album.album}
-              class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-            />
-            {#if album.is_hires}
-              <img
-                src="/assets/logo-hires.png"
-                class="absolute bottom-2 right-2 h-8 w-8"
-                alt="Hi-res"
-              />
-            {/if}
-            <div
-              class="absolute right-2 top-2 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100"
-            >
-              <button
-                class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
-                title="Play"
-                on:click|stopPropagation={() => playAlbum(album)}
-              >
-                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
-                  ><path d="M8 5v14l11-7z" /></svg
-                >
-              </button>
-              <button
-                class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
-                title="Add to queue"
-                on:click|stopPropagation={() => addAlbumToQueue(album)}
-              >
-                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
-                  ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
-                >
-              </button>
-            </div>
-          </button>
-          <div class="space-y-1">
-            <p class="text-base font-semibold line-clamp-1">{album.album}</p>
-            <p class="text-xs text-white/60">
-              {album.year ? album.year.substring(0, 4) : "—"} • {album.track_count ||
-                0} tracks
-            </p>
-          </div>
-        </article>
-      {/each}
-    </div>
-  {/if}
-
-  {#if appearsOnAlbums.length > 0}
-    <div class="section-head mt-10">
-      <div>
-        <p class="text-sm uppercase tracking-wide text-white/60">Features</p>
-        <h3 class="text-xl font-semibold">Appears On</h3>
-      </div>
-    </div>
-    <div
-      class="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]"
-    >
-      {#each appearsOnAlbums as album}
-        <article class="grid-card flex flex-col gap-3">
-          <button
-            class="group relative aspect-square overflow-hidden rounded-2xl"
-            on:click={() =>
-              goto(
-                `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-              )}
-          >
-            <img
-              src={album.art_sha1
-                ? `/art/file/${album.art_sha1}`
-                : album.art_id
-                  ? `/art/${album.art_id}`
-                  : "/assets/logo.png"}
-              alt={album.album}
-              class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-            />
-            {#if album.is_hires}
-              <img
-                src="/assets/logo-hires.png"
-                class="absolute bottom-2 right-2 h-8 w-8"
-                alt="Hi-res"
-              />
-            {/if}
-            <div
-              class="absolute right-2 top-2 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100"
-            >
-              <button
-                class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
-                title="Play"
-                on:click|stopPropagation={() => playAlbum(album)}
-              >
-                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
-                  ><path d="M8 5v14l11-7z" /></svg
-                >
-              </button>
-              <button
-                class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
-                title="Add to queue"
-                on:click|stopPropagation={() => addAlbumToQueue(album)}
-              >
-                <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
-                  ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
-                >
-              </button>
-            </div>
-          </button>
-          <div class="space-y-1">
-            <p class="text-base font-semibold line-clamp-1">{album.album}</p>
-            <p class="text-xs text-white/60">
-              {album.year ? album.year.substring(0, 4) : "—"} • {album.track_count ||
-                0} tracks
-            </p>
-          </div>
-        </article>
-      {/each}
-    </div>
-  {/if}
-
-  {#if missingAlbums.length > 0}
-    <div class="section-head mt-10" id="missing-albums">
-      <div>
-        <p class="text-sm uppercase tracking-wide text-white/60">Discovery</p>
-        <h3 class="text-xl font-semibold">Missing Albums</h3>
-      </div>
+      </section>
     </div>
 
-    <div class="glass-panel overflow-hidden">
-      <table class="w-full text-left text-sm">
-        <thead
-          class="bg-white/5 text-white/40 uppercase text-xs tracking-wider font-medium"
+    {#if missingAlbums.length > 0}
+      <section class="pb-10">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-2xl font-bold text-white/80">Missing Albums</h2>
+        </div>
+        <div
+          class="glass-surface rounded-2xl overflow-hidden border border-white/5 bg-surface-900/40 backdrop-blur-xl"
         >
-          <tr>
-            <th class="px-4 py-2">Album</th>
-            <th class="px-4 py-2 w-32">Released</th>
-            <th class="px-2 py-2 w-10 text-center" title="MusicBrainz">MB</th>
-            <th class="px-2 py-2 w-10 text-center" title="Tidal">Ti</th>
-            <th class="px-2 py-2 w-10 text-center" title="Qobuz">Qo</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-white/5">
-          {#each missingAlbums.sort( (a, b) => (b.release_date || "").localeCompare(a.release_date || ""), ) as album}
-            <tr class="group hover:bg-white/5 transition-colors">
-              <td class="px-4 py-2 font-medium text-white/90">
-                {album.title}
-              </td>
-              <td class="px-4 py-2 text-white/60">
-                {album.release_date || "—"}
-              </td>
-
-              <!-- MusicBrainz -->
-              <td class="px-2 py-2 text-center">
-                {#if album.musicbrainz_url}
-                  <a
-                    href={album.musicbrainz_url}
-                    target="_blank"
-                    class="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 transition-colors mx-auto text-white/60 hover:text-white"
-                    title="Open in MusicBrainz"
+          <table class="w-full text-left text-sm whitespace-nowrap">
+            <thead
+              class="uppercase tracking-wider border-b border-white/10 text-white/40 text-xs bg-white/5"
+            >
+              <tr>
+                <th class="px-6 py-4">Album</th>
+                <th class="px-6 py-4">Released</th>
+                <th class="px-6 py-4 text-center">Links</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5">
+              {#each missingAlbums as album}
+                <tr class="hover:bg-white/5 transition-colors">
+                  <td class="px-6 py-4 font-medium text-white/90"
+                    >{album.title}</td
                   >
-                    <img
-                      src="/assets/logo-musicbrainz.svg"
-                      alt="MB"
-                      class="h-4 w-4 object-contain"
-                    />
-                  </a>
-                {/if}
-              </td>
-
-              <!-- Tidal -->
-              <td class="px-2 py-2 text-center">
-                {#if album.tidal_url}
-                  <a
-                    href={album.tidal_url}
-                    target="_blank"
-                    class="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 transition-colors mx-auto"
-                    title="Open in Tidal"
+                  <td class="px-6 py-4 text-white/50"
+                    >{album.release_date || "—"}</td
                   >
-                    <img
-                      src="/assets/logo-tidal.png"
-                      alt="Tidal"
-                      class="h-4 w-4 object-contain"
-                    />
-                  </a>
-                {/if}
-              </td>
+                  <td class="px-6 py-4">
+                    <div class="flex items-center justify-center gap-3">
+                      {#if album.musicbrainz_url}
+                        <a
+                          href={album.musicbrainz_url}
+                          target="_blank"
+                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                          ><img
+                            src="/assets/logo-musicbrainz.svg"
+                            class="w-5 h-5"
+                            alt="MB"
+                          /></a
+                        >
+                      {/if}
+                      {#if album.tidal_url}
+                        <a
+                          href={album.tidal_url}
+                          target="_blank"
+                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                          ><img
+                            src="/assets/logo-tidal.png"
+                            class="w-5 h-5"
+                            alt="Tidal"
+                          /></a
+                        >
+                      {/if}
+                      {#if album.qobuz_url}
+                        <a
+                          href={album.qobuz_url}
+                          target="_blank"
+                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                          ><img
+                            src="/assets/logo-qobuz.png"
+                            class="w-5 h-5"
+                            alt="Qobuz"
+                          /></a
+                        >
+                      {/if}
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {/if}
+  </main>
+</div>
 
-              <!-- Qobuz -->
-              <td class="px-2 py-2 text-center">
-                {#if album.qobuz_url}
-                  <a
-                    href={album.qobuz_url}
-                    target="_blank"
-                    class="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 transition-colors mx-auto"
-                    title="Open in Qobuz"
-                  >
-                    <img
-                      src="/assets/logo-qobuz.png"
-                      alt="Qobuz"
-                      class="h-4 w-4 object-contain"
-                    />
-                  </a>
-                {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-  {/if}
-</section>
+<style>
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+</style>

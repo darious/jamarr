@@ -29,12 +29,22 @@
     let artistFilter = "";
     let mbidFilter = "";
     let missingOnly = false;
-    let missingAlbumsOnly = false;
-    let bioOnly = false;
-    let linksOnly = false;
-    let updateTopTracks = false;
+    let runFilesystem = false;
+    let doMetadata = false;
+    let doBio = false;
+    let doArtwork = false;
+    let doSpotifyArtwork = false;
+    let doTopTracks = false;
+    let doSingles = false;
+
+    // doLinks removed
+    let doMissingAlbums = false;
+    let scanAll = false;
     let artistOptions: string[] = [];
     let artistsLoaded = false;
+    let queueActive = false;
+    let taskQueue: { label: string; start: () => Promise<void> }[] = [];
+    let startTimestamp = 0;
 
     let eventSource: EventSource | undefined;
 
@@ -74,6 +84,9 @@
                 }
                 if (data.music_path && !scanPath) {
                     scanPath = data.music_path;
+                    if (scanPath && !scanPath.endsWith("/")) {
+                        scanPath += "/";
+                    }
                 }
             }
         } catch (e) {}
@@ -88,6 +101,7 @@
             artistsLoaded = true;
         } catch (e) {
             addLog(`Failed to load artists for filter: ${e}`);
+            artistsLoaded = true;
         }
     });
 
@@ -112,6 +126,7 @@
         } else if (data.type === "progress") {
             status = "Running";
             isRunning = true;
+            if (!startTimestamp) startTimestamp = Date.now();
             stats = {
                 scanned: data.current,
                 total: data.total,
@@ -126,9 +141,10 @@
         } else if (data.type === "start") {
             status = "Running";
             isRunning = true;
+            if (!startTimestamp) startTimestamp = Date.now();
             stats.phase = data.phase || stats.phase;
             if (!logs.length || !isRunning) {
-                logs = []; // Clear logs on first start to match CLI session feel
+                logs = [];
             }
             addLog(
                 `Started ${data.mode}${
@@ -139,7 +155,7 @@
             stats.completedStatus = "";
         } else if (data.type === "complete") {
             status = data.status === "success" ? "Idle" : "Error";
-            isRunning = false;
+            isRunning = queueActive ? true : false;
             addLog(
                 `Scan finished: ${data.status}${
                     data.error ? ` (${data.error})` : ""
@@ -147,46 +163,132 @@
             );
             stats.completed = true;
             stats.completedStatus = data.status;
+            if (queueActive) {
+                runNextTask();
+            } else {
+                isRunning = false;
+                startTimestamp = 0;
+            }
         }
     }
 
     function addLog(msg: string) {
-        logs = [...logs, { timestamp: Date.now(), message: msg }];
+        logs = [{ timestamp: Date.now(), message: msg }, ...logs];
         // Keep max logs
-        if (logs.length > 500) logs = logs.slice(100);
+        if (logs.length > 500) logs = logs.slice(0, 500);
     }
 
-    async function startFilesystemScan() {
-        try {
-            await triggerFilesystemScan({
-                force: forceRescan,
-                path: scanPath || undefined,
+    function buildTasks() {
+        taskQueue = [];
+        const wantsMetadata =
+            doMetadata ||
+            doBio ||
+            doArtwork ||
+            doSpotifyArtwork ||
+            doTopTracks ||
+            doSingles ||
+            doSingles;
+
+        if (runFilesystem && wantsMetadata) {
+            taskQueue.push({
+                label: "Full Scan (Filesystem + Metadata)",
+                start: () =>
+                    triggerFullScan({
+                        force: forceRescan,
+                        path: scanPath || undefined,
+                        artistFilter: artistFilter || undefined,
+                        mbidFilter: mbidFilter || undefined,
+                        missingOnly,
+                        fetchMetadata: doMetadata,
+                        fetchBio: doBio,
+                        fetchArtwork: doArtwork,
+                        fetchSpotifyArtwork: doSpotifyArtwork,
+                        // fetchLinks implicit in backend logic for full scan or metadata
+                        refreshTopTracks: doTopTracks,
+                        refreshSingles: doSingles,
+                    }),
             });
-        } catch (e) {
-            addLog(`Error starting scan: ${e}`);
-        }
-    }
-
-    async function startMetadataScan() {
-        try {
-            if (missingAlbumsOnly) {
-                await triggerMissingAlbumsScan(
-                    mbidFilter || undefined,
-                    artistFilter || undefined,
-                );
-            } else {
-                await triggerMetadataScan({
-                    artistFilter: artistFilter || undefined,
-                    mbidFilter: mbidFilter || undefined,
-                    missingOnly,
-                    bioOnly,
-                    linksOnly,
-                    updateTopTracks,
+        } else {
+            if (runFilesystem) {
+                taskQueue.push({
+                    label: "Filesystem",
+                    start: () =>
+                        triggerFilesystemScan({
+                            force: forceRescan,
+                            path: scanPath || undefined,
+                        }),
                 });
             }
-        } catch (e) {
-            addLog(`Error starting metadata update: ${e}`);
+
+            if (wantsMetadata) {
+                taskQueue.push({
+                    label: "Metadata",
+                    start: () =>
+                        triggerMetadataScan({
+                            artistFilter: artistFilter || undefined,
+                            mbidFilter: mbidFilter || undefined,
+                            missingOnly,
+                            fetchMetadata: doMetadata,
+                            fetchBio: doBio,
+                            fetchArtwork: doArtwork,
+                            fetchSpotifyArtwork: doSpotifyArtwork,
+                            fetchLinks: true,
+                            refreshTopTracks: doTopTracks,
+                            refreshSingles: doSingles,
+                        }),
+                });
+            }
         }
+
+        if (doMissingAlbums) {
+            taskQueue.push({
+                label: "Missing Albums",
+                start: () =>
+                    triggerMissingAlbumsScan(
+                        mbidFilter || undefined,
+                        artistFilter || undefined,
+                    ),
+            });
+        }
+    }
+
+    function runNextTask() {
+        if (!taskQueue.length) {
+            queueActive = false;
+            isRunning = false;
+            startTimestamp = 0;
+            return;
+        }
+        const next = taskQueue.shift();
+        if (!next) {
+            queueActive = false;
+            isRunning = false;
+            startTimestamp = 0;
+            return;
+        }
+        addLog(`Starting ${next.label}...`);
+        next.start().catch((e) => {
+            addLog(`Error starting ${next.label}: ${e}`);
+            queueActive = false;
+            isRunning = false;
+            startTimestamp = 0;
+        });
+    }
+
+    async function startCombined() {
+        if (isRunning || queueActive) {
+            addLog("A scan is already running.");
+            return;
+        }
+        buildTasks();
+        if (!taskQueue.length) {
+            addLog("Nothing selected to run.");
+            return;
+        }
+        queueActive = true;
+        startTimestamp = 0;
+        logs = [];
+        runNextTask();
     }
 
     async function startPrune() {
@@ -204,25 +306,60 @@
     }
 
     async function startFull() {
-        try {
-            const metadataMissingOnly = forceRescan ? false : true;
-            await triggerFullScan({
-                force: forceRescan,
-                path: scanPath || undefined,
-                artistFilter: artistFilter || undefined,
-                mbidFilter: mbidFilter || undefined,
-                missingOnly: metadataMissingOnly,
-                bioOnly,
-                linksOnly,
-                updateTopTracks,
-            });
-        } catch (e) {
-            addLog(`Error starting full run: ${e}`);
-        }
+        return startCombined();
     }
 
     async function handleCancel() {
         await cancelScan();
+    }
+
+    function toggleScanAll() {
+        if (scanAll) {
+            runFilesystem = true;
+            doMetadata = true;
+            doBio = true;
+            doArtwork = true;
+            doSpotifyArtwork = false; // By default don't enable fallback unless explicit? Or enable it?
+            // User requirement: "looking for soptify artwork should NEVER run on all ariists... even when missing only is unchecked"
+            // Wait, logic says: "looking for soptify artwork should NEVER run on all ariists" -> this implies it's a fallback mechanism.
+            // But here we are just toggling the checkbox.
+            // If I check Scan All, should I check Spotify Art?
+            // Usually "All" means all available options.
+            // But user said: "when we so scan all, we should do the spotofy check AFTER the fanart.tv check"
+            // So enabling it is fine, the backend handles the "if missing" logic.
+            // However, "looking for soptify artwork should NEVER run on all ariists" means even if I strictly say "fetch spotify art",
+            // the backend should still check if art exists first?
+            // Yes, user said: "we should only check spotify IF we dont have a artistthumb for that artist... so we need to check that first"
+            // So it is safe to enable the flag, logic is in backend.
+            doSpotifyArtwork = true;
+            doTopTracks = true;
+            doSingles = true;
+            // doMissingAlbums remains separate as requested
+        } else {
+            runFilesystem = false;
+            doMetadata = false;
+            doBio = false;
+            doArtwork = false;
+            doSpotifyArtwork = false;
+            doTopTracks = false;
+            doSingles = false;
+        }
+    }
+
+    function updateScanAllState() {
+        if (
+            runFilesystem &&
+            doMetadata &&
+            doBio &&
+            doArtwork &&
+            doSpotifyArtwork &&
+            doTopTracks &&
+            doSingles
+        ) {
+            scanAll = true;
+        } else {
+            scanAll = false;
+        }
     }
 </script>
 
@@ -240,326 +377,79 @@
         </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <!-- Left: Actions -->
-        <div class="space-y-8">
-            <!-- Full Library Refresh -->
-            <div class="card bg-white/5 border border-white/10 p-6 text-white">
-                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        class="h-5 w-5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                        /></svg
-                    >
-                    Full Library Refresh
-                </h2>
-                <p class="text-sm text-white/70 mb-6">
-                    Runs filesystem scan, metadata update, and prune in one go.
-                    Mirrors the CLI <code>full</code> command.
-                </p>
-
-                <div class="space-y-4 mb-4">
-                    <label class="label">
-                        <span class="label-text text-white"
-                            >Custom Path (optional)</span
-                        >
-                        <input
-                            type="text"
-                            bind:value={scanPath}
-                            placeholder="/music"
-                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
-                        />
-                    </label>
-                    <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-4">
-                            <input
-                                type="checkbox"
-                                bind:checked={forceRescan}
-                                class="checkbox checkbox-primary"
-                            />
-                            <span class="label-text text-white"
-                                >Force Rescan (re-read all tags)</span
-                            >
-                        </label>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                        class="btn w-full border border-white/10 bg-white/10 text-white hover:bg-white/20 normal-case font-normal"
-                        on:click={startFull}
-                        disabled={isRunning}
-                    >
-                        Run Full Refresh
-                    </button>
-                    <button
-                        class="btn w-full border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
-                        on:click={startFilesystemScan}
-                        disabled={isRunning}
-                    >
-                        Filesystem Only
-                    </button>
-                </div>
-            </div>
-
-            <!-- Filesystem Scanner -->
-            <div class="card bg-white/5 border border-white/10 p-6 text-white">
-                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        class="h-5 w-5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                        /></svg
-                    >
-                    Filesystem Scanner
-                </h2>
-                <p class="text-sm text-white/70 mb-6">
-                    Scan specific folders or the entire library for new files.
-                    Changes to tags update existing entries.
-                </p>
-
-                <label class="label">
-                    <span class="label-text text-white"
-                        >Custom Path (optional)</span
-                    >
-                    <input
-                        type="text"
-                        bind:value={scanPath}
-                        placeholder="Defaults to MUSIC_PATH"
-                        class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
-                    />
-                </label>
-
-                <div class="form-control mb-6">
-                    <label class="label cursor-pointer justify-start gap-4">
-                        <input
-                            type="checkbox"
-                            bind:checked={forceRescan}
-                            class="checkbox checkbox-primary"
-                        />
-                        <span class="label-text text-white"
-                            >Force Rescan (Re-read all tags)</span
-                        >
-                    </label>
-                </div>
-
-                <div class="flex gap-4">
-                    <button
-                        class="btn w-full border border-white/10 bg-white/10 text-white hover:bg-white/20 normal-case font-normal"
-                        on:click={startFilesystemScan}
-                        disabled={isRunning}
-                    >
-                        Start Scan
-                    </button>
-                </div>
-            </div>
-
-            <!-- Metadata Manager -->
-            <div class="card bg-white/5 border border-white/10 p-6 text-white">
-                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        class="h-5 w-5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                        /></svg
-                    >
-                    Metadata
-                </h2>
-                <p class="text-sm text-white/70 mb-6">
-                    Fetch info from MusicBrainz, Spotify, and other sources.
-                </p>
-
-                <div class="space-y-4 mb-6">
-                    <label class="label">
-                        <span class="label-text text-white"
-                            >Artist Filter (Optional)</span
-                        >
-                        <input
-                            type="text"
-                            bind:value={artistFilter}
-                            list="artist-list"
-                            placeholder={artistsLoaded
-                                ? "Type to filter (blank = all)"
-                                : "Loading artists..."}
-                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
-                        />
-                        <datalist id="artist-list">
-                            {#each artistOptions as artistName}
-                                <option value={artistName}></option>
-                            {/each}
-                        </datalist>
-                    </label>
-
-                    <label class="label">
-                        <span class="label-text text-white"
-                            >MusicBrainz ID (Optional)</span
-                        >
-                        <input
-                            type="text"
-                            bind:value={mbidFilter}
-                            placeholder="e.g. ef5aab86-887d-4fc2-a883-431ef017175a"
-                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
-                        />
-                    </label>
-
-                    <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-4">
-                            <input
-                                type="checkbox"
-                                bind:checked={missingOnly}
-                                class="checkbox checkbox-secondary"
-                            />
-                            <span class="label-text text-white"
-                                >Missing Metadata Only</span
-                            >
-                        </label>
-                    </div>
-
-                    <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-4">
-                            <input
-                                type="checkbox"
-                                bind:checked={updateTopTracks}
-                                class="checkbox checkbox-secondary"
-                            />
-                            <span class="label-text text-white"
-                                >Refresh Top Tracks & Singles</span
-                            >
-                        </label>
-                        <p class="text-xs text-white/60 mt-1 ml-8">
-                            Re-fetch Spotify top tracks and MusicBrainz singles for the filtered artist or all artists, even if other metadata is complete.
-                        </p>
-                    </div>
-
-                    <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-4">
-                            <input
-                                type="checkbox"
-                                bind:checked={missingAlbumsOnly}
-                                class="checkbox checkbox-accent"
-                            />
-                            <span class="label-text text-white"
-                                >Scan Missing Albums (Discovery)</span
-                            >
-                        </label>
-                    </div>
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <label class="label cursor-pointer justify-start gap-4">
-                            <input
-                                type="checkbox"
-                                bind:checked={bioOnly}
-                                class="checkbox checkbox-secondary"
-                            />
-                            <span class="label-text text-white"
-                                >Bio & Images Only</span
-                            >
-                        </label>
-                        <label class="label cursor-pointer justify-start gap-4">
-                            <input
-                                type="checkbox"
-                                bind:checked={linksOnly}
-                                class="checkbox checkbox-secondary"
-                            />
-                            <span class="label-text text-white"
-                                >Links Only (Tidal/Qobuz/Wiki)</span
-                            >
-                        </label>
-                    </div>
-                </div>
-
-                <button
-                    class="btn w-full border border-white/10 bg-white/10 text-white hover:bg-white/20 normal-case font-normal"
-                    on:click={startMetadataScan}
-                    disabled={isRunning}
-                >
-                    Update Metadata
-                </button>
-            </div>
-
-            <!-- Maintenance -->
-            <div class="card bg-white/5 border border-white/10 p-6 text-white">
-                <h2
-                    class="text-xl font-semibold mb-4 text-error flex items-center gap-2"
-                >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        class="h-5 w-5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        /></svg
-                    >
-                    Maintenance
-                </h2>
-                <p class="text-sm text-white/70 mb-6">
-                    Clean up the database by removing entries for deleted files
-                    and unused artwork.
-                </p>
-                <button
-                    class="btn w-full border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
-                    on:click={startPrune}
-                    disabled={isRunning}
-                >
-                    Prune Library
-                </button>
-            </div>
-        </div>
-
-        <!-- Right: Output -->
-        <div class="flex flex-col h-full space-y-4">
-            <!-- Progress Card -->
+    <div class="space-y-6">
+        <!-- Status + Logs -->
+        <div class="space-y-4">
             <div
                 class="card bg-black/40 border border-white/10 p-6 backdrop-blur-sm"
             >
-                <div class="flex justify-between items-center mb-2">
-                    <div class="flex flex-col">
+                <div class="flex justify-between items-start gap-4">
+                    <div class="flex flex-col gap-1">
                         <span
                             class="text-xs uppercase tracking-wide text-primary-300"
-                            >{stats.phase || "idle"}</span
                         >
-                        <span class="text-sm font-medium text-white/80"
-                            >{stats.message ||
-                                (stats.completed ? "Done" : "Ready")}</span
+                            {stats.phase || (isRunning ? "running" : "idle")}
+                        </span>
+                        <span class="text-base font-semibold text-white">
+                            {stats.message ||
+                                (stats.completed ? "Done" : "Ready")}
+                        </span>
+                        <div
+                            class="text-xs text-white/60 flex items-center gap-3"
                         >
+                            <span
+                                >Progress: {stats.scanned}/{stats.total ||
+                                    "?"}</span
+                            >
+                            <span
+                                >Elapsed: {startTimestamp
+                                    ? Math.max(
+                                          0,
+                                          Math.round(
+                                              (Date.now() - startTimestamp) /
+                                                  1000,
+                                          ),
+                                      ) + "s"
+                                    : "0s"}</span
+                            >
+                            <span
+                                >ETA: {stats.total > 0 && stats.percentage > 0
+                                    ? Math.max(
+                                          0,
+                                          Math.round(
+                                              ((100 - stats.percentage) *
+                                                  (Date.now() -
+                                                      startTimestamp)) /
+                                                  Math.max(
+                                                      stats.percentage,
+                                                      1,
+                                                  ) /
+                                                  1000,
+                                          ),
+                                      ) + "s"
+                                    : "--"}</span
+                            >
+                        </div>
                     </div>
-                    <span class="text-xs font-mono text-primary-400"
-                        >{Math.round(stats.percentage)}%</span
-                    >
+                    <div class="flex flex-col items-end text-right">
+                        <span class="text-xs font-mono text-primary-400"
+                            >{Math.round(stats.percentage)}%</span
+                        >
+                        {#if isRunning}
+                            <button
+                                class="btn btn-xs btn-error mt-2"
+                                on:click={handleCancel}
+                            >
+                                Cancel
+                            </button>
+                        {/if}
+                    </div>
                 </div>
                 <progress
-                    class="progress progress-primary w-full"
+                    class="progress progress-primary w-full mt-4"
                     value={stats.percentage}
                     max="100"
                 ></progress>
-
                 {#if stats.completed}
                     <div
                         class="mt-3 flex items-center justify-between text-xs text-white/70 bg-white/5 rounded-lg px-3 py-2 border border-white/10"
@@ -576,20 +466,10 @@
                         </button>
                     </div>
                 {/if}
-
-                {#if isRunning}
-                    <div class="mt-4 flex justify-end">
-                        <button
-                            class="btn btn-xs btn-error"
-                            on:click={handleCancel}>Cancel Operation</button
-                        >
-                    </div>
-                {/if}
             </div>
 
-            <!-- Terminal -->
             <div
-                class="flex-1 card bg-[#0d1117] border border-white/10 overflow-hidden flex flex-col font-mono text-sm shadow-inner"
+                class="card bg-[#0d1117] border border-white/10 overflow-hidden flex flex-col font-mono text-sm shadow-inner"
             >
                 <div
                     class="bg-white/5 px-4 py-2 border-b border-white/5 flex items-center justify-between"
@@ -610,14 +490,14 @@
                     </span>
                 </div>
                 <div
-                    class="flex-1 overflow-y-auto p-4 space-y-1 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
+                    class="max-h-[320px] overflow-y-auto p-4 space-y-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
                     bind:this={logContainer}
                 >
                     {#if logs.length === 0}
                         <div class="text-white/20 italic">No logs...</div>
                     {/if}
                     {#each logs as log}
-                        <div class="break-all font-mono">
+                        <div class="break-all">
                             <span class="text-white/30 mr-2 select-none"
                                 >[{new Date(
                                     log.timestamp,
@@ -627,6 +507,214 @@
                         </div>
                     {/each}
                 </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="card bg-white/5 border border-white/10 p-6 text-white">
+            <div class="grid gap-4 md:grid-cols-2">
+                <div class="space-y-4">
+                    <label class="label">
+                        <span class="label-text text-white">Library Path</span>
+                        <input
+                            type="text"
+                            bind:value={scanPath}
+                            placeholder="Defaults to library root"
+                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
+                        />
+                    </label>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                bind:checked={forceRescan}
+                                class="checkbox checkbox-primary"
+                            />
+                            <span class="label-text text-white"
+                                >Force rescan (re-read tags)</span
+                            >
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                bind:checked={missingOnly}
+                                class="checkbox checkbox-secondary"
+                            />
+                            <span class="label-text text-white"
+                                >Missing only (skip data we already have)</span
+                            >
+                        </label>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <label class="label">
+                        <span class="label-text text-white"
+                            >Artist filter (optional)</span
+                        >
+                        <input
+                            type="text"
+                            bind:value={artistFilter}
+                            list="artist-list"
+                            placeholder={artistsLoaded
+                                ? "Type to filter (blank = all)"
+                                : "Loading artists..."}
+                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
+                        />
+                        <datalist id="artist-list">
+                            {#each artistOptions as artistName}
+                                <option value={artistName}></option>
+                            {/each}
+                        </datalist>
+                    </label>
+                    <label class="label">
+                        <span class="label-text text-white"
+                            >MusicBrainz ID (optional)</span
+                        >
+                        <input
+                            type="text"
+                            bind:value={mbidFilter}
+                            placeholder="e.g. ef5aab86-887d-4fc2-a883-431ef017175a"
+                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
+                        />
+                    </label>
+                </div>
+            </div>
+
+            <div class="mt-6 grid md:grid-cols-2 gap-4">
+                <div class="space-y-2">
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={scanAll}
+                                on:change={toggleScanAll}
+                                class="checkbox checkbox-accent"
+                            /><span class="label-text text-white font-bold"
+                                >Scan All (Full Refresh)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="divider my-1"></div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={runFilesystem}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Scan & add/update files</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doMetadata}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Pull artist metadata (MusicBrainz)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doBio}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Pull bios (Wikipedia)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doArtwork}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Pull artist artwork (fanart.tv)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doSpotifyArtwork}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Pull artist artwork (Spotify)</span
+                            ></label
+                        >
+                    </div>
+                </div>
+                <div class="space-y-2 pt-[3.25rem]">
+                    <!-- Align with right column offset by Scan All + Divider -->
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doTopTracks}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Refresh top tracks (Spotify)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doSingles}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Refresh singles (MusicBrainz)</span
+                            ></label
+                        >
+                    </div>
+                    <!-- Links refresh is now part of metadata/implicit, removed separate checkbox -->
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doMissingAlbums}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Scan missing albums (discovery)</span
+                            ></label
+                        >
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex flex-wrap gap-3">
+                <button
+                    class="btn border border-white/10 bg-white/10 text-white hover:bg-white/20 normal-case font-normal"
+                    on:click={startCombined}
+                    disabled={isRunning || queueActive}
+                >
+                    Start
+                </button>
+                <button
+                    class="btn border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+                    on:click={startPrune}
+                    disabled={isRunning}
+                >
+                    Prune Library
+                </button>
             </div>
         </div>
     </div>

@@ -7,6 +7,7 @@ from typing import List, Optional
 from typing import List, Optional
 from app.config import get_musicbrainz_root_url
 from app.scanner.scan_manager import ScanManager
+from app.media.image_lookup import fetch_primary_images
 
 router = APIRouter()
 
@@ -83,10 +84,14 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
     """
     async with db.execute(query) as cursor:
         rows = await cursor.fetchall()
-        
+
+        artist_images = await fetch_primary_images(db, "artist", [r["mbid"] for r in rows], "artistthumb")
+        artist_backgrounds = await fetch_primary_images(db, "artist", [r["mbid"] for r in rows], "artistbackground")
         artists = []
         for row in rows:
-            mbid = row[0]
+            mbid = row["mbid"]
+            art_info = artist_images.get(mbid, {})
+            bg_info = artist_backgrounds.get(mbid, {})
             
             # Fetch top tracks for this artist
             top_tracks_query = """
@@ -132,7 +137,7 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
                         "mbid": s_row["external_mbid"],
                         "title": s_row["external_name"],
                         "date": s_row["external_date"],
-                        "artist": row[1],  # artist name
+                        "artist": row["name"],  # artist name
                         "local_track_id": s_row["local_track_id"],
                         "codec": s_row["codec"],
                         "bit_depth": s_row["bit_depth"],
@@ -154,37 +159,42 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
             """
             async with db.execute(similar_query, (mbid,)) as sim_cursor:
                 sim_rows = await sim_cursor.fetchall()
-                similar_artists = [
-                    {
+                sim_mbids = [r["similar_artist_mbid"] for r in sim_rows if r["similar_artist_mbid"]]
+                sim_images = await fetch_primary_images(db, "artist", sim_mbids, "artistthumb") if sim_mbids else {}
+                similar_artists = []
+                for sim_row in sim_rows:
+                    sim_mbid = sim_row["similar_artist_mbid"]
+                    sim_art = sim_images.get(sim_mbid, {}) if sim_mbid else {}
+                    similar_artists.append({
                         "name": sim_row["similar_artist_name"],
-                        "mbid": sim_row["similar_artist_mbid"],
+                        "mbid": sim_mbid,
                         "image_url": sim_row["image_url"],
-                        "art_id": sim_row["art_id"],
-                        "art_sha1": sim_row["art_sha1"]
-                    }
-                    for sim_row in sim_rows
-                ]
+                        "art_id": sim_art.get("art_id") or sim_row["art_id"],
+                        "art_sha1": sim_art.get("art_sha1") or sim_row["art_sha1"],
+                    })
             
             artists.append({
-                "mbid": row[0],
-                "name": row[1], 
-                "image_url": row[2], 
-                "art_id": row[3],
-                "art_sha1": row[4],
-                "bio": row[5], 
+                "mbid": row["mbid"],
+                "name": row["name"], 
+                "image_url": row["image_url"], 
+                "art_id": art_info.get("art_id") or row["art_id"],
+                "art_sha1": art_info.get("art_sha1") or row["art_sha1"],
+                "bio": row["bio"], 
                 "similar_artists": similar_artists,
                 "top_tracks": top_tracks,
-                "sort_name": row[6] or row[1], # Fallback to name
-                "homepage": row[7],
-                "spotify_url": row[8],
-                "wikipedia_url": row[9],
-                "qobuz_url": row[10],
-                "musicbrainz_url": row[11],
-                "tidal_url": row[12],
-                "primary_album_count": row[13],
-                "appears_on_album_count": row[14],
+                "sort_name": row["sort_name"] or row["name"], # Fallback to name
+                "homepage": row["homepage"],
+                "spotify_url": row["spotify_url"],
+                "wikipedia_url": row["wikipedia_url"],
+                "qobuz_url": row["qobuz_url"],
+                "musicbrainz_url": row["musicbrainz_url"],
+                "tidal_url": row["tidal_url"],
+                "primary_album_count": row["primary_album_count"],
+                "appears_on_album_count": row["appears_on_album_count"],
                 "singles": singles,
-                "albums": []  # Deprecated
+                "albums": [],  # Deprecated
+                "background_art_id": bg_info.get("art_id"),
+                "background_sha1": bg_info.get("art_sha1"),
             })
         
         return artists

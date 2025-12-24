@@ -17,10 +17,33 @@ router = APIRouter()
 CACHE_DIR = "cache/art"
 _TEST_ART_BYTES = _build_test_art_bytes()
 
-def _get_art_path(sha1: str, art_type: str) -> str:
-    """Compute path for artwork file using subdirectory distribution."""
+def _get_art_path(sha1: str, path_on_disk: str | None = None) -> str:
+    """
+    Compute unified path for artwork file, migrating legacy locations if found.
+    """
+    if path_on_disk and os.path.exists(path_on_disk):
+        return path_on_disk
+
     subdir = sha1[:2]
-    return os.path.join(CACHE_DIR, art_type, subdir, sha1)
+    unified = os.path.join(CACHE_DIR, subdir, sha1)
+    if os.path.exists(unified):
+        return unified
+
+    legacy_candidates = [
+        os.path.join(CACHE_DIR, "artistthumb", subdir, sha1),
+        os.path.join(CACHE_DIR, "artist", subdir, sha1),
+        os.path.join(CACHE_DIR, "album", subdir, sha1),
+    ]
+    for legacy in legacy_candidates:
+        if os.path.exists(legacy):
+            os.makedirs(os.path.dirname(unified), exist_ok=True)
+            try:
+                os.rename(legacy, unified)
+                return unified
+            except OSError:
+                return legacy
+
+    return unified
 
 @router.get("/art/{art_id}")
 async def get_artwork(art_id: int):
@@ -30,14 +53,13 @@ async def get_artwork(art_id: int):
     # But the outline says /art/{art_id}
     
     async for db in get_db():
-        async with db.execute("SELECT sha1, type FROM artwork WHERE id = ?", (art_id,)) as cursor:
+        async with db.execute("SELECT sha1, path_on_disk FROM artwork WHERE id = ?", (art_id,)) as cursor:
             row = await cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Artwork not found")
             
             sha1 = row["sha1"]
-            art_type = row["type"] or "album"  # Default to album for legacy records
-            path = _get_art_path(sha1, art_type)
+            path = _get_art_path(sha1, row["path_on_disk"])
             
             if not os.path.exists(path):
                 raise HTTPException(status_code=404, detail="Artwork file missing")
@@ -55,13 +77,12 @@ async def get_artwork(art_id: int):
 async def get_artwork_by_sha1(sha1: str):
     # Lookup type to build path
     async for db in get_db():
-        async with db.execute("SELECT type FROM artwork WHERE sha1 = ?", (sha1,)) as cursor:
+        async with db.execute("SELECT path_on_disk FROM artwork WHERE sha1 = ?", (sha1,)) as cursor:
             row = await cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Artwork not found")
             
-            art_type = row["type"] or "album"
-            path = _get_art_path(sha1, art_type)
+            path = _get_art_path(sha1, row["path_on_disk"])
             
             if not os.path.exists(path):
                 raise HTTPException(status_code=404, detail="Artwork file missing")

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+import os
 from typing import Optional, Dict, Any
 from app.scanner.core import Scanner
 from app.config import get_music_path
@@ -26,6 +27,20 @@ class ScanManager:
         self.scanner = Scanner()
         self._phase: Optional[str] = None
         self._music_path = get_music_path()
+        self._configure_logging()
+
+    def _configure_logging(self):
+        try:
+            os.makedirs("cache/log", exist_ok=True)
+        except Exception:
+            pass
+        scan_logger = logging.getLogger("scanner")
+        if not any(getattr(h, "_scanner_log", False) for h in scan_logger.handlers):
+            fh = logging.FileHandler("cache/log/scanner.log")
+            fh._scanner_log = True
+            fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+            scan_logger.addHandler(fh)
+        scan_logger.setLevel(logging.DEBUG)
 
     def get_music_path(self) -> str:
         return self._music_path
@@ -131,7 +146,7 @@ class ScanManager:
             self._current_task = None
             self._phase = None
 
-    async def start_metadata_update(self, artist_filter=None, mbid_filter=None, missing_only=False, bio_only=False, links_only=False, refresh_top_tracks=False):
+    async def start_metadata_update(self, artist_filter=None, mbid_filter=None, missing_only=False, bio_only=False, links_only=False, refresh_top_tracks=False, refresh_singles=False, fetch_metadata=True, fetch_bio=True, fetch_artwork=True, fetch_spotify_artwork=False, fetch_links=True):
         async with self._lock:
             if self._current_task and not self._current_task.done():
                 raise RuntimeError("Scan already in progress")
@@ -141,10 +156,10 @@ class ScanManager:
             self._phase = "metadata" if not links_only else "links"
             self.scanner.scan_logger = self.ManagerLogger(self)
             
-            self._current_task = asyncio.create_task(self._run_metadata(artist_filter, mbid_filter, missing_only, bio_only, links_only, refresh_top_tracks))
+            self._current_task = asyncio.create_task(self._run_metadata(artist_filter, mbid_filter, missing_only, bio_only, links_only, refresh_top_tracks, refresh_singles, fetch_metadata, fetch_bio, fetch_artwork, fetch_spotify_artwork, fetch_links))
             return self._current_task
 
-    async def _run_metadata(self, artist, mbid, missing_only, bio_only, links_only, refresh_top_tracks):
+    async def _run_metadata(self, artist, mbid, missing_only, bio_only, links_only, refresh_top_tracks, refresh_singles, fetch_metadata, fetch_bio, fetch_artwork, fetch_spotify_artwork, fetch_links):
         try:
             self._broadcast({"type": "start", "mode": "metadata" if not links_only else "links", "phase": self._phase})
             mode_name = "links-only refresh" if links_only else "metadata update"
@@ -154,7 +169,19 @@ class ScanManager:
             if links_only:
                 await self.scanner.update_links(artist_filter=artist, mbid_filter=mbid)
             else:
-                await self.scanner.update_metadata(artist_filter=artist, mbid_filter=mbid, missing_only=missing_only, bio_only=bio_only, refresh_top_tracks=refresh_top_tracks)
+                await self.scanner.update_metadata(
+                    artist_filter=artist,
+                    mbid_filter=mbid,
+                    missing_only=missing_only,
+                    bio_only=bio_only or fetch_bio,
+                    refresh_top_tracks=refresh_top_tracks,
+                    refresh_singles=refresh_singles,
+                    fetch_metadata=fetch_metadata,
+                    fetch_bio=fetch_bio,
+                    fetch_artwork=fetch_artwork,
+                    fetch_spotify_artwork=fetch_spotify_artwork,
+                    fetch_links=fetch_links,
+                )
             
             self._status = "Idle"
             self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
@@ -171,7 +198,7 @@ class ScanManager:
             self._current_task = None
             self._phase = None
 
-    async def start_full(self, path: str = None, force: bool = False, artist_filter=None, mbid_filter=None, missing_only=False, bio_only=False, links_only=False, refresh_top_tracks=False):
+    async def start_full(self, path: str = None, force: bool = False, artist_filter=None, mbid_filter=None, missing_only=False, bio_only=False, links_only=False, refresh_top_tracks=False, refresh_singles=False, fetch_metadata=True, fetch_bio=True, fetch_artwork=True, fetch_spotify_artwork=False, fetch_links=True, prune=True):
         async with self._lock:
             if self._current_task and not self._current_task.done():
                 raise RuntimeError("Scan already in progress")
@@ -182,14 +209,14 @@ class ScanManager:
             self.scanner.scan_logger = self.ManagerLogger(self)
 
             # For full runs: default to missing-only metadata unless force is requested.
-            metadata_missing_only = False if force else True
+            metadata_missing_only = False if force else missing_only
 
             self._current_task = asyncio.create_task(
-                self._run_full(path, force, artist_filter, mbid_filter, metadata_missing_only, bio_only, links_only, refresh_top_tracks)
+                self._run_full(path, force, artist_filter, mbid_filter, metadata_missing_only, bio_only, links_only, refresh_top_tracks, refresh_singles, fetch_metadata, fetch_bio, fetch_artwork, fetch_spotify_artwork, fetch_links, prune=True)
             )
             return self._current_task
 
-    async def _run_full(self, path, force, artist, mbid, missing_only, bio_only, links_only, refresh_top_tracks):
+    async def _run_full(self, path, force, artist, mbid, missing_only, bio_only, links_only, refresh_top_tracks, refresh_singles, fetch_metadata, fetch_bio, fetch_artwork, fetch_spotify_artwork, fetch_links, prune):
         try:
             self._broadcast({"type": "start", "mode": "full", "phase": self._phase})
             self._log_message("Starting full library refresh (scan -> metadata -> prune)")
@@ -220,14 +247,29 @@ class ScanManager:
                     self._log_message("No new/updated artists detected; skipping metadata step.")
                 else:
                     # Always allow new artists to fetch top tracks; existing artists obey refresh_top_tracks flag.
-                    await self.scanner.update_metadata(artist_filter=artist, mbid_filter=filter_mbid, missing_only=missing_only, bio_only=bio_only, refresh_top_tracks=refresh_top_tracks)
+                    await self.scanner.update_metadata(
+                        artist_filter=artist, 
+                        mbid_filter=filter_mbid, 
+                        missing_only=missing_only, 
+                        bio_only=bio_only, 
+                        refresh_top_tracks=refresh_top_tracks,
+                        refresh_singles=refresh_singles,
+                        fetch_metadata=fetch_metadata,
+                        fetch_bio=fetch_bio,
+                        fetch_artwork=fetch_artwork,
+                        fetch_spotify_artwork=fetch_spotify_artwork,
+                        fetch_links=fetch_links
+                    )
 
             if self._stop_event.is_set():
                 raise asyncio.CancelledError()
 
-            self._phase = "prune"
-            self._broadcast({"type": "start", "mode": "prune", "phase": self._phase})
-            await self.scanner.prune_library()
+            if prune:
+                self._phase = "prune"
+                self._broadcast({"type": "start", "mode": "prune", "phase": self._phase})
+                await self.scanner.prune_library()
+            else:
+                self._log_message("Prune skipped (not requested).")
 
             self._status = "Idle"
             self._broadcast({"type": "complete", "status": "success", "phase": self._phase})

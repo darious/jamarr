@@ -123,22 +123,34 @@ Stores similar artists data.
 Stores unique artwork to avoid duplication. Artwork files are organized in subdirectories based on the first 2 characters of the SHA1 hash.
 
 **Storage Structure:**
-- Album artwork: `cache/art/album/{sha1[:2]}/{sha1}`
-- Artist images: `cache/art/artist/{sha1[:2]}/{sha1}`
+- All artwork: `cache/art/{sha1[:2]}/{sha1}`
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | `id` | INTEGER | Primary Key, Auto-incrementing ID. |
 | `sha1` | TEXT | SHA1 hash of the image content. Unique. |
-| `type` | TEXT | Type of artwork: 'album' or 'artist'. |
 | `mime` | TEXT | MIME type of the image. |
 | `width` | INTEGER | Image width in pixels. |
 | `height` | INTEGER | Image height in pixels. |
 | `path_on_disk` | TEXT | Path to the cached image file. |
 | `filesize_bytes` | INTEGER | Cached file size. |
 | `image_format` | TEXT | Image format reported by Pillow. |
+| `source` | TEXT | Source provider for the artwork (e.g., 'fanart.tv'). |
+| `source_url` | TEXT | Original URL the artwork was fetched from. |
 | `checked_at` | REAL | Unix timestamp of last quality check. |
 | `check_errors` | TEXT | JSON array of issue codes/details from the last check. |
+
+### `image_mapping`
+Maps artwork to entities and their semantic role.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `artwork_id` | INTEGER | Foreign Key referencing `artwork.id`. |
+| `entity_type` | TEXT | One of 'artist', 'album', 'track'. |
+| `entity_id` | TEXT | Identifier of the entity (MBID for artist/album, track id for track fallback). |
+| `image_type` | TEXT | Role for the image (e.g., 'artistthumb', 'album'). |
+| `score` | REAL | Optional score/rank (e.g., likes). |
+| `created_at` | REAL | Timestamp when the mapping was created. |
 
 ### `renderers`
 Stores discovered UPnP/DLNA renderers.

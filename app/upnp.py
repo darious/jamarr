@@ -555,6 +555,14 @@ class UPnPManager:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(url, content=body, headers=headers, timeout=10.0) # 10s timeout
                 if resp.status_code != 200:
+                    # Some renderers (e.g., Rygel) return 500/701 "Transition not available"
+                    # even though they actually start playback. Treat that as a soft success
+                    # so we don't spam errors when playback is working.
+                    if action == "Play" and "errorCode>701" in resp.text:
+                        self.log(f"SOAP Action {action} returned 701 (Transition not available) but continuing")
+                        logger.warning(f"SOAP Action {action} soft-failed with 701: {resp.text}")
+                        return True, resp.text
+
                     self.log(f"SOAP Action {action} FAILED: {resp.status_code} {resp.text}")
                     logger.error(f"SOAP Action {action} failed: {resp.status_code} {resp.text}")
                     return False, resp.text

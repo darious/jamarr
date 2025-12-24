@@ -35,6 +35,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
       mbid: libMatch?.mbid,
       art_id: libMatch?.art_id,
       art_sha1: libMatch?.art_sha1,
+      background_art_id: libMatch?.background_art_id,
+      background_sha1: libMatch?.background_sha1,
       image_url: libMatch?.image_url
     };
   });

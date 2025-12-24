@@ -4,6 +4,8 @@ export interface Artist {
     image_url: string | null;
     art_id: number | null;
     art_sha1?: string | null;
+    background_art_id?: number | null;
+    background_sha1?: string | null;
     bio: string | null;
     similar_artists: {
         name: string;
@@ -170,9 +172,13 @@ export type MetadataOptions = {
     artistFilter?: string;
     mbidFilter?: string;
     missingOnly?: boolean;
-    bioOnly?: boolean;
-    linksOnly?: boolean;
-    updateTopTracks?: boolean;
+    fetchMetadata?: boolean;
+    fetchBio?: boolean;
+    fetchArtwork?: boolean;
+    fetchSpotifyArtwork?: boolean;
+    fetchLinks?: boolean;
+    refreshTopTracks?: boolean;
+    refreshSingles?: boolean;
 };
 
 export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<void> {
@@ -184,9 +190,13 @@ export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<v
             artist_filter: opts.artistFilter || null,
             mbid_filter: opts.mbidFilter || null,
             missing_only: Boolean(opts.missingOnly),
-            bio_only: Boolean(opts.bioOnly),
-            links_only: Boolean(opts.linksOnly),
-            refresh_top_tracks: Boolean(opts.updateTopTracks),
+            fetch_metadata: opts.fetchMetadata !== false,
+            fetch_bio: opts.fetchBio !== false,
+            fetch_artwork: opts.fetchArtwork !== false,
+            fetch_spotify_artwork: Boolean(opts.fetchSpotifyArtwork),
+            fetch_links: opts.fetchLinks !== undefined ? opts.fetchLinks : (opts.fetchMetadata !== false),
+            refresh_top_tracks: Boolean(opts.refreshTopTracks),
+            refresh_singles: Boolean(opts.refreshSingles),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger metadata scan');
@@ -208,9 +218,13 @@ export async function triggerFullScan(opts: { force?: boolean; path?: string } &
             artist_filter: opts.artistFilter || null,
             mbid_filter: opts.mbidFilter || null,
             missing_only: Boolean(opts.missingOnly),
-            bio_only: Boolean(opts.bioOnly),
-            links_only: Boolean(opts.linksOnly),
-            refresh_top_tracks: Boolean(opts.updateTopTracks),
+            fetch_metadata: opts.fetchMetadata !== false,
+            fetch_bio: opts.fetchBio !== false,
+            fetch_artwork: opts.fetchArtwork !== false,
+            fetch_spotify_artwork: Boolean(opts.fetchSpotifyArtwork),
+            fetch_links: opts.fetchLinks !== undefined ? opts.fetchLinks : (opts.fetchMetadata !== false),
+            refresh_top_tracks: Boolean(opts.refreshTopTracks),
+            refresh_singles: Boolean(opts.refreshSingles),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger full scan');

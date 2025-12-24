@@ -87,6 +87,7 @@ async def monitor_upnp_playback(udn: str):
     await asyncio.sleep(3)
     
     was_playing = False # Initialize to prevent UnboundLocalError
+    last_position = 0.0
     try:
         while True:
             # 1. Fetch position & transport from UPnP
@@ -102,9 +103,14 @@ async def monitor_upnp_playback(udn: str):
                  was_playing = state['is_playing']
                  
                  # Update Live Stats
+                 # Some renderers (e.g., Rygel) return 0 or NOT_IMPLEMENTED for RelTime.
+                 # If we see PLAYING but rel_time didn't move, fall back to incrementing locally.
+                 if transport_state == "PLAYING" and (rel_time is None or rel_time == 0):
+                     rel_time = max(0, state.get("position_seconds", 0) + 1)
                  state['position_seconds'] = rel_time
                  state['transport_state'] = transport_state
-                 # Don't overwrite is_playing yet, logic below decides
+                 # Align is_playing with transport state
+                 state['is_playing'] = transport_state not in ["PAUSED_PLAYBACK", "STOPPED", "NO_MEDIA_PRESENT"]
                  
                  # Save partial update (position/transport)
                  # await update_renderer_state_db(db, udn, state) 
@@ -126,22 +132,30 @@ async def monitor_upnp_playback(udn: str):
                      else:
                          # Still playing or paused or buffering
                          # If Paused, do we set is_playing=False? 
-                         # If user paused via remote, transport is PAUSED_PLAYBACK.
-                         # We should sync is_playing to False?
-                         if "PAUSE" in transport_state:
-                             state['is_playing'] = False
+                        # If user paused via remote, transport is PAUSED_PLAYBACK.
+                        # We should sync is_playing to False?
+                        if "PAUSE" in transport_state:
+                            state['is_playing'] = False
                          
-                         # Race Condition Fix:
-                         # Use a specific UPDATE for status fields to avoid overwriting volume/queue
-                         # if they were changed by another request while we were waiting on UPnP.
-                         # await update_renderer_state_db(db, udn, state)
-                         await db.execute("""
-                             UPDATE renderer_states 
-                             SET position_seconds = ?, transport_state = ?, is_playing = ?, updated_at = CURRENT_TIMESTAMP
-                             WHERE renderer_udn = ?
-                         """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
-                         await db.commit()
-
+                        # Race Condition Fix:
+                        # Use a specific UPDATE for status fields to avoid overwriting volume/queue
+                        # if they were changed by another request while we were waiting on UPnP.
+                        # await update_renderer_state_db(db, udn, state)
+                        await db.execute("""
+                            UPDATE renderer_states 
+                            SET position_seconds = ?, transport_state = ?, is_playing = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE renderer_udn = ?
+                        """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
+                        await db.commit()
+                 else:
+                     # Even if we thought we weren't playing, keep position fresh for the UI
+                     await db.execute("""
+                         UPDATE renderer_states 
+                         SET position_seconds = ?, transport_state = ?, is_playing = ?, updated_at = CURRENT_TIMESTAMP
+                         WHERE renderer_udn = ?
+                     """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
+                     await db.commit()
+                 last_position = state['position_seconds']
                  # History logging for remote playback (based on renderer state queue)
                  if state['is_playing'] and state['current_index'] is not None and state['current_index'] >= 0:
                      queue = state.get("queue") or []
@@ -715,7 +729,19 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
                 track = state['queue'][state['current_index']]
                 await upnp.play_track(track['id'], track.get('path'), track)
                 playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
-    return {"status": "ok"}
+    # Return the state so the client can sync immediately
+    return {
+        "status": "ok",
+        "state": {
+            "queue": state.get("queue", []),
+            "current_index": state.get("current_index", -1),
+            "position_seconds": state.get("position_seconds", 0),
+            "is_playing": state.get("is_playing", False),
+            "transport_state": state.get("transport_state", "STOPPED"),
+            "renderer": udn,
+            "volume": state.get("volume"),
+        }
+    }
 
 @router.post("/api/player/log-play")
 async def log_play(update: LogPlayRequest, request: Request, client_id: str = Depends(get_client_id)):
