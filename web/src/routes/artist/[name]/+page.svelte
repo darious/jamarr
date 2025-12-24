@@ -236,7 +236,7 @@
       .sort((a, b) => {
         const dateA = a.date || "";
         const dateB = b.date || "";
-        return dateB.localeCompare(dateA); // Newest first
+        return dateA.localeCompare(dateB); // Oldest first
       });
   })();
 
@@ -346,7 +346,7 @@
 
   function handleImageError(e: Event) {
     (e.currentTarget as HTMLImageElement).src =
-      "/assets/default-placeholder.svg";
+      "/assets/default-artist-placeholder.svg";
   }
 </script>
 
@@ -367,7 +367,7 @@
               ? `/art/file/${artist.art_sha1}`
               : artist?.art_id
                 ? `/art/${artist.art_id}`
-                : "/assets/default-placeholder.svg"
+                : "/assets/default-artist-placeholder.svg"
       }')`}
     ></div>
     <div class="absolute inset-0 bg-surface-900/80"></div>
@@ -398,7 +398,7 @@
                 ? `/art/file/${artist.art_sha1}`
                 : artist?.art_id
                   ? `/art/${artist.art_id}`
-                  : "/assets/default-placeholder.svg"
+                  : "/assets/default-artist-placeholder.svg"
         }');`}
       >
         <!-- Gradient Fade to Bottom (Start of merge) - Inside scaling div to match atmosphere -->
@@ -645,7 +645,7 @@
                     );
                     if (alb?.art_sha1) return `/art/file/${alb.art_sha1}`;
                     if (alb?.art_id) return `/art/${alb.art_id}`;
-                    return "/assets/default-placeholder.svg";
+                    return "/assets/default-artist-placeholder.svg";
                   })()}
                   class="w-full h-full rounded object-cover bg-surface-700"
                   alt="Art"
@@ -734,7 +734,7 @@
                       ? `/art/file/${single.art_sha1}`
                       : single.art_id
                         ? `/art/${single.art_id}`
-                        : "/assets/default-placeholder.svg"}
+                        : "/assets/default-artist-placeholder.svg"}
                     class="w-full h-full rounded object-cover bg-surface-700"
                     alt="Art"
                   />
