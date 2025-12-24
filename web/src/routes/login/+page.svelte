@@ -73,9 +73,10 @@
         on:submit|preventDefault={handleLogin}
       >
         <div class="space-y-2">
-          <label class="block text-sm text-white/70">Username</label>
+          <label class="block text-sm text-white/70" for="username-input">Username</label>
           <input
             class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
+            id="username-input"
             name="username"
             autocomplete="username"
             bind:value={username}
@@ -84,10 +85,11 @@
         </div>
 
         <div class="space-y-2">
-          <label class="block text-sm text-white/70">Password</label>
+          <label class="block text-sm text-white/70" for="password-input">Password</label>
           <input
             class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
             type="password"
+            id="password-input"
             name="password"
             autocomplete="current-password"
             bind:value={password}

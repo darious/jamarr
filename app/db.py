@@ -92,9 +92,24 @@ CREATE TABLE IF NOT EXISTS artwork (
     path_on_disk TEXT,
     filesize_bytes INTEGER,
     image_format TEXT,
+    source TEXT,
+    source_url TEXT,
     checked_at REAL,
     check_errors TEXT
 );
+
+CREATE TABLE IF NOT EXISTS image_mapping (
+    artwork_id INTEGER NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    image_type TEXT NOT NULL,
+    score REAL,
+    created_at REAL DEFAULT (strftime('%s','now')),
+    PRIMARY KEY (entity_type, entity_id, image_type),
+    FOREIGN KEY(artwork_id) REFERENCES artwork(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_mapping_artwork ON image_mapping(artwork_id);
 
 CREATE TABLE IF NOT EXISTS renderers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -240,6 +255,30 @@ async def init_db():
             "ALTER TABLE artwork ADD COLUMN image_format TEXT",
             "ALTER TABLE artwork ADD COLUMN checked_at REAL",
             "ALTER TABLE artwork ADD COLUMN check_errors TEXT",
+            "ALTER TABLE artwork ADD COLUMN source TEXT",
+            "ALTER TABLE artwork ADD COLUMN source_url TEXT",
+            "UPDATE artwork SET type='artistthumb' WHERE type='artist'",
+            """CREATE TABLE IF NOT EXISTS image_mapping (
+                artwork_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                image_type TEXT NOT NULL,
+                score REAL,
+                created_at REAL DEFAULT (strftime('%s','now')),
+                PRIMARY KEY (entity_type, entity_id, image_type),
+                FOREIGN KEY(artwork_id) REFERENCES artwork(id) ON DELETE CASCADE
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_image_mapping_artwork ON image_mapping(artwork_id)",
+            """INSERT OR IGNORE INTO image_mapping (artwork_id, entity_type, entity_id, image_type, score, created_at)
+               SELECT art_id, 'artist', mbid, 'artistthumb', NULL, strftime('%s','now')
+               FROM artists WHERE art_id IS NOT NULL""",
+            """INSERT OR IGNORE INTO image_mapping (artwork_id, entity_type, entity_id, image_type, score, created_at)
+               SELECT art_id, 'album', mbid, 'album', NULL, strftime('%s','now')
+               FROM albums WHERE art_id IS NOT NULL""",
+            """INSERT OR IGNORE INTO image_mapping (artwork_id, entity_type, entity_id, image_type, score, created_at)
+               SELECT art_id, 'track', CAST(id AS TEXT), 'album', NULL, strftime('%s','now')
+               FROM tracks WHERE art_id IS NOT NULL""",
+            "UPDATE artwork SET type=NULL WHERE type IS NOT NULL",
             # Normalization Migration
             """CREATE TABLE IF NOT EXISTS albums (
                 mbid TEXT PRIMARY KEY,
@@ -337,6 +376,12 @@ async def init_db():
                 await db.execute(sql)
             except Exception:
                 pass # Column likely exists
+
+        # Consolidate artwork paths into unified cache/art/{sha1[:2]}/{sha1}
+        try:
+            await _unify_artwork_cache(db)
+        except Exception:
+            pass
             
         try:
              await db.execute("ALTER TABLE artwork ADD COLUMN type TEXT")
@@ -472,4 +517,59 @@ async def init_db():
         # Drop deprecated playback_state table
         await db.execute("DROP TABLE IF EXISTS playback_state")
         
+        # Consolidate artwork cache and clear legacy type column values
+        try:
+            await _unify_artwork_cache(db)
+        except Exception:
+            pass
+
         await db.commit()
+
+
+async def _unify_artwork_cache(db):
+    """
+    Move legacy artwork files (artist/album folders) into unified cache/art/{sha1[:2]}/{sha1}
+    and update path_on_disk. Leaves rows intact if files are missing.
+    """
+    import os
+    import shutil
+
+    async with db.execute("SELECT id, sha1, path_on_disk FROM artwork") as cursor:
+        rows = await cursor.fetchall()
+
+    for row in rows:
+        art_id = row["id"]
+        sha1 = row["sha1"]
+        current_path = row["path_on_disk"]
+
+        bucket = sha1[:2]
+        unified_path = os.path.join("cache/art", bucket, sha1)
+
+        candidates = [
+            current_path,
+            os.path.join("cache/art/artistthumb", bucket, sha1),
+            os.path.join("cache/art/artist", bucket, sha1),
+            os.path.join("cache/art/album", bucket, sha1),
+        ]
+
+        src_path = None
+        for cand in candidates:
+            if cand and os.path.exists(cand):
+                src_path = cand
+                break
+
+        if src_path and os.path.abspath(src_path) != os.path.abspath(unified_path):
+            os.makedirs(os.path.dirname(unified_path), exist_ok=True)
+            try:
+                shutil.move(src_path, unified_path)
+            except Exception:
+                try:
+                    shutil.copyfile(src_path, unified_path)
+                except Exception:
+                    pass
+
+        # Always normalize path_on_disk to the unified path, even if the file is missing.
+        await db.execute(
+            "UPDATE artwork SET path_on_disk=?, type=NULL WHERE id=?",
+            (unified_path, art_id),
+        )
