@@ -346,7 +346,8 @@ async def fetch_artist_metadata(
     try:
         async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
             # 1. MusicBrainz Core Data & Relations
-            needs_mb = fetch_metadata or fetch_links or fetch_top_tracks or fetch_singles or fetch_bio
+            # For singles-only runs we don't need core artist data/relations.
+            needs_mb = fetch_metadata or fetch_links or fetch_top_tracks or fetch_bio
             mb_data = None
             if needs_mb:
                 logger.debug(f"Fetching Core Data from MusicBrainz for {artist_name} ({mbid})...")
@@ -454,10 +455,8 @@ async def fetch_artist_metadata(
                 except Exception as e:
                     logger.warning(f"Wikipedia fetch failed for {artist_name}: {e}")
 
-            # 3. Spotify (Image, Similar, Top Tracks) - temporarily disabled
-            if SPOTIFY_SCANNING_DISABLED or not fetch_top_tracks:
-                logger.debug("Spotify scanning disabled; skipping Spotify API calls.")
-            else:
+            # 3. Spotify (Image, Similar, Top Tracks) - only when requested
+            if fetch_top_tracks and not SPOTIFY_SCANNING_DISABLED:
                 logger.debug("Checking Spotify credentials...")
                 token = await get_spotify_token(client)
                 if token:
@@ -501,81 +500,75 @@ async def fetch_artist_metadata(
                              logger.warning(f"Spotify Search Failed: {e}")
 
                     if spotify_id:
-                         try:
-                             # Get Artist (Image)
-                             if fetch_artwork:
-                                 logger.debug(f"Fetching Spotify Artist details (Bio/Image) for {spotify_id}...")
-                                 art_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}", headers=sp_headers)
-                                 if art_resp.status_code == 200:
-                                     images = art_resp.json().get("images", [])
-                                     if images:
-                                         if not metadata["image_url"]:
-                                             metadata["image_url"] = images[0]["url"]
-                                             metadata["image_source"] = "spotify"
+                        try:
+                            # Get Artist (Image)
+                            if fetch_artwork:
+                                logger.debug(f"Fetching Spotify Artist details (Bio/Image) for {spotify_id}...")
+                                art_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}", headers=sp_headers)
+                                if art_resp.status_code == 200:
+                                    images = art_resp.json().get("images", [])
+                                    if images and not metadata["image_url"]:
+                                        metadata["image_url"] = images[0]["url"]
+                                        metadata["image_source"] = "spotify"
 
-                             # Get Related Artists
-                             logger.debug(f"Fetching Related Artists for: {spotify_id}")
-                             rel_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}/related-artists", headers=sp_headers)
-                             if rel_resp.status_code == 200:
-                                 rel_data = rel_resp.json()
-                                 metadata["similar_artists"] = [a["name"] for a in rel_data.get("artists", [])[:10]]
-                                 logger.debug(f"Found {len(metadata['similar_artists'])} similar artists via API")
-                             else:
-                                 logger.debug(f"Spotify Related API Failed: {rel_resp.status_code}. Attempting scrape...")
-                                 # Fallback: Scrape public page
-                                 try:
-                                     from bs4 import BeautifulSoup
-                                     page_url = f"https://open.spotify.com/artist/{spotify_id}"
-                                     page_resp = await client.get(page_url)
-                                     if page_resp.status_code == 200:
-                                         soup = BeautifulSoup(page_resp.text, "html.parser")
-                                         # Look for "Fans also like"
-                                         fans_header = soup.find(string="Fans also like")
-                                         if fans_header:
-                                             # Heuristic: Find all links to /artist/ that are NOT the current artist.
-                                             seen = set()
-                                             similar = []
-                                             for a in soup.find_all("a", href=True):
-                                                 href = a["href"]
-                                                 if href.startswith("/artist/") and spotify_id not in href:
-                                                     name = a.get_text(strip=True)
-                                                     if name and name not in seen:
-                                                         if name.lower() != "see all":
-                                                             seen.add(name)
-                                                             similar.append(name)
-                                             
-                                             if similar:
-                                                 metadata["similar_artists"] = similar[:10]
-                                                 logger.debug(f"Scraped {len(similar)} potential similar artists")
-                                 except Exception as scrape_e:
-                                     logger.error(f"Scraping failed: {scrape_e}")
+                            # Get Related Artists
+                            logger.debug(f"Fetching Related Artists for: {spotify_id}")
+                            rel_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}/related-artists", headers=sp_headers)
+                            if rel_resp.status_code == 200:
+                                rel_data = rel_resp.json()
+                                metadata["similar_artists"] = [a["name"] for a in rel_data.get("artists", [])[:10]]
+                                logger.debug(f"Found {len(metadata['similar_artists'])} similar artists via API")
+                            else:
+                                logger.debug(f"Spotify Related API Failed: {rel_resp.status_code}. Attempting scrape...")
+                                # Fallback: Scrape public page
+                                try:
+                                    from bs4 import BeautifulSoup
+                                    page_url = f"https://open.spotify.com/artist/{spotify_id}"
+                                    page_resp = await client.get(page_url)
+                                    if page_resp.status_code == 200:
+                                        soup = BeautifulSoup(page_resp.text, "html.parser")
+                                        fans_header = soup.find(string="Fans also like")
+                                        if fans_header:
+                                            seen = set()
+                                            similar = []
+                                            for a in soup.find_all("a", href=True):
+                                                href = a["href"]
+                                                if href.startswith("/artist/") and spotify_id not in href:
+                                                    name = a.get_text(strip=True)
+                                                    if name and name not in seen and name.lower() != "see all":
+                                                        seen.add(name)
+                                                        similar.append(name)
+                                            if similar:
+                                                metadata["similar_artists"] = similar[:10]
+                                                logger.debug(f"Scraped {len(similar)} potential similar artists")
+                                except Exception as scrape_e:
+                                    logger.error(f"Scraping failed: {scrape_e}")
 
-
-
-
-                             # Get Top Tracks
-                             logger.debug("Fetching Top Tracks from Spotify...")
-                             top_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}/top-tracks?market=US", headers=sp_headers)
-                             if top_resp.status_code == 200:
-                                 top_data = top_resp.json()
-                                 tracks = []
-                                 for t in top_data.get("tracks", [])[:10]:
-                                     tracks.append({
-                                         "name": t["name"],
-                                         "album": t["album"]["name"],
-                                         "date": t["album"]["release_date"],
-                                         "duration_ms": t["duration_ms"],
-                                         "popularity": t["popularity"],
-                                         "preview_url": t["preview_url"]
-                                     })
-                                 metadata["top_tracks"] = tracks
-                         except Exception as e:
-                             logger.warning(f"Spotify Data Fetch Failed: {e}")
+                            # Get Top Tracks
+                            logger.debug("Fetching Top Tracks from Spotify...")
+                            top_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}/top-tracks?market=US", headers=sp_headers)
+                            if top_resp.status_code == 200:
+                                top_data = top_resp.json()
+                                tracks = []
+                                for t in top_data.get("tracks", [])[:10]:
+                                    tracks.append({
+                                        "name": t["name"],
+                                        "album": t["album"]["name"],
+                                        "date": t["album"]["release_date"],
+                                        "duration_ms": t["duration_ms"],
+                                        "popularity": t["popularity"],
+                                        "preview_url": t["preview_url"]
+                                    })
+                                metadata["top_tracks"] = tracks
+                        except Exception as e:
+                            logger.warning(f"Spotify Data Fetch Failed: {e}")
                 else:
                     logger.debug("No Spotify token available (credentials missing or failed).")
                     # Fallback: if only one MB candidate, preserve that URL even without token
                     if spotify_candidates and len(spotify_candidates) == 1 and not metadata["spotify_url"]:
                         metadata["spotify_url"] = spotify_candidates[0][1]
+            elif fetch_top_tracks and SPOTIFY_SCANNING_DISABLED:
+                logger.debug("Spotify scanning disabled; skipping Spotify API calls.")
 
             # 4. MusicBrainz Singles & Albums (Release Groups)
             if bio_only and not (fetch_links or fetch_singles):
@@ -591,22 +584,18 @@ async def fetch_artist_metadata(
                 logger.debug("Fetching Albums (Release Groups) from MusicBrainz...")
                 albums = await fetch_artist_release_groups(mbid, "album", client)
                 for a in albums:
-                     logger.debug(f"Resolving links for album: {a['title']} ({a['mbid']})")
-                     res = await fetch_best_release_match(a['mbid'], client)
-                     a['links'] = res['links']
-                     a['release_ids'] = res['release_ids']
-                     a['primary_release_id'] = res.get('primary_release_id')
+                     should_resolve_links = fetch_links and (a["mbid"] not in local_release_group_ids)
+                     if should_resolve_links:
+                         logger.debug(f"Resolving links for album: {a['title']} ({a['mbid']})")
+                         res = await fetch_best_release_match(a['mbid'], client)
+                         a['links'] = res['links']
+                         a['release_ids'] = res['release_ids']
+                         a['primary_release_id'] = res.get('primary_release_id')
                 metadata["albums"] = albums
 
                 logger.debug("Fetching EPs (Release Groups) from MusicBrainz...")
                 eps = await fetch_artist_release_groups(mbid, "ep", client)
-                for e in eps:
-                     if e['mbid'] in local_release_group_ids:
-                         logger.debug(f"Resolving links for EP (Local): {e['title']} ({e['mbid']})")
-                         res = await fetch_best_release_match(e['mbid'], client)
-                         e['links'] = res['links']
-                         e['release_ids'] = res['release_ids']
-                         e['primary_release_id'] = res.get('primary_release_id')
+                # Skip link resolution for EPs when we already have them locally; only missing-albums flow needs links.
                 metadata["albums"].extend(eps)
 
     except Exception as e:
