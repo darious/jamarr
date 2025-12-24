@@ -239,7 +239,18 @@ export async function playFromQueue(index: number) {
             body: JSON.stringify({ index, hostname, client_ip })
         });
         if (res.ok) {
-            playerState.update(s => ({ ...s, current_index: index, is_playing: true, position_seconds: 0 }));
+            const data = await res.json();
+            const newState = data.state || {};
+            playerState.update(s => ({
+                ...s,
+                queue: newState.queue ?? s.queue,
+                current_index: newState.current_index ?? index,
+                is_playing: newState.is_playing ?? true,
+                position_seconds: newState.position_seconds ?? 0,
+                transport_state: newState.transport_state ?? s.transport_state,
+                renderer: newState.renderer ?? s.renderer,
+                volume: newState.volume ?? s.volume
+            }));
             await playCurrentTrack();
         }
     } catch (e) {
