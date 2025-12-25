@@ -584,3 +584,16 @@ async def _unify_artwork_cache(db):
             "UPDATE artwork SET path_on_disk=?, type=NULL WHERE id=?",
             (unified_path, art_id),
         )
+
+async def optimize_db():
+    """
+    Runs database optimization commands (VACUUM, ANALYZE).
+    This can take a while and might lock the DB.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        # VACUUM rebuilds the DB file, repacking it into a minimal amount of disk space.
+        await db.execute("VACUUM")
+        # ANALYZE gathers statistics about indices to help the query planner.
+        await db.execute("ANALYZE")
+        # PRAGMA optimize is also good practice
+        await db.execute("PRAGMA optimize")

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.db import get_db
+from app.db import get_db, optimize_db
 import aiosqlite
 import json
 from typing import List, Optional
@@ -19,6 +19,14 @@ async def scan_missing_albums(artist: str = None, mbid: str = None):
         return {"status": "started", "message": "Missing albums scan started"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/api/library/optimize")
+async def trigger_optimize():
+    try:
+        await optimize_db()
+        return {"status": "success", "message": "Database optimized"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/artists/{mbid}/missing")
 async def get_missing_albums(mbid: str, db: aiosqlite.Connection = Depends(get_db)):

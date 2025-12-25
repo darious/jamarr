@@ -8,6 +8,7 @@
         cancelScan,
         fetchArtists,
         triggerMissingAlbumsScan,
+        triggerOptimize,
     } from "$lib/api";
 
     let status = "Idle";
@@ -112,11 +113,19 @@
         }
     });
 
+    let isUserScrolled = false;
+
     afterUpdate(() => {
-        if (logContainer) {
-            logContainer.scrollTop = logContainer.scrollHeight;
+        if (logContainer && !isUserScrolled) {
+            logContainer.scrollTop = 0;
         }
     });
+
+    function handleScroll() {
+        if (!logContainer) return;
+        // Check if we are close to the top (tolerance of 10px)
+        isUserScrolled = logContainer.scrollTop > 10;
+    }
 
     function handleEvent(data: any) {
         if (data.type === "status") {
@@ -305,6 +314,29 @@
             await triggerPrune();
         } catch (e) {
             addLog(`Error starting prune: ${e}`);
+        }
+    }
+
+    async function startOptimize() {
+        if (isRunning) return;
+        if (
+            !confirm(
+                "Run database optimization (VACUUM, ANALYZE)? This may take a while and lock the database.",
+            )
+        )
+            return;
+
+        try {
+            status = "Optimizing...";
+            isRunning = true;
+            addLog("Starting database optimization...");
+            await triggerOptimize();
+            addLog("Database optimization completed.");
+        } catch (e) {
+            addLog(`Error optimizing DB: ${e}`);
+        } finally {
+            isRunning = false;
+            status = "Idle";
         }
     }
 
@@ -498,6 +530,7 @@
                 <div
                     class="max-h-[320px] overflow-y-auto p-4 space-y-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
                     bind:this={logContainer}
+                    on:scroll={handleScroll}
                 >
                     {#if logs.length === 0}
                         <div class="text-white/20 italic">No logs...</div>
@@ -732,6 +765,14 @@
                     disabled={isRunning}
                 >
                     Prune Library
+                </button>
+
+                <button
+                    class="btn border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+                    disabled={isRunning}
+                    on:click={startOptimize}
+                >
+                    Optimize Database
                 </button>
             </div>
         </div>

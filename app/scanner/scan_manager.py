@@ -40,7 +40,27 @@ class ScanManager:
             fh._scanner_log = True
             fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
             scan_logger.addHandler(fh)
+        
+        # UI Broadcast Handler
+        if not any(getattr(h, "_ui_broadcast", False) for h in scan_logger.handlers):
+            bh = self.BroadcastLogHandler(self)
+            bh._ui_broadcast = True
+            bh.setLevel(logging.INFO) # Only show INFO+ in UI to avoid flood
+            scan_logger.addHandler(bh)
+
         scan_logger.setLevel(logging.DEBUG)
+
+    class BroadcastLogHandler(logging.Handler):
+        def __init__(self, manager):
+            super().__init__()
+            self.manager = manager
+        
+        def emit(self, record):
+            try:
+                msg = self.format(record)
+                self.manager._log_message(msg)
+            except Exception:
+                self.handleError(record)
 
     def get_music_path(self) -> str:
         return self._music_path
