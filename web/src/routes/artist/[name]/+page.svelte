@@ -469,7 +469,7 @@
           <div class="flex flex-wrap justify-end gap-2">
             {#if artist?.homepage}
               <a
-                class="btn-icon btn-icon-sm variant-filled-surface hover:variant-filled-primary transition-all"
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#3b82f6] hover:bg-[#3b82f6] hover:text-white transition-all border border-transparent"
                 target="_blank"
                 href={artist.homepage}
                 title="Homepage"
@@ -501,6 +501,20 @@
                 title="Tidal"
               >
                 <img src="/assets/logo-tidal.png" alt="Tidal" class="h-5 w-5" />
+              </a>
+            {/if}
+            {#if artist?.lastfm_url}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#D51007] hover:bg-[#D51007] hover:text-white transition-all border border-transparent"
+                target="_blank"
+                href={artist.lastfm_url}
+                title="Last.fm"
+              >
+                <img
+                  src="/assets/logo-lastfm.png"
+                  alt="Last.fm"
+                  class="h-5 w-5"
+                />
               </a>
             {/if}
             {#if artist?.qobuz_url}
@@ -693,7 +707,7 @@
 
               <div class="flex-1 min-w-0">
                 <p
-                  class={`text-sm font-medium truncate ${track.id > 0 ? "text-white" : "text-white/40"}`}
+                  class={`text-sm font-medium truncate ${track.id > 0 ? "text-white" : "text-white/40 line-through"}`}
                 >
                   {track.title}
                 </p>
@@ -793,7 +807,7 @@
 
                 <div class="flex-1 min-w-0">
                   <p
-                    class={`text-sm font-medium truncate ${single.localId ? "text-white" : "text-white/40"}`}
+                    class={`text-sm font-medium truncate ${single.localId ? "text-white" : "text-white/40 line-through"}`}
                   >
                     {single.title}
                   </p>

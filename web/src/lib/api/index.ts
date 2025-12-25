@@ -45,6 +45,7 @@ export interface Artist {
     qobuz_url: string | null;
     musicbrainz_url: string | null;
     tidal_url?: string | null;
+    lastfm_url?: string | null;
     albums?: {
         mbid: string;
         title: string;

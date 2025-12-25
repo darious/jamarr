@@ -15,7 +15,9 @@
     if (data.albumMeta?.art_id) return `/art/${data.albumMeta.art_id}`;
     const withArt = data.tracks.find((t) => t.art_sha1 || t.art_id);
     if (withArt?.art_sha1) return `/art/file/${withArt.art_sha1}`;
-    return withArt?.art_id ? `/art/${withArt.art_id}` : "/assets/logo.png";
+    return withArt?.art_id
+      ? `/art/${withArt.art_id}`
+      : "/assets/default-album-placeholder.svg";
   };
 
   const getMusicBrainzUrl = () => {
@@ -217,13 +219,13 @@
                     ? `/art/file/${track.art_sha1}`
                     : track.art_id
                       ? `/art/${track.art_id}`
-                      : "/assets/logo.png"}
+                      : "/assets/default-album-placeholder.svg"}
                   alt="Art"
                   class="h-full w-full object-cover"
                   on:error={(e) => {
                     const img = e.currentTarget;
                     if (img instanceof HTMLImageElement)
-                      img.src = "/assets/logo.png";
+                      img.src = "/assets/default-album-placeholder.svg";
                   }}
                 />
                 <div
