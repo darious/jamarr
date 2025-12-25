@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from app.db import get_db
+from app.db import get_db, optimize_db
 import aiosqlite
 import json
 from typing import List, Optional
@@ -19,6 +19,14 @@ async def scan_missing_albums(artist: str = None, mbid: str = None):
         return {"status": "started", "message": "Missing albums scan started"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/api/library/optimize")
+async def trigger_optimize():
+    try:
+        await optimize_db()
+        return {"status": "success", "message": "Database optimized"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/artists/{mbid}/missing")
 async def get_missing_albums(mbid: str, db: aiosqlite.Connection = Depends(get_db)):
@@ -69,6 +77,7 @@ async def get_artists(
             MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as musicbrainz_url,
             MAX(CASE WHEN el.type = 'tidal' THEN el.url END) as tidal_url,
             MAX(CASE WHEN el.type = 'lastfm' THEN el.url END) as lastfm_url,
+            MAX(CASE WHEN el.type = 'discogs' THEN el.url END) as discogs_url,
             COALESCE(ac.primary_album_count, 0) as primary_album_count,
             COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
         FROM artists a
@@ -139,6 +148,7 @@ async def get_artists(
                 "wikipedia_url": row["wikipedia_url"],
                 "qobuz_url": row["qobuz_url"],
                 "lastfm_url": row["lastfm_url"],
+                "discogs_url": row["discogs_url"],
                 "musicbrainz_url": row["musicbrainz_url"],
                 "tidal_url": row["tidal_url"],
                 "primary_album_count": row["primary_album_count"],

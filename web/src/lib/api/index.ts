@@ -50,6 +50,7 @@ export interface Artist {
     musicbrainz_url: string | null;
     tidal_url?: string | null;
     lastfm_url?: string | null;
+    discogs_url?: string | null;
     albums?: {
         mbid: string;
         title: string;
@@ -255,6 +256,14 @@ export async function triggerPrune(): Promise<void> {
         body: JSON.stringify({ type: 'prune' })
     });
     if (!res.ok) throw new Error('Failed to prune library');
+}
+
+export async function triggerOptimize(): Promise<void> {
+    const res = await fetch('/api/library/optimize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error('Failed to optimize database');
 }
 
 
