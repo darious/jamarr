@@ -476,6 +476,7 @@ async def fetch_artist_metadata(
         "top_tracks": [],
         "singles": [],
         "albums": [],
+        "genres": [],
         "last_updated": time.time()
     }
 
@@ -507,7 +508,7 @@ async def fetch_artist_metadata(
             if needs_mb:
                 logger.debug(f"Fetching Core Data from MusicBrainz for {artist_name} ({mbid})...")
                 await mb_limiter.acquire()
-                mb_url = f"{MB_API_ROOT}/artist/{mbid}?inc=url-rels&fmt=json"
+                mb_url = f"{MB_API_ROOT}/artist/{mbid}?inc=url-rels+genres&fmt=json"
                 
                 for attempt in range(3):
                     try:
@@ -565,6 +566,16 @@ async def fetch_artist_metadata(
                              if cand_id and not any(cand_id == c[0] for c in spotify_candidates):
                                  spotify_candidates.append((cand_id, target))
                                  logger.debug(f"data source: MusicBrainz (Spotify candidate) -> {target}")
+                
+                # Genres
+                if mb_data.get("genres"):
+                    metadata["genres"] = [
+                        {"name": g["name"], "count": g.get("count", 0)} 
+                        for g in mb_data["genres"]
+                    ]
+                    # Sort by count descending
+                    metadata["genres"].sort(key=lambda x: x["count"], reverse=True)
+                    logger.debug(f"Found {len(metadata['genres'])} genres for {artist_name}")
 
             if fetch_artwork:
                 fanart = await fetch_fanart_artist_images(client, mbid)

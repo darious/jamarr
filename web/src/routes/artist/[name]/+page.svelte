@@ -462,6 +462,18 @@
               {artist?.bio || "No biography available yet."}
             </p>
           </div>
+
+          {#if artist?.genres?.length}
+            <div class="flex flex-wrap gap-2">
+              {#each artist.genres.slice(0, 8) as genre}
+                <span
+                  class="px-3 py-1 text-xs font-medium text-white/80 bg-white/5 border border-white/10 rounded-full backdrop-blur-sm cursor-default hover:bg-white/10 hover:border-white/20 transition-colors"
+                >
+                  {genre.name}
+                </span>
+              {/each}
+            </div>
+          {/if}
         </div>
 
         <!-- Links (Right Side) -->
