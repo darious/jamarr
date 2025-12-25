@@ -107,8 +107,17 @@ export interface User {
     last_login?: string | null;
 }
 
-export async function fetchArtists(fetchFn: any = fetch): Promise<Artist[]> {
-    const res = await fetchFn('/api/artists');
+export async function fetchArtists(
+    fetchFn: any = fetch,
+    options: { limit?: number; offset?: number; name?: string; mbid?: string } = {}
+): Promise<Artist[]> {
+    const params = new URLSearchParams();
+    if (options.limit !== undefined) params.append('limit', options.limit.toString());
+    if (options.offset !== undefined) params.append('offset', options.offset.toString());
+    if (options.name !== undefined) params.append('name', options.name);
+    if (options.mbid !== undefined) params.append('mbid', options.mbid);
+
+    const res = await fetchFn(`/api/artists?${params.toString()}`);
     if (!res.ok) throw new Error('Failed to fetch artists');
     return await res.json();
 }
@@ -382,6 +391,13 @@ export type ArtistStats = {
     total: number;
     with_background: number;
     sources: Record<string, number>;
+    link_stats: Record<string, number>;
+};
+
+export type AlbumStats = {
+    total: number;
+    with_artwork: number;
+    link_stats: Record<string, number>;
 };
 
 export type MediaQualitySummary = {
@@ -389,12 +405,14 @@ export type MediaQualitySummary = {
         all: ArtistStats;
         primary: ArtistStats;
     };
+    album_stats: AlbumStats;
 };
 
 export type EntityItem = {
     name: string;
     mbid: string;
     image_url: string | null;
+    artist_name?: string | null;
 };
 
 export async function fetchMediaQualityItems(
