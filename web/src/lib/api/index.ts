@@ -14,6 +14,10 @@ export interface Artist {
         art_id?: number | null;
         art_sha1?: string | null;
     }[];
+    genres?: {
+        name: string;
+        count: number;
+    }[];
     top_tracks: {
         name: string;
         album: string;
@@ -374,50 +378,38 @@ export async function changePassword(data: { current_password: string; new_passw
     }
 }
 
-export type MediaQualityIssue = {
-    id: number;
-    entity_type: string;
-    entity_id: string | null;
-    issue_code: string;
-    details: Record<string, any>;
-    created_at: number | null;
-    resolved_at: number | null;
-    context?: Record<string, any> | null;
+export type ArtistStats = {
+    total: number;
+    with_background: number;
+    sources: Record<string, number>;
 };
 
 export type MediaQualitySummary = {
-    issue_counts: Record<string, number>;
-    pending_artwork: number;
-    artwork_with_issues: number;
+    artist_stats: {
+        all: ArtistStats;
+        primary: ArtistStats;
+    };
 };
 
-export async function runMediaQualityCheck(force = false): Promise<{ status: string; stats: any }> {
-    const res = await fetch('/api/media-quality/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force }),
-    });
-    if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        throw new Error(detail.detail || 'Failed to run media quality checks');
-    }
-    return await res.json();
-}
+export type EntityItem = {
+    name: string;
+    mbid: string;
+    image_url: string | null;
+};
 
-export async function fetchMediaQualityIssues(
-    params: { entityType?: string; issueCode?: string; includeResolved?: boolean; limit?: number } = {},
-    fetchFn: any = fetch,
-): Promise<MediaQualityIssue[]> {
+export async function fetchMediaQualityItems(
+    category: string,
+    filterType: string,
+    filterValue?: string
+): Promise<EntityItem[]> {
     const search = new URLSearchParams();
-    if (params.entityType) search.append('entity_type', params.entityType);
-    if (params.issueCode) search.append('issue_code', params.issueCode);
-    if (params.includeResolved) search.append('include_resolved', 'true');
-    if (params.limit) search.append('limit', String(params.limit));
+    search.append('category', category);
+    search.append('filter_type', filterType);
+    if (filterValue) search.append('filter_value', filterValue);
 
-    const res = await fetchFn(`/api/media-quality/issues?${search.toString()}`);
-    if (!res.ok) throw new Error('Failed to fetch media quality issues');
-    const data = await res.json();
-    return data.issues || [];
+    const res = await fetch(`/api/media-quality/items?${search.toString()}`);
+    if (!res.ok) throw new Error('Failed to fetch media quality items');
+    return await res.json();
 }
 
 export async function fetchMediaQualitySummary(fetchFn: any = fetch): Promise<MediaQualitySummary> {
