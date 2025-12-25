@@ -208,6 +208,7 @@ __marimo__/
 
 # Local cache
 cache/
+cache
 
 # Frontend build artifacts
 web/build/
