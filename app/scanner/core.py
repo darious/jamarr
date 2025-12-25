@@ -313,9 +313,21 @@ class Scanner:
                  
                  # Junction: Artist-Album (Primary)
                  if mb_rg_id:
+                     # Critical: Ensure parent Album exists to satisfy FK constraint
+                     # This redundancy ensures that even if _process_file failed to insert the album (e.g. missing title),
+                     # or if we are in a context where the album wasn't processed yet, we verify it exists.
+                     # We use default title if tag is missing to ensure the link can be created.
+                     safe_title = tags.get("album") or f"Unknown Album ({mb_rg_id})"
                      await db.execute("""
-                        INSERT OR IGNORE INTO artist_albums (artist_mbid, album_mbid, type)
+                        INSERT INTO albums (mbid, title, release_date, secondary_types, last_updated)
+                        VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT(mbid) DO NOTHING
+                     """, (mb_rg_id, safe_title, tags.get("date"), 'Album', time.time()))
+
+                     await db.execute("""
+                        INSERT INTO artist_albums (artist_mbid, album_mbid, type)
                         VALUES (?, ?, ?)
+                        ON CONFLICT(artist_mbid, album_mbid) DO NOTHING
                      """, (mbid, mb_rg_id, 'primary'))
 
              # Update tracks_top if this track is a match
@@ -940,10 +952,21 @@ class Scanner:
                                 if row: sim_mbid = row[0]
                         
                         await db.execute("""
-                            INSERT OR REPLACE INTO similar_artists 
+                            INSERT OR REPLACE INTO similar_artists
                             (artist_mbid, similar_artist_name, similar_artist_mbid, rank, last_updated)
                             VALUES (?, ?, ?, ?, ?)
                         """, (mbid, sim_name, sim_mbid, idx + 1, time.time()))
+
+                # 4. Artist Genres
+                if eff_fetch_metadata and meta.get("genres"):
+                    await db.execute("DELETE FROM artist_genres WHERE artist_mbid=?", (mbid,))
+                    
+                    logger.debug(f"Storing {len(meta['genres'])} genres for {mbid}")
+                    for g in meta["genres"]:
+                         await db.execute("""
+                            INSERT INTO artist_genres (artist_mbid, genre, count, last_updated)
+                            VALUES (?, ?, ?, ?)
+                         """, (mbid, g["name"], g["count"], time.time()))
 
                 # 4. Albums & Singles (Release Groups)
                 all_releases = meta.get("albums", []) + meta.get("singles", [])

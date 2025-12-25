@@ -173,6 +173,18 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
                         "art_id": sim_art.get("art_id") or sim_row["art_id"],
                         "art_sha1": sim_art.get("art_sha1") or sim_row["art_sha1"],
                     })
+
+
+            # Fetch genres
+            genres_query = """
+                SELECT genre, count 
+                FROM artist_genres 
+                WHERE artist_mbid = ? 
+                ORDER BY count DESC
+            """
+            async with db.execute(genres_query, (mbid,)) as g_cursor:
+                g_rows = await g_cursor.fetchall()
+                genres = [{"name": r["genre"], "count": r["count"]} for r in g_rows]
             
             artists.append({
                 "mbid": row["mbid"],
@@ -182,6 +194,7 @@ async def get_artists(db: aiosqlite.Connection = Depends(get_db)):
                 "art_sha1": art_info.get("art_sha1") or row["art_sha1"],
                 "bio": row["bio"], 
                 "similar_artists": similar_artists,
+                "genres": genres,
                 "top_tracks": top_tracks,
                 "sort_name": row["sort_name"] or row["name"], # Fallback to name
                 "homepage": row["homepage"],

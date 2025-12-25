@@ -342,6 +342,17 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS idx_similar_artists_similar ON similar_artists(similar_artist_mbid)"
             "CREATE INDEX IF NOT EXISTS idx_similar_artists_artist ON similar_artists(artist_mbid)",
             "CREATE INDEX IF NOT EXISTS idx_similar_artists_similar ON similar_artists(similar_artist_mbid)",
+            
+            # Artist Genres table
+            """CREATE TABLE IF NOT EXISTS artist_genres (
+                artist_mbid TEXT NOT NULL,
+                genre TEXT NOT NULL,
+                count INTEGER DEFAULT 0,
+                last_updated REAL,
+                PRIMARY KEY (artist_mbid, genre),
+                FOREIGN KEY(artist_mbid) REFERENCES artists(mbid)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_artist_genres_artist ON artist_genres(artist_mbid)",
             # Missing Albums table
             """CREATE TABLE IF NOT EXISTS missing_albums (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
