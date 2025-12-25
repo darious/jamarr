@@ -35,13 +35,21 @@
     modalItems = [];
 
     // Construct title
-    const catStr = category === "all" ? "All Artists" : "Primary Artists";
+    let catStr = "";
+    if (category === "all") catStr = "All Artists";
+    else if (category === "primary") catStr = "Primary Artists";
+    else if (category === "album") catStr = "Albums";
+
     if (filterType === "total") {
       modalTitle = `${catStr} (Total)`;
     } else if (filterType === "background") {
       modalTitle = `${catStr} with Background Art`;
     } else if (filterType === "source") {
       modalTitle = `${catStr} - Source: ${filterValue}`;
+    } else if (filterType === "link_type") {
+      modalTitle = `${catStr} - Link: ${filterValue}`;
+    } else if (filterType === "missing_link_type") {
+      modalTitle = `${catStr} - Missing Link: ${filterValue}`;
     }
 
     try {
@@ -108,7 +116,7 @@
             <h2 class="text-lg font-semibold">Artist Statistics</h2>
           </div>
 
-          <div class="grid grid-cols-2 gap-8">
+          <div class="grid md:grid-cols-2 gap-8">
             <!-- All Artists Column -->
             <div class="space-y-4">
               <h3
@@ -116,7 +124,6 @@
               >
                 All Artists
               </h3>
-
               <div class="flex items-baseline gap-2">
                 <button
                   class="text-3xl font-bold text-primary hover:underline"
@@ -155,6 +162,36 @@
                       >
                         {count}
                       </button>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+
+              <div class="pt-4 border-t border-white/5">
+                <p class="text-xs font-medium text-white/40 mb-3 uppercase">
+                  External Links
+                </p>
+                <div class="space-y-2">
+                  {#each Object.entries(summary.artist_stats.all.link_stats) as [type, count]}
+                    <div class="flex items-center justify-between text-sm">
+                      <span class="text-white/60 capitalize">{type}</span>
+                      <div class="flex gap-2">
+                        <button
+                          class="font-medium bg-white/10 px-2 py-0.5 rounded text-white/90 hover:bg-primary/20 hover:text-primary transition-colors"
+                          on:click={() => drillDown("all", "link_type", type)}
+                          title="View Artists with this link"
+                        >
+                          {count}
+                        </button>
+                        <button
+                          class="font-medium bg-red-500/10 px-2 py-0.5 rounded text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-colors"
+                          on:click={() =>
+                            drillDown("all", "missing_link_type", type)}
+                          title="View Artists missing this link"
+                        >
+                          Missing: {summary.artist_stats.all.total - count}
+                        </button>
+                      </div>
                     </div>
                   {/each}
                 </div>
@@ -211,6 +248,155 @@
                   {/each}
                 </div>
               </div>
+
+              <div class="pt-4 border-t border-white/5">
+                <p class="text-xs font-medium text-white/40 mb-3 uppercase">
+                  External Links
+                </p>
+                <div class="space-y-2">
+                  {#each Object.entries(summary.artist_stats.primary.link_stats) as [type, count]}
+                    <div class="flex items-center justify-between text-sm">
+                      <span class="text-white/60 capitalize">{type}</span>
+                      <div class="flex gap-2">
+                        <button
+                          class="font-medium bg-white/10 px-2 py-0.5 rounded text-white/90 hover:bg-primary/20 hover:text-primary transition-colors"
+                          on:click={() =>
+                            drillDown("primary", "link_type", type)}
+                          title="View Artists with this link"
+                        >
+                          {count}
+                        </button>
+                        <button
+                          class="font-medium bg-red-500/10 px-2 py-0.5 rounded text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-colors"
+                          on:click={() =>
+                            drillDown("primary", "missing_link_type", type)}
+                          title="View Artists missing this link"
+                        >
+                          Missing: {summary.artist_stats.primary.total - count}
+                        </button>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Album Stats -->
+        <div
+          class="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur space-y-6"
+        >
+          <div class="flex items-center gap-3 mb-6">
+            <div
+              class="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><rect
+                  width="18"
+                  height="18"
+                  x="3"
+                  y="3"
+                  rx="2"
+                  ry="2"
+                /><circle cx="12" cy="12" r="5" /><line
+                  x1="12"
+                  x2="12"
+                  y1="12"
+                  y2="12.01"
+                /></svg
+              >
+            </div>
+            <div>
+              <h3 class="font-medium text-white">Album Statistics</h3>
+              <p class="text-sm text-white/50">Collection quality</p>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="text-3xl font-bold text-white">
+                  {summary.album_stats.total}
+                </div>
+                <div class="text-xs text-white/50 font-medium uppercase mt-1">
+                  Total Albums
+                </div>
+              </div>
+              <button
+                class="btn btn-sm btn-ghost text-white/60 hover:text-white"
+                on:click={() => drillDown("album", "total")}
+              >
+                View All
+              </button>
+            </div>
+
+            <div class="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+              <div class="h-full bg-purple-500/50 w-full" />
+            </div>
+
+            <div class="space-y-2">
+              <div
+                class="flex items-center justify-between text-sm text-white/70"
+              >
+                <span>With artwork</span>
+                <button
+                  class="font-medium text-white hover:text-purple-400 hover:underline"
+                  on:click={() => drillDown("album", "artwork", "present")}
+                >
+                  {summary.album_stats.with_artwork}
+                </button>
+              </div>
+              <div
+                class="flex items-center justify-between text-sm text-white/70"
+              >
+                <span>Missing artwork</span>
+                <button
+                  class="font-medium text-red-300 hover:text-red-400 hover:underline"
+                  on:click={() => drillDown("album", "artwork", "missing")}
+                >
+                  {summary.album_stats.total - summary.album_stats.with_artwork}
+                </button>
+              </div>
+            </div>
+
+            <div class="pt-4 border-t border-white/5">
+              <p class="text-xs font-medium text-white/40 mb-3 uppercase">
+                External Links
+              </p>
+              <div class="space-y-2">
+                {#each Object.entries(summary.album_stats.link_stats) as [type, count]}
+                  <div class="flex items-center justify-between text-sm">
+                    <span class="text-white/60 capitalize">{type}</span>
+                    <div class="flex gap-2">
+                      <button
+                        class="font-medium bg-white/10 px-2 py-0.5 rounded text-white/90 hover:bg-purple-500/20 hover:text-purple-400 transition-colors"
+                        on:click={() => drillDown("album", "link_type", type)}
+                        title="View Albums with this link"
+                      >
+                        {count}
+                      </button>
+                      <button
+                        class="font-medium bg-red-500/10 px-2 py-0.5 rounded text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-colors"
+                        on:click={() =>
+                          drillDown("album", "missing_link_type", type)}
+                        title="View Albums missing this link"
+                      >
+                        Missing: {summary.album_stats.total - count}
+                      </button>
+                    </div>
+                  </div>
+                {/each}
+              </div>
             </div>
           </div>
         </div>
@@ -251,7 +437,9 @@
             <div class="divide-y divide-white/5">
               {#each modalItems as item}
                 <a
-                  href={`/artist/${encodeURIComponent(item.name)}`}
+                  href={item.artist_name
+                    ? `/album/${encodeURIComponent(item.artist_name)}/${encodeURIComponent(item.name)}`
+                    : `/artist/${encodeURIComponent(item.name)}`}
                   class="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg transition-colors group"
                 >
                   {#if item.image_url}
