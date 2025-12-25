@@ -433,6 +433,8 @@ async def fetch_artist_metadata(
     if local_release_group_ids is None:
         local_release_group_ids = set()
 
+    logger.info(f"Fetching metadata for {artist_name} ({mbid})...")
+
     # If nothing is requested, return immediately
     if not any([fetch_metadata, fetch_bio, fetch_artwork, fetch_links, fetch_top_tracks, fetch_singles, bio_only, fetch_similar_artists]):
         return {
@@ -737,14 +739,9 @@ async def fetch_artist_metadata(
             if fetch_metadata or fetch_links:
                 logger.debug("Fetching Albums (Release Groups) from MusicBrainz...")
                 albums = await fetch_artist_release_groups(mbid, "album", client)
-                for a in albums:
-                     should_resolve_links = fetch_links and (a["mbid"] not in local_release_group_ids)
-                     if should_resolve_links:
-                         logger.debug(f"Resolving links for album: {a['title']} ({a['mbid']})")
-                         res = await fetch_best_release_match(a['mbid'], client)
-                         a['links'] = res['links']
-                         a['release_ids'] = res['release_ids']
-                         a['primary_release_id'] = res.get('primary_release_id')
+                # Optimization: We used to resolve links for every missing album here.
+                # User requested to skip this expensive lookup.
+                # We will rely on Release Group MBIDs for linking.
                 metadata["albums"] = albums
 
                 logger.debug("Fetching EPs (Release Groups) from MusicBrainz...")
