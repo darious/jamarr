@@ -249,15 +249,17 @@ async def upsert_artwork_record(db, sha1: str, meta: Optional[Dict[str, Any]] = 
             (*params, art_id),
         )
     else:
-        await db.execute(
+        cursor = await db.execute(
             """
             INSERT INTO artwork (sha1, mime, width, height, path_on_disk, filesize_bytes, image_format, source, source_url)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (sha1, *params),
         )
-        async with db.execute("SELECT last_insert_rowid()") as id_cursor:
-            art_id = (await id_cursor.fetchone())[0]
+        art_id = cursor.lastrowid
+        # Note: aiosqlite cursors don't strictly require close if not iterating, but it's good practice.
+        # However, db.execute returns a cursor that is awaitable (the coroutine), which returns the cursor.
+        # So 'cursor' here allows access to lastrowid.
 
     return art_id
 
