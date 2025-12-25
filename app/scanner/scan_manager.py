@@ -61,9 +61,17 @@ class ScanManager:
             
             while True:
                 event = await queue.get()
+                if event is None:
+                    break
                 yield event
         finally:
             self._event_queues.remove(queue)
+
+    async def shutdown(self):
+        """Stop any active scan and close all subscriber queues."""
+        await self.stop_scan()
+        for queue in self._event_queues:
+            queue.put_nowait(None)
 
     def _broadcast(self, event: Dict[str, Any]):
         """Push event to all connected clients"""
@@ -327,9 +335,12 @@ class ScanManager:
         if self._current_task and not self._current_task.done():
             self._stop_event.set()
             self._log_message("Stopping scan...")
-            # We don't await cancellation here, we let the task handle the event check
-            # But we can await the task if we want to ensure it stopped before returning
-            # return await self._current_task
+            try:
+                await self._current_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error waiting for scan to stop: {e}")
 
     async def start_missing_albums_scan(self, artist_filter=None, mbid_filter=None):
         async with self._lock:

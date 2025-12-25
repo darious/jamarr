@@ -247,6 +247,37 @@ async def fetch_lastfm_top_tracks(mbid, artist_name):
         logger.error(f"Last.fm Top Tracks failed for {mbid}: {e}")
         return []
 
+async def fetch_lastfm_artist_url(mbid: str):
+    """
+    Fetch artist URL from Last.fm using MBID.
+    """
+    if not mbid: return None
+    
+    api_key, _ = get_lastfm_credentials()
+    if not api_key: return None
+
+    url = "http://ws.audioscrobbler.com/2.0/"
+    params = {
+        "method": "artist.getinfo",
+        "mbid": mbid,
+        "api_key": api_key,
+        "format": "json"
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, params=params, timeout=10.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("artist", {}).get("url")
+            else:
+                logger.debug(f"Last.fm Artist Info error {resp.status_code} for {mbid}")
+                return None
+    except Exception as e:
+        logger.debug(f"Last.fm Artist Info failed for {mbid}: {e}")
+        return None
+
+
 async def fetch_lastfm_similar_artists(mbid, artist_name):
     """
     Fetch similar artists from Last.fm using MBID strict.
@@ -417,6 +448,7 @@ async def fetch_artist_metadata(
             "wikipedia_url": None,
             "qobuz_url": None,
             "tidal_url": None,
+            "lastfm_url": None,
             "musicbrainz_url": None,
             "similar_artists": [],
             "top_tracks": [],
@@ -438,6 +470,7 @@ async def fetch_artist_metadata(
         "wikipedia_url": known_wikipedia_url,
         "qobuz_url": None,
         "tidal_url": None,
+        "lastfm_url": None,
         "musicbrainz_url": None,
         "similar_artists": [],
         "top_tracks": [],
@@ -605,9 +638,13 @@ async def fetch_artist_metadata(
                  metadata["similar_artists"] = await fetch_lastfm_similar_artists(mbid, artist_name)
                  logger.debug(f"Found {len(metadata['similar_artists'])} similar artists")
 
-            # 4. Spotify (Artwork Only)
-            # Only if explicitly requested (usually if Fanart failed or missing)
-            if fetch_spotify_artwork and not SPOTIFY_SCANNING_DISABLED:
+            if fetch_links:
+                 logger.debug(f"Fetching Last.fm URL for {artist_name}...")
+                 metadata["lastfm_url"] = await fetch_lastfm_artist_url(mbid)
+
+            # 4. Spotify (Artwork & Links)
+            # We need to resolve Spotify ID if we want artwork OR if we want to store the Spotify link
+            if (fetch_spotify_artwork or fetch_links) and not SPOTIFY_SCANNING_DISABLED:
                 logger.debug("Checking Spotify credentials for artwork...")
                 token = await get_spotify_token(client)
                 if token:

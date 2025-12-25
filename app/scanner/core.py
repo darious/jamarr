@@ -532,8 +532,8 @@ class Scanner:
             query = """
                 SELECT a.mbid, a.name, a.last_updated, a.sort_name, a.bio, a.image_url, 
                        a.art_id, aw.source as art_source,
-                       COUNT(el.id) as link_count,
-                       (SELECT url FROM external_links l WHERE l.entity_id=a.mbid AND l.type='spotify' LIMIT 1) as spotify_link_existing
+                       (SELECT url FROM external_links l WHERE l.entity_id=a.mbid AND l.type='spotify' LIMIT 1) as spotify_link_existing,
+                       COALESCE(SUM(CASE WHEN el.type != 'musicbrainz' THEN 1 ELSE 0 END), 0) as link_count
                 FROM artists a
                 LEFT JOIN artwork aw ON a.art_id = aw.id
                 LEFT JOIN external_links el 
@@ -566,7 +566,7 @@ class Scanner:
                 rows = await cursor.fetchall()
 
             def has_selected_gaps(row):
-                _, name, _, sort_name, bio, image_url, art_id, art_source, link_count, spotify_link_existing = row
+                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count = row
                 checks = []
                 if fetch_metadata:
                     checks.append(not name or not str(name).strip() or not sort_name or not str(sort_name).strip())
@@ -595,7 +595,7 @@ class Scanner:
             
             # Pre-calculate work to determine actual count of active tasks
             for row in rows:
-                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, link_count, spotify_link_existing = row
+                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count = row
                 if not mbid: continue
 
                 # Check "missing only" gaps simply first
@@ -654,8 +654,9 @@ class Scanner:
                          # If missing_only=False (Refresh), user might expect links refresh?
                          # But user said "when missing is unchecked, get as many spotify links ... where no fanart artwork".
                          # This implies if fanart exists, we skip everything.
-                         if has_fanart:
-                             eff_fetch_links = False
+                         # FIX: Do NOT disable link fetching here; let standard fetch_links flag decide.
+                         # if has_fanart:
+                         #    eff_fetch_links = False
 
                 has_bio = bool(bio and str(bio).strip())
                 has_meta_core = bool(name and str(name).strip() and sort_name and str(sort_name).strip())
@@ -708,7 +709,7 @@ class Scanner:
                     logger.info("Metadata update cancelled by stop signal.")
                     raise asyncio.CancelledError()
                 
-                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, link_count, spotify_link_existing = row
+                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count = row
                 
                 # Emit initial "Fetching..." if name is unknown, or name if known
                 display_name = name or f"Artist ({mbid[:8]})"
@@ -852,6 +853,7 @@ class Scanner:
                     if meta.get("qobuz_url"): artist_links.append(("qobuz", meta["qobuz_url"]))
                     if meta.get("wikipedia_url"): artist_links.append(("wikipedia", meta["wikipedia_url"]))
                     if meta.get("homepage"): artist_links.append(("homepage", meta["homepage"]))
+                    if meta.get("lastfm_url"): artist_links.append(("lastfm", meta["lastfm_url"]))
                     
                     for l_type, l_url in artist_links:
                         await db.execute("INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)", 
