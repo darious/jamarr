@@ -23,7 +23,7 @@ For database details, see [Database Schema](database_schema.md).
 ## Setup
 
 ### Prerequisites
-- Python 3.12+
+- Python 3.13+
 - `uv` (fast Python package/dependency manager)
 - `ffmpeg` (for `ffprobe`) - *Required for scanning and analysis*
 
@@ -64,7 +64,7 @@ The recommended way to run Jamarr is via Docker Compose.
 ## Development Setup
 
 ### Prerequisites
-- Python 3.12+
+- Python 3.13+
 - `uv`
 - Node.js 20+
 - `ffmpeg` (optional, for analysis)
