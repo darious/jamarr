@@ -273,7 +273,7 @@ class ScanManager:
                 # If not force: restrict to artists touched in this scan
                 filter_mbid = mbid if force else (scanned_mbid_filter if scanned_mbid_filter else mbid)
                 # If nothing new/updated and no explicit filter, skip metadata to avoid touching everything
-                if not force and not artist and not mbid and not scanned_mbid_filter and not refresh_top_tracks:
+                if not force and not artist and not mbid and not scanned_mbid_filter and not refresh_top_tracks and not refresh_singles:
                     self._log_message("No new/updated artists detected; skipping metadata step.")
                 else:
                     # Always allow new artists to fetch top tracks; existing artists obey refresh_top_tracks flag.
