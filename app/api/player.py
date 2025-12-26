@@ -284,12 +284,14 @@ async def _enrich_track_metadata(track: Dict[str, Any], db: aiosqlite.Connection
     enriched = dict(track)
     if not enriched.get("path") or not enriched.get("mime"):
         async with db.execute(
-            "SELECT path, codec FROM tracks WHERE id = ? LIMIT 1", (enriched.get("id"),)
+            "SELECT path, codec, art_id FROM tracks WHERE id = ? LIMIT 1", (enriched.get("id"),)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
                 if not enriched.get("path"):
                     enriched["path"] = row["path"]
+                if not enriched.get("art_id"):
+                    enriched["art_id"] = row["art_id"]
                 if not enriched.get("mime"):
                     mime, _ = mimetypes.guess_type(row["path"])
                     if not mime:
