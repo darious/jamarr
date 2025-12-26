@@ -101,13 +101,17 @@ class UPnPManager:
         if self._discovery_task:
             self._discovery_task.cancel()
             try:
-                await self._discovery_task
-            except asyncio.CancelledError:
+                await asyncio.wait_for(self._discovery_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
         
         # Cleanup HTTP session
         if self._session:
-            await self._session.close()
+            try:
+                await asyncio.wait_for(self._session.close(), timeout=2.0)
+            except Exception as e:
+                logger.debug(f"Error closing UPnP session: {e}")
+            
             self._session = None
             self._requester = None
             self._factory = None
