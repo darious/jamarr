@@ -1049,6 +1049,7 @@ class Scanner:
                 if meta.get("wikipedia_url"): artist_links.append(("wikipedia", meta["wikipedia_url"]))
                 if meta.get("homepage"): artist_links.append(("homepage", meta["homepage"]))
                 if meta.get("lastfm_url"): artist_links.append(("lastfm", meta["lastfm_url"]))
+                if meta.get("discogs_url"): artist_links.append(("discogs", meta["discogs_url"]))
                 
                 for l_type, l_url in artist_links:
                     await db.execute("INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)", 
