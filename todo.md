@@ -8,6 +8,7 @@
 * ~~make the scanner notice changed files and update them and remove files that are missing from the file system~~
 * ~~make the file location relative to the config  music root varibale, so we can clone the database~~
 * improve matching of top tracks and singles
+* fix where tracks exist and we rescan it scans all metadata again, it should remove all tracks in the path and rescan it
 
 ## Search
 * ~~Add search box to the top of the page~~
