@@ -289,15 +289,46 @@ class Scanner:
             placeholders = ", ".join(["?"] * len(keys))
             columns = ", ".join(keys)
             
-            sql = f"INSERT OR REPLACE INTO tracks ({columns}) VALUES ({placeholders})"
+            sql = f"""
+                INSERT INTO tracks ({columns}) VALUES ({placeholders})
+                ON CONFLICT(path) DO UPDATE SET
+                    mtime=excluded.mtime,
+                    title=excluded.title,
+                    artist=excluded.artist,
+                    album=excluded.album,
+                    album_artist=excluded.album_artist,
+                    track_no=excluded.track_no,
+                    disc_no=excluded.disc_no,
+                    date=excluded.date,
+                    genre=excluded.genre,
+                    duration_seconds=excluded.duration_seconds,
+                    codec=excluded.codec,
+                    sample_rate_hz=excluded.sample_rate_hz,
+                    bit_depth=excluded.bit_depth,
+                    bitrate=excluded.bitrate,
+                    channels=excluded.channels,
+                    label=excluded.label,
+                    mb_artist_id=excluded.mb_artist_id,
+                    mb_album_artist_id=excluded.mb_album_artist_id,
+                    mb_track_id=excluded.mb_track_id,
+                    mb_release_track_id=excluded.mb_release_track_id,
+                    mb_release_id=excluded.mb_release_id,
+                    mb_release_group_id=excluded.mb_release_group_id,
+                    art_id=excluded.art_id
+            """
             cursor = await db.execute(sql, values)
-            track_id = cursor.lastrowid
             
+            if cursor.lastrowid:
+                track_id = cursor.lastrowid
+            else:
+                async with db.execute("SELECT id FROM tracks WHERE path = ?", (rel_path,)) as c2:
+                    row = await c2.fetchone()
+                    track_id = row[0] if row else None
+        
             if cached_mtime is not None:
                 self.stats["updated"] += 1
             else:
                 self.stats["added"] += 1
-            # logger.debug(f"[filesystem] Upserted track id={track_id} path={rel_path}")
 
             # Map artwork to album or track fallback
             if art_id:
@@ -326,7 +357,7 @@ class Scanner:
                      # Remove from missing_albums if we have it now
                      await db.execute("DELETE FROM missing_albums WHERE release_group_mbid = ?", (mb_rg_id,))
                  except Exception as e:
-                     logger.warning(f"Error upserting album {album_title}: {e}")
+                     logger.warning(f"Error upserting album {album_title} ({mb_rg_id}): {e}")
 
             # 2. Handle Artists & Junctions
             if track_id:

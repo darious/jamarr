@@ -228,6 +228,11 @@ END;
 
 async def get_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
+        await db.execute("PRAGMA temp_store=MEMORY")
+
+        await db.execute("PRAGMA busy_timeout=5000")
         db.row_factory = aiosqlite.Row
         yield db
 
@@ -236,6 +241,10 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         # Enable WAL mode for better concurrency
         await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
+        await db.execute("PRAGMA temp_store=MEMORY")
+
+        await db.execute("PRAGMA busy_timeout=5000")
         
         await db.executescript(INIT_SCRIPT)
         
@@ -379,7 +388,18 @@ async def init_db():
                 created_at REAL DEFAULT (strftime('%s','now')),
                 resolved_at REAL
             )""",
-            "CREATE INDEX IF NOT EXISTS idx_media_quality_open ON media_quality_issues(entity_type, issue_code) WHERE resolved_at IS NULL"
+            "CREATE INDEX IF NOT EXISTS idx_media_quality_open ON media_quality_issues(entity_type, issue_code) WHERE resolved_at IS NULL",
+            
+            # --- Performance Optimizations ---
+            "CREATE INDEX IF NOT EXISTS idx_track_artists_mbid ON track_artists(mbid)",
+            "CREATE INDEX IF NOT EXISTS idx_artist_albums_album ON artist_albums(album_mbid)",
+            "CREATE INDEX IF NOT EXISTS idx_links_entity_type ON external_links(entity_type, entity_id, type)",
+            "CREATE INDEX IF NOT EXISTS idx_playback_history_ts ON playback_history(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_playback_history_user_ts ON playback_history(user_id, timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_playback_history_track_ts ON playback_history(track_id, timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_tracks_missing_art ON tracks(id) WHERE art_id IS NULL",
+            "CREATE INDEX IF NOT EXISTS idx_artists_missing_image ON artists(mbid) WHERE image_url IS NULL OR image_url = ''",
+            "CREATE INDEX IF NOT EXISTS idx_artwork_source ON artwork(source)"
         ]
         
         for sql in migrations:
