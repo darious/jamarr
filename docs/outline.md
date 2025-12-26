@@ -57,12 +57,15 @@ The frontend provides a polished, app-like user experience:
 │   ├── api/              # FastAPI Routers (library, player, etc.)
 │   ├── scanner/          # Library Scanning Logic
 │   │   ├── cli.py        # CLI Entrypoint
+│   │   ├── scan_manager.py # Orchestrates scanning tasks
 │   │   ├── core.py       # Core Scanner Logic
 │   │   ├── metadata.py   # Metadata Fetching (MusicBrainz/Spotify)
 │   │   └── tags.py       # Tag Extraction
 │   ├── upnp/             # UPnP Manager & Control Logic
 │   ├── main.py           # App Entrypoint
-│   └── db.py             # Database Models & Connection
+│   ├── db.py             # Database Models & Connection
+│   ├── auth.py           # Authentication & User Management
+│   └── tidal.py          # Tidal Integration Helper
 ├── web/                  # SvelteKit Frontend
 │   ├── src/
 │   │   ├── routes/       # Pages (Home, Artist, Queue, etc.)
