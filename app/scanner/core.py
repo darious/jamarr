@@ -152,7 +152,7 @@ class Scanner:
             clauses.append(f"-iname '*{ext}'")
         
         or_clause = " -o ".join(clauses)
-        cmd = f"find {safe_root} -type f \( {or_clause} \) -print | wc -l"
+        cmd = f"find {safe_root} -type f \\( {or_clause} \\) -print | wc -l"
         
         try:
             proc = await asyncio.create_subprocess_shell(
