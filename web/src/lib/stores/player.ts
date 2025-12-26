@@ -15,6 +15,7 @@ export interface PlayerState {
     is_playing: boolean;
     position_seconds: number;
     volume: number | null;
+    transport_state?: string;
 }
 
 export const playerState = writable<PlayerState>({
@@ -186,15 +187,10 @@ export async function setQueue(tracks: Track[], startIndex: number = 0) {
         });
         console.log('[setQueue] Response status:', res.status);
         if (res.ok) {
-            playerState.update(s => ({
-                ...s,
-                queue: tracks,
-                current_index: startIndex,
-                is_playing: true,
-                position_seconds: 0
-            }));
-            console.log('[setQueue] State updated, calling playCurrentTrack');
-            await playCurrentTrack();
+            // Don't update store optimistically - immediately refresh from server instead
+            // This ensures UI shows accurate state (position, artwork, etc)
+            console.log('[setQueue] Queue set successfully, refreshing state from server');
+            await loadQueueFromServer();
         } else {
             console.error('[setQueue] Failed, status:', res.status, await res.text());
         }
@@ -325,7 +321,10 @@ async function playCurrentTrack() {
         } else {
             console.log('[playCurrentTrack] Not local playback, data:', data);
             // Optimistically update state to Playing for remote
-            playerState.update(s => ({ ...s, is_playing: true }));
+            playerState.update(s => ({ ...s, is_playing: true, position_seconds: 0 }));
+
+            // Immediately refresh state to get accurate position and avoid UI lag
+            await loadQueueFromServer();
         }
     } catch (e) {
         console.error('[playCurrentTrack] Exception:', e);

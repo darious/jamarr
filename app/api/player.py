@@ -19,6 +19,7 @@ upnp = UPnPManager.get_instance()
 
 # Global map to track Playback Monitor Tasks (UDN -> Task)
 playback_monitors: Dict[str, asyncio.Task] = {}
+monitor_start_times: Dict[str, float] = {}  # Track when monitors were last started
 
 async def play_next_track_internal(udn: str):
     """Internal helper to advance queue and play next track."""
@@ -88,11 +89,23 @@ async def monitor_upnp_playback(udn: str):
     
     was_playing = False # Initialize to prevent UnboundLocalError
     last_position = 0.0
+    consecutive_errors = 0
     try:
         while True:
             # 1. Fetch position & transport from UPnP
-            rel_time, _ = await upnp.get_position(udn)
-            transport_state = await upnp.get_transport_info(udn)
+            try:
+                rel_time, _ = await upnp.get_position(udn)
+                transport_state = await upnp.get_transport_info(udn)
+                consecutive_errors = 0  # Reset on success
+            except Exception as e:
+                consecutive_errors += 1
+                logger.error(f"[Player] Monitor {udn}: Error fetching state (attempt {consecutive_errors}/10): {e}", exc_info=True)
+                if consecutive_errors > 10:
+                    logger.error(f"[Player] Monitor {udn}: Too many consecutive errors, stopping")
+                    break
+                # Use last known values and continue
+                await asyncio.sleep(1)
+                continue
             
             # print(f"[Player] Monitor {udn}: {transport_state} @ {rel_time}s")
             
@@ -590,13 +603,19 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
         udn = await get_active_renderer(db, client_id)
         state = await get_renderer_state_db(db, udn)
         
-        # If UPnP, sync live state
+         # If UPnP, sync live state
         if udn != f"local:{client_id}" and not udn.startswith("local:"):
              # For UPnP devices, we might want to check if monitor is running
              if state['is_playing']:
                 if udn not in playback_monitors or playback_monitors[udn].done():
-                    logger.info(f"[Player] Auto-restarting monitor for {udn}")
-                    playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                    # Only restart if it's been at least 5 seconds since last start
+                    import time
+                    now = time.time()
+                    last_start = monitor_start_times.get(udn, 0)
+                    if now - last_start > 5:
+                        logger.info(f"[Player] Auto-restarting monitor for {udn}")
+                        playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                        monitor_start_times[udn] = now
 
         return {
             "queue": state['queue'],
@@ -645,10 +664,10 @@ async def set_queue(update: QueueUpdate, request: Request, client_id: str = Depe
                     break
             if playable_idx is None:
                 raise HTTPException(status_code=404, detail="No playable tracks found on disk for this queue.")
-
             state['current_index'] = playable_idx
             await update_renderer_state_db(db, udn, state)
 
+            # Cancel existing monitor
             if udn in playback_monitors:
                 playback_monitors[udn].cancel()
                 try:
@@ -656,13 +675,21 @@ async def set_queue(update: QueueUpdate, request: Request, client_id: str = Depe
                 except Exception:
                     pass
 
-            await upnp.set_renderer(udn)
-            env_port = os.environ.get('HOST_PORT')
-            port = env_port if env_port else (request.url.port or 8111)
-            upnp.base_url = f"http://{upnp.local_ip}:{port}"
-            track = state['queue'][state['current_index']]
-            await upnp.play_track(track['id'], track.get('path'), track)
-            playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+            # Start playback in background to avoid blocking HTTP response
+            async def start_playback():
+                await upnp.set_renderer(udn)
+                env_port = os.environ.get('HOST_PORT')
+                port = env_port if env_port else (request.url.port or 8111)
+                upnp.base_url = f"http://{upnp.local_ip}:{port}"
+                track = state['queue'][state['current_index']]
+                await upnp.play_track(track['id'], track.get('path'), track)
+                playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                import time
+                monitor_start_times[udn] = time.time()
+            
+            # Start playback in background
+            asyncio.create_task(start_playback())
+            
     return {"status": "ok"}
 
 @router.post("/api/player/queue/append")
@@ -729,6 +756,8 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
                 track = state['queue'][state['current_index']]
                 await upnp.play_track(track['id'], track.get('path'), track)
                 playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                import time
+                monitor_start_times[udn] = time.time()
     # Return the state so the client can sync immediately
     return {
         "status": "ok",
@@ -856,14 +885,6 @@ async def play_track(data: dict, request: Request, client_id: str = Depends(get_
 
         if not is_local:
             # UPnP Playback
-            # Stop existing monitor cleanly to avoid stale auto-advance
-            if udn in playback_monitors:
-                playback_monitors[udn].cancel()
-                try:
-                    await asyncio.wait([playback_monitors[udn]], timeout=1)
-                except Exception:
-                    pass
-
             await upnp.set_renderer(udn) 
             
             env_port = os.environ.get('HOST_PORT')
@@ -871,6 +892,29 @@ async def play_track(data: dict, request: Request, client_id: str = Depends(get_
             upnp.base_url = f"http://{upnp.local_ip}:{port}"
             
             state = await get_renderer_state_db(db, udn)
+            
+            # Check if this track is already playing
+            current_track = None
+            if state.get('current_index') is not None and state.get('queue'):
+                queue = state['queue']
+                if 0 <= state['current_index'] < len(queue):
+                    current_track = queue[state['current_index']]
+            
+            # If the same track is already playing, just resume if paused
+            if current_track and current_track.get('id') == track['id'] and state.get('is_playing'):
+                logger.info(f"Track {track_id} is already playing, ignoring duplicate play request")
+                return {"status": "already_playing", "renderer": udn}
+            
+            # If paused, just resume
+            if current_track and current_track.get('id') == track['id'] and not state.get('is_playing'):
+                logger.info(f"Resuming track {track_id}")
+                await upnp.play()
+                state['is_playing'] = True
+                state['transport_state'] = "PLAYING"
+                await update_renderer_state_db(db, udn, state)
+                return {"status": "resumed", "renderer": udn}
+            
+            # Different track or no track playing - start new playback
             # Try to keep the existing queue if this track is in it; otherwise replace with single track
             existing_queue = state.get("queue") or []
             try:
@@ -888,11 +932,21 @@ async def play_track(data: dict, request: Request, client_id: str = Depends(get_
             state["transport_state"] = "PLAYING"
             await update_renderer_state_db(db, udn, state)
             _reset_history_tracker(udn)
+            
+            # Stop existing monitor cleanly
+            if udn in playback_monitors:
+                playback_monitors[udn].cancel()
+                try:
+                    await asyncio.wait([playback_monitors[udn]], timeout=1)
+                except Exception:
+                    pass
 
             await upnp.play_track(track['id'], track['path'], track)
             
             # Start fresh monitor (only for UPnP)
             playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+            import time
+            monitor_start_times[udn] = time.time()
             
             return {"status": "streaming_started", "renderer": udn}
         else:
@@ -949,6 +1003,8 @@ async def resume_playback(client_id: str = Depends(get_client_id)):
             
             if udn not in playback_monitors or playback_monitors[udn].done():
                 playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                import time
+                monitor_start_times[udn] = time.time()
             
     return {"status": "ok"}
 
