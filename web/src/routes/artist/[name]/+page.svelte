@@ -505,6 +505,20 @@
                 />
               </a>
             {/if}
+            {#if artist?.wikipedia_url}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#FFFFFF] hover:bg-[#FFFFFF] transition-all border border-transparent"
+                target="_blank"
+                href={artist.wikipedia_url}
+                title="Wikipedia"
+              >
+                <img
+                  src="/assets/logo-wikipedia.svg"
+                  alt="Wikipedia"
+                  class="h-5 w-5"
+                />
+              </a>
+            {/if}
             {#if artist?.tidal_url}
               <a
                 class="btn-icon btn-icon-sm variant-filled-surface hover:border-black hover:bg-black hover:text-white transition-all border border-transparent"
@@ -513,20 +527,6 @@
                 title="Tidal"
               >
                 <img src="/assets/logo-tidal.png" alt="Tidal" class="h-5 w-5" />
-              </a>
-            {/if}
-            {#if artist?.lastfm_url}
-              <a
-                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#D51007] hover:bg-[#D51007] hover:text-white transition-all border border-transparent"
-                target="_blank"
-                href={artist.lastfm_url}
-                title="Last.fm"
-              >
-                <img
-                  src="/assets/logo-lastfm.png"
-                  alt="Last.fm"
-                  class="h-5 w-5"
-                />
               </a>
             {/if}
             {#if artist?.qobuz_url}
@@ -549,6 +549,34 @@
                 <img
                   src="/assets/logo-spotify.svg"
                   alt="Spotify"
+                  class="h-5 w-5"
+                />
+              </a>
+            {/if}
+            {#if artist?.lastfm_url}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#D51007] hover:bg-[#D51007] hover:text-white transition-all border border-transparent"
+                target="_blank"
+                href={artist.lastfm_url}
+                title="Last.fm"
+              >
+                <img
+                  src="/assets/logo-lastfm.png"
+                  alt="Last.fm"
+                  class="h-5 w-5"
+                />
+              </a>
+            {/if}
+            {#if artist?.discogs_url}
+              <a
+                class="btn-icon btn-icon-sm variant-filled-surface hover:border-[#333333] hover:bg-[#333333] hover:text-white transition-all border border-transparent"
+                target="_blank"
+                href={artist.discogs_url}
+                title="Discogs"
+              >
+                <img
+                  src="/assets/logo-discogs.svg"
+                  alt="Discogs"
                   class="h-5 w-5"
                 />
               </a>

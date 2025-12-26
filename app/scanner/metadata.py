@@ -191,6 +191,89 @@ async def _pick_best_spotify_candidate(client: httpx.AsyncClient, headers: dict,
 
     return best["id"], best.get("url")
 
+async def fetch_wikidata_external_links(client: httpx.AsyncClient, wikidata_url: str, existing_links: dict) -> dict:
+    """
+    Fetch external service IDs from Wikidata and construct URLs.
+    Only returns links that are missing from existing_links.
+    
+    Args:
+        client: HTTP client
+        wikidata_url: Wikidata entity URL (e.g., https://www.wikidata.org/wiki/Q45188)
+        existing_links: Dict of existing links to check against
+        
+    Returns:
+        Dict of {service: url} for missing links only
+    """
+    missing_links = {}
+    
+    try:
+        # Extract QID from URL
+        qid = wikidata_url.split("/")[-1]
+        wd_api = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
+        
+        logger.debug(f"Fetching Wikidata external links for {qid}...")
+        resp = await client.get(wd_api)
+        if resp.status_code != 200:
+            logger.warning(f"Wikidata fetch failed: {resp.status_code}")
+            return missing_links
+        
+        wd_data = resp.json()
+        entities = wd_data.get("entities", {})
+        entity = entities.get(qid, {})
+        claims = entity.get("claims", {})
+        
+        # Property mapping: Wikidata property ID -> (service_name, URL_template)
+        property_map = {
+            "P1902": ("spotify_url", "https://open.spotify.com/artist/{}"),
+            "P5749": ("tidal_url", "https://tidal.com/browse/artist/{}"),
+            "P6573": ("qobuz_url", "https://www.qobuz.com/us-en/interpreter/{}"),
+            "P3192": ("lastfm_url", "https://www.last.fm/music/{}"),
+            "P1953": ("discogs_url", "https://www.discogs.com/artist/{}"),
+            "P856": ("homepage", None),  # Direct URL, no template
+        }
+        
+        for prop_id, (service_name, url_template) in property_map.items():
+            # Skip if we already have this link from MusicBrainz
+            if existing_links.get(service_name):
+                continue
+            
+            # Check if Wikidata has this property
+            if prop_id not in claims:
+                continue
+            
+            try:
+                # Extract value from claim
+                mainsnak = claims[prop_id][0].get("mainsnak", {})
+                datavalue = mainsnak.get("datavalue", {})
+                value = datavalue.get("value")
+                
+                if not value:
+                    continue
+                
+                # Construct URL
+                if url_template:
+                    # For ID-based properties, construct URL from template
+                    url = url_template.format(value)
+                else:
+                    # For direct URL properties (like homepage), use value directly
+                    url = value
+                
+                missing_links[service_name] = url
+                
+            except Exception as e:
+                logger.warning(f"Failed to extract {service_name} from Wikidata: {e}")
+                continue
+        
+        if missing_links:
+            # Create a comprehensive log message showing all filled links
+            link_types = ", ".join(missing_links.keys())
+            logger.info(f"Wikidata filled {len(missing_links)} missing link(s): {link_types}")
+        
+    except Exception as e:
+        logger.warning(f"Wikidata external links fetch failed: {e}")
+    
+    return missing_links
+
 async def fetch_lastfm_top_tracks(mbid, artist_name):
     """
     Fetch top tracks from Last.fm using MBID strict.
@@ -473,6 +556,7 @@ async def fetch_artist_metadata(
         "qobuz_url": None,
         "tidal_url": None,
         "lastfm_url": None,
+        "discogs_url": None,
         "musicbrainz_url": None,
         "similar_artists": [],
         "top_tracks": [],
@@ -560,6 +644,9 @@ async def fetch_artist_metadata(
                          # We accept any Qobuz artist link provided by MB
                          metadata["qobuz_url"] = target
                          logger.debug(f"data source: MusicBrainz (Qobuz) -> {target}")
+                    elif "discogs.com" in target:
+                         metadata["discogs_url"] = target
+                         logger.debug(f"data source: MusicBrainz (Discogs) -> {target}")
                     elif "spotify.com" in target and type_ in ("streaming", "free streaming"):
                          # Collect all candidate Spotify URLs/IDs from MB
                          parts = target.split("/")
@@ -639,6 +726,32 @@ async def fetch_artist_metadata(
                                 logger.debug(f"Bio fetched: {len(extract)} characters")
                  except Exception as e:
                      logger.warning(f"Wikipedia bio fetch failed for {target_wiki_url}: {e}")
+
+            # 2b. Wikidata Fallback for Missing External Links
+            # If we have a Wikidata URL and fetch_links is enabled, try to fill missing links
+            if wikidata_url and fetch_links:
+                try:
+                    # Check which links are missing
+                    existing_links = {
+                        "spotify_url": metadata.get("spotify_url"),
+                        "tidal_url": metadata.get("tidal_url"),
+                        "qobuz_url": metadata.get("qobuz_url"),
+                        "lastfm_url": metadata.get("lastfm_url"),
+                        "discogs_url": metadata.get("discogs_url"),
+                        "homepage": metadata.get("homepage"),
+                    }
+                    
+                    # Fetch missing links from Wikidata
+                    wikidata_links = await fetch_wikidata_external_links(client, wikidata_url, existing_links)
+                    
+                    # Merge Wikidata links into metadata (only for missing links)
+                    for service, url in wikidata_links.items():
+                        if not metadata.get(service):
+                            metadata[service] = url
+                            logger.debug(f"data source: Wikidata ({service}) -> {url}")
+                            
+                except Exception as e:
+                    logger.warning(f"Wikidata fallback failed: {e}")
 
             # 3. Last.fm (Top Tracks & Similar Artists)
             if fetch_top_tracks:
