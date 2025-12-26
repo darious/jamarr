@@ -420,11 +420,26 @@ async def init_db():
             pass # Column likely exists
 
         # Migration: Add renderer columns
-        for col in ["control_url", "rendering_control_url", "ip"]:
-             try:
-                 await db.execute(f"ALTER TABLE renderers ADD COLUMN {col} TEXT")
-             except:
-                 pass
+        renderer_columns = [
+            ("control_url", "TEXT"),
+            ("rendering_control_url", "TEXT"),
+            ("ip", "TEXT"),
+            ("device_type", "TEXT"),
+            ("manufacturer", "TEXT"),
+            ("model_name", "TEXT"),
+            ("model_number", "TEXT"),
+            ("serial_number", "TEXT"),
+            ("firmware_version", "TEXT"),
+            ("event_subscription_sid", "TEXT"),
+            ("supports_events", "BOOLEAN DEFAULT 0"),
+            ("supports_gapless", "BOOLEAN DEFAULT 0"),
+        ]
+        
+        for col_name, col_type in renderer_columns:
+            try:
+                await db.execute(f"ALTER TABLE renderers ADD COLUMN {col_name} {col_type}")
+            except Exception:
+                pass  # Column likely exists
 
         # Playback State (Single row enforced) - DEPRECATED in favor of renderer_states
         # Kept for backward compat or migration if needed, but we will use renderer_states now.
