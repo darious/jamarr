@@ -356,7 +356,15 @@ class ScanManager:
             self._stop_event.set()
             self._log_message("Stopping scan...")
             try:
-                await self._current_task
+                # Wait for task to finish gracefully with a timeout
+                await asyncio.wait_for(self._current_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Scan task did not stop gracefully, forcing cancellation...")
+                self._current_task.cancel()
+                try:
+                    await self._current_task
+                except asyncio.CancelledError:
+                    pass
             except asyncio.CancelledError:
                 pass
             except Exception as e:
