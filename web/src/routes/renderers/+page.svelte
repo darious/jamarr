@@ -139,7 +139,6 @@
 
     <div class="grid gap-4 grid-cols-1">
         {#each renderers as r}
-            <!-- Filter out the 'local' browser entry if we only care about network devices, but user might want to see it -->
             <div
                 class="rounded-xl border border-white/10 bg-surface-800 p-6 shadow-lg"
             >
@@ -162,7 +161,7 @@
                             />
                         </svg>
                     </div>
-                    <div>
+                    <div class="flex-1">
                         <h3 class="font-bold text-lg leading-tight">
                             {r.name}
                         </h3>
@@ -172,44 +171,164 @@
                     </div>
                 </div>
 
-                <div class="space-y-2 text-sm text-white/60">
-                    {#if r.udn && !r.udn.startsWith("local:")}
-                        <div class="flex flex-col">
-                            <span
-                                class="text-xs uppercase tracking-wider opacity-50"
-                                >UDN</span
-                            >
-                            <span
-                                class="font-mono text-xs truncate"
-                                title={r.udn}>{r.udn}</span
-                            >
+                {#if r.udn && !r.udn.startsWith("local:")}
+                    <!-- Device Info -->
+                    {#if r.manufacturer || r.model_name}
+                        <div
+                            class="mb-4 space-y-1 border-t border-white/5 pt-4"
+                        >
+                            {#if r.manufacturer}
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-white/40"
+                                        >Manufacturer</span
+                                    >
+                                    <span class="text-white/80"
+                                        >{r.manufacturer}</span
+                                    >
+                                </div>
+                            {/if}
+                            {#if r.model_name}
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-white/40">Model</span>
+                                    <span class="text-white/80"
+                                        >{r.model_name}</span
+                                    >
+                                </div>
+                            {/if}
+                            {#if r.model_number}
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-white/40">Model #</span>
+                                    <span
+                                        class="text-white/60 font-mono text-xs"
+                                        >{r.model_number}</span
+                                    >
+                                </div>
+                            {/if}
+                            {#if r.serial_number}
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-white/40">Serial</span>
+                                    <span
+                                        class="text-white/60 font-mono text-xs"
+                                        >{r.serial_number}</span
+                                    >
+                                </div>
+                            {/if}
+                            {#if r.firmware_version}
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-white/40">Firmware</span>
+                                    <span
+                                        class="text-white/60 font-mono text-xs"
+                                        >{r.firmware_version}</span
+                                    >
+                                </div>
+                            {/if}
                         </div>
-                        <div class="flex flex-col">
-                            <span
-                                class="text-xs uppercase tracking-wider opacity-50"
-                                >Control URL</span
-                            >
-                            <span
-                                class="font-mono text-xs truncate"
-                                title={r.control_url}>{r.control_url}</span
-                            >
-                        </div>
-                        <div class="flex flex-col">
-                            <span
-                                class="text-xs uppercase tracking-wider opacity-50"
-                                >Location</span
-                            >
-                            <span
-                                class="font-mono text-xs truncate"
-                                title={r.location}>{r.location}</span
-                            >
-                        </div>
-                    {:else}
-                        <p class="italic">
-                            This is your current browser session.
-                        </p>
                     {/if}
-                </div>
+
+                    <!-- Capabilities -->
+                    {#if r.supports_events || r.supports_gapless}
+                        <div class="mb-4 flex flex-wrap gap-2">
+                            {#if r.supports_events}
+                                <span
+                                    class="inline-flex items-center gap-1 rounded-full bg-green-500/20 px-3 py-1 text-xs font-medium text-green-400"
+                                >
+                                    <svg
+                                        class="h-3 w-3"
+                                        fill="currentColor"
+                                        viewBox="0 0 20 20"
+                                    >
+                                        <path
+                                            fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                            clip-rule="evenodd"
+                                        />
+                                    </svg>
+                                    Events
+                                </span>
+                            {/if}
+                            {#if r.supports_gapless}
+                                <span
+                                    class="inline-flex items-center gap-1 rounded-full bg-blue-500/20 px-3 py-1 text-xs font-medium text-blue-400"
+                                >
+                                    <svg
+                                        class="h-3 w-3"
+                                        fill="currentColor"
+                                        viewBox="0 0 20 20"
+                                    >
+                                        <path
+                                            fill-rule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                            clip-rule="evenodd"
+                                        />
+                                    </svg>
+                                    Gapless
+                                </span>
+                            {/if}
+                        </div>
+                    {/if}
+
+                    <!-- Technical Details (collapsible) -->
+                    <details class="text-sm text-white/60">
+                        <summary
+                            class="cursor-pointer text-xs uppercase tracking-wider opacity-50 hover:opacity-100"
+                            >Technical Details</summary
+                        >
+                        <div class="mt-2 space-y-2">
+                            <div class="flex flex-col">
+                                <span
+                                    class="text-xs uppercase tracking-wider opacity-50"
+                                    >UDN</span
+                                >
+                                <span
+                                    class="font-mono text-xs truncate"
+                                    title={r.udn}>{r.udn}</span
+                                >
+                            </div>
+                            {#if r.control_url}
+                                <div class="flex flex-col">
+                                    <span
+                                        class="text-xs uppercase tracking-wider opacity-50"
+                                        >Control URL</span
+                                    >
+                                    <span
+                                        class="font-mono text-xs truncate"
+                                        title={r.control_url}
+                                        >{r.control_url}</span
+                                    >
+                                </div>
+                            {/if}
+                            {#if r.location}
+                                <div class="flex flex-col">
+                                    <span
+                                        class="text-xs uppercase tracking-wider opacity-50"
+                                        >Location</span
+                                    >
+                                    <span
+                                        class="font-mono text-xs truncate"
+                                        title={r.location}>{r.location}</span
+                                    >
+                                </div>
+                            {/if}
+                            {#if r.device_type}
+                                <div class="flex flex-col">
+                                    <span
+                                        class="text-xs uppercase tracking-wider opacity-50"
+                                        >Device Type</span
+                                    >
+                                    <span
+                                        class="font-mono text-xs truncate"
+                                        title={r.device_type}
+                                        >{r.device_type}</span
+                                    >
+                                </div>
+                            {/if}
+                        </div>
+                    </details>
+                {:else}
+                    <p class="italic text-sm text-white/60">
+                        This is your current browser session.
+                    </p>
+                {/if}
             </div>
         {/each}
     </div>
