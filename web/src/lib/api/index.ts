@@ -50,6 +50,7 @@ export interface Artist {
     musicbrainz_url: string | null;
     tidal_url?: string | null;
     lastfm_url?: string | null;
+    discogs_url?: string | null;
     albums?: {
         mbid: string;
         title: string;

@@ -77,6 +77,7 @@ async def get_artists(
             MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as musicbrainz_url,
             MAX(CASE WHEN el.type = 'tidal' THEN el.url END) as tidal_url,
             MAX(CASE WHEN el.type = 'lastfm' THEN el.url END) as lastfm_url,
+            MAX(CASE WHEN el.type = 'discogs' THEN el.url END) as discogs_url,
             COALESCE(ac.primary_album_count, 0) as primary_album_count,
             COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
         FROM artists a
@@ -147,6 +148,7 @@ async def get_artists(
                 "wikipedia_url": row["wikipedia_url"],
                 "qobuz_url": row["qobuz_url"],
                 "lastfm_url": row["lastfm_url"],
+                "discogs_url": row["discogs_url"],
                 "musicbrainz_url": row["musicbrainz_url"],
                 "tidal_url": row["tidal_url"],
                 "primary_album_count": row["primary_album_count"],
