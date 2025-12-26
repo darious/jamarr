@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
 from app.db import get_db
 import os
-import base64
 import io
 
 def _build_test_art_bytes():
@@ -46,13 +45,10 @@ def _get_art_path(sha1: str, path_on_disk: str | None = None) -> str:
     return unified
 
 @router.get("/art/{art_id}")
+@router.get("/art/{art_id}.jpg")
 async def get_artwork(art_id: int, max_size: int = 1000):
     """
     Serve artwork by ID, always converting to JPEG and resizing if needed.
-    
-    Args:
-        art_id: Artwork database ID
-        max_size: Maximum dimension (width or height) in pixels. Default 1000 for UPnP compatibility.
     """
     async for db in get_db():
         async with db.execute("SELECT sha1, path_on_disk FROM artwork WHERE id = ?", (art_id,)) as cursor:
@@ -66,43 +62,60 @@ async def get_artwork(art_id: int, max_size: int = 1000):
             if not os.path.exists(path):
                 raise HTTPException(status_code=404, detail="Artwork file missing")
             
-            # Always re-encode as JPEG
             from PIL import Image
-            with Image.open(path) as img:
-                # Convert to RGB if needed (handles PNG with transparency)
-                if img.mode in ('RGBA', 'LA', 'P'):
-                    # Create white background for transparency
-                    background = Image.new('RGB', img.size, (255, 255, 255))
-                    if img.mode == 'P':
-                        img = img.convert('RGBA')
-                    background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                    img = background
-                elif img.mode != 'RGB':
-                    img = img.convert('RGB')
-                
-                width, height = img.size
-                
-                # Resize if larger than max_size
-                if width > max_size or height > max_size:
-                    # Calculate new size maintaining aspect ratio
-                    if width > height:
-                        new_width = max_size
-                        new_height = int(height * (max_size / width))
-                    else:
-                        new_height = max_size
-                        new_width = int(width * (max_size / height))
+            try:
+                with Image.open(path) as img:
+                    # Convert to RGB if needed (handles PNG with transparency)
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        background = Image.new('RGB', img.size, (255, 255, 255))
+                        if img.mode == 'P':
+                            img = img.convert('RGBA')
+                        background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                        img = background
+                    elif img.mode != 'RGB':
+                        img = img.convert('RGB')
                     
-                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                
-                # Save as JPEG to buffer
-                buf = io.BytesIO()
-                img.save(buf, format='JPEG', quality=90, optimize=True)
-                buf.seek(0)
-                
-                # Return JPEG
-                response = Response(content=buf.getvalue(), media_type="image/jpeg")
-                response.headers["Cache-Control"] = "public, max-age=86400"  # Cache for 24 hours
-                return response
+                    width, height = img.size
+                    
+                    # Resize logic
+                    should_resize = width > max_size or height > max_size
+                    if should_resize:
+                        if width > height:
+                            new_width = max_size
+                            new_height = int(height * (max_size / width))
+                        else:
+                            new_height = max_size
+                            new_width = int(width * (max_size / height))
+                        
+                        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    
+                    # Save to buffer
+                    buf = io.BytesIO()
+                    quality = 95
+                    img.save(buf, format='JPEG', quality=quality, optimize=True)
+                    
+                    # Enforce strict 1MB size limit for Naim/UPnP compatibility
+                    # If too big, reduce quality loop
+                    while buf.tell() > 1_000_000 and quality > 30:
+                        buf.seek(0)
+                        buf.truncate()
+                        quality -= 15
+                        img.save(buf, format='JPEG', quality=quality, optimize=True)
+
+                    buf.seek(0)
+                    
+                    # Return JPEG
+                    response = Response(content=buf.getvalue(), media_type="image/jpeg")
+                    response.headers["Cache-Control"] = "public, max-age=86400"
+                    return response
+                    
+            except Exception as e:
+                pass
+            
+            # Fallback
+            response = FileResponse(path)
+            response.headers["Cache-Control"] = "no-cache"
+            return response
     
     raise HTTPException(status_code=500, detail="Database error")
 
@@ -120,8 +133,6 @@ async def get_artwork_by_sha1(sha1: str):
             if not os.path.exists(path):
                 raise HTTPException(status_code=404, detail="Artwork file missing")
             
-            # Since this is SHA1-based, we CAN cache it safely forever!
-            # The URL uniquely identifies the content.
             response = FileResponse(path)
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             return response
@@ -130,9 +141,7 @@ async def get_artwork_by_sha1(sha1: str):
 
 @router.get("/art/test")
 async def get_test_artwork():
-    """Serve a JPEG for UPnP album art testing (generated if Pillow is available)."""
+    """Serve a JPEG for UPnP album art testing."""
     response = Response(content=_TEST_ART_BYTES, media_type="image/jpeg")
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
+    response.headers["Cache-Control"] = "no-cache"
     return response
