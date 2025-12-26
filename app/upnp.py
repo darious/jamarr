@@ -405,7 +405,7 @@ class UPnPManager:
         # Build art URL if available
         art_url = None
         if metadata.get("art_id"):
-            art_url = f"{self.base_url}/art/{metadata['art_id']}"
+            art_url = f"{self.base_url}/art/{metadata['art_id']}.jpg"
         
         # Extract metadata fields
         title = metadata.get("title", "Unknown Track")
@@ -444,9 +444,11 @@ class UPnPManager:
             <item id="1" parentID="0" restricted="1">
                 <dc:title>{title_esc}</dc:title>
                 <dc:creator>{artist_esc}</dc:creator>
+                <upnp:artist>{artist_esc}</upnp:artist>
                 <upnp:album>{album_esc}</upnp:album>
                 <upnp:class>object.item.audioItem.musicTrack</upnp:class>
                 {art_element}
+                <res protocolInfo="http-get:*:{mime_type}:*">{media_url}</res>
             </item>
         </DIDL-Lite>
         """
