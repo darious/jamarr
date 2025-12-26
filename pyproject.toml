@@ -1,0 +1,25 @@
+[project]
+name = "jamarr"
+version = "0.1.0"
+description = "Web-Based UPnP Music Controller"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "mutagen",
+    "async-upnp-client",
+    "aiofiles",
+    "python-multipart",
+    "aiosqlite",
+    "httpx",
+    "beautifulsoup4",
+    "pyyaml",
+    "rich",
+    "argon2-cffi",
+    "email-validator",
+    "pillow",
+]
+
+[tool.uv]
+package = false
