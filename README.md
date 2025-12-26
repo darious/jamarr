@@ -200,6 +200,8 @@ The database has been normalized to improve data integrity and query performance
 -   **`external_links`**: Stores URLs for Artists and Albums.
     -   Types: `spotify`, `tidal`, `qobuz`, `wikipedia`, `homepage`.
     -   Supports prioritized link resolution (e.g., matching Digital Media releases).
+-   **`artist_genres`**: Stores genre tags and weights for artists.
+-   **`missing_albums`**: Tracks albums found in external sources but missing from the local library.
 -   **`artwork`**: Deduplicated artwork storage.
     -   Images stored by SHA1 hash to prevent duplicates.
 
@@ -208,6 +210,8 @@ The database has been normalized to improve data integrity and query performance
 -   **`renderer_states`**: Current playback status (queue, position, volume) for each renderer.
 -   **`client_sessions`**: Tracks active user sessions and their selected renderer.
 -   **`playback_history`**: Log of all played tracks.
+-   **`users`**: User accounts and authentication data.
+-   **`sessions`**: Active login sessions.
 
 ## Frontend (SvelteKit + Skeleton)
 
