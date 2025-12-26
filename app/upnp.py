@@ -434,6 +434,11 @@ class UPnPManager:
         album_esc = html.escape(album)
         
         # Note: Legacy uses dc:creator instead of upnp:artist, and includes dlna namespace
+        # Build albumArtURI element if artwork is available
+        art_element = ""
+        if art_url:
+            art_element = f"<upnp:albumArtURI>{html.escape(art_url)}</upnp:albumArtURI>"
+        
         didl_lite = f"""
         <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">
             <item id="1" parentID="0" restricted="1">
@@ -441,7 +446,7 @@ class UPnPManager:
                 <dc:creator>{artist_esc}</dc:creator>
                 <upnp:album>{album_esc}</upnp:album>
                 <upnp:class>object.item.audioItem.musicTrack</upnp:class>
-                <res protocolInfo="http-get:*:{mime_type}:*">{media_url}</res>
+                {art_element}
             </item>
         </DIDL-Lite>
         """
