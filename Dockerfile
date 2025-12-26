@@ -7,16 +7,20 @@ COPY web/ .
 RUN npm run build
 
 # Stage 2: Runtime
-FROM python:3.12-slim
+FROM python:3.13-slim
 WORKDIR /app
 
 # Install system dependencies
 # ffmpeg is useful for audio manipulation if jamarr does any transcoding or analysis
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install uv for dependency management
+RUN pip install --no-cache-dir uv
+
+# Install Python dependencies with uv
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy backend code
 COPY app ./app
@@ -30,4 +34,4 @@ COPY --from=frontend-builder /app/web/build ./web/build
 EXPOSE 8111
 
 # Command to run (host 0.0.0.0 is crucial for docker)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8111"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8111"]

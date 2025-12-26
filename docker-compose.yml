@@ -1,8 +1,33 @@
 services:
+  jamarr_db:
+    image: postgres:18.1-alpine
+    container_name: jamarr_db
+    network_mode: "host"
+    command: postgres -p 8110
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jamarr
+      POSTGRES_PASSWORD: jamarr
+      POSTGRES_DB: jamarr
+    volumes:
+      - ./cache/postgres:/var/lib/postgresql/data
+
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:latest
+    container_name: cloudbeaver
+    network_mode: "host"
+    restart: unless-stopped
+    environment:
+      CB_SERVER_PORT: 8978
+    volumes:
+      - ./cache/cloudbeaver:/opt/cloudbeaver/workspace
+
   jamarr:
     build: .
     container_name: jamarr
-    network_mode: "host" # Critical for UPnP discovery
+    network_mode: "host"
+    depends_on:
+      - jamarr_db
     volumes:
       - type: volume
         source: music
@@ -15,8 +40,14 @@ services:
     restart: unless-stopped
     environment:
       - HOST=0.0.0.0
-      - HOST_IP=REDACTED_IP # Explicitly advertise this IP for UPnP
-      - HOST_PORT=8111 # Explicitly advertise this Port
+      - HOST_IP=REDACTED_IP # Updated to user specified IP
+      - HOST_PORT=8111
+      # Database connection info (Hardcoded for now as requested)
+      - DB_HOST=127.0.0.1
+      - DB_PORT=8110
+      - DB_USER=jamarr
+      - DB_PASS=jamarr
+      - DB_NAME=jamarr
 
 
 volumes:

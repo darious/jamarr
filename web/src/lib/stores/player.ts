@@ -15,6 +15,7 @@ export interface PlayerState {
     is_playing: boolean;
     position_seconds: number;
     volume: number | null;
+    transport_state?: string;
 }
 
 export const playerState = writable<PlayerState>({
@@ -186,14 +187,12 @@ export async function setQueue(tracks: Track[], startIndex: number = 0) {
         });
         console.log('[setQueue] Response status:', res.status);
         if (res.ok) {
-            playerState.update(s => ({
-                ...s,
-                queue: tracks,
-                current_index: startIndex,
-                is_playing: true,
-                position_seconds: 0
-            }));
-            console.log('[setQueue] State updated, calling playCurrentTrack');
+            // Don't update store optimistically - immediately refresh from server instead
+            // This ensures UI shows accurate state (position, artwork, etc)
+            console.log('[setQueue] Queue set successfully, refreshing state from server');
+            await loadQueueFromServer();
+            // Now trigger playback
+            console.log('[setQueue] Calling playCurrentTrack to start playback');
             await playCurrentTrack();
         } else {
             console.error('[setQueue] Failed, status:', res.status, await res.text());
@@ -300,12 +299,35 @@ export function updateProgress(seconds: number, isPlaying: boolean) {
 
 async function playCurrentTrack() {
     const s = get(playerState);
-    const track = s.queue[s.current_index];
-    console.log('[playCurrentTrack] Called, current track:', track);
+    let track = s.queue[s.current_index];
+
+    // If track is not in frontend queue, fetch from server
     if (!track) {
-        console.warn('[playCurrentTrack] No track found at index', s.current_index);
-        return;
+        console.warn('[playCurrentTrack] Track not in frontend queue, fetching from server');
+        try {
+            const res = await fetch('/api/player/state', {
+                headers: getHeaders()
+            });
+            if (res.ok) {
+                const serverState = await res.json();
+                if (serverState.queue && serverState.queue[serverState.current_index]) {
+                    track = serverState.queue[serverState.current_index];
+                    console.log('[playCurrentTrack] Got track from server:', track.title);
+                } else {
+                    console.error('[playCurrentTrack] No track at current index on server either');
+                    return;
+                }
+            } else {
+                console.error('[playCurrentTrack] Failed to fetch server state');
+                return;
+            }
+        } catch (e) {
+            console.error('[playCurrentTrack] Exception fetching server state:', e);
+            return;
+        }
     }
+
+    console.log('[playCurrentTrack] Called, current track:', track);
 
     try {
         console.log('[playCurrentTrack] Calling POST /api/player/play with track_id:', track.id);
@@ -325,7 +347,10 @@ async function playCurrentTrack() {
         } else {
             console.log('[playCurrentTrack] Not local playback, data:', data);
             // Optimistically update state to Playing for remote
-            playerState.update(s => ({ ...s, is_playing: true }));
+            playerState.update(s => ({ ...s, is_playing: true, position_seconds: 0 }));
+
+            // Immediately refresh state to get accurate position and avoid UI lag
+            await loadQueueFromServer();
         }
     } catch (e) {
         console.error('[playCurrentTrack] Exception:', e);

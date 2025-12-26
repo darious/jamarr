@@ -3,9 +3,11 @@ import os
 import shutil
 from io import BytesIO
 from typing import Any, Dict, Optional
+from datetime import datetime, timezone
 
 import aiofiles
 import httpx
+import asyncpg
 from PIL import Image
 from mutagen import File
 from mutagen.flac import FLAC, Picture
@@ -75,14 +77,6 @@ def _extract_image_metadata(data: bytes) -> Dict[str, Any]:
 async def extract_and_save_artwork(path: str) -> Optional[Dict[str, Any]]:
     """
     Extracts artwork from file at path, saves to cache, and returns details.
-    Note: This function assumes it's called within a context where we can write to DB,
-    but for separation of concerns, maybe it just returns the hash and we link it later?
-    
-    Actually, the plan said:
-    - extract_artwork -> bytes
-    - save_artwork -> hash
-    
-    Let's stick to that.
     """
     data = _extract_artwork_data(path)
     if not data:
@@ -168,25 +162,24 @@ async def cleanup_orphaned_artwork(db):
         sql = """
             SELECT id, sha1 FROM artwork 
             WHERE id NOT IN (
-                SELECT DISTINCT artwork_id FROM image_mapping
+                SELECT DISTINCT artwork_id FROM image_map
                 UNION
-                SELECT DISTINCT art_id FROM tracks WHERE art_id IS NOT NULL
+                SELECT DISTINCT artwork_id FROM track WHERE artwork_id IS NOT NULL
                 UNION
-                SELECT DISTINCT art_id FROM artists WHERE art_id IS NOT NULL
+                SELECT DISTINCT artwork_id FROM artist WHERE artwork_id IS NOT NULL
                 UNION
-                SELECT DISTINCT art_id FROM albums WHERE art_id IS NOT NULL
+                SELECT DISTINCT artwork_id FROM album WHERE artwork_id IS NOT NULL
             )
         """
         
-        async with db.execute(sql) as cursor:
-            rows = await cursor.fetchall()
+        rows = await db.fetch(sql)
             
         if not rows:
             return 0
             
         count = 0
         for row in rows:
-            art_id, sha1 = row
+            artwork_id, sha1 = row["id"], row["sha1"]
             path = _resolve_or_migrate_art_path(sha1)
             
             # Delete file
@@ -197,17 +190,16 @@ async def cleanup_orphaned_artwork(db):
                     print(f"Error removing artwork file {path}: {e}")
             
             # Delete DB entry
-            await db.execute("DELETE FROM artwork WHERE id = ?", (art_id,))
+            await db.execute("DELETE FROM artwork WHERE id = $1", artwork_id)
             count += 1
-            
-        await db.commit()
+        
         return count
         
     except Exception as e:
         print(f"Error extracting orphaned artwork: {e}")
         return 0
 
-async def upsert_artwork_record(db, sha1: str, meta: Optional[Dict[str, Any]] = None, source: Optional[str] = None, source_url: Optional[str] = None) -> Optional[int]:
+async def upsert_artwork_record(db: asyncpg.Connection, sha1: str, meta: Optional[Dict[str, Any]] = None, source: Optional[str] = None, source_url: Optional[str] = None) -> Optional[int]:
     """
     Insert or update an artwork row with the provided metadata and return its ID.
     """
@@ -217,8 +209,8 @@ async def upsert_artwork_record(db, sha1: str, meta: Optional[Dict[str, Any]] = 
     meta = meta or {}
     if sha1 and not meta.get("path_on_disk"):
         meta["path_on_disk"] = _resolve_or_migrate_art_path(sha1, meta.get("path_on_disk"))
-    async with db.execute("SELECT id FROM artwork WHERE sha1 = ?", (sha1,)) as cursor:
-        row = await cursor.fetchone()
+    
+    row = await db.fetchrow("SELECT id FROM artwork WHERE sha1 = $1", sha1)
 
     params = (
         meta.get("mime"),
@@ -232,39 +224,36 @@ async def upsert_artwork_record(db, sha1: str, meta: Optional[Dict[str, Any]] = 
     )
 
     if row:
-        art_id = row[0]
+        artwork_id = row["id"]
         await db.execute(
             """
             UPDATE artwork
-            SET mime=COALESCE(?, mime),
-                width=COALESCE(?, width),
-                height=COALESCE(?, height),
-                path_on_disk=COALESCE(?, path_on_disk),
-                filesize_bytes=COALESCE(?, filesize_bytes),
-                image_format=COALESCE(?, image_format),
-                source=COALESCE(?, source),
-                source_url=COALESCE(?, source_url)
-            WHERE id=?
+            SET mime=COALESCE($1, mime),
+                width=COALESCE($2, width),
+                height=COALESCE($3, height),
+                path_on_disk=COALESCE($4, path_on_disk),
+                filesize_bytes=COALESCE($5, filesize_bytes),
+                image_format=COALESCE($6, image_format),
+                source=COALESCE($7, source),
+                source_url=COALESCE($8, source_url)
+            WHERE id=$9
             """,
-            (*params, art_id),
+            *params, artwork_id,
         )
     else:
-        cursor = await db.execute(
+        artwork_id = await db.fetchval(
             """
             INSERT INTO artwork (sha1, mime, width, height, path_on_disk, filesize_bytes, image_format, source, source_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id
             """,
-            (sha1, *params),
+            sha1, *params,
         )
-        art_id = cursor.lastrowid
-        # Note: aiosqlite cursors don't strictly require close if not iterating, but it's good practice.
-        # However, db.execute returns a cursor that is awaitable (the coroutine), which returns the cursor.
-        # So 'cursor' here allows access to lastrowid.
 
-    return art_id
+    return artwork_id
 
 async def upsert_image_mapping(
-    db,
+    db: asyncpg.Connection,
     artwork_id: int,
     entity_type: str,
     entity_id: str,
@@ -279,12 +268,12 @@ async def upsert_image_mapping(
 
     await db.execute(
         """
-        INSERT INTO image_mapping (artwork_id, entity_type, entity_id, image_type, score, created_at)
-        VALUES (?, ?, ?, ?, ?, strftime('%s','now'))
+        INSERT INTO image_map (artwork_id, entity_type, entity_id, image_type, score, created_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
         ON CONFLICT(entity_type, entity_id, image_type)
         DO UPDATE SET artwork_id=excluded.artwork_id,
-                      score=COALESCE(excluded.score, image_mapping.score),
-                      created_at=COALESCE(image_mapping.created_at, excluded.created_at)
+                      score=COALESCE(excluded.score, image_map.score),
+                      created_at=COALESCE(image_map.created_at, excluded.created_at)
         """,
-        (artwork_id, entity_type, str(entity_id), image_type, score),
+        artwork_id, entity_type, str(entity_id), image_type, score,
     )

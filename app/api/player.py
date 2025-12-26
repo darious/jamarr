@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, Request, HTTPException, Header, Response
 import os
 import asyncio
-from app.db import get_db, DB_PATH
-import aiosqlite
+from app.db import get_db
+import asyncpg
 from app.upnp import UPnPManager
 import mimetypes
 import httpx
@@ -19,10 +19,13 @@ upnp = UPnPManager.get_instance()
 
 # Global map to track Playback Monitor Tasks (UDN -> Task)
 playback_monitors: Dict[str, asyncio.Task] = {}
+monitor_start_times: Dict[str, float] = {}  # Track when monitors were last started
+# Track when we last started a new track to prevent false "track finished" detection during transitions
+last_track_start_time: Dict[str, float] = {}
 
 async def play_next_track_internal(udn: str):
     """Internal helper to advance queue and play next track."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async for db in get_db():
         state = await get_renderer_state_db(db, udn)
         queue = state['queue']
         current_index = state['current_index']
@@ -57,6 +60,8 @@ async def play_next_track_internal(udn: str):
                  track['mime'] = mime
 
             await upnp.play_track(track['id'], track['path'], track)
+            # Record track start time to prevent false "track finished" detection
+            last_track_start_time[udn] = time.time()
             
             # Update DB
             state['current_index'] = next_index
@@ -88,16 +93,28 @@ async def monitor_upnp_playback(udn: str):
     
     was_playing = False # Initialize to prevent UnboundLocalError
     last_position = 0.0
+    consecutive_errors = 0
     try:
         while True:
             # 1. Fetch position & transport from UPnP
-            rel_time, _ = await upnp.get_position(udn)
-            transport_state = await upnp.get_transport_info(udn)
+            try:
+                rel_time, _ = await upnp.get_position(udn)
+                transport_state = await upnp.get_transport_info(udn)
+                consecutive_errors = 0  # Reset on success
+            except Exception as e:
+                consecutive_errors += 1
+                logger.error(f"[Player] Monitor {udn}: Error fetching state (attempt {consecutive_errors}/10): {e}", exc_info=True)
+                if consecutive_errors > 10:
+                    logger.error(f"[Player] Monitor {udn}: Too many consecutive errors, stopping")
+                    break
+                # Use last known values and continue
+                await asyncio.sleep(1)
+                continue
             
             # print(f"[Player] Monitor {udn}: {transport_state} @ {rel_time}s")
             
             # 2. Update DB
-            async with aiosqlite.connect(DB_PATH) as db:
+            async for db in get_db():
                  # Check what we *think* we are doing
                  state = await get_renderer_state_db(db, udn)
                  was_playing = state['is_playing']
@@ -123,6 +140,11 @@ async def monitor_upnp_playback(udn: str):
                  
                  if was_playing:
                      if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
+                         # Check for race condition: STOPPED detected too soon after play
+                         time_since_start = time.time() - last_track_start_time.get(udn, 0)
+                         if time_since_start < 5.0:
+                             logger.info(f"[Player] Ignoring STOPPED state during transition (started {time_since_start:.1f}s ago)")
+                             continue
                          logger.info(f"[Player] Track finished detection: State={transport_state}, Expected=Playing")
                          # Trigger Next Track
                          # We must run this OUTSIDE the current DB transaction if helper uses its own?
@@ -142,19 +164,17 @@ async def monitor_upnp_playback(udn: str):
                         # if they were changed by another request while we were waiting on UPnP.
                         # await update_renderer_state_db(db, udn, state)
                         await db.execute("""
-                            UPDATE renderer_states 
-                            SET position_seconds = ?, transport_state = ?, is_playing = ?, updated_at = CURRENT_TIMESTAMP
-                            WHERE renderer_udn = ?
-                        """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
-                        await db.commit()
+                            UPDATE renderer_state 
+                            SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
+                            WHERE renderer_udn = $4
+                        """, state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn)
                  else:
                      # Even if we thought we weren't playing, keep position fresh for the UI
                      await db.execute("""
-                         UPDATE renderer_states 
-                         SET position_seconds = ?, transport_state = ?, is_playing = ?, updated_at = CURRENT_TIMESTAMP
-                         WHERE renderer_udn = ?
-                     """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
-                     await db.commit()
+                         UPDATE renderer_state 
+                         SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
+                         WHERE renderer_udn = $4
+                     """, state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn)
                  last_position = state['position_seconds']
                  # History logging for remote playback (based on renderer state queue)
                  if state['is_playing'] and state['current_index'] is not None and state['current_index'] >= 0:
@@ -202,7 +222,9 @@ class Track(BaseModel):
     artist: str
     album: str
     duration_seconds: float
+    artwork_id: Optional[int] = None
     art_id: Optional[int] = None
+    art_sha1: Optional[str] = None
     codec: Optional[str] = None
     bit_depth: Optional[int] = None
     sample_rate_hz: Optional[int] = None
@@ -266,21 +288,30 @@ def _track_path_exists(track: Dict[str, Any]) -> bool:
         abs_path = os.path.join(get_music_path(), abs_path)
     return os.path.exists(abs_path)
 
-async def _enrich_track_metadata(track: Dict[str, Any], db: aiosqlite.Connection) -> Dict[str, Any]:
-    """Ensure track dict has path and mime; fallback to DB lookup."""
+# ... (skip to enrich function)
+
+async def _enrich_track_metadata(track: Dict[str, Any], db: asyncpg.Connection) -> Dict[str, Any]:
+    """Ensure track dict has path, mime, and artwork; fallback to DB lookup."""
     enriched = dict(track)
-    if not enriched.get("path") or not enriched.get("mime"):
-        async with db.execute(
-            "SELECT path, codec FROM tracks WHERE id = ? LIMIT 1", (enriched.get("id"),)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                if not enriched.get("path"):
-                    enriched["path"] = row["path"]
+    # Always try to fetch missing critical fields
+    if not enriched.get("path") or not enriched.get("mime") or not enriched.get("art_sha1"):
+        row = await db.fetchrow("""
+            SELECT t.path, t.codec, t.artwork_id, a.sha1 as art_sha1 
+            FROM track t
+            LEFT JOIN artwork a ON t.artwork_id = a.id
+            WHERE t.id = $1 LIMIT 1
+            """, enriched.get("id"))
+        if row:
+            if not enriched.get("path"):
+                enriched["path"] = row[0]
+            if not enriched.get("artwork_id"):
+                enriched["artwork_id"] = row[2]
+            if not enriched.get("art_sha1"):
+                enriched["art_sha1"] = row[3]
                 if not enriched.get("mime"):
-                    mime, _ = mimetypes.guess_type(row["path"])
+                    mime, _ = mimetypes.guess_type(row[0])
                     if not mime:
-                        ext = os.path.splitext(row["path"])[1].lower()
+                        ext = os.path.splitext(row[0])[1].lower()
                         if ext == '.flac': mime = "audio/flac"
                         elif ext == '.mp3': mime = "audio/mpeg"
                         elif ext == '.m4a': mime = "audio/mp4"
@@ -288,34 +319,79 @@ async def _enrich_track_metadata(track: Dict[str, Any], db: aiosqlite.Connection
                         elif ext == '.ogg': mime = "audio/ogg"
                         else: mime = "audio/flac"
                     enriched["mime"] = mime
+    
+    # Frontend compat
+    if enriched.get("artwork_id") and not enriched.get("art_id"):
+        enriched["art_id"] = enriched["artwork_id"]
+        
     return enriched
 
-async def get_active_renderer(db: aiosqlite.Connection, client_id: str) -> str:
+async def get_active_renderer(db: asyncpg.Connection, client_id: str) -> str:
     """Get active renderer UDN for client. Defaults to local:<client_id>."""
-    async with db.execute("SELECT active_renderer_udn FROM client_sessions WHERE client_id = ?", (client_id,)) as cursor:
-        row = await cursor.fetchone()
-        if row and row[0]:
-            return row[0]
+    row = await db.fetchrow("SELECT active_renderer_udn FROM client_session WHERE client_id = $1", client_id)
+    if row and row[0]:
+        return row[0]
             
     # If no session found, implicitly create one for observability
     default_udn = f"local:{client_id}"
     await db.execute("""
-        INSERT OR IGNORE INTO client_sessions (client_id, active_renderer_udn, last_seen)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
-    """, (client_id, default_udn))
-    await db.commit()
+        INSERT INTO client_session (client_id, active_renderer_udn, last_seen_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (client_id) DO NOTHING
+    """, client_id, default_udn)
     
     return default_udn
 
-async def get_renderer_state_db(db: aiosqlite.Connection, udn: str) -> Dict[str, Any]:
+async def get_renderer_state_db(db: asyncpg.Connection, udn: str) -> Dict[str, Any]:
     """Get state from DB for a renderer. Returns default if not found."""
-    async with db.execute("SELECT queue, current_index, position_seconds, is_playing, transport_state, volume FROM renderer_states WHERE renderer_udn = ?", (udn,)) as cursor:
-        row = await cursor.fetchone()
-        if row:
-            try:
-                queue = json.loads(row[0])
-            except:
-                queue = []
+    row = await db.fetchrow("SELECT queue, current_index, position_seconds, is_playing, transport_state, volume FROM renderer_state WHERE renderer_udn = $1", udn)
+    if row:
+        try:
+            queue = json.loads(row[0])
+        except:
+            queue = []
+
+        # Backfill missing art_sha1 for legacy queues
+        missing_sha1_ids = set()
+        for t in queue:
+            if t.get("artwork_id") and not t.get("art_sha1"):
+                # Use integer conversion for safety
+                    try:
+                        missing_sha1_ids.add(int(t["artwork_id"]))
+                    except:
+                        pass
+            
+            if missing_sha1_ids:
+                try:
+                    placeholders = ",".join("?" for _ in missing_sha1_ids)
+                    query = f"SELECT id, sha1 FROM artwork WHERE id IN ({placeholders})"
+                    art_rows = await db.fetch(query, list(missing_sha1_ids))
+                    art_map = {r[0]: r[1] for r in art_rows}
+                    
+                    updated = False
+                    for t in queue:
+                        aid = t.get("artwork_id")
+                        if aid and not t.get("art_sha1"):
+                             try:
+                                 aid_int = int(aid)
+                                 if aid_int in art_map:
+                                     t["art_sha1"] = art_map[aid_int]
+                                     updated = True
+                             except:
+                                 pass
+                    
+                    if updated:
+                        new_queue_json = json.dumps(queue)
+                        await db.execute("UPDATE renderer_state SET queue = $1 WHERE renderer_udn = $2", new_queue_json, udn)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"[Player] Failed to backfill art_sha1: {e}")
+
+            # Ensure art_id is present for frontend
+            for t in queue:
+                if t.get("artwork_id") and not t.get("art_id"):
+                    t["art_id"] = t["artwork_id"]
+
             return {
                 "queue": queue,
                 "current_index": row[1],
@@ -333,13 +409,13 @@ async def get_renderer_state_db(db: aiosqlite.Connection, udn: str) -> Dict[str,
         "volume": None
     }
 
-async def update_renderer_state_db(db: aiosqlite.Connection, udn: str, state: Dict[str, Any]):
+async def update_renderer_state_db(db: asyncpg.Connection, udn: str, state: Dict[str, Any]):
     """Upsert renderer state."""
     queue_json = json.dumps(state.get("queue", []))
     volume = state.get("volume")
     await db.execute("""
-        INSERT INTO renderer_states (renderer_udn, queue, current_index, position_seconds, is_playing, transport_state, volume, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO renderer_state (renderer_udn, queue, current_index, position_seconds, is_playing, transport_state, volume, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
         ON CONFLICT(renderer_udn) DO UPDATE SET
             queue = excluded.queue,
             current_index = excluded.current_index,
@@ -347,9 +423,8 @@ async def update_renderer_state_db(db: aiosqlite.Connection, udn: str, state: Di
             is_playing = excluded.is_playing,
             transport_state = excluded.transport_state,
             volume = excluded.volume,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = NOW()
     """, (udn, queue_json, state.get("current_index", -1), state.get("position_seconds", 0), 1 if state.get("is_playing") else 0, state.get("transport_state", "STOPPED"), volume))
-    await db.commit()
 
 def _reset_history_tracker(key: str):
     if key in _history_tracker:
@@ -382,42 +457,39 @@ def _should_log_history(key: str, track_id: int, position: float, duration: floa
 # Keyed by renderer UDN (for remote) or client_id (for local).
 _history_tracker = {}
 
-async def log_history(db: aiosqlite.Connection, track_id: int, client_ip: str, client_id: str = None, user_id: int = None):
+async def log_history(db: asyncpg.Connection, track_id: int, client_ip: str, client_id: str = None, user_id: int = None):
     if track_id and track_id > 0:
         try:
             # Guard against immediate duplicate inserts (e.g., dual reporters) within a short window.
-            async with db.execute(
+            existing = await db.fetchrow(
                 """
                 SELECT id, client_ip, user_id, client_id, timestamp 
                 FROM playback_history 
-                WHERE track_id = ? 
-                  AND timestamp > datetime('now', '-5 seconds')
-                  AND (client_id = ? OR (? IS NULL AND client_id IS NULL))
-                  AND (user_id = ? OR (? IS NULL AND user_id IS NULL))
+                WHERE track_id = $1 
+                  AND timestamp > NOW() - INTERVAL '5 seconds'
+                  AND (client_id = $2 OR ($3::text IS NULL AND client_id IS NULL))
+                  AND (user_id = $4 OR ($5::integer IS NULL AND user_id IS NULL))
                 ORDER BY timestamp DESC
                 LIMIT 1
                 """,
-                (track_id, client_id, client_id, user_id, user_id)
-            ) as cursor:
-                existing = await cursor.fetchone()
-                if existing:
-                    existing_id, existing_ip, existing_user_id, existing_client_id, existing_ts = existing
-                    if existing_ip == "127.0.0.1" and client_ip and client_ip != "127.0.0.1" and client_ip != "unknown":
-                        logger.info(f"Refining history log {existing_id}: Updating IP to {client_ip}")
-                        await db.execute(
-                            "UPDATE playback_history SET client_ip = ?, client_id = ?, user_id = COALESCE(user_id, ?) WHERE id = ?",
-                            (client_ip, client_id, user_id, existing_id)
-                        )
-                        await db.commit()
-                        return
-                    logger.info(f"Skipping duplicate history log for track {track_id} (recent entry exists)")
+                track_id, client_id, client_id, user_id, user_id
+            )
+            if existing:
+                existing_id, existing_ip, existing_user_id, existing_client_id, existing_ts = existing
+                if existing_ip == "127.0.0.1" and client_ip and client_ip != "127.0.0.1" and client_ip != "unknown":
+                    logger.info(f"Refining history log {existing_id}: Updating IP to {client_ip}")
+                    await db.execute(
+                        "UPDATE playback_history SET client_ip = $1, client_id = $2, user_id = COALESCE(user_id, $3) WHERE id = $4",
+                        client_ip, client_id, user_id, existing_id
+                    )
                     return
+                logger.info(f"Skipping duplicate history log for track {track_id} (recent entry exists)")
+                return
 
             await db.execute(
-                "INSERT INTO playback_history (track_id, client_ip, client_id, user_id) VALUES (?, ?, ?, ?)",
+                "INSERT INTO playback_history (track_id, client_ip, client_id, user_id) VALUES ($1, $2, $3, $4)",
                 (track_id, client_ip, client_id, user_id)
             )
-            await db.commit()
         except Exception as e:
             logger.error(f"Failed to log history: {e}")
 
@@ -437,50 +509,53 @@ async def get_playback_history(response: Response, scope: str = "all", request: 
         filter_clause = ""
         params = ()
         if scope == "mine" and user_row:
-            filter_clause = "WHERE h.user_id = ?"
+            filter_clause = "WHERE h.user_id = $1"
             params = (user_row["id"],)
 
         query = f"""
             SELECT 
                 h.id, h.timestamp, h.client_ip, h.client_id, h.user_id,
-                t.id, t.title, t.artist, t.album, t.art_id, t.duration_seconds,
+                t.id, t.title, t.artist, t.album, t.artwork_id, t.duration_seconds,
                 t.codec, t.bit_depth, t.sample_rate_hz, t.date,
-                u.username, u.display_name, u.email
+                u.username, u.display_name, u.email,
+                a.sha1 as art_sha1
             FROM playback_history h
-            JOIN tracks t ON h.track_id = t.id
-            LEFT JOIN users u ON u.id = h.user_id
+            JOIN track t ON h.track_id = t.id
+            LEFT JOIN artwork a ON t.artwork_id = a.id
+            LEFT JOIN user u ON u.id = h.user_id
             {filter_clause}
             ORDER BY h.timestamp DESC
         """
-        async with db.execute(query, params) as cursor:
-            rows = await cursor.fetchall()
-            history = []
-            for row in rows:
-                history.append({
-                    "id": row[0],
-                    "timestamp": row[1],
-                    "client_ip": row[2],
-                    "client_id": row[3],
-                    "user": {
-                        "id": row[4],
-                        "username": row[14],
-                        "display_name": row[15],
-                        "email": row[16],
-                    } if row[4] else None,
-                    "track": {
-                        "id": row[5],
-                        "title": row[6],
-                        "artist": row[7],
-                        "album": row[8],
-                        "art_id": row[9],
-                        "duration_seconds": row[10],
-                        "codec": row[11],
-                        "bit_depth": row[12],
-                        "sample_rate_hz": row[13],
-                        "date": row[17] if len(row) > 17 else row[13]
-                    }
-                })
-            return history
+        rows = await db.fetch(query, params)
+        history = []
+        for row in rows:
+            history.append({
+                "id": row[0],
+                "timestamp": row[1],
+                "client_ip": row[2],
+                "client_id": row[3],
+                "user": {
+                    "id": row[4],
+                    "username": row[15],
+                    "display_name": row[16],
+                    "email": row[17],
+                } if row[4] else None,
+                "track": {
+                    "id": row[5],
+                    "title": row[6],
+                    "artist": row[7],
+                    "album": row[8],
+                    "artwork_id": row[9],
+                    "art_id": row[9], # Compat
+                    "art_sha1": row[18], # New standard
+                    "duration_seconds": row[10],
+                    "codec": row[11],
+                    "bit_depth": row[12],
+                    "sample_rate_hz": row[13],
+                    "date": row[14]
+                }
+            })
+        return history
     return []
 
 @router.get("/api/player/history/stats")
@@ -497,7 +572,7 @@ async def get_playback_history_stats(
 
     async for db in get_db():
         user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
-        where_clauses = ["date(timestamp, 'localtime') >= date('now', 'localtime', ?)"]
+        where_clauses = ["DATE(timestamp) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
         params: List[Any] = [f"-{days - 1} days"]
         if scope == "mine" and user_row:
             where_clauses.append("h.user_id = ?")
@@ -506,75 +581,76 @@ async def get_playback_history_stats(
 
         # Plays per day
         daily_query = f"""
-            SELECT date(timestamp, 'localtime') as day, COUNT(*) as plays
+            SELECT DATE(timestamp) as day, COUNT(*) as plays
             FROM playback_history h
             WHERE {where_sql}
             GROUP BY day
             ORDER BY day DESC
         """
-        async with db.execute(daily_query, params) as cursor:
-            rows = await cursor.fetchall()
-            daily = [{"day": row[0], "plays": row[1]} for row in rows]
+        rows = await db.fetch(daily_query, params)
+        daily = [{"day": row[0], "plays": row[1]} for row in rows]
 
         # Top artists
         artists_query = f"""
-            SELECT t.artist, MIN(t.art_id) as art_id, COUNT(*) as plays
+            SELECT t.artist, MIN(t.artwork_id) as artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
             FROM playback_history h
-            JOIN tracks t ON t.id = h.track_id
+            JOIN track t ON t.id = h.track_id
+            LEFT JOIN artwork a ON t.artwork_id = a.id
             WHERE {where_sql}
             GROUP BY t.artist
             ORDER BY plays DESC
             LIMIT 10
         """
-        async with db.execute(artists_query, params) as cursor:
-            rows = await cursor.fetchall()
-            artists = [
-                {"artist": row[0], "art_id": row[1], "plays": row[2]}
-                for row in rows
-                if row[0]
-            ]
+        rows = await db.fetch(artists_query, params)
+        artists = [
+            {"artist": row[0], "artwork_id": row[1], "art_id": row[1], "art_sha1": row[2], "plays": row[3]}
+            for row in rows
+            if row[0]
+        ]
 
         # Top albums
         albums_query = f"""
-            SELECT t.album, t.artist, MIN(t.art_id) as art_id, COUNT(*) as plays
+            SELECT t.album, t.artist, MIN(t.artwork_id) as artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
             FROM playback_history h
-            JOIN tracks t ON t.id = h.track_id
-            WHERE {where_sql}
-            GROUP BY t.album, t.artist
-            ORDER BY plays DESC
-            LIMIT 10
-        """
-        async with db.execute(albums_query, params) as cursor:
-            rows = await cursor.fetchall()
-            albums = [
-                {"album": row[0], "artist": row[1], "art_id": row[2], "plays": row[3]}
-                for row in rows
-                if row[0]
-            ]
-
+            JOIN track t ON t.id = h.track_id
+            LEFT JOIN artwork a ON t.artwork_id = a.id
+                WHERE {where_sql}
+                GROUP BY t.album, t.artist
+                ORDER BY plays DESC
+                LIMIT 10
+            """
+        rows = await db.fetch(albums_query, params)
+        albums = [
+            {"album": row[0], "artist": row[1], "artwork_id": row[2], "art_id": row[2], "art_sha1": row[3], "plays": row[4]}
+            for row in rows
+            if row[0]
+        ]
+    
         # Top tracks
         tracks_query = f"""
-            SELECT t.id, t.title, t.artist, t.album, t.art_id, COUNT(*) as plays
-            FROM playback_history h
-            JOIN tracks t ON t.id = h.track_id
-            WHERE {where_sql}
-            GROUP BY t.id, t.title, t.artist, t.album, t.art_id
+        SELECT t.id, t.title, t.artist, t.album, t.artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
+        FROM playback_history h
+        JOIN track t ON t.id = h.track_id
+        LEFT JOIN artwork a ON t.artwork_id = a.id
+        WHERE {where_sql}
+            GROUP BY t.id, t.title, t.artist, t.album, t.artwork_id
             ORDER BY plays DESC
             LIMIT 10
         """
-        async with db.execute(tracks_query, params) as cursor:
-            rows = await cursor.fetchall()
-            tracks = [
-                {
-                    "id": row[0],
-                    "title": row[1],
-                    "artist": row[2],
-                    "album": row[3],
-                    "art_id": row[4],
-                    "plays": row[5],
-                }
-                for row in rows
-            ]
+        rows = await db.fetch(tracks_query, params)
+        tracks = [
+            {
+                "id": row[0],
+                "title": row[1],
+                "artist": row[2],
+                "album": row[3],
+                "artwork_id": row[4],
+                "art_id": row[4],
+                "art_sha1": row[5],
+            "plays": row[6],
+        }
+        for row in rows
+    ]
 
         return {
             "daily": daily,
@@ -590,13 +666,19 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
         udn = await get_active_renderer(db, client_id)
         state = await get_renderer_state_db(db, udn)
         
-        # If UPnP, sync live state
+         # If UPnP, sync live state
         if udn != f"local:{client_id}" and not udn.startswith("local:"):
              # For UPnP devices, we might want to check if monitor is running
              if state['is_playing']:
                 if udn not in playback_monitors or playback_monitors[udn].done():
-                    logger.info(f"[Player] Auto-restarting monitor for {udn}")
-                    playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                    # Only restart if it's been at least 5 seconds since last start
+                    import time
+                    now = time.time()
+                    last_start = monitor_start_times.get(udn, 0)
+                    if now - last_start > 5:
+                        logger.info(f"[Player] Auto-restarting monitor for {udn}")
+                        playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                        monitor_start_times[udn] = now
 
         return {
             "queue": state['queue'],
@@ -645,10 +727,10 @@ async def set_queue(update: QueueUpdate, request: Request, client_id: str = Depe
                     break
             if playable_idx is None:
                 raise HTTPException(status_code=404, detail="No playable tracks found on disk for this queue.")
-
             state['current_index'] = playable_idx
             await update_renderer_state_db(db, udn, state)
 
+            # Cancel existing monitor
             if udn in playback_monitors:
                 playback_monitors[udn].cancel()
                 try:
@@ -656,13 +738,21 @@ async def set_queue(update: QueueUpdate, request: Request, client_id: str = Depe
                 except Exception:
                     pass
 
-            await upnp.set_renderer(udn)
-            env_port = os.environ.get('HOST_PORT')
-            port = env_port if env_port else (request.url.port or 8111)
-            upnp.base_url = f"http://{upnp.local_ip}:{port}"
-            track = state['queue'][state['current_index']]
-            await upnp.play_track(track['id'], track.get('path'), track)
-            playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+            # Start playback in background to avoid blocking HTTP response
+            async def start_playback():
+                await upnp.set_renderer(udn)
+                env_port = os.environ.get('HOST_PORT')
+                port = env_port if env_port else (request.url.port or 8111)
+                upnp.base_url = f"http://{upnp.local_ip}:{port}"
+                track = state['queue'][state['current_index']]
+                await upnp.play_track(track['id'], track.get('path'), track)
+                playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                import time
+                monitor_start_times[udn] = time.time()
+            
+            # Start playback in background
+            asyncio.create_task(start_playback())
+            
     return {"status": "ok"}
 
 @router.post("/api/player/queue/append")
@@ -729,6 +819,8 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
                 track = state['queue'][state['current_index']]
                 await upnp.play_track(track['id'], track.get('path'), track)
                 playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                import time
+                monitor_start_times[udn] = time.time()
     # Return the state so the client can sync immediately
     return {
         "status": "ok",
@@ -813,17 +905,16 @@ async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
     
     async for db in get_db():
         await db.execute("""
-            INSERT INTO client_sessions (client_id, active_renderer_udn, last_seen)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO client_session (client_id, active_renderer_udn, last_seen_at)
+            VALUES ($1, $2, NOW())
             ON CONFLICT(client_id) DO UPDATE SET
                 active_renderer_udn = excluded.active_renderer_udn,
-                last_seen = CURRENT_TIMESTAMP
+                last_seen_at = NOW()
         """, (client_id, udn))
-        await db.commit()
     return {"active": udn}
 
 @router.post("/api/player/play")
-async def play_track(data: dict, request: Request, client_id: str = Depends(get_client_id), db: aiosqlite.Connection = Depends(get_db)):
+async def play_track(data: dict, request: Request, client_id: str = Depends(get_client_id), db: asyncpg.Connection = Depends(get_db)):
     track_id = data.get("track_id")
     if not track_id:
         raise HTTPException(status_code=400, detail="Missing track_id")
@@ -831,89 +922,113 @@ async def play_track(data: dict, request: Request, client_id: str = Depends(get_
     udn = await get_active_renderer(db, client_id)
 
     # Fetch track metadata
-    async with db.execute("SELECT id, title, artist, album, art_id, path, duration_seconds FROM tracks WHERE id = ?", (track_id,)) as cursor:
-        row = await cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Track not found")
-        track = dict(row)
-        user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
+    row = await db.fetchrow("SELECT id, title, artist, album, artwork_id, path, duration_seconds FROM track WHERE id = $1", track_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Track not found")
+    track = dict(row)
+    user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
+    
+    # Mime logic
+    mime, _ = mimetypes.guess_type(track['path'])
+    if not mime:
+        ext = os.path.splitext(track['path'])[1].lower()
+        if ext == '.flac': mime = "audio/flac"
+        elif ext == '.mp3': mime = "audio/mpeg"
+        elif ext == '.m4a': mime = "audio/mp4"
+        elif ext == '.wav': mime = "audio/wav"
+        elif ext == '.ogg': mime = "audio/ogg"
+        else: mime = "audio/flac"
+    track['mime'] = mime
+    if user_row:
+        track["user_id"] = user_row["id"]
+
+    is_local = udn.startswith("local:") or udn == "local"
+
+    if not is_local:
+        # UPnP Playback
+        await upnp.set_renderer(udn) 
         
-        # Mime logic
-        mime, _ = mimetypes.guess_type(track['path'])
-        if not mime:
-            ext = os.path.splitext(track['path'])[1].lower()
-            if ext == '.flac': mime = "audio/flac"
-            elif ext == '.mp3': mime = "audio/mpeg"
-            elif ext == '.m4a': mime = "audio/mp4"
-            elif ext == '.wav': mime = "audio/wav"
-            elif ext == '.ogg': mime = "audio/ogg"
-            else: mime = "audio/flac"
-        track['mime'] = mime
-        if user_row:
-            track["user_id"] = user_row["id"]
-
-        is_local = udn.startswith("local:")
-
-        if not is_local:
-            # UPnP Playback
-            # Stop existing monitor cleanly to avoid stale auto-advance
-            if udn in playback_monitors:
-                playback_monitors[udn].cancel()
-                try:
-                    await asyncio.wait([playback_monitors[udn]], timeout=1)
-                except Exception:
-                    pass
-
-            await upnp.set_renderer(udn) 
-            
-            env_port = os.environ.get('HOST_PORT')
-            port = env_port if env_port else (request.url.port or 8111)
-            upnp.base_url = f"http://{upnp.local_ip}:{port}"
-            
-            state = await get_renderer_state_db(db, udn)
-            # Try to keep the existing queue if this track is in it; otherwise replace with single track
-            existing_queue = state.get("queue") or []
-            try:
-                current_index = next(
-                    i for i, t in enumerate(existing_queue) if t.get("id") == track["id"]
-                )
-            except StopIteration:
-                existing_queue = [track]
-                current_index = 0
-
-            state["queue"] = existing_queue
-            state["current_index"] = current_index
-            state["position_seconds"] = 0
-            state["is_playing"] = True
-            state["transport_state"] = "PLAYING"
+        env_port = os.environ.get('HOST_PORT')
+        port = env_port if env_port else (request.url.port or 8111)
+        upnp.base_url = f"http://{upnp.local_ip}:{port}"
+        
+        state = await get_renderer_state_db(db, udn)
+        
+        # Check if this track is already playing
+        current_track = None
+        if state.get('current_index') is not None and state.get('queue'):
+            queue = state['queue']
+            if 0 <= state['current_index'] < len(queue):
+                current_track = queue[state['current_index']]
+        
+        # If the same track is already playing, just resume if paused
+        if current_track and current_track.get('id') == track['id'] and state.get('is_playing'):
+            logger.info(f"Track {track_id} is already playing, ignoring duplicate play request")
+            return {"status": "already_playing", "renderer": udn}
+        
+        # If paused, just resume
+        if current_track and current_track.get('id') == track['id'] and not state.get('is_playing'):
+            logger.info(f"Resuming track {track_id}")
+            await upnp.play()
+            state['is_playing'] = True
+            state['transport_state'] = "PLAYING"
             await update_renderer_state_db(db, udn, state)
-            _reset_history_tracker(udn)
+            return {"status": "resumed", "renderer": udn}
+        
+        # Different track or no track playing - start new playback
+        # Try to keep the existing queue if this track is in it; otherwise replace with single track
+        existing_queue = state.get("queue") or []
+        try:
+            current_index = next(
+                i for i, t in enumerate(existing_queue) if t.get("id") == track["id"]
+            )
+        except StopIteration:
+            existing_queue = [track]
+            current_index = 0
 
-            await upnp.play_track(track['id'], track['path'], track)
-            
-            # Start fresh monitor (only for UPnP)
-            playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
-            
-            return {"status": "streaming_started", "renderer": udn}
-        else:
-            state = await get_renderer_state_db(db, udn)
-            existing_queue = state.get("queue") or []
+        state["queue"] = existing_queue
+        state["current_index"] = current_index
+        state["position_seconds"] = 0
+        state["is_playing"] = True
+        state["transport_state"] = "PLAYING"
+        await update_renderer_state_db(db, udn, state)
+        _reset_history_tracker(udn)
+        
+        # Stop existing monitor cleanly
+        if udn in playback_monitors:
+            playback_monitors[udn].cancel()
             try:
-                current_index = next(
-                    i for i, t in enumerate(existing_queue) if t.get("id") == track["id"]
-                )
-            except StopIteration:
-                existing_queue = [track]
-                current_index = 0
+                await asyncio.wait([playback_monitors[udn]], timeout=1)
+            except Exception:
+                pass
 
-            state["queue"] = existing_queue
-            state["current_index"] = current_index
-            state["position_seconds"] = 0
-            state["is_playing"] = True
-            state["transport_state"] = "PLAYING"
-            await update_renderer_state_db(db, udn, state)
-            
-            return {"status": "local_playback", "message": "Handle playback in browser"}
+        await upnp.play_track(track['id'], track['path'], track)
+        
+        # Start fresh monitor (only for UPnP)
+        playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+        import time
+        monitor_start_times[udn] = time.time()
+        
+        return {"status": "streaming_started", "renderer": udn}
+    else:
+        state = await get_renderer_state_db(db, udn)
+        existing_queue = state.get("queue") or []
+        try:
+            current_index = next(
+                i for i, t in enumerate(existing_queue) if t.get("id") == track["id"]
+            )
+        except StopIteration:
+            existing_queue = [track]
+            current_index = 0
+
+        state["queue"] = existing_queue
+        state["current_index"] = current_index
+        state["position_seconds"] = 0
+        state["is_playing"] = True
+        state["transport_state"] = "PLAYING"
+        await update_renderer_state_db(db, udn, state)
+        
+        return {"status": "local_playback", "message": "Handle playback in browser"}
 
 @router.post("/api/player/pause")
 async def pause_playback(client_id: str = Depends(get_client_id)):
@@ -932,7 +1047,7 @@ async def pause_playback(client_id: str = Depends(get_client_id)):
                 playback_monitors[udn].cancel()
                 del playback_monitors[udn]
             
-    return {"status": "ok"}
+        return {"status": "ok"}
 
 @router.post("/api/player/resume")
 async def resume_playback(client_id: str = Depends(get_client_id)):
@@ -949,6 +1064,8 @@ async def resume_playback(client_id: str = Depends(get_client_id)):
             
             if udn not in playback_monitors or playback_monitors[udn].done():
                 playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+                import time
+                monitor_start_times[udn] = time.time()
             
     return {"status": "ok"}
 

@@ -254,9 +254,23 @@ class ScanManager:
             self.scanner._stop_event = self._stop_event
 
             artist_mbids = await self.scanner.scan_filesystem(root_path=path, force_rescan=force) or set()
-            scanned_mbid_filter = None
-            if not force:
-                scanned_mbid_filter = {mb for mb, _ in artist_mbids if mb}
+            
+            # Logic: Determine if we should filter the metadata update
+            # 1. If it's a partial scan (subfolder), we ALWAYS filter to the artists found, even if Force=True.
+            # 2. If it's a full scan AND Force=True, we clear the filter to update everything efficiently (avoid huge IN clause).
+            # 3. If Force=False, we always filter to what changed (scanned_mbid_filter).
+            
+            music_path = get_music_path()
+            # Normalize paths for comparison
+            p_abs = os.path.abspath(path) if path else os.path.abspath(music_path)
+            m_abs = os.path.abspath(music_path)
+            is_partial_scan = (p_abs != m_abs)
+            
+            scanned_mbid_filter = {mb for mb, _ in artist_mbids if mb}
+            
+            if not is_partial_scan and force:
+                 # Full Library Error/Force Scan -> Update All (Efficiently)
+                 scanned_mbid_filter = None
 
             if self._stop_event.is_set():
                 raise asyncio.CancelledError()
@@ -271,9 +285,11 @@ class ScanManager:
             else:
                 # If force: run full metadata for all (or specified filter)
                 # If not force: restrict to artists touched in this scan
-                filter_mbid = mbid if force else (scanned_mbid_filter if scanned_mbid_filter else mbid)
+                # LOGIC CHANGE: If we scanned specific files (scanned_mbid_filter), we MUST restrict metadata update to them.
+                # ignoring scanned_mbid_filter when force=True caused partial directory scans to trigger FULL DB metadata updates.
+                filter_mbid = scanned_mbid_filter if scanned_mbid_filter else mbid
                 # If nothing new/updated and no explicit filter, skip metadata to avoid touching everything
-                if not force and not artist and not mbid and not scanned_mbid_filter and not refresh_top_tracks:
+                if not force and not artist and not mbid and not scanned_mbid_filter and not refresh_top_tracks and not refresh_singles:
                     self._log_message("No new/updated artists detected; skipping metadata step.")
                 else:
                     # Always allow new artists to fetch top tracks; existing artists obey refresh_top_tracks flag.
@@ -356,7 +372,15 @@ class ScanManager:
             self._stop_event.set()
             self._log_message("Stopping scan...")
             try:
-                await self._current_task
+                # Wait for task to finish gracefully with a timeout
+                await asyncio.wait_for(self._current_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Scan task did not stop gracefully, forcing cancellation...")
+                self._current_task.cancel()
+                try:
+                    await self._current_task
+                except asyncio.CancelledError:
+                    pass
             except asyncio.CancelledError:
                 pass
             except Exception as e:

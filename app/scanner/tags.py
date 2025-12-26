@@ -69,13 +69,13 @@ def extract_tags(path: str) -> dict:
             date = get_first(t, ["DATE", "TDRC", "date", "year", "TYER"])
             genre = get_first(t, ["GENRE", "TCON", "genre"])
             label = get_first(t, ["ORGANIZATION", "TPUB", "label", "publisher"])
-            mb_artist_id = get_first(t, ["MUSICBRAINZ_ARTISTID", "musicbrainz_artistid"])
-            mb_album_artist_id = get_first(t, ["MUSICBRAINZ_ALBUMARTISTID", "musicbrainz_albumartistid"])
-            mb_release_track_id = get_first(t, ["MUSICBRAINZ_RELEASETRACKID", "musicbrainz_releasetrackid"])
-            mb_track_id = get_first(t, ["MUSICBRAINZ_TRACKID", "musicbrainz_trackid", "UFID:http://musicbrainz.org"])
+            artist_mbid = get_first(t, ["MUSICBRAINZ_ARTISTID", "musicbrainz_artistid"])
+            album_artist_mbid = get_first(t, ["MUSICBRAINZ_ALBUMARTISTID", "musicbrainz_albumartistid"])
+            release_track_mbid = get_first(t, ["MUSICBRAINZ_RELEASETRACKID", "musicbrainz_releasetrackid"])
+            track_mbid = get_first(t, ["MUSICBRAINZ_TRACKID", "musicbrainz_trackid", "UFID:http://musicbrainz.org"])
             # Fallback to AlbumID as release ID if needed, though they are usually distinct concepts but mapped similarly in simple taggers
-            mb_release_id = get_first(t, ["MUSICBRAINZ_ALBUMID", "musicbrainz_albumid", "MUSICBRAINZ_RELEASEID", "musicbrainz_releaseid"])
-            mb_release_group_id = get_first(t, ["MUSICBRAINZ_RELEASEGROUPID", "musicbrainz_releasegroupid"])
+            release_mbid = get_first(t, ["MUSICBRAINZ_ALBUMID", "musicbrainz_albumid", "MUSICBRAINZ_RELEASEID", "musicbrainz_releaseid"])
+            release_group_mbid = get_first(t, ["MUSICBRAINZ_RELEASEGROUPID", "musicbrainz_releasegroupid"])
 
         tags.update({
             "title": title,
@@ -87,12 +87,12 @@ def extract_tags(path: str) -> dict:
             "date": date,
             "genre": genre,
             "label": label,
-            "mb_artist_id": mb_artist_id,
-            "mb_album_artist_id": mb_album_artist_id,
-            "mb_track_id": mb_track_id, 
-            "mb_release_track_id": mb_release_track_id,
-            "mb_release_id": mb_release_id,
-            "mb_release_group_id": mb_release_group_id
+            "artist_mbid": artist_mbid,
+            "album_artist_mbid": album_artist_mbid,
+            "track_mbid": track_mbid, 
+            "release_track_mbid": release_track_mbid,
+            "release_mbid": release_mbid,
+            "release_group_mbid": release_group_mbid
         })
 
         return tags

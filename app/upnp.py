@@ -1,707 +1,715 @@
 import asyncio
-import os
-import socket
 import logging
-import httpx
-import xml.etree.ElementTree as ET
+from typing import Dict, Any, Optional, Callable
 from urllib.parse import urlparse
+from xml.sax.saxutils import escape
+import aiohttp
+
+from async_upnp_client.client_factory import UpnpFactory
+from async_upnp_client.client import UpnpDevice, UpnpService
+from async_upnp_client.profiles.dlna import DmrDevice
+from async_upnp_client.search import async_search
+from async_upnp_client.ssdp import SSDP_ST_ALL
+from async_upnp_client.aiohttp import AiohttpRequester, AiohttpSessionRequester
+from async_upnp_client.exceptions import UpnpError, UpnpConnectionError
+from async_upnp_client.utils import CaseInsensitiveDict
+
 from app.db import get_db
+import asyncpg
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-class UPnPManager:
-    _instance = None
+# Search target for MediaRenderer devices
+SSDP_TARGET_MEDIA_RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
 
+
+
+class UPnPManager:
+    """
+    UPnP/DLNA Media Renderer Manager using async-upnp-client library.
+    
+    Manages discovery, control, and state management of UPnP media renderers.
+    Maintains backward compatibility with existing player API.
+    """
+    
+    _instance = None
+    
     @classmethod
     def get_instance(cls):
-        if not cls._instance:
+        if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-
+    
     def __init__(self):
         self.debug_log = []
-        self.renderers = {} # udn -> dict (friendly_name, location, control_url, rendering_control_url)
-        self.active_renderer = None # udn
+        self.renderers: Dict[str, Dict[str, Any]] = {}  # udn -> renderer info
+        self.dmr_devices: Dict[str, DmrDevice] = {}  # udn -> DmrDevice instance
+        self.active_renderer = None  # udn
         self.local_ip = self._get_local_ip()
-        self.base_url = None
-        self._bg_task = None
+        self.base_url = f"http://{self.local_ip}:8111"
+        
+        # Discovery state
+        self._discovery_task: Optional[asyncio.Task] = None
+        self._running = False
+        
+        # Subnet scanning state
         self.is_scanning_subnet = False
-        self.scan_progress = 0
         self.scan_msg = ""
-
-    def start_background_scan(self):
-        if not self._bg_task:
-            self._bg_task = asyncio.create_task(self._discovery_loop())
-
-    async def _discovery_loop(self):
-        loop_count = 0
-        try:
-            while True:
-                try:
-                    self.log("Starting background discovery...")
-                    
-                    if loop_count == 0:
-                        await self.load_persisted_renderers()
-                        
-                    await self.discover(timeout=5)
-                    
-                    # Every 5th loop (approx 5 mins), perform active scan if few renderers found
-                    # or just always do it if users have trouble
-                    loop_count += 1
-                    if loop_count % 5 == 1: 
-                        await self.scan_subnet()
-                        
-                except Exception as e:
-                    self.log(f"Background discovery error: {e}")
-                
-                # Sleep 60s
-                await asyncio.sleep(60)
-        except asyncio.CancelledError:
-            self.log("Background discovery cancelled")
-            raise
-
-    async def stop_background_scan(self):
-        if self._bg_task:
-            self._bg_task.cancel()
-            try:
-                await self._bg_task
-            except asyncio.CancelledError:
-                pass
-            self._bg_task = None
-
-    def log(self, msg):
-        import datetime
-        ts = datetime.datetime.now().isoformat()
-        self.debug_log.append(f"[{ts}] {msg}")
-        logger.info(f"[UPnP] {msg}")
-        if len(self.debug_log) > 50: self.debug_log.pop(0)
-
-    def _get_local_ip(self):
-        # 1. Check for manual override via environment variable
-        host_ip = os.environ.get('HOST_IP')
-        if host_ip:
-            self.log(f"Using configured HOST_IP: {host_ip}")
-            return host_ip
-
+        self.scan_progress = 0
+        
+        # HTTP session for library
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._requester: Optional[AiohttpSessionRequester] = None
+        self._factory: Optional[UpnpFactory] = None
+    
+    def _get_local_ip(self) -> str:
+        """Get local IP address for media streaming URLs."""
+        import socket
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(('REDACTED_IP', 1))
-            IP = s.getsockname()[0]
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
             s.close()
-            return IP
+            return ip
         except Exception:
             return "127.0.0.1"
-
-    async def discover(self, timeout=5):
-        """Send M-SEARCH and process responses"""
-        MSEARCH = (
-            'M-SEARCH * HTTP/1.1\r\n'
-            'HOST: 239.255.255.250:1900\r\n'
-            'MAN: "ssdp:discover"\r\n'
-            'MX: 1\r\n'
-            'ST: urn:schemas-upnp-org:service:AVTransport:1\r\n'
-            '\r\n'
-        ).encode('utf-8')
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    def log(self, msg: str):
+        """Add message to debug log (limited to last 100 entries)."""
+        logger.debug(msg)
+        self.debug_log.append(msg)
+        if len(self.debug_log) > 100:
+            self.debug_log.pop(0)
+    
+    async def _ensure_session(self):
+        """Ensure HTTP session and requester are initialized."""
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+            self._requester = AiohttpSessionRequester(self._session, with_sleep=True)
+            self._factory = UpnpFactory(self._requester)
+    
+    def start_background_scan(self):
+        """Start background discovery loop."""
+        if not self._running:
+            self._running = True
+            self._discovery_task = asyncio.create_task(self._discovery_loop())
+            self.log("Started background UPnP discovery")
+    
+    async def stop_background_scan(self):
+        """Stop background discovery loop."""
+        self._running = False
+        if self._discovery_task:
+            self._discovery_task.cancel()
+            try:
+                await asyncio.wait_for(self._discovery_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
         
-        try:
+        # Cleanup HTTP session
+        if self._session:
             try:
-                sock.bind(('0.0.0.0', 0)) 
+                await asyncio.wait_for(self._session.close(), timeout=2.0)
             except Exception as e:
-                self.log(f"Failed to bind discovery socket: {e}")
-                return []
-
-            # Send
-            try:
-                sock.sendto(MSEARCH, ('239.255.255.250', 1900))
-            except Exception as e:
-                 self.log(f"Failed to send M-SEARCH: {e}")
-                 
-            sock.setblocking(False)
-
-            start = asyncio.get_event_loop().time()
+                logger.debug(f"Error closing UPnP session: {e}")
             
-            while True:
-                time_left = timeout - (asyncio.get_event_loop().time() - start)
-                if time_left <= 0:
-                    break
-                try:
-                    data, addr = await asyncio.wait_for(
-                        asyncio.get_event_loop().sock_recv(sock, 1024), 
-                        timeout=time_left
-                    )
-                    await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), addr)
-                except asyncio.TimeoutError:
-                    break
-                except Exception:
-                    await asyncio.sleep(0.1)
-        finally:
-            sock.close()
-        return list(self.renderers.values())
-
-    async def _process_ssdp_packet(self, data, addr):
-        lines = data.split('\r\n')
-        headers = {}
-        for line in lines[1:]:
-            if ':' in line:
-                key, val = line.split(':', 1)
-                headers[key.upper()] = val.strip()
+            self._session = None
+            self._requester = None
+            self._factory = None
         
-        location = headers.get('LOCATION')
-        st = headers.get('ST')
+        self.log("Stopped background UPnP discovery")
+    
+    async def _discovery_loop(self):
+        """Periodic discovery loop to find and maintain renderer list."""
+        await self.load_persisted_renderers()
         
-        if location:
-            await self._add_renderer(location)
-
-    async def _add_renderer(self, location):
-        self.log(f"Process device location: {location}")
+        while self._running:
+            try:
+                await self.discover(timeout=3)
+                await asyncio.sleep(30)  # Discover every 30 seconds
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Discovery loop error: {e}")
+                await asyncio.sleep(30)
+    
+    async def discover(self, timeout=5):
+        """
+        Discover UPnP Media Renderers on the network using async_search.
+        
+        Args:
+            timeout: Discovery timeout in seconds
+        """
+        await self._ensure_session()
+        
+        self.log(f"Starting UPnP discovery (timeout={timeout}s)...")
+        
+        discovered_locations = []
+        
+        async def search_callback(headers: CaseInsensitiveDict):
+            """Callback for each discovered device."""
+            location = headers.get("location") or headers.get("LOCATION")
+            st = headers.get("st") or headers.get("ST")
+            
+            # Filter for MediaRenderer devices
+            if location and st and "MediaRenderer" in st:
+                if location not in discovered_locations:
+                    discovered_locations.append(location)
+        
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(location, timeout=5.0) # Increased timeout
-                if resp.status_code == 200:
-                    xml = resp.text
-                    if not xml or not xml.strip():
-                        # self.log(f"Empty XML from {location}")
-                        return
-                        
-                    root = ET.fromstring(xml)
-                    
-                    # Extract Device Info
-                    device = root.find('.//{urn:schemas-upnp-org:device-1-0}device')
-                    if device is None:
-                        device = root.find('.//device') # Try without NS
-                    
-                    if device:
-                        name = device.findtext('{urn:schemas-upnp-org:device-1-0}friendlyName') or device.findtext('friendlyName') or "Unknown"
-                        udn = device.findtext('{urn:schemas-upnp-org:device-1-0}UDN') or device.findtext('UDN')
-                        # self.log(f"Found Device: {name} (UDN: {udn})")
-                        
-                        # Find AVTransport Control URL
-                        services = device.findall('.//{urn:schemas-upnp-org:device-1-0}service')
-                        if not services:
-                            services = device.findall('.//service')
-                            
-                        control_url = None
-                        rendering_control_url = None
-                        
-                        for svc in services:
-                            svc_type = svc.findtext('{urn:schemas-upnp-org:device-1-0}serviceType') or svc.findtext('serviceType') or ''
-                            if 'AVTransport' in svc_type:
-                                control_url = svc.findtext('{urn:schemas-upnp-org:device-1-0}controlURL') or svc.findtext('controlURL')
-                            elif 'RenderingControl' in svc_type:
-                                rendering_control_url = svc.findtext('{urn:schemas-upnp-org:device-1-0}controlURL') or svc.findtext('controlURL')
-                        
-                        
-                        if udn and control_url:
-                            # Normalize Control URL
-                            parsed = urlparse(location)
-                            base = f"{parsed.scheme}://{parsed.netloc}"
-                            if not control_url.startswith('http'):
-                                if not control_url.startswith('/'):
-                                    control_url = '/' + control_url
-                                control_url = base + control_url
-                                
-                            if rendering_control_url:
-                                if not rendering_control_url.startswith('http'):
-                                    if not rendering_control_url.startswith('/'):
-                                        rendering_control_url = '/' + rendering_control_url
-                                    rendering_control_url = base + rendering_control_url
-
-                            renderer_data = {
-                                'udn': udn,
-                                'name': name,
-                                'location': location,
-                                'control_url': control_url,
-                                'rendering_control_url': rendering_control_url,
-                                'ip': parsed.hostname
-                            }
-                            
-                            self.renderers[udn] = renderer_data
-                            # Persist
-                            await self.save_renderer(renderer_data)
-                            
-                            self.log(f"Added/Updated Renderer: {name} ({parsed.hostname})")
-                            logger.info(f"Discovered UPnP Renderer: {name} at {control_url}")
-                        else:
-                            self.log(f"Missing UDN or ControlURL. UDN: {udn}, Ctrl: {control_url}")
-                    else:
-                        self.log("No device tag found in XML")
-                else:
-                    self.log(f"HTTP Error {resp.status_code} fetching XML")
-
+            # Perform search with callback
+            await async_search(
+                async_callback=search_callback,
+                timeout=timeout,
+                search_target=SSDP_TARGET_MEDIA_RENDERER
+            )
+            
+            # Process discovered devices
+            for location in discovered_locations:
+                await self._add_renderer(location)
+            
+            self.log(f"Discovery complete. Found {len(self.renderers)} renderer(s)")
+            
         except Exception as e:
-            self.log(f"Failed to add renderer from {location}: {e}")
-            logger.warning(f"Failed to add renderer from {location}: {e}")
+            logger.error(f"Discovery error: {e}")
+            self.log(f"Discovery error: {e}")
 
-    async def load_persisted_renderers(self):
-        """Load renderers from DB on startup, check if they are alive, remove dead ones."""
-        self.log("Loading persisted renderers...")
-        async for db in get_db():
-             rows = await db.execute_fetchall("SELECT * FROM renderers")
-             for row in rows:
-                 r = dict(row)
-                 # Map db columns back to internal struct if needed
-                 # Schema: friendly_name, udn, location_url, last_seen, control_url, rendering_control_url, ip
-                 data = {
-                     'udn': r['udn'],
-                     'name': r['friendly_name'],
-                     'location': r['location_url'],
-                     'control_url': r['control_url'],
-                     'rendering_control_url': r['rendering_control_url'],
-                     'ip': r['ip']
-                 }
-                 
-                 # Optimistic verification
-                 is_alive = await self.verify_device(data)
-                 if is_alive:
-                     self.renderers[data['udn']] = data
-                     self.log(f"Restored renderer: {data['name']}")
-                 else:
-                     self.log(f"Removing dead renderer: {data['name']}")
-                     await db.execute("DELETE FROM renderers WHERE udn = ?", (data['udn'],))
-                     await db.commit()
-
-    async def verify_device(self, r):
-        """Quick check if device is reachable."""
+    
+    async def _add_renderer(self, location: str):
+        """
+        Add or update a renderer from its description URL.
+        
+        Args:
+            location: URL to device description XML
+        """
         try:
-             async with httpx.AsyncClient() as client:
-                 resp = await client.get(r['location'], timeout=2.0)
-                 return resp.status_code == 200
-        except:
-            return False
+            await self._ensure_session()
+            
+            # Create UPnP device from description
+            device: UpnpDevice = await self._factory.async_create_device(location)
+            
+            udn = device.udn
+            if not udn:
+                logger.warning(f"Device at {location} has no UDN")
+                return
+            
+            # Extract device information
+            parsed_url = urlparse(location)
+            ip = parsed_url.hostname
+            
+            renderer_info = {
+                "udn": udn,
+                "name": device.name or "Unknown Device",  # UI expects 'name' field
+                "friendly_name": device.name or "Unknown Device",
+                "location": location,
+                "ip": ip,
+                "device_type": device.device_type,
+                "manufacturer": device.manufacturer,
+                "model_name": device.model_name,
+                "model_number": device.model_number,
+                "serial_number": device.serial_number,
+                "firmware_version": getattr(device, "firmware_version", None),
+            }
+            
+            # Find AVTransport and RenderingControl services
+            # Use service_id method which is safer than direct dictionary access
+            try:
+                avt_service = device.service_id("urn:upnp-org:serviceId:AVTransport")
+                if avt_service:
+                    renderer_info["control_url"] = avt_service.control_url
+            except (KeyError, AttributeError):
+                # Try alternative lookup
+                for service in device.services.values():
+                    if "AVTransport" in service.service_type:
+                        renderer_info["control_url"] = service.control_url
+                        break
+            
+            try:
+                rc_service = device.service_id("urn:upnp-org:serviceId:RenderingControl")
+                if rc_service:
+                    renderer_info["rendering_control_url"] = rc_service.control_url
+            except (KeyError, AttributeError):
+                # Try alternative lookup
+                for service in device.services.values():
+                    if "RenderingControl" in service.service_type:
+                        renderer_info["rendering_control_url"] = service.control_url
+                        break
+            
+            # Create DMR device wrapper with event handler
+            # For now, we pass None for event_handler (will implement in Phase 2)
+            dmr = DmrDevice(device, event_handler=None)
+            
+            # Check capabilities
+            renderer_info["supports_events"] = True  # async-upnp-client supports events
+            renderer_info["supports_gapless"] = dmr.has_next_transport_uri
+            
+            # Query supported MIME types
+            supported_mimes = await self.get_supported_protocols(udn)
+            
+            # Only update MIME types if we got data, otherwise preserve existing data
+            if supported_mimes:
+                renderer_info["supported_mime_types"] = ",".join(sorted(supported_mimes))
+                logger.debug(f"  Supports {len(supported_mimes)} MIME types")
+            else:
+                # Check if we have existing MIME types in the database
+                async for db in get_db():
+                    row = await db.fetchrow(
+                        "SELECT supported_mime_types FROM renderer WHERE udn = $1", udn
+                    )
+                    if row and row["supported_mime_types"]:
+                        # Preserve existing MIME types from database
+                        renderer_info["supported_mime_types"] = row["supported_mime_types"]
+                        logger.debug(f"  Preserving existing MIME types from database")
+                    else:
+                        # No data available
+                        renderer_info["supported_mime_types"] = ""
+                        logger.debug(f"  No MIME type data available")
 
-    async def save_renderer(self, r):
-        import time
+            
+            # Store renderer info and DMR device
+            self.renderers[udn] = renderer_info
+            self.dmr_devices[udn] = dmr
+            
+            # Persist to database
+            await self.save_renderer(renderer_info)
+            
+            self.log(f"Added renderer: {renderer_info['friendly_name']} ({udn})")
+            
+        except Exception as e:
+            logger.error(f"Error adding renderer from {location}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            self.log(f"Error adding renderer: {e}")
+    
+    async def load_persisted_renderers(self):
+        """Load previously discovered renderers from database and verify they're still alive."""
+        async for db in get_db():
+            rows = await db.fetch("SELECT * FROM renderer")
+            for row in rows:
+                r = dict(row)
+                # Try to verify device is still reachable
+                if await self.verify_device(r):
+                    self.renderers[r["udn"]] = r
+                    # Try to recreate DMR device
+                    if r.get("location"):
+                        try:
+                            await self._add_renderer(r["location"])
+                        except Exception as e:
+                            logger.debug(f"Could not recreate DMR for {r['udn']}: {e}")
+    
+    async def verify_device(self, r: Dict[str, Any]) -> bool:
+        """Quick check if device is reachable."""
+        if not r.get("location"):
+            return False
+        
+        try:
+            await self._ensure_session()
+            async with self._session.get(r["location"], timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+    
+    async def save_renderer(self, r: Dict[str, Any]):
+        """Persist renderer to database."""
         async for db in get_db():
             await db.execute("""
-                INSERT OR REPLACE INTO renderers 
-                (udn, friendly_name, location_url, control_url, rendering_control_url, ip, last_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (r['udn'], r['name'], r['location'], r['control_url'], r['rendering_control_url'], r['ip'], time.time()))
-            await db.commit()
-
+                INSERT INTO renderer 
+                (udn, friendly_name, location_url, ip, control_url, rendering_control_url, 
+                 device_type, manufacturer, model_name, model_number, serial_number, 
+                 firmware_version, supports_events, supports_gapless, supported_mime_types, last_seen_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+                ON CONFLICT (udn) DO UPDATE SET
+                    friendly_name = EXCLUDED.friendly_name,
+                    location_url = EXCLUDED.location_url,
+                    ip = EXCLUDED.ip,
+                    control_url = EXCLUDED.control_url,
+                    rendering_control_url = EXCLUDED.rendering_control_url,
+                    device_type = EXCLUDED.device_type,
+                    manufacturer = EXCLUDED.manufacturer,
+                    model_name = EXCLUDED.model_name,
+                    model_number = EXCLUDED.model_number,
+                    serial_number = EXCLUDED.serial_number,
+                    firmware_version = EXCLUDED.firmware_version,
+                    supports_events = EXCLUDED.supports_events,
+                    supports_gapless = EXCLUDED.supports_gapless,
+                    supported_mime_types = EXCLUDED.supported_mime_types,
+                    last_seen_at = NOW()
+            """,
+                r["udn"], r.get("friendly_name"), r.get("location"), r.get("ip"),
+                r.get("control_url"), r.get("rendering_control_url"),
+                r.get("device_type"), r.get("manufacturer"), r.get("model_name"),
+                r.get("model_number"), r.get("serial_number"), r.get("firmware_version"),
+                r.get("supports_events", False), r.get("supports_gapless", False),
+                r.get("supported_mime_types", "")
+            )
+    
     async def add_device_by_ip(self, ip: str):
-        """Manually access UPnP device via Unicast M-SEARCH and HTTP Probing."""
-        # 1. Try Unicast M-SEARCH (Standard compliant way for known IP)
-        # Fast fail (0.5s) to avoid delaying fallback
-        try:
-             MSEARCH = (
-                'M-SEARCH * HTTP/1.1\r\n'
-                f'HOST: {ip}:1900\r\n'
-                'MAN: "ssdp:discover"\r\n'
-                'MX: 1\r\n'
-                'ST: urn:schemas-upnp-org:service:AVTransport:1\r\n'
-                '\r\n'
-             ).encode('utf-8')
-
-             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-             sock.setblocking(False)
-             try:
-                 sock.bind(('0.0.0.0', 0))
-                 sock.sendto(MSEARCH, (ip, 1900))
-
-                 try:
-                     data = await asyncio.wait_for(
-                        asyncio.get_event_loop().sock_recv(sock, 2048),
-                        timeout=1.5 # Increased from 0.3s for slower devices like Naim
-                     )
-                     await self._process_ssdp_packet(data.decode('utf-8', errors='ignore'), (ip, 1900))
-                     return True
-                 except Exception:
-                     pass
-             finally:
-                 sock.close()
-        except Exception:
-             pass
-
-        # 2. Fallback to HTTP Port Scan (Parallelized)
-        ports = [8080, 80, 55000, 5000, 5050, 1400, 54380]
-        paths = ['/description.xml', '/device-desc.xml', '/dd.xml', '/xml/device_description.xml', '/MediaRenderer_TA-AN1000.xml', '/dmr.xml']
+        """
+        Manually add a UPnP device by IP address using unicast M-SEARCH and HTTP probing.
         
-        # Helper to check a specific url
-        async def check_url(client, url):
+        Args:
+            ip: IP address of the device
+        """
+        self.log(f"Attempting to add device at {ip}...")
+        
+        # Try common UPnP ports and paths
+        common_urls = [
+            f"http://{ip}:49152/description.xml",
+            f"http://{ip}:8080/description.xml",
+            f"http://{ip}:1400/xml/device_description.xml",  # Sonos
+            f"http://{ip}:60053/upnp/dev/uuid/description.xml",  # Rygel
+        ]
+        
+        await self._ensure_session()
+        
+        for url in common_urls:
             try:
-                resp = await client.get(url, timeout=1.0)
-                if resp.status_code == 200 and ('device' in resp.text or 'root' in resp.text):
-                     return url
-            except Exception:
-                pass
-            return None
-
-        # Gather all probes
-        probe_tasks = []
-        async with httpx.AsyncClient() as client:
-            for port in ports:
-                # Optimization: Try to connect to port first? 
-                # Actually, blindly firing 42 requests in parallel is fine for async, 
-                # as long as we don't wait sequentially.
-                for path in paths:
-                    url = f"http://{ip}:{port}{path}"
-                    probe_tasks.append(check_url(client, url))
-            
-            # Run all probes for this IP in parallel
-            results = await asyncio.gather(*probe_tasks)
-            
-            for url in results:
-                if url:
-                    logger.info(f"Found Device at {url}")
-                    await self._add_renderer(url)
-                    return True
+                async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status == 200:
+                        await self._add_renderer(url)
+                        self.log(f"Successfully added device from {url}")
+                        return
+            except Exception as e:
+                logger.debug(f"Failed to probe {url}: {e}")
         
-        return False
+        self.log(f"Could not find UPnP device at {ip}")
     
     async def scan_subnet(self):
-        """Active scan of the local subnet and common home subnets."""
-        if self.is_scanning_subnet:
-            return
-
+        """Active scan of the local subnet for UPnP devices."""
         self.is_scanning_subnet = True
         self.scan_progress = 0
-        self.scan_msg = "Starting active scan..."
-        self.log("Starting active subnet scan...")
+        self.scan_msg = "Scanning local subnet..."
+        
+        # Get local subnet
+        import ipaddress
+        local_network = ipaddress.ip_network(f"{self.local_ip}/24", strict=False)
+        
+        total_hosts = 254
+        scanned = 0
+        
+        for ip in local_network.hosts():
+            if not self.is_scanning_subnet:
+                break
+            
+            ip_str = str(ip)
+            scanned += 1
+            self.scan_progress = int((scanned / total_hosts) * 100)
+            self.scan_msg = f"Scanning {ip_str}..."
+            
+            await self.add_device_by_ip(ip_str)
+        
+        self.is_scanning_subnet = False
+        self.scan_msg = "Scan complete"
+        self.scan_progress = 100
+    
+    async def get_renderers(self) -> list:
+        """Get list of all discovered renderers."""
+        return list(self.renderers.values())
+    
+    async def set_renderer(self, udn: str):
+        """Set the active renderer by UDN."""
+        if udn in self.renderers:
+            self.active_renderer = udn
+            self.log(f"Active renderer set to: {self.renderers[udn]['friendly_name']}")
+        else:
+            raise ValueError(f"Renderer {udn} not found")
+    
+    async def get_supported_protocols(self, udn: str) -> set:
+        """
+        Query device's supported MIME types via GetProtocolInfo.
+        
+        Returns:
+            Set of supported MIME types (e.g., {'audio/flac', 'audio/mpeg'})
+        """
+        dmr = self.dmr_devices.get(udn)
+        if not dmr:
+            return set()
+        
+        device = dmr.device
+        
+        # Find ConnectionManager service
+        cm_service = None
+        for service in device.services.values():
+            if "ConnectionManager" in service.service_type:
+                cm_service = service
+                break
+        
+        if not cm_service:
+            logger.debug(f"No ConnectionManager service found for {udn}")
+            return set()
         
         try:
-            subnets = set()
-            local_ip = self.local_ip
-            if local_ip and local_ip != '127.0.0.1':
-                subnets.add('.'.join(local_ip.split('.')[:-1]))
-            subnets.add('192.168.0')
-            subnets.add('192.168.1')
+            action = cm_service.action("GetProtocolInfo")
+            result = await action.async_call()
             
-            total_ips = len(subnets) * 254
-            processed_ips = 0
-
-            tasks = []
-            chunk_size = 10 
+            # Parse Sink protocols (what the device can play)
+            sink = result.get("Sink", "")
+            if not sink:
+                return set()
             
-            for idx, subnet in enumerate(subnets):
-                self.log(f"Scanning subnet {subnet}.x ...")
-                
-                for i in range(1, 255):
-                    processed_ips += 1
-                    # Update progress every 2 IPs
-                    if i % 2 == 0:
-                        pct = int((processed_ips / total_ips) * 100)
-                        self.scan_progress = pct
-                        self.scan_msg = f"Scanning {subnet}.{i} ({pct}%)"
+            # Extract unique MIME types
+            mime_types = set()
+            protocols = sink.split(',')
+            for proto in protocols:
+                parts = proto.split(':')
+                if len(parts) >= 3:
+                    mime = parts[2]
+                    if mime and mime != '*':
+                        mime_types.add(mime)
+            
+            logger.debug(f"Device {udn} supports {len(mime_types)} MIME types")
+            return mime_types
+            
+        except Exception as e:
+            logger.debug(f"Error querying protocols for {udn}: {e}")
+            return set()
 
-                    target_ip = f"{subnet}.{i}"
-                    if target_ip == local_ip: continue
-                    
-                    tasks.append(self.add_device_by_ip(target_ip))
-                    
-                    if len(tasks) >= chunk_size:
-                        await asyncio.gather(*tasks)
-                        tasks = []
-                        await asyncio.sleep(0.01)
-                
-                if tasks:
-                    await asyncio.gather(*tasks)
-                    tasks = []
-                
-            self.log("Active subnet scan completed.")
-            self.scan_progress = 100
-            self.scan_msg = "Scan complete."
-        finally:
-            self.is_scanning_subnet = False
-            self.scan_progress = 0
-            self.scan_msg = ""
-                            
-    # --- Control Actions ---
-
-    async def get_renderers(self):
-        return list(self.renderers.values())
-
-    async def set_renderer(self, udn):
-        if udn == 'local':
-            self.active_renderer = None
-        else:
-            if udn not in self.renderers:
-                await self.discover()
-            if udn in self.renderers:
-                self.active_renderer = udn
-            else:
-                raise ValueError("Renderer not found")
-
-    async def play_track(self, track_id, track_path, metadata):
+    
+    async def play_track(self, track_id: int, track_path: str, metadata: Dict[str, Any], username: str = None):
         """
         Play a track on the active renderer.
-        metadata: {title, artist, album, art_id, duration, mime}
+        
+        Args:
+            track_id: Track ID from database
+            track_path: Path to track file
+            metadata: Track metadata (title, artist, album, artwork_id, duration, mime)
         """
         if not self.active_renderer:
-            return # Should default to local if active_renderer is None, but handled by caller
-
-        renderer = self.renderers[self.active_renderer]
-        control_url = renderer['control_url']
-
-        # Construct Stream URL
-        # Use dynamic base_url if available (from API request), else fallback to detected IP
-        if self.base_url:
-            base = self.base_url
-        else:
-            base = f"http://{self.local_ip}:8111"
-
-        stream_url = f"{base}/api/stream/{track_id}"
-        # Disable album art in DIDL; some renderers reject external art URIs (e.g., Naim 701 errors)
-        art_url = None
-
-        # Construct DIDL
-        didl = self._create_didl(stream_url, metadata['mime'], metadata['title'], 
-                               metadata['artist'], metadata['album'], art_url)
-        if os.environ.get("UPNP_LOG_DIDL"):
-            logger.info(f"DIDL sent:\n{didl}")
-
-        # 1. Stop (Optional, safer) - Naim atoms prefer stop before new URI
-        ok, resp = await self._soap_action(control_url, 'Stop', {'InstanceID': 0})
-        if not ok:
-            self.log(f"Stop command failed (continuing): {resp}")
-
-        await asyncio.sleep(0.2)
-
-        # Construct Stream URL
-        stream_url = f"{base}/api/stream/{track_id}"
+            raise ValueError("No active renderer set")
         
-        # 2. SetAVTransportURI
-        self.log(f"Setting URI: {stream_url}")
-        # self.log(f"Meta: {didl}") 
-        ok, resp = await self._soap_action(control_url, 'SetAVTransportURI', {
-            'InstanceID': 0,
-            'CurrentURI': stream_url,
-            'CurrentURIMetaData': didl
-        })
-        if not ok:
-            self.log(f"SetAVTransportURI failed, aborting Play: {resp}")
-            return
-
-        await asyncio.sleep(0.6)  # give renderer a moment to ingest metadata
-
-        # 3. Play
-        ok, resp = await self._soap_action(control_url, 'Play', {
-            'InstanceID': 0,
-            'Speed': 1
-        })
-        if not ok:
-            self.log(f"Play failed: {resp}")
-
-    async def pause(self):
-        if self.active_renderer:
-            r = self.renderers[self.active_renderer]
-            await self._soap_action(r['control_url'], 'Pause', {'InstanceID': 0})
-
-    async def resume(self):
-         if self.active_renderer:
-            r = self.renderers[self.active_renderer]
-            await self._soap_action(r['control_url'], 'Play', {'InstanceID': 0, 'Speed': 1})
-
-    async def set_volume(self, volume_percent: int):
-        if self.active_renderer:
-            r = self.renderers[self.active_renderer]
-            rc_url = r.get('rendering_control_url')
-            if rc_url:
-                await self._soap_action(rc_url, 'SetVolume', {
-                    'InstanceID': 0,
-                    'Channel': 'Master',
-                    'DesiredVolume': volume_percent
-                })
+        dmr = self.dmr_devices.get(self.active_renderer)
+        if not dmr:
+            raise ValueError(f"DMR device not found for {self.active_renderer}")
+        
+        # Build media URL
+        media_url = f"{self.base_url}/api/stream/{track_id}"
+        
+        # Get MIME type from metadata
+        mime_type = metadata.get("mime", "audio/flac")
+        
+        # Get supported MIME types from renderer info (stored in database)
+        renderer_info = self.renderers.get(self.active_renderer, {})
+        supported_mimes_str = renderer_info.get("supported_mime_types", "")
+        supported_mimes = set(supported_mimes_str.split(",")) if supported_mimes_str else set()
+        
+        # Choose the best MIME type for this device
+        # Try to match the exact MIME type first, then try variants
+        if mime_type == "audio/flac":
+            # FLAC has two common variants: audio/flac and audio/x-flac
+            # Check which one the device supports
+            if "audio/flac" in supported_mimes:
+                mime_type = "audio/flac"  # Sonos prefers this
+                logger.debug(f"Device supports audio/flac")
+            elif "audio/x-flac" in supported_mimes:
+                mime_type = "audio/x-flac"  # Some devices prefer this
+                logger.debug(f"Device supports audio/x-flac")
             else:
-                self.log("No RenderingControl URL for active renderer")
-
-    def _create_didl(self, url, mime, title, artist, album, art_url=None):
-        import html
-        title = html.escape(title or "Unknown")
-        artist = html.escape(artist or "Unknown")
-        album = html.escape(album or "Unknown")
-        # Ensure mime is simple
-        # Naim might prefer audio/mpeg or audio/x-flac or similar. Use what was passed but ensure protocolInfo format is standard.
-        # Fallback to broad match if issues persist.
+                # Fallback: if we don't have device info, use audio/flac as default
+                mime_type = "audio/flac"
+                logger.debug(f"Device protocols unknown, using audio/flac as default")
+        elif mime_type == "audio/mp4":
+            # M4A/AAC - usually audio/mp4 or audio/x-m4a
+            if "audio/mp4" in supported_mimes:
+                mime_type = "audio/mp4"
+            elif "audio/x-m4a" in supported_mimes:
+                mime_type = "audio/x-m4a"
+        # For other types (audio/mpeg, etc.), keep as-is
         
-        return f"""
+        # Build art URL if available
+        art_url = None
+        if metadata.get("artwork_id"):
+            art_url = f"{self.base_url}/art/{metadata['artwork_id']}.jpg"
+        
+        # Extract metadata fields
+        title = metadata.get("title", "Unknown Track")
+        artist = metadata.get("artist", "Unknown Artist")
+        album = metadata.get("album", "Unknown Album")
+        
+        # Get renderer info
+        renderer_name = self.renderers.get(self.active_renderer, {}).get('friendly_name', 'Unknown')
+        renderer_location = self.renderers.get(self.active_renderer, {}).get('location', '')
+        renderer_ip = renderer_location.split('//')[1].split(':')[0] if '//' in renderer_location else 'Unknown'
+        
+        # Build comprehensive log message
+        log_parts = [f"Playing: {track_path} : {title} by {artist} ({mime_type}) on {renderer_name}"]
+        if renderer_ip and renderer_ip != 'Unknown':
+            log_parts.append(f"({renderer_ip})")
+        if username:
+            log_parts.append(f"requested by {username}")
+        
+        logger.info(" ".join(log_parts))
+        
+        # Manually construct DIDL-Lite XML matching the legacy implementation exactly
+        # This format has been tested and works with Naim and other renderers
+        import html
+        title_esc = html.escape(title)
+        artist_esc = html.escape(artist)
+        album_esc = html.escape(album)
+        
+        # Note: Legacy uses dc:creator instead of upnp:artist, and includes dlna namespace
+        # Build albumArtURI element if artwork is available
+        art_element = ""
+        if art_url:
+            art_element = f"<upnp:albumArtURI>{html.escape(art_url)}</upnp:albumArtURI>"
+        
+        didl_lite = f"""
         <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">
             <item id="1" parentID="0" restricted="1">
-                <dc:title>{title}</dc:title>
-                <dc:creator>{artist}</dc:creator>
-                <upnp:album>{album}</upnp:album>
+                <dc:title>{title_esc}</dc:title>
+                <dc:creator>{artist_esc}</dc:creator>
+                <upnp:artist>{artist_esc}</upnp:artist>
+                <upnp:album>{album_esc}</upnp:album>
                 <upnp:class>object.item.audioItem.musicTrack</upnp:class>
-                <res protocolInfo="http-get:*:{mime}:*">{url}</res>
+                {art_element}
+                <res protocolInfo="http-get:*:{mime_type}:*">{media_url}</res>
             </item>
         </DIDL-Lite>
         """
-
-    async def _soap_action(self, url, action, args):
-        """Send SOAP action and return (ok, response_text)."""
-        self.log(f"SOAP Action: {action} to {url}")
-        # Helper to escape values
-        import html
-        def escape_val(val):
-            return html.escape(str(val))
-
-        body = f"""<?xml version="1.0"?>
-        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-            <s:Body>
-                <u:{action} xmlns:u="urn:schemas-upnp-org:service:AVTransport:1" xmlns:r="urn:schemas-upnp-org:service:RenderingControl:1">
-                    {''.join([f"<{k}>{escape_val(v)}</{k}>" for k, v in args.items()])}
-                </u:{action}>
-            </s:Body>
-        </s:Envelope>
-        """
         
-        # Log the full request body for debugging
-        # logger.debug(f"SOAP Request Body ({action}):\n{body}")
-
-        headers = {
-            'Content-Type': 'text/xml; charset="utf-8"',
-            'SOAPAction': f'"urn:schemas-upnp-org:service:AVTransport:1#{action}"',
-            'Connection': 'close'
-        }
-
+        # Set transport URI with manually constructed metadata
+        await dmr.async_set_transport_uri(
+            media_url=media_url,
+            media_title=title,
+            meta_data=didl_lite
+        )
+        
+        # Wait for device to be ready
+        await dmr.async_wait_for_can_play(max_wait_time=5)
+        
+        # Start playback
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, content=body, headers=headers, timeout=10.0) # 10s timeout
-                if resp.status_code != 200:
-                    # Some renderers (e.g., Rygel) return 500/701 "Transition not available"
-                    # even though they actually start playback. Treat that as a soft success
-                    # so we don't spam errors when playback is working.
-                    if action == "Play" and "errorCode>701" in resp.text:
-                        self.log(f"SOAP Action {action} returned 701 (Transition not available) but continuing")
-                        logger.warning(f"SOAP Action {action} soft-failed with 701: {resp.text}")
-                        return True, resp.text
-
-                    self.log(f"SOAP Action {action} FAILED: {resp.status_code} {resp.text}")
-                    logger.error(f"SOAP Action {action} failed: {resp.status_code} {resp.text}")
-                    return False, resp.text
-                else:
-                    self.log(f"SOAP Action {action} SUCCESS")
-                    logger.debug(f"SOAP Action {action} Response:\n{resp.text}")
-                    return True, resp.text
-        except Exception as e:
-            self.log(f"SOAP Action {action} ERROR: {e}")
-            logger.exception(f"SOAP Action {action} Exception")
-            return False, str(e)
-
-    def _parse_time(self, time_str):
-        if not time_str or time_str == 'NOT_IMPLEMENTED':
-            return 0
-        try:
-            parts = time_str.split(':')
-            if len(parts) == 3:
-                h, m, s = map(float, parts)
-                return h * 3600 + m * 60 + s
-        except Exception:
-            pass
-        return 0
-
-    async def get_position(self, udn=None):
-        """Get current position and duration from active renderer or specified udn."""
-        target_udn = udn or self.active_renderer
-        if not target_udn or target_udn not in self.renderers:
-            return 0, 0
-        
-        r = self.renderers[target_udn]
-        url = r['control_url']
-        
-        try:
-            # GetPositionInfo
-            action = "GetPositionInfo"
-            body = f"""<?xml version="1.0"?>
-            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-                <s:Body>
-                    <u:{action} xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
-                        <InstanceID>0</InstanceID>
-                    </u:{action}>
-                </s:Body>
-            </s:Envelope>
-            """
-            
-            headers = {
-                'Content-Type': 'text/xml; charset="utf-8"',
-                'SOAPAction': f'"urn:schemas-upnp-org:service:AVTransport:1#{action}"'
-            }
-            
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, content=body, headers=headers, timeout=2.0)
-                if resp.status_code == 200:
-                    xml = resp.text
-                    # Parse RelTime and TrackDuration
-                    # <RelTime>00:00:23</RelTime>
-                    # <TrackDuration>00:03:45</TrackDuration>
-                    
-                    # Simple parsing
-                    rel_time = 0
-                    duration = 0
-                    
-                    import re
-                    rel_match = re.search(r'<RelTime>(.*?)</RelTime>', xml)
-                    dur_match = re.search(r'<TrackDuration>(.*?)</TrackDuration>', xml)
-                    
-                    if rel_match:
-                        rel_time = self._parse_time(rel_match.group(1))
-                    if dur_match:
-                        duration = self._parse_time(dur_match.group(1))
-                        
-                    return rel_time, duration
-        except Exception as e:
-            self.log(f"GetPositionInfo failed: {e}")
-            
-        return 0, 0
-
-    async def get_transport_info(self, udn=None):
-        """Get CurrentTransportState (PLAYING, STOPPED, PAUSED_PLAYBACK, etc)."""
-        target_udn = udn or self.active_renderer
-        if not target_udn or target_udn not in self.renderers:
-            return "STOPPED"
-        
-        r = self.renderers[target_udn]
-        url = r['control_url']
-        
-        try:
-            action = "GetTransportInfo"
-            body = f"""<?xml version="1.0"?>
-            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-                <s:Body>
-                    <u:{action} xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
-                        <InstanceID>0</InstanceID>
-                    </u:{action}>
-                </s:Body>
-            </s:Envelope>
-            """
-            
-            headers = {
-                'Content-Type': 'text/xml; charset="utf-8"',
-                'SOAPAction': f'"urn:schemas-upnp-org:service:AVTransport:1#{action}"'
-            }
-            
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, content=body, headers=headers, timeout=2.0)
-                if resp.status_code == 200:
-                    xml = resp.text
-                    import re
-                    match = re.search(r'<CurrentTransportState>(.*?)</CurrentTransportState>', xml)
-                    if match:
-                        return match.group(1)
-        except Exception as e:
-            self.log(f"GetTransportInfo failed: {e}")
-            
-        return "UNKNOWN"
-
-    async def seek(self, target_seconds: float):
-        """Seek to a specific time (REL_TIME)."""
+            await dmr.async_play()
+        except UpnpError as e:
+            # Error 701 means "Transition not available" - device is already playing
+            if "701" in str(e):
+                logger.info(f"Device already playing, ignoring play command")
+            else:
+                raise
+    
+    async def pause(self):
+        """Pause playback on active renderer."""
         if not self.active_renderer:
             return
-
-        r = self.renderers[self.active_renderer]
-        control_url = r['control_url']
         
-        # Format as H:MM:SS
-        m, s = divmod(int(target_seconds), 60)
-        h, m = divmod(m, 60)
-        target = f"{h}:{m:02d}:{s:02d}"
+        dmr = self.dmr_devices.get(self.active_renderer)
+        if dmr:
+            await dmr.async_pause()
+            self.log("Playback paused")
+    
+    async def resume(self):
+        """Resume playback on active renderer."""
+        if not self.active_renderer:
+            return
         
-        self.log(f"Seeking to {target}")
+        dmr = self.dmr_devices.get(self.active_renderer)
+        if dmr:
+            await dmr.async_play()
+            self.log("Playback resumed")
+    
+    async def set_volume(self, volume_percent: int):
+        """
+        Set volume on active renderer.
         
-        await self._soap_action(control_url, 'Seek', {
-            'InstanceID': 0,
-            'Unit': 'REL_TIME',
-            'Target': target
-        })
+        Args:
+            volume_percent: Volume level 0-100
+        """
+        if not self.active_renderer:
+            return
+        
+        dmr = self.dmr_devices.get(self.active_renderer)
+        if dmr and dmr.has_volume_level:
+            # Convert 0-100 to 0.0-1.0
+            volume_level = volume_percent / 100.0
+            await dmr.async_set_volume_level(volume_level)
+            self.log(f"Volume set to {volume_percent}%")
+    
+    async def get_position(self, udn: Optional[str] = None) -> tuple:
+        """
+        Get current playback position and duration.
+        
+        Args:
+            udn: Renderer UDN (uses active if None)
+            
+        Returns:
+            Tuple of (position_seconds, duration_seconds)
+        """
+        target_udn = udn or self.active_renderer
+        if not target_udn:
+            return (0, 0)
+        
+        dmr = self.dmr_devices.get(target_udn)
+        if not dmr:
+            return (0, 0)
+        
+        # Update device state from UPnP device
+        try:
+            await dmr.async_update()
+        except Exception as e:
+            logger.debug(f"Failed to update DMR state: {e}")
+            return (0, 0)
+        
+        # Get position and duration from DMR device
+        position = dmr.media_position
+        duration = dmr.media_duration
+        
+        # Convert to seconds - handle both int and timedelta types
+        if isinstance(position, int):
+            position_seconds = position
+        elif position:
+            position_seconds = position.total_seconds()
+        else:
+            position_seconds = 0
+            
+        if isinstance(duration, int):
+            duration_seconds = duration
+        elif duration:
+            duration_seconds = duration.total_seconds()
+        else:
+            duration_seconds = 0
+        
+        return (position_seconds, duration_seconds)
+    
+    async def get_transport_info(self, udn: Optional[str] = None) -> str:
+        """
+        Get current transport state.
+        
+        Args:
+            udn: Renderer UDN (uses active if None)
+            
+        Returns:
+            Transport state string (PLAYING, STOPPED, PAUSED_PLAYBACK, etc.)
+        """
+        target_udn = udn or self.active_renderer
+        if not target_udn:
+            return "STOPPED"
+        
+        dmr = self.dmr_devices.get(target_udn)
+        if not dmr:
+            return "STOPPED"
+        
+        # Update device state from UPnP device
+        try:
+            await dmr.async_update()
+        except Exception as e:
+            logger.debug(f"Failed to update DMR state: {e}")
+            return "STOPPED"
+        
+        transport_state = dmr.transport_state
+        return transport_state.value if transport_state else "STOPPED"
+    
+    async def seek(self, target_seconds: float):
+        """
+        Seek to a specific time position.
+        
+        Args:
+            target_seconds: Target position in seconds
+        """
+        if not self.active_renderer:
+            return
+        
+        dmr = self.dmr_devices.get(self.active_renderer)
+        if dmr:
+            from datetime import timedelta
+            target_time = timedelta(seconds=target_seconds)
+            await dmr.async_seek_rel_time(target_time)
+            self.log(f"Seeked to {target_seconds}s")

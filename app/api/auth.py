@@ -1,6 +1,7 @@
 from typing import Optional
+from datetime import datetime, timezone
 
-import aiosqlite
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr
 
@@ -54,18 +55,19 @@ def _set_session_cookie(response: Response, token: str) -> None:
     )
 
 
-def _public_user_dict(row: aiosqlite.Row) -> dict:
+def _public_user_dict(row: asyncpg.Record) -> dict:
     return {
         "id": row["id"],
         "username": row["username"],
         "email": row["email"],
         "display_name": row["display_name"] or row["username"],
-        "created_at": row["created_at"],
-        "last_login": row["last_login"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "last_login": row["last_login_at"].isoformat() if row["last_login_at"] else None,
     }
 
 
 def _validate_password(password: str) -> None:
+    """Validate password meets minimum requirements."""
     if len(password) < 8:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -78,47 +80,45 @@ async def signup(
     payload: SignupBody,
     request: Request,
     response: Response,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ):
     username = payload.username.strip()
     email = payload.email.strip()
     _validate_password(payload.password)
 
-    async with db.execute(
-        "SELECT 1 FROM users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)",
-        (username, email),
-    ) as cursor:
-        if await cursor.fetchone():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Username or email already in use.",
-            )
+    existing = await db.fetchrow(
+        'SELECT 1 FROM "user" WHERE username = $1 OR email = $2',
+        username, email
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username or email already taken.",
+        )
 
     password_hash = hash_password(payload.password)
-    display_name = payload.display_name.strip() if payload.display_name else username
-
-    cursor = await db.execute(
+    
+    # Insert new user
+    user = await db.fetchrow(
         """
-        INSERT INTO users (username, email, password_hash, display_name)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO "user" (username, email, password_hash, display_name, created_at, last_login_at)
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        RETURNING *
         """,
-        (username, email, password_hash, display_name),
+        username,
+        email,
+        password_hash,
+        payload.display_name.strip() if payload.display_name else None,
     )
-    user_id = cursor.lastrowid
 
     token = await create_session(
         db,
-        user_id=user_id,
+        user_id=user["id"],
         user_agent=request.headers.get("user-agent"),
         ip=request.client.host if request.client else None,
     )
-    await db.commit()
-
     _set_session_cookie(response, token)
-    async with db.execute("SELECT * FROM users WHERE id = ?", (user_id,)) as cursor:
-        saved_user = await cursor.fetchone()
-
-    return _public_user_dict(saved_user)
+    return _public_user_dict(user)
 
 
 @router.post("/api/auth/login")
@@ -126,20 +126,19 @@ async def login(
     payload: LoginBody,
     request: Request,
     response: Response,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ):
     username = payload.username.strip()
 
-    async with db.execute(
+    user = await db.fetchrow(
         """
         SELECT *
-        FROM users
-        WHERE LOWER(username) = LOWER(?)
+        FROM "user"
+        WHERE username = $1
         LIMIT 1
         """,
-        (username,),
-    ) as cursor:
-        user = await cursor.fetchone()
+        username,
+    )
 
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(
@@ -153,16 +152,18 @@ async def login(
         ip=request.client.host if request.client else None,
     )
     await db.execute(
-        "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", (user["id"],)
+        'UPDATE "user" SET last_login_at = $1 WHERE id = $2', 
+        datetime.now(timezone.utc), 
+        user["id"]
     )
-    await db.commit()
     _set_session_cookie(response, token)
     return _public_user_dict(user)
 
 
+
 @router.post("/api/auth/logout")
 async def logout(
-    request: Request, response: Response, db: aiosqlite.Connection = Depends(get_db)
+    request: Request, response: Response, db: asyncpg.Connection = Depends(get_db)
 ):
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token:
@@ -175,7 +176,7 @@ async def logout(
 
 @router.get("/api/auth/me")
 async def me(
-    request: Request, response: Response, db: aiosqlite.Connection = Depends(get_db)
+    request: Request, response: Response, db: asyncpg.Connection = Depends(get_db)
 ):
     token = request.cookies.get(SESSION_COOKIE_NAME)
     user, token_value = await get_session_user(db, token)
@@ -192,33 +193,31 @@ async def update_profile(
     payload: UpdateProfileBody,
     request: Request,
     response: Response,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ):
     user, token = await require_current_user(request, db)
     email = payload.email.strip()
     display_name = payload.display_name.strip() if payload.display_name else user["display_name"]
 
-    async with db.execute(
-        "SELECT 1 FROM users WHERE LOWER(email) = LOWER(?) AND id != ?",
-        (email, user["id"]),
-    ) as cursor:
-        if await cursor.fetchone():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already in use.",
-            )
+    existing = await db.fetchrow(
+        'SELECT 1 FROM "user" WHERE email = $1 AND id != $2',
+        email, user["id"],
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already in use.",
+        )
 
     await db.execute(
-        "UPDATE users SET email = ?, display_name = ? WHERE id = ?",
-        (email, display_name, user["id"]),
+        'UPDATE "user" SET email = $1, display_name = $2 WHERE id = $3',
+        email, display_name, user["id"],
     )
-    await db.commit()
     _set_session_cookie(response, token)
-    updated_user = await db.execute(
-        "SELECT * FROM users WHERE id = ?", (user["id"],)
+    updated_user = await db.fetchrow(
+        'SELECT * FROM "user" WHERE id = $1', user["id"],
     )
-    row = await updated_user.fetchone()
-    return _public_user_dict(row or user)
+    return _public_user_dict(updated_user or user)
 
 
 @router.post("/api/auth/password")
@@ -226,7 +225,7 @@ async def change_password(
     payload: ChangePasswordBody,
     request: Request,
     response: Response,
-    db: aiosqlite.Connection = Depends(get_db),
+    db: asyncpg.Connection = Depends(get_db),
 ):
     user, token = await require_current_user(request, db)
     _validate_password(payload.new_password)
@@ -239,13 +238,12 @@ async def change_password(
 
     new_hash = hash_password(payload.new_password)
     await db.execute(
-        "UPDATE users SET password_hash = ? WHERE id = ?",
-        (new_hash, user["id"]),
+        'UPDATE "user" SET password_hash = $1 WHERE id = $2',
+        new_hash, user["id"],
     )
     # Invalidate other sessions but keep current one
     await db.execute(
-        "DELETE FROM sessions WHERE user_id = ? AND token != ?", (user["id"], token)
+        "DELETE FROM session WHERE user_id = $1 AND token != $2", user["id"], token
     )
-    await db.commit()
     _set_session_cookie(response, token)
     return {"ok": True}

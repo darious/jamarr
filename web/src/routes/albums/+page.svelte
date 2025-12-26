@@ -61,7 +61,7 @@
             )}
         >
           <img
-            src={album.art_id ? `/art/${album.art_id}` : "/assets/logo.png"}
+            src={album.art_sha1 ? `/api/art/file/${album.art_sha1}?max_size=300` : "/assets/logo.png"}
             alt={album.album}
             class="h-full w-full rounded-2xl object-cover transition-transform duration-200 group-hover:scale-[1.03]"
           />

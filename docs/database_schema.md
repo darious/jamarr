@@ -1,6 +1,6 @@
 # Database Schema
 
-The application uses a SQLite database located at `cache/library.sqlite`.
+The application uses a PostgreSQL database (running in Docker on port 8110).
 
 ## Tables
 
@@ -177,6 +177,7 @@ Stores the current playback state for each renderer (local or UPnP). This allows
 | `position_seconds` | REAL | Last saved playback position. |
 | `is_playing` | BOOLEAN | Whether playback is active. |
 | `transport_state` | TEXT | UPnP Transport State (e.g., PLAYING, STOPPED). |
+| `volume` | INTEGER | Current volume level (0-100). |
 | `updated_at` | DATETIME | Timestamp of last update. |
 
 ### `client_sessions`
@@ -187,6 +188,60 @@ Maps client IDs to their active renderer UDN.
 | `client_id` | TEXT | Primary Key. UUID of the client. |
 | `active_renderer_udn` | TEXT | UDN of the renderer the client is controlling. |
 | `last_seen` | DATETIME | Timestamp of last activity. |
+
+### `artist_genres`
+Stores genres associated with artists.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `artist_mbid` | TEXT | Foreign Key `artists.mbid`. |
+| `genre` | TEXT | Genre name. |
+| `count` | INTEGER | Vote count or weight for the genre. |
+| `last_updated` | REAL | Timestamp of last update. |
+
+### `missing_albums`
+Stores albums found in MusicBrainz/Tidal that are missing from the local library.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | INTEGER | Primary Key. |
+| `artist_mbid` | TEXT | Foreign Key `artists.mbid`. |
+| `release_group_mbid` | TEXT | MusicBrainz Release Group ID. |
+| `title` | TEXT | Album title. |
+| `release_date` | TEXT | Release date. |
+| `primary_type` | TEXT | Album type. |
+| `image_url` | TEXT | URL to album artwork. |
+| `musicbrainz_url` | TEXT | Link to MusicBrainz. |
+| `tidal_url` | TEXT | Link to Tidal. |
+| `qobuz_url` | TEXT | Link to Qobuz. |
+| `last_updated` | REAL | Timestamp of last update. |
+
+### `users`
+Stores user accounts for authentication.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | INTEGER | Primary Key. |
+| `username` | TEXT | Unique username. |
+| `email` | TEXT | Unique email address. |
+| `password_hash` | TEXT | Hashed password. |
+| `display_name` | TEXT | Display name. |
+| `created_at` | DATETIME | Creation timestamp. |
+| `last_login` | DATETIME | Last login timestamp. |
+| `is_active` | BOOLEAN | Account active status. |
+
+### `sessions`
+Stores active user sessions.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | INTEGER | Primary Key. |
+| `user_id` | INTEGER | Foreign Key `users.id`. |
+| `token` | TEXT | Unique session token. |
+| `created_at` | DATETIME | Creation timestamp. |
+| `expires_at` | DATETIME | Expiration timestamp. |
+| `user_agent` | TEXT | User agent string. |
+| `ip` | TEXT | IP address. |
 
 ### `media_quality_issues`
 Stores outstanding media quality findings across artwork, tracks, albums, and artists.

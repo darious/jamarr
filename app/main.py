@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from app.db import init_db
+from app.db import init_db, close_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -13,6 +13,7 @@ async def lifespan(app: FastAPI):
     yield
     await UPnPManager.get_instance().stop_background_scan()
     await ScanManager.get_instance().shutdown()
+    await close_db()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -53,16 +54,19 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 from app.media import art
-from app.api import library, stream, player, search, scan, auth, media_quality
+from app.api import library, stream, player, search, scan, auth
+
 
 app.include_router(art.router)
+app.include_router(art.router, prefix="/api")
 app.include_router(library.router)
 app.include_router(stream.router)
 app.include_router(player.router)
 app.include_router(search.router)
 app.include_router(scan.router)
 app.include_router(auth.router)
-app.include_router(media_quality.router)
+# app.include_router(media_quality.router)
+
 
 
 

@@ -420,15 +420,13 @@ async def match_track_to_library(db, artist_mbid, track_name, album_name=None, e
     # Get all tracks for this artist (including features)
     # We also fetch MB IDs now
     query = """
-        SELECT t.id, t.title, t.album, t.duration_seconds, t.mb_track_id, t.mb_release_track_id
-        FROM tracks t
-        JOIN track_artists ta ON t.id = ta.track_id
-        WHERE ta.mbid = ? 
+        SELECT t.id, t.title, t.album, t.duration_seconds, t.track_mbid, t.release_track_mbid
+        FROM track t
+        JOIN track_artist ta ON t.id = ta.track_id
+        WHERE ta.artist_mbid = $1 
     """
     
-    candidates = []
-    async with db.execute(query, (artist_mbid,)) as cursor:
-        candidates = await cursor.fetchall()
+    candidates = await db.fetch(query, artist_mbid)
         
     if not candidates:
         return None
@@ -524,7 +522,7 @@ async def fetch_artist_metadata(
             "mbid": mbid,
             "name": artist_name,
             "sort_name": artist_name,
-            "last_updated": time.time(),
+            "updated_at": time.time(),
             "bio": None,
             "image_url": None,
             "image_source": None,
@@ -563,7 +561,7 @@ async def fetch_artist_metadata(
         "singles": [],
         "albums": [],
         "genres": [],
-        "last_updated": time.time()
+        "updated_at": time.time()
     }
 
     # Fast path: artwork-only (skip MusicBrainz release/link fetch)
@@ -1060,12 +1058,12 @@ async def fetch_best_release_match(rg_id: str, client: httpx.AsyncClient):
         logger.warning(f"Error resolving release links for {rg_id}: {e}")
         return {"links": [], "release_ids": [], "primary_release_id": None}
 
-async def fetch_track_credits(mb_recording_id: str, mb_release_track_id: str = None):
+async def fetch_track_credits(mb_recording_id: str, release_track_mbid: str = None):
     """
     Fetch artist credits for a track.
     Returns list of (mbid, name).
     """
-    target_id = mb_recording_id or mb_release_track_id
+    target_id = mb_recording_id or release_track_mbid
     if not target_id: return []
 
     credits = []

@@ -23,60 +23,79 @@ For database details, see [Database Schema](database_schema.md).
 ## Setup
 
 ### Prerequisites
-- Python 3.9+
+- Python 3.13+
+- `uv` (fast Python package/dependency manager)
 - `ffmpeg` (for `ffprobe`) - *Required for scanning and analysis*
 
 ### Installation
 
-1.  **Create a virtual environment:**
+1.  **Install dependencies with uv (creates .venv):**
     ```bash
-    python3 -m venv venv
-    source venv/bin/activate
+    uv sync
     ```
 
-2.  **Install dependencies:**
+2.  **Run the API locally:**
     ```bash
-    pip install -r requirements.txt
+    uv run uvicorn app.main:app --host 0.0.0.0 --port 8111
     ```
 
 ## Deployment (Docker)
 
-The recommended way to run Jamarr is via Docker Compose.
+The recommended way to run Jamarr in production is via Docker Compose.
 
-1.  **Configure Volumes**:
-    Edit `docker-compose.yml` to point to your music library:
-    ```yaml
-    volumes:
-      - /path/to/your/music:/app/music
-      - ./cache:/app/cache
-    ```
+1. **Configure Volumes**:
+   Edit `docker-compose.yml` to point to your music library and set your server IP:
+   ```yaml
+   volumes:
+     music:
+       driver_opts:
+         device: ":/path/to/your/music"
+   environment:
+     - HOST_IP=192.168.1.xxx  # Your server IP
+   ```
 
-2.  **Run**:
-    ```bash
-    docker-compose up --build -d
-    ```
+2. **Build and Run**:
+   ```bash
+   docker compose build
+   docker compose up -d
+   ```
 
-3.  **Access**:
-    Open `http://localhost:8111`.
+3. **Access**:
+   Open `http://your-server-ip:8111`.
 
 **Note**: The container uses `network_mode: "host"` to enable UPnP device discovery on your local network.
 
 ## Development Setup
 
-### Prerequisites
-- Python 3.12+
-- Node.js 20+
-- `ffmpeg` (optional, for analysis)
+For the best development experience, use the provided Docker Compose setup with hot-reload enabled for both frontend and backend.
 
-### Backend
-1.  Create venv: `python3 -m venv venv && source venv/bin/activate`
-2.  Install: `pip install -r requirements.txt`
-3.  Run: `uvicorn app.main:app --reload --host 0.0.0.0 --port 8111`
+### Quick Start
 
-### Frontend
-1.  Apps lives in `web/`.
-2.  Install: `cd web && npm install`
-3.  Run: `npm run dev -- --host 0.0.0.0 --port 4173`
+```bash
+./dev.sh
+```
+
+This starts all services in development mode:
+- **Backend API** (port 8111) - Auto-reloads on Python code changes
+- **Frontend** (port 5173) - Vite HMR for instant updates
+- **PostgreSQL** (port 8110) - Database
+- **CloudBeaver** (port 8978) - Database management UI
+
+**No Docker rebuilds needed** for code changes! See [Development Mode Guide](docs/DEV_MODE.md) for details.
+
+### Manual Development (Without Docker)
+
+If you prefer to run services manually:
+
+#### Backend
+1. Install deps: `uv sync`
+2. Start PostgreSQL (or use Docker: `docker compose up jamarr_db -d`)
+3. Run: `uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8111`
+
+#### Frontend
+1. Navigate to `web/`
+2. Install: `npm install`
+3. Run: `npm run dev:host`
 
 
 ### Running the Scanner (CLI)
@@ -85,7 +104,7 @@ Jamarr includes a powerful CLI to manage the library and metadata.
 
 **Basic Usage:**
 ```bash
-python -m app.scanner.cli <command> [options]
+uv run python -m app.scanner.cli <command> [options]
 ```
 
 ## Workflow Overview
@@ -113,10 +132,10 @@ This separation ensures fast initial scans while allowing rich metadata to be fe
     **Examples:**
     ```bash
     # Standard scan
-    python -m app.scanner.cli scan -v
+    uv run python -m app.scanner.cli scan -v
     
     # Force rescan specific folder
-    python -m app.scanner.cli scan --path "/music/New Added" --force
+    uv run python -m app.scanner.cli scan --path "/music/New Added" --force
     ```
 
 2.  **`metadata`**: Fetches artist/album metadata from MusicBrainz & Spotify.
@@ -135,13 +154,13 @@ This separation ensures fast initial scans while allowing rich metadata to be fe
     **Examples:**
     ```bash
     # Update all metadata (recommended after first scan)
-    python -m app.scanner.cli metadata -v
+    uv run python -m app.scanner.cli metadata -v
     
     # Update specific artist by name
-    python -m app.scanner.cli metadata --artist "Bear's Den"
+    uv run python -m app.scanner.cli metadata --artist "Bear's Den"
     
     # Update specific artist by MusicBrainz ID (useful for blank names)
-    python -m app.scanner.cli metadata --mbid ef5aab86-887d-4fc2-a883-431ef017175a
+    uv run python -m app.scanner.cli metadata --mbid ef5aab86-887d-4fc2-a883-431ef017175a
     
     # Find artists with blank names
     sqlite3 cache/library.sqlite "select mbid, name from artists where name is null or name = ''"
@@ -155,7 +174,7 @@ This separation ensures fast initial scans while allowing rich metadata to be fe
 
     **Example:**
     ```bash
-    python -m app.scanner.cli prune
+    uv run python -m app.scanner.cli prune
     ```
 
 4.  **`full`**: Runs `scan` followed immediately by `metadata` and then `prune`.
@@ -163,20 +182,20 @@ This separation ensures fast initial scans while allowing rich metadata to be fe
     
     **Example:**
     ```bash
-    python -m app.scanner.cli full
+    uv run python -m app.scanner.cli full
     ```
 
 ## Typical Workflow
 
 ```bash
 # 1. Initial scan - populates tracks, albums, and single-artist names from tags
-python -m app.scanner.cli scan
+uv run python -m app.scanner.cli scan
 
 # 2. Enrich with metadata - fills in missing names, sort names, bios, artwork
-python -m app.scanner.cli metadata
+uv run python -m app.scanner.cli metadata
 
 # 3. (Optional) Clean up orphaned data
-python -m app.scanner.cli prune
+uv run python -m app.scanner.cli prune
 ```
 
 ## Database Schema
@@ -200,6 +219,8 @@ The database has been normalized to improve data integrity and query performance
 -   **`external_links`**: Stores URLs for Artists and Albums.
     -   Types: `spotify`, `tidal`, `qobuz`, `wikipedia`, `homepage`.
     -   Supports prioritized link resolution (e.g., matching Digital Media releases).
+-   **`artist_genres`**: Stores genre tags and weights for artists.
+-   **`missing_albums`**: Tracks albums found in external sources but missing from the local library.
 -   **`artwork`**: Deduplicated artwork storage.
     -   Images stored by SHA1 hash to prevent duplicates.
 
@@ -208,24 +229,23 @@ The database has been normalized to improve data integrity and query performance
 -   **`renderer_states`**: Current playback status (queue, position, volume) for each renderer.
 -   **`client_sessions`**: Tracks active user sessions and their selected renderer.
 -   **`playback_history`**: Log of all played tracks.
+-   **`users`**: User accounts and authentication data.
+-   **`sessions`**: Active login sessions.
 
 ## Frontend (SvelteKit + Skeleton)
 
-The web UI now lives in a SvelteKit app with Skeleton UI and Tailwind.
+The web UI is built with SvelteKit, Skeleton UI, and Tailwind CSS.
 
-Install and run the frontend in dev mode:
+### Development
+Use the Docker Compose dev mode (see [Development Setup](#development-setup)) for the best experience with hot-reload.
+
+### Production Build
+The Dockerfile automatically builds the frontend and bundles it with the backend. To build manually:
 
 ```bash
 cd web
 npm install
-npm run dev -- --host 0.0.0.0 --port 4173
-```
-
-Build production assets (served by FastAPI from `web/build`):
-
-```bash
-cd web
 npm run build
 ```
 
-The FastAPI app is already configured to serve the built assets from `web/build`; rebuild whenever you change frontend code.
+The FastAPI backend serves the built assets from `web/build`.
