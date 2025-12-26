@@ -710,7 +710,10 @@ class Scanner:
                 SELECT a.mbid, a.name, a.last_updated, a.sort_name, a.bio, a.image_url, 
                        a.art_id, aw.source as art_source,
                        (SELECT url FROM external_links l WHERE l.entity_id=a.mbid AND l.type='spotify' LIMIT 1) as spotify_link_existing,
-                       COALESCE(SUM(CASE WHEN el.type != 'musicbrainz' THEN 1 ELSE 0 END), 0) as link_count
+                       COALESCE(SUM(CASE WHEN el.type != 'musicbrainz' THEN 1 ELSE 0 END), 0) as link_count,
+                       (SELECT COUNT(*) FROM tracks_top tt WHERE tt.artist_mbid=a.mbid AND tt.type='top') as top_track_count,
+                       (SELECT COUNT(*) FROM tracks_top ts WHERE ts.artist_mbid=a.mbid AND ts.type='single') as single_count,
+                       (SELECT COUNT(*) FROM similar_artists sa WHERE sa.artist_mbid=a.mbid) as similar_count
                 FROM artists a
                 LEFT JOIN artwork aw ON a.art_id = aw.id
                 LEFT JOIN external_links el 
@@ -731,10 +734,11 @@ class Scanner:
             elif artist_filter:
                 clauses.append("name LIKE ?")
                 params.append(f"%{artist_filter}%")
-            elif missing_only and not refresh_top_tracks:
-                clauses.append(
-                    "(name IS NULL OR name = '' OR sort_name IS NULL OR sort_name = '' OR bio IS NULL OR bio = '' OR image_url IS NULL OR image_url = '')"
-                )
+            # elif missing_only and not refresh_top_tracks:
+            #     # Optimized filtering is risky if we are checking for specific gaps (like links)
+            #     # that aren't covered by this clause. Relied on Python filter instead.
+            #     pass
+            
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
             query += " GROUP BY a.mbid"
@@ -743,41 +747,53 @@ class Scanner:
                 rows = await cursor.fetchall()
 
             # Helper for Gap Checking
-            def has_selected_gaps(row):
-                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count = row
-                checks = []
-                if fetch_metadata:
-                    checks.append(not name or not str(name).strip() or not sort_name or not str(sort_name).strip())
-                if fetch_bio:
-                    checks.append(not bio or not str(bio).strip())
+            def has_selected_gaps(row, fetch_top, fetch_singles):
+                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
+                
+                # Check Explicit Missing Items
+                if fetch_metadata and (not name or not str(name).strip() or not sort_name or not str(sort_name).strip()): return True
+                if fetch_bio and (not bio or not str(bio).strip()): return True
+                
                 if fetch_artwork:
-                     if not art_id or not image_url: checks.append(True)
-                     elif art_source_existing == 'spotify': checks.append(True)
-                if fetch_links:
-                    checks.append((link_count or 0) == 0)
-                return any(checks)
+                     if not art_id_existing or not image_url: return True
+                     elif art_source_existing == 'spotify': return True # Always replace spotify (low quality usually)
+                
+                if fetch_links and (link_count or 0) == 0: return True
+                
+                if fetch_top and (top_track_count or 0) == 0: return True
+                if fetch_singles and (single_count or 0) == 0: return True
+                
+                if fetch_similar_artists and (similar_count or 0) == 0: return True
+
+                return False
 
             # Filter if generic missing_only
-            if missing_only and not refresh_top_tracks and not refresh_singles:
-                rows = [r for r in rows if has_selected_gaps(r)]
+            # Logic: If missing_only is set, we ONLY want rows where `has_selected_gaps` returns True
+            # taking into account ALL requested flags.
             
             # --- PREPARE TASKS ---
             tasks_to_spawn = []
             
             for row in rows:
-                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count = row
+                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
                 if not mbid: continue
 
                 # Logic Check
-                if missing_only and not refresh_top_tracks and not refresh_singles and not has_selected_gaps(row):
+                if missing_only and not has_selected_gaps(row, refresh_top_tracks, refresh_singles):
                     continue
 
                 eff_fetch_metadata = fetch_metadata
                 eff_fetch_bio = fetch_bio
                 eff_fetch_artwork = fetch_artwork
                 eff_fetch_links = fetch_links
+                
+                # Dynamic Flags based on Gap Check (Don't re-fetch what we have)
                 eff_refresh_top_tracks = refresh_top_tracks
                 eff_refresh_singles = refresh_singles
+                
+                if missing_only:
+                     if top_track_count > 0: eff_refresh_top_tracks = False
+                     if single_count > 0: eff_refresh_singles = False
                 eff_fetch_spotify_artwork = fetch_spotify_artwork
                 eff_fetch_similar_artists = fetch_similar_artists
 
@@ -933,7 +949,7 @@ class Scanner:
 
     async def _produce_metadata_update(self, semaphore, row, flags, local_release_group_ids, known_wikipedia_url):
          eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists = flags
-         mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count = row
+         mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
          
          if self._stop_event.is_set(): return None
 
@@ -985,7 +1001,7 @@ class Scanner:
             art_download = res["art_download"]
             bg_download = res["bg_download"]
             
-            mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count = row
+            mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
             eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists = flags
 
             # 1. Upsert Artwork

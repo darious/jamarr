@@ -20,9 +20,9 @@ class ScanRequest(BaseModel):
     links_only: bool = False  # deprecated; use fetch_links
     refresh_top_tracks: bool = False
     refresh_singles: bool = False
-    fetch_metadata: bool = True
-    fetch_bio: bool = True
-    fetch_artwork: bool = True
+    fetch_metadata: bool = False
+    fetch_bio: bool = False
+    fetch_artwork: bool = False
     fetch_spotify_artwork: bool = False
     fetch_links: bool = False
     fetch_similar_artists: bool = False
