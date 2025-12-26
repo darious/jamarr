@@ -79,14 +79,12 @@ async def list_media_quality_items(
                  where_clauses.append(f"{tbl}.art_id NOT IN (SELECT id FROM artwork WHERE source LIKE '%fanart%' OR source LIKE '%spotify%')")
 
         elif filter_type == "link_type":
-             entity_type = 'album' if category == 'album' else 'artist'
              if filter_value:
-                 where_clauses.append(f"{tbl}.mbid IN (SELECT entity_id FROM external_links WHERE type='{filter_value}' AND entity_type='{entity_type}')")
+                 where_clauses.append(f"{tbl}.mbid IN (SELECT entity_id FROM external_links WHERE type='{filter_value}')")
 
         elif filter_type == "missing_link_type":
-             entity_type = 'album' if category == 'album' else 'artist'
              if filter_value:
-                 where_clauses.append(f"{tbl}.mbid NOT IN (SELECT entity_id FROM external_links WHERE type='{filter_value}' AND entity_type='{entity_type}')")
+                 where_clauses.append(f"{tbl}.mbid NOT IN (SELECT entity_id FROM external_links WHERE type='{filter_value}')")
 
         # Construct final SQL
         if where_clauses:

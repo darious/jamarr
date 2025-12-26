@@ -1121,7 +1121,8 @@ class Scanner:
             # Original logic:
             # await db.execute("DELETE FROM artist_albums WHERE artist_mbid=?", (mbid,))
             if eff_fetch_metadata: # Only if we fetched albums
-                await db.execute("DELETE FROM artist_albums WHERE artist_mbid=?", (mbid,))
+                # await db.execute("DELETE FROM artist_albums WHERE artist_mbid=?", (mbid,))
+                pass
                 
                 for release in all_releases:
                     r_mbid, r_title, r_date = release["mbid"], release["title"], release["date"]
