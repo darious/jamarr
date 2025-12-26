@@ -23,20 +23,20 @@ For database details, see [Database Schema](database_schema.md).
 ## Setup
 
 ### Prerequisites
-- Python 3.9+
+- Python 3.12+
+- `uv` (fast Python package/dependency manager)
 - `ffmpeg` (for `ffprobe`) - *Required for scanning and analysis*
 
 ### Installation
 
-1.  **Create a virtual environment:**
+1.  **Install dependencies with uv (creates .venv):**
     ```bash
-    python3 -m venv venv
-    source venv/bin/activate
+    uv sync
     ```
 
-2.  **Install dependencies:**
+2.  **Run the API locally:**
     ```bash
-    pip install -r requirements.txt
+    uv run uvicorn app.main:app --host 0.0.0.0 --port 8111
     ```
 
 ## Deployment (Docker)
@@ -65,13 +65,13 @@ The recommended way to run Jamarr is via Docker Compose.
 
 ### Prerequisites
 - Python 3.12+
+- `uv`
 - Node.js 20+
 - `ffmpeg` (optional, for analysis)
 
 ### Backend
-1.  Create venv: `python3 -m venv venv && source venv/bin/activate`
-2.  Install: `pip install -r requirements.txt`
-3.  Run: `uvicorn app.main:app --reload --host 0.0.0.0 --port 8111`
+1.  Install deps: `uv sync`
+2.  Run (auto-uses the uv-managed `.venv`): `uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8111`
 
 ### Frontend
 1.  Apps lives in `web/`.
@@ -85,7 +85,7 @@ Jamarr includes a powerful CLI to manage the library and metadata.
 
 **Basic Usage:**
 ```bash
-python -m app.scanner.cli <command> [options]
+uv run python -m app.scanner.cli <command> [options]
 ```
 
 ## Workflow Overview
@@ -113,10 +113,10 @@ This separation ensures fast initial scans while allowing rich metadata to be fe
     **Examples:**
     ```bash
     # Standard scan
-    python -m app.scanner.cli scan -v
+    uv run python -m app.scanner.cli scan -v
     
     # Force rescan specific folder
-    python -m app.scanner.cli scan --path "/music/New Added" --force
+    uv run python -m app.scanner.cli scan --path "/music/New Added" --force
     ```
 
 2.  **`metadata`**: Fetches artist/album metadata from MusicBrainz & Spotify.
@@ -135,13 +135,13 @@ This separation ensures fast initial scans while allowing rich metadata to be fe
     **Examples:**
     ```bash
     # Update all metadata (recommended after first scan)
-    python -m app.scanner.cli metadata -v
+    uv run python -m app.scanner.cli metadata -v
     
     # Update specific artist by name
-    python -m app.scanner.cli metadata --artist "Bear's Den"
+    uv run python -m app.scanner.cli metadata --artist "Bear's Den"
     
     # Update specific artist by MusicBrainz ID (useful for blank names)
-    python -m app.scanner.cli metadata --mbid ef5aab86-887d-4fc2-a883-431ef017175a
+    uv run python -m app.scanner.cli metadata --mbid ef5aab86-887d-4fc2-a883-431ef017175a
     
     # Find artists with blank names
     sqlite3 cache/library.sqlite "select mbid, name from artists where name is null or name = ''"
@@ -155,7 +155,7 @@ This separation ensures fast initial scans while allowing rich metadata to be fe
 
     **Example:**
     ```bash
-    python -m app.scanner.cli prune
+    uv run python -m app.scanner.cli prune
     ```
 
 4.  **`full`**: Runs `scan` followed immediately by `metadata` and then `prune`.
@@ -163,20 +163,20 @@ This separation ensures fast initial scans while allowing rich metadata to be fe
     
     **Example:**
     ```bash
-    python -m app.scanner.cli full
+    uv run python -m app.scanner.cli full
     ```
 
 ## Typical Workflow
 
 ```bash
 # 1. Initial scan - populates tracks, albums, and single-artist names from tags
-python -m app.scanner.cli scan
+uv run python -m app.scanner.cli scan
 
 # 2. Enrich with metadata - fills in missing names, sort names, bios, artwork
-python -m app.scanner.cli metadata
+uv run python -m app.scanner.cli metadata
 
 # 3. (Optional) Clean up orphaned data
-python -m app.scanner.cli prune
+uv run python -m app.scanner.cli prune
 ```
 
 ## Database Schema
