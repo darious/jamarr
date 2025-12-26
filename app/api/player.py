@@ -20,6 +20,8 @@ upnp = UPnPManager.get_instance()
 # Global map to track Playback Monitor Tasks (UDN -> Task)
 playback_monitors: Dict[str, asyncio.Task] = {}
 monitor_start_times: Dict[str, float] = {}  # Track when monitors were last started
+# Track when we last started a new track to prevent false "track finished" detection during transitions
+last_track_start_time: Dict[str, float] = {}
 
 async def play_next_track_internal(udn: str):
     """Internal helper to advance queue and play next track."""
@@ -58,6 +60,8 @@ async def play_next_track_internal(udn: str):
                  track['mime'] = mime
 
             await upnp.play_track(track['id'], track['path'], track)
+            # Record track start time to prevent false "track finished" detection
+            last_track_start_time[udn] = time.time()
             
             # Update DB
             state['current_index'] = next_index
@@ -136,6 +140,11 @@ async def monitor_upnp_playback(udn: str):
                  
                  if was_playing:
                      if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
+                         # Check for race condition: STOPPED detected too soon after play
+                         time_since_start = time.time() - last_track_start_time.get(udn, 0)
+                         if time_since_start < 5.0:
+                             logger.info(f"[Player] Ignoring STOPPED state during transition (started {time_since_start:.1f}s ago)")
+                             continue
                          logger.info(f"[Player] Track finished detection: State={transport_state}, Expected=Playing")
                          # Trigger Next Track
                          # We must run this OUTSIDE the current DB transaction if helper uses its own?
