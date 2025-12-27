@@ -14,12 +14,14 @@ The backend is the brain of the operation, responsible for:
 -   **Tidal Integration**: Maps local artists/albums to Tidal URLs for external listening.
 -   **API**: Exposes REST endpoints for the frontend.
 
-### 2. Database (SQLite)
-A local SQLite database (`cache/library.sqlite`) serves as the single source of truth for:
+### 2. Database (PostgreSQL)
+A PostgreSQL database serves as the single source of truth for:
 -   **Library**: Tracks, Artists, Albums, and Artwork.
 -   **State**: Current queue, active renderer, and playback position per device.
 -   **History**: Log of played tracks.
--   **Search Index**: FTS5 virtual tables for instant full-text search.
+-   **Search Index**: Full-text search capabilities.
+
+The database runs in a Docker container and is accessible via CloudBeaver for administration.
 
 ### 3. Frontend (SvelteKit)
 The frontend provides a polished, app-like user experience:
@@ -71,8 +73,14 @@ The frontend provides a polished, app-like user experience:
 │   │   ├── routes/       # Pages (Home, Artist, Queue, etc.)
 │   │   ├── lib/          # Components, Stores, API helpers
 │   └── static/           # Static assets
-├── cache/                # Data Directory
-│   ├── library.sqlite    # SQLite DB
-│   └── art/              # Cached Images
-└── docker-compose.yml    # Deployment Config
+├── cache/                # Data Directory (PostgreSQL data, cached images)
+├── docs/                 # Documentation
+│   ├── DEV_MODE.md       # Development setup guide
+│   ├── database_schema.md # Database schema reference
+│   └── outline.md        # System architecture
+├── docker-compose.yml    # Production Docker Compose
+├── docker-compose.dev.yml # Development overrides
+├── Dockerfile            # Production container build
+├── dev.sh                # Development mode startup script
+└── config.yaml           # Application configuration
 ```

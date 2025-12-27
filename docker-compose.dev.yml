@@ -7,6 +7,7 @@ services:
       - ./config.yaml:/app/config.yaml
       - /mnt/config/q-dev/jamarr:/app/cache
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8111 --reload --reload-dir /app/app
+    # Don't need to rebuild for backend changes - volume mount + reload handles it
 
   jamarr_db:
     volumes:
@@ -15,3 +16,21 @@ services:
   cloudbeaver:
     volumes:
       - /mnt/config/q-dev/jamarr/cloudbeaver:/opt/cloudbeaver/workspace
+
+  # Frontend dev server - runs separately with HMR
+  jamarr_web:
+    image: node:20-slim
+    container_name: jamarr_web
+    network_mode: "host"
+    working_dir: /app/web
+    volumes:
+      - ./web:/app/web
+      # Use named volume for node_modules to avoid conflicts with host
+      - jamarr_web_node_modules:/app/web/node_modules
+    entrypoint: /bin/sh -c "npm install && npm run dev:host"
+    environment:
+      - VITE_API_URL=http://127.0.0.1:8111
+    restart: unless-stopped
+
+volumes:
+  jamarr_web_node_modules:
