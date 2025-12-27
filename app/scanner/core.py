@@ -59,6 +59,133 @@ class Scanner:
         
         file_count = 0 # Will be updated after DB load
         self.stats["total_estimate"] = 0
+
+        # Pre-scan Cleanup (Force Rescan only)
+        if force_rescan:
+            try:
+                music_root = get_music_path()
+                rel_root = os.path.relpath(root_path, music_root)
+                
+                if rel_root == ".":
+                    limit_clause = "1=1"
+                    params = ()
+                else:
+                    limit_clause = "path LIKE ? OR path = ?"
+                    params = (f"{rel_root}/%", rel_root)
+                
+                async for db in get_db():
+                    # Comprehensive cleanup for Force Rescan
+                    # Delete tracks, albums, and ALL related data for the target path
+                    
+                    start_t = time.time()
+                    
+                    # Step 1: Identify tracks and albums in scope
+                    cursor = await db.execute(f"SELECT id FROM tracks WHERE {limit_clause}", params)
+                    t_rows = await cursor.fetchall()
+                    track_ids = [r[0] for r in t_rows]
+                    
+                    cursor = await db.execute(f"SELECT DISTINCT mb_release_group_id FROM tracks WHERE {limit_clause}", params)
+                    a_rows = await cursor.fetchall()
+                    album_mbids = [r[0] for r in a_rows if r[0]]
+                    
+                    # Step 2: Identify artists associated with these tracks/albums
+                    # (We'll clean up their metadata links)
+                    artist_mbids_to_clean = set()
+                    if track_ids:
+                        t_placeholders = ",".join("?" * len(track_ids))
+                        cursor = await db.execute(f"SELECT DISTINCT mbid FROM track_artists WHERE track_id IN ({t_placeholders})", track_ids)
+                        artist_rows = await cursor.fetchall()
+                        artist_mbids_to_clean = {r[0] for r in artist_rows if r[0]}
+
+                    if not track_ids:
+                        logger.info("Force Rescan Cleanup: No existing tracks found in this path.")
+                        continue
+
+                    # Step 3: Delete all related data
+                    counts = {}
+                    
+                    # A. Track-level deletions
+                    t_placeholders = ",".join("?" * len(track_ids))
+                    
+                    # Delete track-artist links
+                    cursor = await db.execute(f"DELETE FROM track_artists WHERE track_id IN ({t_placeholders})", track_ids)
+                    counts['track_artists'] = cursor.rowcount
+                    
+                    # Delete image mappings for tracks
+                    cursor = await db.execute(f"DELETE FROM image_mapping WHERE entity_type='track' AND entity_id IN ({t_placeholders})", [str(tid) for tid in track_ids])
+                    counts['track_images'] = cursor.rowcount
+                    
+                    # Delete tracks themselves
+                    await db.execute(f"DELETE FROM tracks WHERE id IN ({t_placeholders})", track_ids)
+                    counts['tracks'] = len(track_ids)
+                    
+                    # B. Album-level deletions
+                    if album_mbids:
+                        a_placeholders = ",".join("?" * len(album_mbids))
+                        
+                        # Delete artist-album links
+                        cursor = await db.execute(f"DELETE FROM artist_albums WHERE album_mbid IN ({a_placeholders})", album_mbids)
+                        counts['artist_albums'] = cursor.rowcount
+                        
+                        # Delete album external links
+                        cursor = await db.execute(f"DELETE FROM external_links WHERE entity_type='album' AND entity_id IN ({a_placeholders})", album_mbids)
+                        counts['album_links'] = cursor.rowcount
+                        
+                        # Delete album image mappings
+                        cursor = await db.execute(f"DELETE FROM image_mapping WHERE entity_type='album' AND entity_id IN ({a_placeholders})", album_mbids)
+                        counts['album_images'] = cursor.rowcount
+                        
+                        # Delete albums
+                        cursor = await db.execute(f"DELETE FROM albums WHERE mbid IN ({a_placeholders})", album_mbids)
+                        counts['albums'] = cursor.rowcount
+                        
+                        # Delete missing_albums entries (they'll be re-discovered if still missing)
+                        cursor = await db.execute(f"DELETE FROM missing_albums WHERE release_group_mbid IN ({a_placeholders})", album_mbids)
+                        counts['missing_albums'] = cursor.rowcount
+                    
+                    # C. Artist metadata cleanup (for artists in this scope)
+                    # Note: We DON'T delete the artists themselves, as they might have tracks elsewhere
+                    # But we DO clean up their metadata links that might be stale
+                    if artist_mbids_to_clean:
+                        am_placeholders = ",".join("?" * len(artist_mbids_to_clean))
+                        artist_list = list(artist_mbids_to_clean)
+                        
+                        # Delete artist external links
+                        cursor = await db.execute(f"DELETE FROM external_links WHERE entity_type='artist' AND entity_id IN ({am_placeholders})", artist_list)
+                        counts['artist_links'] = cursor.rowcount
+                        
+                        # Delete artist image mappings
+                        cursor = await db.execute(f"DELETE FROM image_mapping WHERE entity_type='artist' AND entity_id IN ({am_placeholders})", artist_list)
+                        counts['artist_images'] = cursor.rowcount
+                        
+                        # Delete artist genres
+                        cursor = await db.execute(f"DELETE FROM artist_genres WHERE artist_mbid IN ({am_placeholders})", artist_list)
+                        counts['artist_genres'] = cursor.rowcount
+                        
+                        # Delete top tracks/singles
+                        cursor = await db.execute(f"DELETE FROM tracks_top WHERE artist_mbid IN ({am_placeholders})", artist_list)
+                        counts['tracks_top'] = cursor.rowcount
+                        
+                        # Delete similar artists
+                        cursor = await db.execute(f"DELETE FROM similar_artists WHERE artist_mbid IN ({am_placeholders})", artist_list)
+                        counts['similar_artists'] = cursor.rowcount
+
+                    await db.commit()
+                    
+                    # Build summary log
+                    summary_parts = []
+                    if counts.get('tracks'): summary_parts.append(f"{counts['tracks']} tracks")
+                    if counts.get('albums'): summary_parts.append(f"{counts['albums']} albums")
+                    if counts.get('artist_albums'): summary_parts.append(f"{counts['artist_albums']} artist-album links")
+                    if counts.get('artist_links'): summary_parts.append(f"{counts['artist_links']} artist external links")
+                    if counts.get('album_links'): summary_parts.append(f"{counts['album_links']} album external links")
+                    if counts.get('tracks_top'): summary_parts.append(f"{counts['tracks_top']} top tracks/singles")
+                    if counts.get('artist_genres'): summary_parts.append(f"{counts['artist_genres']} genre tags")
+                    
+                    summary = ", ".join(summary_parts) if summary_parts else "no data"
+                    logger.info(f"Force Rescan Cleanup: Purged {summary} for '{rel_root}' ({time.time() - start_t:.2f}s)")
+            except Exception as e:
+                logger.warning(f"Cleanup failed: {e}")
         
         # Concurrency for directory scanning
         # self._recursion_sem = asyncio.Semaphore(20) # Removed in favor of Queue
@@ -137,6 +264,8 @@ class Scanner:
             # Clear caches
             self._db_files_cache = {}
             self._processed_artists_session = set()
+
+            logger.info(f"Scanner finished: {self.stats['scanned']} scanned, {self.stats['added']} added, {self.stats['updated']} updated, {self.stats.get('deleted_relations', 0)} relations cleared.")
 
             return artist_mbids
 
@@ -379,48 +508,19 @@ class Scanner:
             cleaned = raw.replace("/", ";").replace("&", ";")
             return [x.strip() for x in cleaned.split(";") if x.strip()]
 
+        aa_ids = []
+        if tags.get("mb_album_artist_id"):
+             aa_ids = extract_ids(tags["mb_album_artist_id"])
+
         ids = []
         if tags.get("mb_artist_id"):
             ids = extract_ids(tags["mb_artist_id"])
 
-        # Enrichment (Credits) if needed
-        mb_track_id = tags.get("mb_track_id") or tags.get("mb_release_track_id")
-        artist_tag = tags.get("artist") or ""
-        needs_enrichment = False
-        
-        if mb_track_id and (len(ids) <= 1):
-            ids_check = ids if ids else []
-            if "feat" in artist_tag.lower() or "&" in artist_tag or "," in artist_tag:
-                 needs_enrichment = True
-
-        if needs_enrichment:
-             try:
-                 credits = await fetch_track_credits(tags.get("mb_track_id"), tags.get("mb_release_track_id"))
-                 if credits:
-                     ids = [c[0] for c in credits]
-                     for mbid, name in credits:
-                         # Upsert Artist from credits name (Cached Check)
-                         if (mbid, name) not in self._processed_artists_session:
-                             await db.execute("""
-                                INSERT INTO artists (mbid, name, last_updated) VALUES (?, ?, ?)
-                                ON CONFLICT(mbid) DO UPDATE SET name=COALESCE(name, excluded.name)
-                             """, (mbid, name, time.time()))
-                             
-                             # Create MusicBrainz external link
-                             from app.config import get_musicbrainz_root_url
-                             mb_url = f"{get_musicbrainz_root_url()}/artist/{mbid}"
-                             await db.execute("""
-                                INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url)
-                                VALUES (?, ?, ?, ?)
-                             """, ('artist', mbid, 'musicbrainz', mb_url))
-                             
-                             self._processed_artists_session.add((mbid, name))
-                         
-                         artist_mbids.add((mbid, name))
-             except: pass
+        # Deduplicate IDs to prevent UNIQUE constraint violations
+        ids = list(dict.fromkeys(ids))
 
         for mbid in ids:
-            await db.execute("INSERT INTO track_artists (track_id, mbid) VALUES (?, ?)", (track_id, mbid))
+            await db.execute("INSERT OR IGNORE INTO track_artists (track_id, mbid) VALUES (?, ?)", (track_id, mbid))
             
             # Upsert Artist (Track Artist)
             name = tags.get("artist") if len(ids) == 1 else None
@@ -442,6 +542,14 @@ class Scanner:
                 self._processed_artists_session.add((mbid, name))
 
             artist_mbids.add((mbid, name))
+            
+            # Logic: Link to Album as 'appears_on' if not album artist
+            if mb_rg_id and mbid not in aa_ids:
+                 await db.execute("""
+                    INSERT INTO artist_albums (artist_mbid, album_mbid, type)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(artist_mbid, album_mbid) DO NOTHING
+                 """, (mbid, mb_rg_id, 'appears_on'))
         
         # Album Artist & Album Junction
         if tags.get("mb_album_artist_id"):
