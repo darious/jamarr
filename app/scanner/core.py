@@ -182,8 +182,10 @@ class Scanner:
                     if counts.get('tracks_top'): summary_parts.append(f"{counts['tracks_top']} top tracks/singles")
                     if counts.get('artist_genres'): summary_parts.append(f"{counts['artist_genres']} genre tags")
                     
+                    
                     summary = ", ".join(summary_parts) if summary_parts else "no data"
                     logger.info(f"Force Rescan Cleanup: Purged {summary} for '{rel_root}' ({time.time() - start_t:.2f}s)")
+                    break  # Exit the async for loop to close the DB connection before scanning starts
             except Exception as e:
                 logger.warning(f"Cleanup failed: {e}")
         
@@ -309,6 +311,7 @@ class Scanner:
         num_workers = 20
 
         async def worker():
+            batch_counter = 0  # Per-worker batch counter
             while True:
                 try:
                     path = await queue.get()
@@ -335,11 +338,11 @@ class Scanner:
                                     
                                     await self._process_file(entry.path, db, artist_mbids, force_rescan, entry=entry)
                                     
-                                    # Batch Commit
-                                    self._batch_counter += 1
-                                    if self._batch_counter >= self._batch_size:
+                                    # Batch Commit (per-worker)
+                                    batch_counter += 1
+                                    if batch_counter >= self._batch_size:
                                         await db.commit()
-                                        self._batch_counter = 0
+                                        batch_counter = 0
 
                     except OSError as e:
                         logger.error(f"Error listing {path}: {e}")
