@@ -39,9 +39,20 @@ For database details, see [Database Schema](database_schema.md).
     uv run uvicorn app.main:app --host 0.0.0.0 --port 8111
     ```
 
+## Quick Start Helper Scripts
+
+We provide helper scripts to simplify development, production, and testing workflows.
+
+| Script | description |
+| :--- | :--- |
+| `./dev.sh` | Starts the stack in **Development Mode** (hot-reload enabled). |
+| `./prod.sh` | Builds and starts the stack in **Production Mode** (optimized build). |
+| `./test.sh` | Runs the API test suite inside the Docker container. |
+| `./server.sh` | (Internal) Entrypoint for the backend container. |
+
 ## Deployment (Docker)
 
-The recommended way to run Jamarr in production is via Docker Compose.
+The recommended way to run Jamarr in production is via `prod.sh` or Docker Compose.
 
 1. **Configure Volumes**:
    Edit `docker-compose.yml` to point to your music library and set your server IP:
@@ -56,8 +67,9 @@ The recommended way to run Jamarr in production is via Docker Compose.
 
 2. **Build and Run**:
    ```bash
-   docker compose build
-   docker compose up -d
+   ./prod.sh
+   # OR
+   docker compose build && docker compose up -d
    ```
 
 3. **Access**:
@@ -97,6 +109,20 @@ If you prefer to run services manually:
 2. Install: `npm install`
 3. Run: `npm run dev:host`
 
+
+### Running Tests
+
+To run the full API test suite inside the Docker container:
+
+```bash
+./test.sh
+```
+    
+Pass pytest arguments directly to the script:
+```bash
+./test.sh -v               # Verbose output
+./test.sh -k "test_search" # Run only specific tests
+```
 
 ### Running the Scanner (CLI)
 
