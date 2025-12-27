@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, Request, HTTPException, Header, Response
 import os
 import asyncio
-from app.db import get_db, DB_PATH
-import aiosqlite
+from app.db import get_db
+import asyncpg
 from app.upnp import UPnPManager
 import mimetypes
 import httpx
@@ -25,7 +25,7 @@ last_track_start_time: Dict[str, float] = {}
 
 async def play_next_track_internal(udn: str):
     """Internal helper to advance queue and play next track."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async for db in get_db():
         state = await get_renderer_state_db(db, udn)
         queue = state['queue']
         current_index = state['current_index']
@@ -114,7 +114,7 @@ async def monitor_upnp_playback(udn: str):
             # print(f"[Player] Monitor {udn}: {transport_state} @ {rel_time}s")
             
             # 2. Update DB
-            async with aiosqlite.connect(DB_PATH) as db:
+            async for db in get_db():
                  # Check what we *think* we are doing
                  state = await get_renderer_state_db(db, udn)
                  was_playing = state['is_playing']
@@ -165,18 +165,16 @@ async def monitor_upnp_playback(udn: str):
                         # await update_renderer_state_db(db, udn, state)
                         await db.execute("""
                             UPDATE renderer_state 
-                            SET position_seconds = ?, transport_state = ?, is_playing = ?, updated_at = CURRENT_TIMESTAMP
-                            WHERE renderer_udn = ?
-                        """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
-                        await db.commit()
+                            SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
+                            WHERE renderer_udn = $4
+                        """, state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn)
                  else:
                      # Even if we thought we weren't playing, keep position fresh for the UI
                      await db.execute("""
                          UPDATE renderer_state 
-                         SET position_seconds = ?, transport_state = ?, is_playing = ?, updated_at = CURRENT_TIMESTAMP
-                         WHERE renderer_udn = ?
-                     """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
-                     await db.commit()
+                         SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
+                         WHERE renderer_udn = $4
+                     """, state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn)
                  last_position = state['position_seconds']
                  # History logging for remote playback (based on renderer state queue)
                  if state['is_playing'] and state['current_index'] is not None and state['current_index'] >= 0:
@@ -292,21 +290,17 @@ def _track_path_exists(track: Dict[str, Any]) -> bool:
 
 # ... (skip to enrich function)
 
-async def _enrich_track_metadata(track: Dict[str, Any], db: aiosqlite.Connection) -> Dict[str, Any]:
+async def _enrich_track_metadata(track: Dict[str, Any], db: asyncpg.Connection) -> Dict[str, Any]:
     """Ensure track dict has path, mime, and artwork; fallback to DB lookup."""
     enriched = dict(track)
     # Always try to fetch missing critical fields
     if not enriched.get("path") or not enriched.get("mime") or not enriched.get("art_sha1"):
-        async with db.execute(
-            """
+        row = await db.fetchrow("""
             SELECT t.path, t.codec, t.artwork_id, a.sha1 as art_sha1 
             FROM track t
             LEFT JOIN artwork a ON t.artwork_id = a.id
-            WHERE t.id = ? LIMIT 1
-            """, 
-            (enriched.get("id"),)
-        ) as cursor:
-            row = await cursor.fetchone()
+            WHERE t.id = $1 LIMIT 1
+            """, enriched.get("id"))
             if row:
                 if not enriched.get("path"):
                     enriched["path"] = row[0]
@@ -332,9 +326,9 @@ async def _enrich_track_metadata(track: Dict[str, Any], db: aiosqlite.Connection
         
     return enriched
 
-async def get_active_renderer(db: aiosqlite.Connection, client_id: str) -> str:
+async def get_active_renderer(db: asyncpg.Connection, client_id: str) -> str:
     """Get active renderer UDN for client. Defaults to local:<client_id>."""
-    async with db.execute("SELECT active_renderer_udn FROM client_session WHERE client_id = ?", (client_id,)) as cursor:
+    async with db.execute("SELECT active_renderer_udn FROM client_session WHERE client_id = $1", client_id) as cursor:
         row = await cursor.fetchone()
         if row and row[0]:
             return row[0]
@@ -342,16 +336,16 @@ async def get_active_renderer(db: aiosqlite.Connection, client_id: str) -> str:
     # If no session found, implicitly create one for observability
     default_udn = f"local:{client_id}"
     await db.execute("""
-        INSERT OR IGNORE INTO client_session (client_id, active_renderer_udn, last_seen_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO client_session (client_id, active_renderer_udn, last_seen_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (client_id) DO NOTHING
     """, (client_id, default_udn))
-    await db.commit()
     
     return default_udn
 
-async def get_renderer_state_db(db: aiosqlite.Connection, udn: str) -> Dict[str, Any]:
+async def get_renderer_state_db(db: asyncpg.Connection, udn: str) -> Dict[str, Any]:
     """Get state from DB for a renderer. Returns default if not found."""
-    async with db.execute("SELECT queue, current_index, position_seconds, is_playing, transport_state, volume FROM renderer_state WHERE renderer_udn = ?", (udn,)) as cursor:
+    async with db.execute("SELECT queue, current_index, position_seconds, is_playing, transport_state, volume FROM renderer_state WHERE renderer_udn = $1", udn) as cursor:
         row = await cursor.fetchone()
         if row:
             try:
@@ -391,8 +385,7 @@ async def get_renderer_state_db(db: aiosqlite.Connection, udn: str) -> Dict[str,
                     
                     if updated:
                         new_queue_json = json.dumps(queue)
-                        await db.execute("UPDATE renderer_state SET queue = ? WHERE renderer_udn = ?", (new_queue_json, udn))
-                        await db.commit()
+                        await db.execute("UPDATE renderer_state SET queue = $1 WHERE renderer_udn = $2", new_queue_json, udn)
                 except Exception as e:
                     import logging
                     logging.getLogger(__name__).error(f"[Player] Failed to backfill art_sha1: {e}")
@@ -419,13 +412,13 @@ async def get_renderer_state_db(db: aiosqlite.Connection, udn: str) -> Dict[str,
         "volume": None
     }
 
-async def update_renderer_state_db(db: aiosqlite.Connection, udn: str, state: Dict[str, Any]):
+async def update_renderer_state_db(db: asyncpg.Connection, udn: str, state: Dict[str, Any]):
     """Upsert renderer state."""
     queue_json = json.dumps(state.get("queue", []))
     volume = state.get("volume")
     await db.execute("""
         INSERT INTO renderer_state (renderer_udn, queue, current_index, position_seconds, is_playing, transport_state, volume, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
         ON CONFLICT(renderer_udn) DO UPDATE SET
             queue = excluded.queue,
             current_index = excluded.current_index,
@@ -433,9 +426,8 @@ async def update_renderer_state_db(db: aiosqlite.Connection, udn: str, state: Di
             is_playing = excluded.is_playing,
             transport_state = excluded.transport_state,
             volume = excluded.volume,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = NOW()
     """, (udn, queue_json, state.get("current_index", -1), state.get("position_seconds", 0), 1 if state.get("is_playing") else 0, state.get("transport_state", "STOPPED"), volume))
-    await db.commit()
 
 def _reset_history_tracker(key: str):
     if key in _history_tracker:
@@ -468,7 +460,7 @@ def _should_log_history(key: str, track_id: int, position: float, duration: floa
 # Keyed by renderer UDN (for remote) or client_id (for local).
 _history_tracker = {}
 
-async def log_history(db: aiosqlite.Connection, track_id: int, client_ip: str, client_id: str = None, user_id: int = None):
+async def log_history(db: asyncpg.Connection, track_id: int, client_ip: str, client_id: str = None, user_id: int = None):
     if track_id and track_id > 0:
         try:
             # Guard against immediate duplicate inserts (e.g., dual reporters) within a short window.
@@ -476,14 +468,14 @@ async def log_history(db: aiosqlite.Connection, track_id: int, client_ip: str, c
                 """
                 SELECT id, client_ip, user_id, client_id, timestamp 
                 FROM playback_history 
-                WHERE track_id = ? 
-                  AND timestamp > datetime('now', '-5 seconds')
-                  AND (client_id = ? OR (? IS NULL AND client_id IS NULL))
-                  AND (user_id = ? OR (? IS NULL AND user_id IS NULL))
+                WHERE track_id = $1 
+                  AND timestamp > NOW() - INTERVAL '5 seconds'
+                  AND (client_id = $2 OR ($3::text IS NULL AND client_id IS NULL))
+                  AND (user_id = $4 OR ($5::integer IS NULL AND user_id IS NULL))
                 ORDER BY timestamp DESC
                 LIMIT 1
                 """,
-                (track_id, client_id, client_id, user_id, user_id)
+                track_id, client_id, client_id, user_id, user_id
             ) as cursor:
                 existing = await cursor.fetchone()
                 if existing:
@@ -491,19 +483,17 @@ async def log_history(db: aiosqlite.Connection, track_id: int, client_ip: str, c
                     if existing_ip == "127.0.0.1" and client_ip and client_ip != "127.0.0.1" and client_ip != "unknown":
                         logger.info(f"Refining history log {existing_id}: Updating IP to {client_ip}")
                         await db.execute(
-                            "UPDATE playback_history SET client_ip = ?, client_id = ?, user_id = COALESCE(user_id, ?) WHERE id = ?",
-                            (client_ip, client_id, user_id, existing_id)
+                            "UPDATE playback_history SET client_ip = $1, client_id = $2, user_id = COALESCE(user_id, $3) WHERE id = $4",
+                            client_ip, client_id, user_id, existing_id
                         )
-                        await db.commit()
                         return
                     logger.info(f"Skipping duplicate history log for track {track_id} (recent entry exists)")
                     return
 
             await db.execute(
-                "INSERT INTO playback_history (track_id, client_ip, client_id, user_id) VALUES (?, ?, ?, ?)",
+                "INSERT INTO playback_history (track_id, client_ip, client_id, user_id) VALUES ($1, $2, $3, $4)",
                 (track_id, client_ip, client_id, user_id)
             )
-            await db.commit()
         except Exception as e:
             logger.error(f"Failed to log history: {e}")
 
@@ -523,7 +513,7 @@ async def get_playback_history(response: Response, scope: str = "all", request: 
         filter_clause = ""
         params = ()
         if scope == "mine" and user_row:
-            filter_clause = "WHERE h.user_id = ?"
+            filter_clause = "WHERE h.user_id = $1"
             params = (user_row["id"],)
 
         query = f"""
@@ -587,7 +577,7 @@ async def get_playback_history_stats(
 
     async for db in get_db():
         user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
-        where_clauses = ["date(timestamp, 'unixepoch', 'localtime') >= date('now', 'localtime', ?)"]
+        where_clauses = ["DATE(timestamp) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
         params: List[Any] = [f"-{days - 1} days"]
         if scope == "mine" and user_row:
             where_clauses.append("h.user_id = ?")
@@ -596,7 +586,7 @@ async def get_playback_history_stats(
 
         # Plays per day
         daily_query = f"""
-            SELECT date(timestamp, 'unixepoch', 'localtime') as day, COUNT(*) as plays
+            SELECT DATE(timestamp) as day, COUNT(*) as plays
             FROM playback_history h
             WHERE {where_sql}
             GROUP BY day
@@ -925,16 +915,15 @@ async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
     async for db in get_db():
         await db.execute("""
             INSERT INTO client_session (client_id, active_renderer_udn, last_seen_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
+            VALUES ($1, $2, NOW())
             ON CONFLICT(client_id) DO UPDATE SET
                 active_renderer_udn = excluded.active_renderer_udn,
-                last_seen_at = CURRENT_TIMESTAMP
+                last_seen_at = NOW()
         """, (client_id, udn))
-        await db.commit()
     return {"active": udn}
 
 @router.post("/api/player/play")
-async def play_track(data: dict, request: Request, client_id: str = Depends(get_client_id), db: aiosqlite.Connection = Depends(get_db)):
+async def play_track(data: dict, request: Request, client_id: str = Depends(get_client_id), db: asyncpg.Connection = Depends(get_db)):
     track_id = data.get("track_id")
     if not track_id:
         raise HTTPException(status_code=400, detail="Missing track_id")
@@ -942,7 +931,7 @@ async def play_track(data: dict, request: Request, client_id: str = Depends(get_
     udn = await get_active_renderer(db, client_id)
 
     # Fetch track metadata
-    async with db.execute("SELECT id, title, artist, album, artwork_id, path, duration_seconds FROM track WHERE id = ?", (track_id,)) as cursor:
+    async with db.execute("SELECT id, title, artist, album, artwork_id, path, duration_seconds FROM track WHERE id = $1", track_id) as cursor:
         row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Track not found")

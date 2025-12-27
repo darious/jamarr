@@ -1,9 +1,9 @@
 import os
 import secrets
-import time
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
-import aiosqlite
+import asyncpg
 from argon2 import PasswordHasher, exceptions as argon2_exceptions
 from fastapi import Depends, HTTPException, Request
 
@@ -30,86 +30,88 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 async def get_user_by_username_or_email(
-    db: aiosqlite.Connection, username_or_email: str
-) -> Optional[aiosqlite.Row]:
+    db: asyncpg.Connection, username_or_email: str
+) -> Optional[asyncpg.Record]:
+    """Get user by username or email (case-insensitive via citext)."""
     query = """
         SELECT *
-        FROM user
-        WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)
+        FROM "user"
+        WHERE username = $1 OR email = $1
         LIMIT 1
     """
-    async with db.execute(query, (username_or_email, username_or_email)) as cursor:
-        return await cursor.fetchone()
+    return await db.fetchrow(query, username_or_email)
 
 
-async def get_user_by_id(db: aiosqlite.Connection, user_id: int) -> Optional[aiosqlite.Row]:
-    async with db.execute("SELECT * FROM user WHERE id = ?", (user_id,)) as cursor:
-        return await cursor.fetchone()
+async def get_user_by_id(db: asyncpg.Connection, user_id: int) -> Optional[asyncpg.Record]:
+    """Get user by ID."""
+    return await db.fetchrow('SELECT * FROM "user" WHERE id = $1', user_id)
 
 
-async def purge_expired_sessions(db: aiosqlite.Connection) -> None:
-    await db.execute("DELETE FROM session WHERE expires_at <= ?", (time.time(),))
+async def purge_expired_sessions(db: asyncpg.Connection) -> None:
+    """Delete expired sessions."""
+    await db.execute("DELETE FROM session WHERE expires_at <= NOW()")
 
 
 async def create_session(
-    db: aiosqlite.Connection, user_id: int, user_agent: Optional[str], ip: Optional[str]
+    db: asyncpg.Connection, user_id: int, user_agent: Optional[str], ip: Optional[str]
 ) -> str:
+    """Create a new session and return the token."""
     await purge_expired_sessions(db)
     token = secrets.token_urlsafe(32)
-    expires_at = time.time() + SESSION_TTL_SECONDS
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=SESSION_TTL_SECONDS)
+    
     await db.execute(
         """
         INSERT INTO session (user_id, token, expires_at, user_agent, ip)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5)
         """,
-        (user_id, token, expires_at, user_agent, ip),
+        user_id, token, expires_at, user_agent, ip,
     )
     return token
 
 
-async def destroy_session(db: aiosqlite.Connection, token: str) -> None:
-    await db.execute("DELETE FROM session WHERE token = ?", (token,))
-    await db.commit()
+async def destroy_session(db: asyncpg.Connection, token: str) -> None:
+    """Delete a session by token."""
+    await db.execute("DELETE FROM session WHERE token = $1", token)
 
 
 async def get_session_user(
-    db: aiosqlite.Connection, token: Optional[str]
-) -> Tuple[Optional[aiosqlite.Row], Optional[str]]:
+    db: asyncpg.Connection, token: Optional[str]
+) -> Tuple[Optional[asyncpg.Record], Optional[str]]:
+    """Get user from session token, with sliding expiration."""
     if not token:
         return None, None
 
-    async with db.execute(
+    row = await db.fetchrow(
         """
-        SELECT user.*, session.expires_at
-        FROM session
-        JOIN user ON user.id = session.user_id
-        WHERE session.token = ?
+        SELECT u.*, s.expires_at
+        FROM session s
+        JOIN "user" u ON u.id = s.user_id
+        WHERE s.token = $1
         LIMIT 1
         """,
-        (token,),
-    ) as cursor:
-        row = await cursor.fetchone()
+        token,
+    )
 
     if not row:
         return None, token
 
-    now_ts = time.time()
+    now = datetime.now(timezone.utc)
     expires_at = row["expires_at"]
-    if expires_at is not None and expires_at < now_ts:
+    if expires_at is not None and expires_at < now:
         await destroy_session(db, token)
-        await db.commit()
         return None, token
 
     # Sliding expiration to keep users logged in
-    new_expiration = now_ts + SESSION_TTL_SECONDS
-    await db.execute("UPDATE session SET expires_at = ? WHERE token = ?", (new_expiration, token))
-    await db.commit()
+    new_expiration = now + timedelta(seconds=SESSION_TTL_SECONDS)
+    await db.execute("UPDATE session SET expires_at = $1 WHERE token = $2", new_expiration, token)
     return row, token
 
 
 async def require_current_user(
-    request: Request, db: aiosqlite.Connection = Depends(get_db)
-) -> Tuple[aiosqlite.Row, str]:
+    request: Request, db: asyncpg.Connection = Depends(get_db)
+) -> Tuple[asyncpg.Record, str]:
+    """Dependency to require an authenticated user."""
     token = request.cookies.get(SESSION_COOKIE_NAME)
     user, token_value = await get_session_user(db, token)
     if not user:

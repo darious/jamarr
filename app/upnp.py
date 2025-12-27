@@ -15,7 +15,8 @@ from async_upnp_client.exceptions import UpnpError, UpnpConnectionError
 from async_upnp_client.utils import CaseInsensitiveDict
 
 from app.db import get_db
-import aiosqlite
+import asyncpg
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -252,18 +253,17 @@ class UPnPManager:
             else:
                 # Check if we have existing MIME types in the database
                 async for db in get_db():
-                    async with db.execute(
-                        "SELECT supported_mime_types FROM renderer WHERE udn = ?", (udn,)
-                    ) as cursor:
-                        row = await cursor.fetchone()
-                        if row and row[0]:
-                            # Preserve existing MIME types from database
-                            renderer_info["supported_mime_types"] = row[0]
-                            logger.debug(f"  Preserving existing MIME types from database")
-                        else:
-                            # No data available
-                            renderer_info["supported_mime_types"] = ""
-                            logger.debug(f"  No MIME type data available")
+                    row = await db.fetchrow(
+                        "SELECT supported_mime_types FROM renderer WHERE udn = $1", udn
+                    )
+                    if row and row["supported_mime_types"]:
+                        # Preserve existing MIME types from database
+                        renderer_info["supported_mime_types"] = row["supported_mime_types"]
+                        logger.debug(f"  Preserving existing MIME types from database")
+                    else:
+                        # No data available
+                        renderer_info["supported_mime_types"] = ""
+                        logger.debug(f"  No MIME type data available")
 
             
             # Store renderer info and DMR device
@@ -284,19 +284,18 @@ class UPnPManager:
     async def load_persisted_renderers(self):
         """Load previously discovered renderers from database and verify they're still alive."""
         async for db in get_db():
-            async with db.execute("SELECT * FROM renderer") as cursor:
-                rows = await cursor.fetchall()
-                for row in rows:
-                    r = dict(row)
-                    # Try to verify device is still reachable
-                    if await self.verify_device(r):
-                        self.renderers[r["udn"]] = r
-                        # Try to recreate DMR device
-                        if r.get("location"):
-                            try:
-                                await self._add_renderer(r["location"])
-                            except Exception as e:
-                                logger.debug(f"Could not recreate DMR for {r['udn']}: {e}")
+            rows = await db.fetch("SELECT * FROM renderer")
+            for row in rows:
+                r = dict(row)
+                # Try to verify device is still reachable
+                if await self.verify_device(r):
+                    self.renderers[r["udn"]] = r
+                    # Try to recreate DMR device
+                    if r.get("location"):
+                        try:
+                            await self._add_renderer(r["location"])
+                        except Exception as e:
+                            logger.debug(f"Could not recreate DMR for {r['udn']}: {e}")
     
     async def verify_device(self, r: Dict[str, Any]) -> bool:
         """Quick check if device is reachable."""
@@ -314,20 +313,35 @@ class UPnPManager:
         """Persist renderer to database."""
         async for db in get_db():
             await db.execute("""
-                INSERT OR REPLACE INTO renderer 
+                INSERT INTO renderer 
                 (udn, friendly_name, location_url, ip, control_url, rendering_control_url, 
                  device_type, manufacturer, model_name, model_number, serial_number, 
                  firmware_version, supports_events, supports_gapless, supported_mime_types, last_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """, (
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+                ON CONFLICT (udn) DO UPDATE SET
+                    friendly_name = EXCLUDED.friendly_name,
+                    location_url = EXCLUDED.location_url,
+                    ip = EXCLUDED.ip,
+                    control_url = EXCLUDED.control_url,
+                    rendering_control_url = EXCLUDED.rendering_control_url,
+                    device_type = EXCLUDED.device_type,
+                    manufacturer = EXCLUDED.manufacturer,
+                    model_name = EXCLUDED.model_name,
+                    model_number = EXCLUDED.model_number,
+                    serial_number = EXCLUDED.serial_number,
+                    firmware_version = EXCLUDED.firmware_version,
+                    supports_events = EXCLUDED.supports_events,
+                    supports_gapless = EXCLUDED.supports_gapless,
+                    supported_mime_types = EXCLUDED.supported_mime_types,
+                    last_seen_at = NOW()
+            """,
                 r["udn"], r.get("friendly_name"), r.get("location"), r.get("ip"),
                 r.get("control_url"), r.get("rendering_control_url"),
                 r.get("device_type"), r.get("manufacturer"), r.get("model_name"),
                 r.get("model_number"), r.get("serial_number"), r.get("firmware_version"),
                 r.get("supports_events", False), r.get("supports_gapless", False),
                 r.get("supported_mime_types", "")
-            ))
-            await db.commit()
+            )
     
     async def add_device_by_ip(self, ip: str):
         """
