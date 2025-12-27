@@ -324,6 +324,26 @@
                             {/if}
                         </div>
                     </details>
+
+                    <!-- Supported Formats (collapsible) -->
+                    {#if r.supported_mime_types}
+                        <details class="text-sm text-white/60 mt-2">
+                            <summary
+                                class="cursor-pointer text-xs uppercase tracking-wider opacity-50 hover:opacity-100"
+                                >Supported Formats</summary
+                            >
+                            <div class="mt-2 flex flex-wrap gap-1">
+                                {#each r.supported_mime_types.split(",") as mime}
+                                    {#if mime.startsWith("audio/")}
+                                        <span
+                                            class="inline-block rounded bg-white/5 px-2 py-0.5 font-mono text-xs text-white/70"
+                                            >{mime}</span
+                                        >
+                                    {/if}
+                                {/each}
+                            </div>
+                        </details>
+                    {/if}
                 {:else}
                     <p class="italic text-sm text-white/60">
                         This is your current browser session.

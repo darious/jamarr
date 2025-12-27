@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS renderer (
     event_subscription_sid TEXT,
     supports_events BOOLEAN DEFAULT 0,
     supports_gapless BOOLEAN DEFAULT 0,
+    supported_mime_types TEXT,
     last_seen_at INTEGER
 );
 
