@@ -103,7 +103,7 @@ async def get_artists(
         params.append(mbid)
         param_num += 1
         
-    query += " GROUP BY a.mbid ORDER BY a.sort_name"
+    query += " GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio, a.sort_name, ac.primary_album_count, ac.appears_on_album_count ORDER BY a.sort_name"
     
     # Apply limit/offset only if not filtering by specific artist (which usually returns 1)
     if not name and not mbid:
@@ -276,20 +276,20 @@ async def get_albums(artist: str = None, album_mbid: str = None, db: asyncpg.Con
     query = """
         SELECT 
             t.album, 
-            t.artwork_id, 
+            MAX(t.artwork_id) as artwork_id,
             MAX(a.sha1) as art_sha1,
-            COALESCE(t.album_artist, t.artist) as artist_name,
+            COALESCE(MAX(t.album_artist), MAX(t.artist)) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
             MIN(t.date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
             MAX(t.release_mbid) as release_mbid,
-            COALESCE(al_rg.mbid, al_title.mbid) as album_mbid,
+            MAX(COALESCE(al_rg.mbid, al_title.mbid)) as album_mbid,
             MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as mb_link,
-            CASE 
-                WHEN $1 IS NOT NULL AND (t.album_artist_mbid LIKE $1 || '%' OR t.album_artist_mbid = $1) THEN 'main'
+            MAX(CASE 
+                WHEN $1::text IS NOT NULL AND (t.album_artist_mbid LIKE $1 || '%' OR t.album_artist_mbid = $1) THEN 'main'
                 ELSE 'appears_on' 
-            END as type
+            END) as type
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
         LEFT JOIN album al_rg ON al_rg.mbid = t.release_group_mbid

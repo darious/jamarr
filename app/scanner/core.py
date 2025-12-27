@@ -3,6 +3,7 @@ import asyncio
 import logging
 import json
 import time
+from datetime import datetime, timezone
 from app.db import get_db
 from app.scanner.tags import extract_tags
 from app.scanner.artwork import extract_and_save_artwork, download_and_save_artwork, cleanup_orphaned_artwork, upsert_artwork_record, upsert_image_mapping
@@ -68,10 +69,10 @@ class Scanner:
                 
                 if rel_root == ".":
                     limit_clause = "1=1"
-                    params = ()
+                    params = []
                 else:
-                    limit_clause = "path LIKE ? OR path = ?"
-                    params = (f"{rel_root}/%", rel_root)
+                    limit_clause = "path LIKE $1 OR path = $2"
+                    params = [f"{rel_root}/%", rel_root]
                 
                 async for db in get_db():
                     # Comprehensive cleanup for Force Rescan
@@ -80,12 +81,10 @@ class Scanner:
                     start_t = time.time()
                     
                     # Step 1: Identify tracks and albums in scope
-                    cursor = await db.execute(f"SELECT id FROM track WHERE {limit_clause}", *params)
-                    t_rows = await cursor.fetchall()
+                    t_rows = await db.fetch(f"SELECT id FROM track WHERE {limit_clause}", *params)
                     track_ids = [r[0] for r in t_rows]
                     
-                    cursor = await db.execute(f"SELECT DISTINCT release_group_mbid FROM track WHERE {limit_clause}", *params)
-                    a_rows = await cursor.fetchall()
+                    a_rows = await db.fetch(f"SELECT DISTINCT release_group_mbid FROM track WHERE {limit_clause}", *params)
                     album_mbids = [r[0] for r in a_rows if r[0]]
                     
                     # Step 2: Identify artists associated with these tracks/albums
@@ -93,8 +92,7 @@ class Scanner:
                     artist_mbids_to_clean = set()
                     if track_ids:
                         t_placeholders = "$1::bigint[]"
-                        cursor = await db.execute("SELECT DISTINCT artist_mbid FROM track_artist WHERE track_id = ANY($1::bigint[])", track_ids)
-                        artist_rows = await cursor.fetchall()
+                        artist_rows = await db.fetch("SELECT DISTINCT artist_mbid FROM track_artist WHERE track_id = ANY($1::bigint[])", track_ids)
                         artist_mbids_to_clean = {r[0] for r in artist_rows if r[0]}
 
                     if not track_ids:
@@ -136,30 +134,31 @@ class Scanner:
                         counts['album_images'] = cursor.rowcount
                         
                         # Delete albums
-                        cursor = await db.execute("DELETE FROM album WHERE mbid = ANY($1::text[])", album_mbids)
-                        counts['albums'] = cursor.rowcount
+                        res = await db.execute("DELETE FROM album WHERE mbid = ANY($1::text[])", album_mbids)
+                        counts['albums'] = int(res.split()[-1])
                         
                         # Delete missing_albums entries (they'll be re-discovered if still missing)
-                        cursor = await db.execute("DELETE FROM missing_album WHERE release_group_mbid = ANY($1::text[])", album_mbids)
-                        counts['missing_albums'] = cursor.rowcount
+                        res = await db.execute("DELETE FROM missing_album WHERE release_group_mbid = ANY($1::text[])", album_mbids)
+                        counts['missing_albums'] = int(res.split()[-1])
                     
                     # C. Artist metadata cleanup (for artists in this scope)
                     # Note: We DON'T delete the artists themselves, as they might have tracks elsewhere
                     # But we DO clean up their metadata links that might be stale
                     if artist_mbids_to_clean:
-                        am_placeholders = ",".join("?" * len(artist_mbids_to_clean))
+                        
                         artist_list = list(artist_mbids_to_clean)
                         
                         # Delete artist external links
-                        cursor = await db.execute("DELETE FROM external_link WHERE entity_type='artist' AND entity_id = ANY($1::text[])", artist_list)
-                        counts['artist_links'] = cursor.rowcount
+                        res = await db.execute("DELETE FROM external_link WHERE entity_type='artist' AND entity_id = ANY($1::text[])", artist_list)
+                        counts['artist_links'] = int(res.split()[-1])
                         
                         # Delete artist image mappings
-                        cursor = await db.execute("DELETE FROM image_map WHERE entity_type='artist' AND entity_id = ANY($1::text[])", artist_list)
-                        counts['artist_images'] = cursor.rowcount
+                        res = await db.execute("DELETE FROM image_map WHERE entity_type='artist' AND entity_id = ANY($1::text[])", artist_list)
+                        counts['artist_images'] = int(res.split()[-1])
                         
                         # Delete artist genres
-                        cursor = await db.execute("DELETE FROM artist_genre WHERE artist_mbid = ANY($1::text[])", artist_list)
+                        res = await db.execute("DELETE FROM artist_genre WHERE artist_mbid = ANY($1::text[])", artist_list)
+                        counts['artist_genres'] = int(res.split()[-1])
                         counts['artist_genres'] = cursor.rowcount
                         
                         # Delete top tracks/singles
@@ -200,10 +199,9 @@ class Scanner:
             self.stats["current_status"] = "Loading DB Cache..."
             logger.info("Pre-fetching file list from database...")
             self._db_files_cache = {}
-            async for row in db.cursor("SELECT path, updated_at FROM track"):
-                rows = await cursor.fetchall()
-                for r in rows:
-                    self._db_files_cache[r[0]] = r[1]
+            rows = await db.fetch("SELECT path, updated_at FROM track")
+            for r in rows:
+                self._db_files_cache[r[0]] = r[1]
             
             # Use 'find' for accurate fast estimate
             self.stats["current_status"] = "Counting files..."
@@ -219,7 +217,7 @@ class Scanner:
             logger.info(f"Estimated file count: {self.stats['total_estimate']} (find said {actual_count}, db has {db_count})")
             self.stats["current_status"] = "Scanning Files"
 
-            await self._scan_recursive(root_path, db, artist_mbids, seen_paths, force_rescan)
+            await self._scan_recursive(root_path, artist_mbids, seen_paths, force_rescan)
             
             # Commit any remaining items
             if self._batch_counter > 0:
@@ -231,9 +229,8 @@ class Scanner:
             
             # 4. Populate Artists Table
             # Ensure all referenced artists exist in the artists table (from current scan OR existing DB)
-            async for row in db.cursor("SELECT DISTINCT artist_mbid FROM track_artist"):
-                rows = await cursor.fetchall()
-                db_mbids = {r[0] for r in rows if r[0]}
+            rows = await db.fetch("SELECT DISTINCT artist_mbid FROM track_artist")
+            db_mbids = {r[0] for r in rows if r[0]}
             
             # Merge known names from scan if available
             all_mbids = db_mbids.union({m[0] for m in artist_mbids if m[0]})
@@ -296,56 +293,57 @@ class Scanner:
         # Fallback to a safe default
         return 0
 
-    async def _scan_recursive(self, root, db, artist_mbids, seen_paths, force_rescan):
+    async def _scan_recursive(self, root, artist_mbids, seen_paths, force_rescan):
         if self._stop_event.is_set(): return
 
         queue = asyncio.Queue()
         queue.put_nowait(root)
         
-        # Determine number of workers (can be higher now that we don't deadlock)
-        num_workers = 20
+        # Determine number of workers (limit to 5 to match typical DB pool size)
+        num_workers = 5
 
         async def worker():
-            batch_counter = 0  # Per-worker batch counter
-            while True:
-                try:
-                    path = await queue.get()
+            async for db in get_db():
+                batch_counter = 0  # Per-worker batch counter
+                while True:
                     try:
-                        if self._stop_event.is_set():
-                            continue
+                        path = await queue.get()
+                        try:
+                            if self._stop_event.is_set():
+                                continue
 
-                        # logger.info(f"Listing directory: {path}")
-                        with os.scandir(path) as it:
-                            entries = list(it)
-                        
-                        for entry in entries:
-                            if entry.is_dir():
-                                queue.put_nowait(entry.path)
-                            elif entry.is_file():
-                                ext = os.path.splitext(entry.name)[1].lower()
-                                if ext in SUPPORTED_EXTENSIONS:
-                                    seen_paths.add(entry.path)
-                                    self.stats["scanned"] += 1
-                                    
-                                    if self.scan_logger and self.stats["scanned"] % 10 == 0:
-                                        percent = (self.stats["scanned"] / self.stats["total_estimate"] * 100) if self.stats["total_estimate"] else 0
-                                        self.scan_logger.emit_progress(self.stats["scanned"], self.stats["total_estimate"], f"Scanning {entry.name}")
-                                    
-                                    await self._process_file(entry.path, db, artist_mbids, force_rescan, entry=entry)
-                                    
-                                    # Batch Commit (per-worker)
-                                    batch_counter += 1
-                                    if batch_counter >= self._batch_size:
-                                        batch_counter = 0
+                            # logger.info(f"Listing directory: {path}")
+                            with os.scandir(path) as it:
+                                entries = list(it)
+                            
+                            for entry in entries:
+                                if entry.is_dir():
+                                    queue.put_nowait(entry.path)
+                                elif entry.is_file():
+                                    ext = os.path.splitext(entry.name)[1].lower()
+                                    if ext in SUPPORTED_EXTENSIONS:
+                                        seen_paths.add(entry.path)
+                                        self.stats["scanned"] += 1
+                                        
+                                        if self.scan_logger and self.stats["scanned"] % 10 == 0:
+                                            percent = (self.stats["scanned"] / self.stats["total_estimate"] * 100) if self.stats["total_estimate"] else 0
+                                            self.scan_logger.emit_progress(self.stats["scanned"], self.stats["total_estimate"], f"Scanning {entry.name}")
+                                        
+                                        await self._process_file(entry.path, db, artist_mbids, force_rescan, entry=entry)
+                                        
+                                        # Batch Commit (per-worker)
+                                        batch_counter += 1
+                                        if batch_counter >= self._batch_size:
+                                            batch_counter = 0
 
-                    except OSError as e:
-                        logger.error(f"Error listing {path}: {e}")
-                    except Exception as e:
-                        logger.exception(f"Error scanning {path}: {e}")
-                    finally:
-                        queue.task_done()
-                except asyncio.CancelledError:
-                    break
+                        except OSError as e:
+                            logger.error(f"Error listing {path}: {e}")
+                        except Exception as e:
+                            logger.exception(f"Error scanning {path}: {e}")
+                        finally:
+                            queue.task_done()
+                    except asyncio.CancelledError:
+                        break
         
         workers = [asyncio.create_task(worker()) for _ in range(num_workers)]
         
@@ -373,9 +371,12 @@ class Scanner:
             else:
                 mtime = os.path.getmtime(path)
             
+            # asyncpg requires datetime for timestamptz
+            mtime_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+
             # Optimized Check
             cached_mtime = self._db_files_cache.get(rel_path)
-            if not force_rescan and cached_mtime is not None and abs(cached_mtime - mtime) < 0.001:
+            if not force_rescan and cached_mtime is not None and abs(cached_mtime.timestamp() - mtime) < 0.001:
                 # logger.debug(f"[filesystem] Skipping unchanged file: {rel_path}")
                 return # Unchanged
 
@@ -403,7 +404,7 @@ class Scanner:
                     "artist_mbid", "album_artist_mbid", "track_mbid", "release_track_mbid", "release_mbid", "release_group_mbid", "artwork_id"]
             
             values = [
-                rel_path, mtime, tags.get("title"), tags.get("artist"), tags.get("album"), 
+                rel_path, mtime_dt, tags.get("title"), tags.get("artist"), tags.get("album"), 
                 tags.get("album_artist"), tags.get("track_no"), tags.get("disc_no"), 
                 tags.get("date"), tags.get("genre"), tags.get("duration_seconds"),
                 tags.get("codec"), tags.get("sample_rate_hz"), tags.get("bit_depth"),
@@ -412,7 +413,8 @@ class Scanner:
                 tags.get("track_mbid"), tags.get("release_track_mbid"), tags.get("release_mbid"), mb_rg_id, artwork_id
             ]
             
-            placeholders = ", ".join(["?"] * len(keys))
+            
+            placeholders = ", ".join([f"${i+1}" for i in range(len(keys))])
             columns = ", ".join(keys)
             
             sql = f"""
@@ -441,15 +443,9 @@ class Scanner:
                     release_mbid=excluded.release_mbid,
                     release_group_mbid=excluded.release_group_mbid,
                     artwork_id=excluded.artwork_id
+                RETURNING id
             """
-            cursor = await db.execute(sql, values)
-            
-            if cursor.lastrowid:
-                track_id = cursor.lastrowid
-            else:
-                async with db.execute("SELECT id FROM track WHERE path = $1", rel_path) as c2:
-                    row = await c2.fetchone()
-                    track_id = row[0] if row else None
+            track_id = await db.fetchval(sql, *values)
         
             if cached_mtime is not None:
                 self.stats["updated"] += 1
@@ -475,10 +471,10 @@ class Scanner:
                         INSERT INTO album (mbid, title, release_date, secondary_types, artwork_id, updated_at)
                         VALUES ($1, $2, $3, $4, $5, NOW())
                         ON CONFLICT(mbid) DO UPDATE SET
-                            title=COALESCE(excluded.title, title),
-                            release_date=COALESCE(excluded.release_date, release_date),
-                            artwork_id=COALESCE(excluded.artwork_id, artwork_id)
-                     """, (mb_rg_id, album_title, tags.get("date"), 'Album', artwork_id))
+                            title=COALESCE(excluded.title, album.title),
+                            release_date=COALESCE(excluded.release_date, album.release_date),
+                            artwork_id=COALESCE(excluded.artwork_id, album.artwork_id)
+                     """, mb_rg_id, album_title, tags.get("date"), 'Album', artwork_id)
 
                      # Remove from missing_album if we have it now
                      await db.execute("DELETE FROM missing_album WHERE release_group_mbid = $1", mb_rg_id)
@@ -517,27 +513,27 @@ class Scanner:
         ids = list(dict.fromkeys(ids))
 
         for mbid in ids:
-            await db.execute("INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, $2) ON CONFLICT (track_id, artist_mbid) DO NOTHING", track_id, mbid)
-            
             # Upsert Artist (Track Artist)
             name = tags.get("artist") if len(ids) == 1 else None
             
             if (mbid, name) not in self._processed_artists_session:
                 await db.execute("""
                     INSERT INTO artist (mbid, name, updated_at) VALUES ($1, $2, NOW())
-                    ON CONFLICT(mbid) DO UPDATE SET name=COALESCE(name, excluded.name)
-                """, (mbid, name))
+                    ON CONFLICT(mbid) DO UPDATE SET name=COALESCE(excluded.name, artist.name)
+                """, mbid, name)
                 
                 # Create MusicBrainz external link
                 from app.config import get_musicbrainz_root_url
                 mb_url = f"{get_musicbrainz_root_url()}/artist/{mbid}"
                 await db.execute("""
-                    INSERT INTO external_link (entity_type, entity_id, type, url)
-                    VALUES ($1, $2, $3, $4)
-                    ON CONFLICT (entity_type, entity_id, type) DO NOTHING
+                    INSERT INTO external_link (entity_type, entity_id, type, url, updated_at)
+                    VALUES ($1, $2, $3, $4, NOW())
+                    ON CONFLICT (entity_type, entity_id, type) DO UPDATE SET url=excluded.url
                 """, 'artist', mbid, 'musicbrainz', mb_url)
                 
                 self._processed_artists_session.add((mbid, name))
+
+            await db.execute("INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, $2) ON CONFLICT (track_id, artist_mbid) DO NOTHING", track_id, mbid)
 
             artist_mbids.add((mbid, name))
             
@@ -601,12 +597,12 @@ class Scanner:
                      # Since this is a SELECT, it's safer, but could catch in local variable if needed.
                      # For now, leaving as is to reduce risk of breaking fuzzy logic.
                      top_tracks = []
-                     async with db.execute("""
+                     rows = await db.fetch("""
                          SELECT id, external_name, external_album, external_duration_ms
                          FROM top_track
                          WHERE artist_mbid = $1 AND track_id IS NULL
-                     """, (mbid,)) as cursor:
-                          top_tracks = await cursor.fetchall()
+                     """, (mbid,))
+                     top_tracks = rows
                           
                      if not top_tracks:
                          continue
@@ -708,8 +704,7 @@ class Scanner:
         async for db in get_db():
             # 1. Prune Tracks (DB -> FS check)
             logger.info("Checking for deleted files...")
-            async for row in db.cursor("SELECT id, path FROM track"):
-                rows = await cursor.fetchall()
+            rows = await db.fetch("SELECT id, path FROM track")
             
             music_root = get_music_path()
             deleted_tracks = 0
@@ -756,11 +751,14 @@ class Scanner:
             logger.info("Pruning orphaned artwork...")
             
             used_shas = set()
-            async with db.execute("""
+            rows = await db.fetch("""
                 SELECT aw.sha1 FROM image_map im
-                JOIN artwork aw ON aw.id = im.artwork_id
-            """) as c:
-                used_shas.update([r[0] for r in await c.fetchall()])
+                JOIN artwork aw ON im.artwork_id = aw.id
+                WHERE im.entity_type = 'track' AND im.entity_id IN (
+                    SELECT id FROM track
+                )
+            """)
+            used_shas.update([r[0] for r in rows])
 
             art_paths = []
             root = self.art_cache_path
@@ -827,14 +825,13 @@ class Scanner:
                 if isinstance(mbid_filter, (list, set, tuple)):
                     filtered = [m for m in mbid_filter if m]
                     if filtered:
-                        placeholders = ",".join(["?"] * len(filtered))
-                        clauses.append(f"mbid IN ({placeholders})")
-                        params.extend(filtered)
+                        clauses.append(f"mbid = ANY(${len(params)+1}::text[])")
+                        params.append(filtered)
                 else:
-                    clauses.append("mbid = ?")
+                    clauses.append(f"mbid = ${len(params)+1}")
                     params.append(mbid_filter)
             elif artist_filter:
-                clauses.append("name LIKE ?")
+                clauses.append(f"name ILIKE ${len(params)+1}")
                 params.append(f"%{artist_filter}%")
             # elif missing_only and not refresh_top_tracks:
             #     # Optimized filtering is risky if we are checking for specific gaps (like links)
@@ -845,8 +842,7 @@ class Scanner:
                 query += " WHERE " + " AND ".join(clauses)
             query += " GROUP BY a.mbid"
             
-            async with db.execute(query, params) as cursor:
-                rows = await cursor.fetchall()
+            rows = await db.fetch(query, params)
 
             # Helper for Gap Checking
             def has_selected_gaps(row, fetch_top, fetch_singles):
@@ -967,38 +963,37 @@ class Scanner:
                             eff_fetch_artwork, eff_fetch_spotify_artwork, eff_fetch_similar_artists = flags[2], flags[6], flags[7]
                             
                             # DB Read: Local RGs
-                            async with db.execute("""
+                            local_rg_rows = await db.fetch("""
                                 SELECT DISTINCT t.release_group_mbid 
                                 FROM track t
                                 JOIN track_artist ta ON t.id = ta.track_id
                                 WHERE ta.artist_mbid = $1 AND t.release_group_mbid IS NOT NULL
-                            """, (mbid,)) as cursor:
-                                local_rg_rows = await cursor.fetchall()
-                                local_release_group_ids = {r[0] for r in local_rg_rows}
+                            """, (mbid,))
+                            local_release_group_ids = {r[0] for r in local_rg_rows}
 
                             # DB Read: Missing Only Top/Singles Check
                             if missing_only and (eff_refresh_top_tracks or eff_refresh_singles):
-                                 async with db.execute("SELECT type, count(*) FROM top_track WHERE artist_mbid=$1 GROUP BY type", mbid) as cursor:
-                                     rows_top = await cursor.fetchall()
-                                     has_top_tracks = False
-                                     has_singles = False
-                                     for r_type, r_count in rows_top:
-                                         if r_type == 'top' and r_count > 0: has_top_tracks = True
-                                         if r_type == 'single' and r_count > 0: has_singles = True
-                                     
-                                     if has_top_tracks: eff_refresh_top_tracks = False
-                                     if has_singles: eff_refresh_singles = False
+                                 rows = await db.fetch("SELECT type, count(*) FROM top_track WHERE artist_mbid=$1 GROUP BY type", mbid)
+                                 rows_top = rows
+                                 has_top_tracks = False
+                                 has_singles = False
+                                 for r_type, r_count in rows_top:
+                                     if r_type == 'top' and r_count > 0: has_top_tracks = True
+                                     if r_type == 'single' and r_count > 0: has_singles = True
+                                 
+                                 if has_top_tracks: eff_refresh_top_tracks = False
+                                 if has_singles: eff_refresh_singles = False
 
                                      # Update Flags
-                                     flags = (flags[0], flags[1], flags[2], flags[3], eff_refresh_top_tracks, eff_refresh_singles, flags[6], flags[7])
+                            flags = (flags[0], flags[1], flags[2], flags[3], eff_refresh_top_tracks, eff_refresh_singles, flags[6], flags[7])
                             
                             # DB Read: Wikipedia
                             known_wikipedia_url = None
                             is_bio_only = eff_fetch_bio and not any([eff_fetch_metadata, eff_fetch_links, eff_fetch_artwork, eff_fetch_spotify_artwork, eff_refresh_top_tracks, eff_refresh_singles])
                             if is_bio_only:
-                                async with db.execute("SELECT url FROM external_link WHERE entity_type='artist' AND entity_id=$1 AND type='wikipedia'", mbid) as cursor:
-                                    row_wiki = await cursor.fetchone()
-                                    if row_wiki: known_wikipedia_url = row_wiki[0]
+                                row = await db.fetchrow("SELECT url FROM external_link WHERE entity_type='artist' AND entity_id=$1 AND type='wikipedia'", mbid)
+                                row_wiki = row
+                                if row_wiki: known_wikipedia_url = row_wiki[0]
 
                             # Spawn Task
                             task = asyncio.create_task(self._produce_metadata_update(
@@ -1132,14 +1127,14 @@ class Scanner:
             # 2. Update Artist Core
             await db.execute("""
                 UPDATE artist SET 
-                    name=CASE WHEN (name IS NULL OR name = '') THEN ? ELSE name END,
-                    sort_name=CASE WHEN (sort_name IS NULL OR sort_name = '') THEN ? ELSE sort_name END,
-                    bio=COALESCE(?, bio),
-                    image_url=COALESCE(?, image_url),
-                    artwork_id=COALESCE(?, artwork_id),
-                    updated_at=?
-                WHERE mbid=$1
-            """, (
+                    name=CASE WHEN (name IS NULL OR name = '') THEN $1 ELSE name END,
+                    sort_name=CASE WHEN (sort_name IS NULL OR sort_name = '') THEN $2 ELSE sort_name END,
+                    bio=COALESCE($3, bio),
+                    image_url=COALESCE($4, image_url),
+                    artwork_id=COALESCE($5, artwork_id),
+                    updated_at=$6
+                WHERE mbid=$7
+            """, 
                 meta.get("name") if eff_fetch_metadata else name,
                 meta.get("sort_name") if eff_fetch_metadata else sort_name,
                 meta.get("bio") if eff_fetch_bio else bio,
@@ -1147,7 +1142,7 @@ class Scanner:
                 artwork_id,
                 meta.get("updated_at") or time.time(),
                 mbid
-            ))
+            )
             
             # 3. External Links
             if eff_fetch_links:
@@ -1216,7 +1211,7 @@ class Scanner:
                                 external_date = EXCLUDED.external_date,
                                 updated_at = NOW()
                         """, mbid, 'single', track_id, single["title"], single.get("album"),
-                              single["date"], single.get("mbid"), time.time()))
+                              single["date"], single.get("mbid"))
 
             # 6. Similar Artists
             if eff_fetch_similar_artists:
@@ -1227,9 +1222,8 @@ class Scanner:
                         if not sim_name: continue
                         
                         if not sim_mbid:
-                             async with db.execute("SELECT mbid FROM artist WHERE LOWER(TRIM(name)) = $1 LIMIT 1", sim_name.lower().strip(),) as c:
-                                 row_sim = await c.fetchone()
-                                 if row_sim: sim_mbid = row_sim[0]
+                            row_sim = await db.fetchrow("SELECT mbid FROM artist WHERE LOWER(TRIM(name)) = $1 LIMIT 1", sim_name.lower().strip(),)
+                            if row_sim: sim_mbid = row_sim[0]
 
                         await db.execute("""
                             INSERT INTO similar_artist
@@ -1251,6 +1245,7 @@ class Scanner:
             # Safe to overwrite if we have better data.
             # But the logic in original was: DELETE FROM artist_album WHERE artist_mbid...
             # Original logic:
+            if eff_fetch_metadata:
                 # await db.execute("DELETE FROM artist_album WHERE artist_mbid=$1", mbid,)
                 # await db.execute("DELETE FROM artist_album WHERE artist_mbid=$1", mbid,)
                 pass
@@ -1263,9 +1258,9 @@ class Scanner:
                     
                     # Tagged Priority
                     tagged_release_ids = []
-                    async with db.execute("SELECT DISTINCT release_mbid FROM track WHERE release_group_mbid = $1 AND release_mbid IS NOT NULL", r_mbid,) as cursor:
-                         rows_tagged = await cursor.fetchall()
-                         tagged_release_ids = [r[0] for r in rows_tagged if r[0]]
+                    rows = await db.fetch("SELECT DISTINCT release_mbid FROM track WHERE release_group_mbid = $1 AND release_mbid IS NOT NULL", r_mbid,)
+                    rows_tagged = rows
+                    tagged_release_ids = [r[0] for r in rows_tagged if r[0]]
                     if tagged_release_ids:
                         r_primary_release = tagged_release_ids[0]
                         r_release_ids = tagged_release_ids
@@ -1277,7 +1272,6 @@ class Scanner:
                     """, (r_mbid, r_title, r_date, 'Album'))
 
                     if r_release_ids:
-                        placeholders = ",".join("?" * len(r_release_ids))
                         await db.execute("UPDATE track SET release_group_mbid=$1 WHERE release_mbid = ANY($2::text[])", r_mbid, r_release_ids)
                     
                     await db.execute(
@@ -1332,12 +1326,11 @@ class Scanner:
         async for db in get_db():
             from app.scanner.metadata import match_track_to_library
             for mbid in artist_ids:
-                async with db.execute("""
+                rows = await db.fetch("""
                     SELECT id, external_name, external_album
                     FROM top_track
                     WHERE artist_mbid = $1 AND track_id IS NULL
-                """, (mbid,)) as cursor:
-                    rows = await cursor.fetchall()
+                """, (mbid,))
 
                 if not rows:
                     continue
@@ -1376,14 +1369,13 @@ class Scanner:
                if isinstance(mbid_filter, (list, set, tuple)):
                    filtered = [m for m in mbid_filter if m]
                    if filtered:
-                       placeholders = ",".join(["?"] * len(filtered))
-                       clauses.append(f"a.mbid IN ({placeholders})")
-                       params.extend(filtered)
+                       clauses.append(f"a.mbid = ANY(${len(params)+1}::text[])")
+                       params.append(filtered)
                else:
-                   clauses.append("a.mbid = ?")
+                   clauses.append(f"a.mbid = ${len(params)+1}")
                    params.append(mbid_filter)
             elif artist_filter:
-                clauses.append("a.name LIKE ?")
+                clauses.append(f"a.name ILIKE ${len(params)+1}")
                 params.append(f"%{artist_filter}%")
             else:
                 # Only enforce "has albums" rule if doing a bulk scan
@@ -1395,8 +1387,7 @@ class Scanner:
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
                 
-            async with db.execute(query, params) as cursor:
-                artists = await cursor.fetchall()
+            artists = await db.fetch(query, params)
 
             total = len(artists)
             processed = 0
@@ -1416,10 +1407,10 @@ class Scanner:
 
                     # 2. Get Local Release Group IDs (from album table)
                     # We check the albums table but via artist_albums to be sure we attribute correctly
-                    async with db.execute("""
+                    rows = await db.fetch("""
                         SELECT album_mbid FROM artist_album WHERE artist_mbid = $1
-                    """, (mbid,)) as cursor:
-                        local_rgs = {r[0] for r in await cursor.fetchall()}
+                    """, (mbid,))
+                    local_rgs = {r[0] for r in rows}
 
 
 
