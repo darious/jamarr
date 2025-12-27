@@ -181,41 +181,50 @@
       console.log("[PlayerBar] jamarr:play-local event received:", e.detail);
       const track = e.detail;
 
-      // Safety check: if we are remote, we shouldn't be messing with local audio
-      if (!$playerState.renderer.startsWith("local")) return;
+      // Relaxed check: Accept "local" or "local:..."
+      if (!$playerState.renderer.includes("local")) return;
 
       if (audio) {
         console.log(
           "[PlayerBar] Setting audio src to:",
           `/api/stream/${track.id}`,
         );
-        audio.src = `/api/stream/${track.id}`;
 
-        // Check if we should resume from a saved position
+        // Check if we're switching to a different track
+        const currentSrc = audio.src;
+        const newSrc = `/api/stream/${track.id}`;
+        const isSameTrack = currentSrc.includes(newSrc);
+
+        audio.src = newSrc;
+
+        // Only resume from saved position if it's the SAME track
+        // Otherwise start from beginning to avoid race condition with timeupdate events
         const savedPosition = $playerState.position_seconds || 0;
-        if (savedPosition > 0) {
-          console.log("[PlayerBar] Resuming from position:", savedPosition);
+        if (isSameTrack && savedPosition > 0) {
+          console.log(
+            "[PlayerBar] Resuming same track from position:",
+            savedPosition,
+          );
           audio.currentTime = savedPosition;
+        } else {
+          console.log("[PlayerBar] Starting new track from beginning");
+          audio.currentTime = 0;
+          // Reset position in store to prevent race condition
+          playerState.update((s) => ({ ...s, position_seconds: 0 }));
         }
 
-        // Only auto-play if was playing before AND user has interacted
-        // (browser blocks auto-play without user interaction)
-        if ($playerState.is_playing) {
-          audio
-            .play()
-            .then(() => {
-              console.log("[PlayerBar] Audio playback started successfully");
-              isPlaying = true;
-            })
-            .catch((e) => {
-              console.warn(
-                "[PlayerBar] Auto-play blocked by browser, user must click play:",
-                e.message,
-              );
-              // Update state to reflect that we're not actually playing
-              updateProgress(audio.currentTime, false);
-            });
-        }
+        // Force Playback immediately - User action (click) initiated this chain
+        audio
+          .play()
+          .then(() => {
+            console.log("[PlayerBar] Audio playback started successfully");
+            isPlaying = true;
+            playerState.update((s) => ({ ...s, is_playing: true }));
+          })
+          .catch((e) => {
+            console.warn("[PlayerBar] Auto-play blocked or failed:", e.message);
+            // Don't revert state to false, let user try again if needed
+          });
       } else {
         console.error("[PlayerBar] Audio element not found!");
       }
@@ -402,18 +411,27 @@
       return;
     }
 
-    // If no source is set, try to resume the current track
-    if (!audio.src || audio.src === window.location.href) {
-      console.log(
-        "[PlayerBar] togglePlay: no src set, dispatching play-local event",
+    // Check if currentTrack exists first
+    if (!currentTrack || !currentTrack.id) {
+      console.error(
+        "[PlayerBar] togglePlay: no valid currentTrack",
+        currentTrack,
       );
-      if (currentTrack) {
-        window.dispatchEvent(
-          new CustomEvent("jamarr:play-local", { detail: currentTrack }),
-        );
-      } else {
-        console.error("[PlayerBar] togglePlay: no currentTrack to play");
-      }
+      return;
+    }
+
+    // If no source is set OR source doesn't match current track, dispatch play-local
+    const expectedPath = `/api/stream/${currentTrack.id}`;
+    if (!audio.src || !audio.src.includes(expectedPath)) {
+      console.log(
+        "[PlayerBar] togglePlay: src missing or mismatch, dispatching play-local event",
+        { current: audio.src, expected: expectedPath },
+      );
+      // Force is_playing to true so the event handler actually plays
+      playerState.update((s) => ({ ...s, is_playing: true }));
+      window.dispatchEvent(
+        new CustomEvent("jamarr:play-local", { detail: currentTrack }),
+      );
       return;
     }
 
@@ -464,10 +482,8 @@
         >
           <img
             src={currentTrack.art_sha1
-              ? `/art/file/${currentTrack.art_sha1}`
-              : currentTrack.art_id
-                ? `/art/${currentTrack.art_id}`
-                : "/assets/logo.png"}
+              ? `/api/art/file/${currentTrack.art_sha1}?max_size=60`
+              : "/assets/logo.png"}
             alt="Art"
             class="h-full w-full object-cover"
             on:error={handleImageError}

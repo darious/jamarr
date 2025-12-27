@@ -46,9 +46,18 @@
     return `${m}:${s}`;
   };
 
-  const getArt = (track: any) => {
+  /* 
+    getArt helper
+    Uses art_sha1 exclusively. 
+  */
+  const getArt = (track: any, size: number = 0) => {
     if (!track) return "/assets/logo.png";
-    if (track.art_sha1) return `/art/file/${track.art_sha1}`;
+    if (track.art_sha1) {
+        return size > 0 
+           ? `/api/art/file/${track.art_sha1}?max_size=${size}`
+           : `/api/art/file/${track.art_sha1}`;
+    }
+    // Fallback if sha1 missing (shouldn't happen with backfill)
     if (track.art_id) return `/art/${track.art_id}`;
     return "/assets/logo.png";
   };
@@ -149,7 +158,7 @@
   <div class="fixed inset-0 z-[60] overflow-hidden bg-black text-white/90">
     <!-- Global Blurred Background -->
     <img
-      src={getArt($playerState.queue[$playerState.current_index])}
+      src={getArt($playerState.queue[$playerState.current_index], 100)}
       alt=""
       class="absolute inset-0 w-full h-full object-cover blur-3xl opacity-50 scale-110"
     />
@@ -238,7 +247,7 @@
         >
           <img
             class="absolute inset-0 w-full h-full object-cover"
-            src={getArt($playerState.queue[$playerState.current_index])}
+            src={getArt($playerState.queue[$playerState.current_index], 600)}
             alt={$playerState.queue[$playerState.current_index]?.title || "Art"}
           />
           <!-- Inner shadow for depth -->

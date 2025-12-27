@@ -14,7 +14,7 @@ class SearchResultArtist(BaseModel):
 class SearchResultAlbum(BaseModel):
     title: str
     artist: str
-    art_id: Optional[int] = None
+    artwork_id: Optional[int] = None
     art_sha1: Optional[str] = None
     
 class SearchResultTrack(BaseModel):
@@ -23,7 +23,7 @@ class SearchResultTrack(BaseModel):
     artist: str
     album: str
     duration_seconds: float
-    art_id: Optional[int] = None
+    artwork_id: Optional[int] = None
     art_sha1: Optional[str] = None
 
 class SearchResponse(BaseModel):
@@ -40,7 +40,7 @@ async def search(q: str, db: aiosqlite.Connection = Depends(get_db)):
     # Use index on name for prefix search
     artists_query = """
         SELECT name, mbid, image_url 
-        FROM artists 
+        FROM artist 
         WHERE name LIKE ? 
         ORDER BY LENGTH(name) ASC, name ASC 
         LIMIT 5
@@ -58,14 +58,14 @@ async def search(q: str, db: aiosqlite.Connection = Depends(get_db)):
     
     # 2. Search Albums
     # Use FTS on tracks for album matches, strictly matching album name
-    # We group by album/artist and pick the max art_id (usually they are all same/similar for an album)
-    # Also fetch the matching SHA1 for that art_id
+    # We group by album/artist and pick the max artwork_id (usually they are all same/similar for an album)
+    # Also fetch the matching SHA1 for that artwork_id
     albums_query = """
-        SELECT t.album, t.artist, MAX(t.art_id) as art_id, a.sha1 as art_sha1
-        FROM tracks t
-        LEFT JOIN artwork a ON t.art_id = a.id
+        SELECT t.album, t.artist, MAX(t.artwork_id) as artwork_id, a.sha1 as art_sha1
+        FROM track t
+        LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.rowid IN (
-            SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?
+            SELECT rowid FROM track_fts WHERE tracks_fts MATCH ?
         )
         GROUP BY t.album, t.artist
         LIMIT 5
@@ -78,17 +78,17 @@ async def search(q: str, db: aiosqlite.Connection = Depends(get_db)):
             albums.append(SearchResultAlbum(
                 title=row['album'],
                 artist=row['artist'],
-                art_id=row['art_id'],
+                artwork_id=row['artwork_id'],
                 art_sha1=row['art_sha1']
             ))
 
     # 3. Search Tracks
     # Use FTS for title match only, ignore album/artist matches
     tracks_query = """
-        SELECT t.id, t.title, t.artist, t.album, t.duration_seconds, t.art_id, a.sha1 as art_sha1
-        FROM tracks t
-        JOIN tracks_fts f ON f.rowid = t.id
-        LEFT JOIN artwork a ON t.art_id = a.id
+        SELECT t.id, t.title, t.artist, t.album, t.duration_seconds, t.artwork_id, a.sha1 as art_sha1
+        FROM track t
+        JOIN track_fts f ON f.rowid = t.id
+        LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE f.tracks_fts MATCH ?
         ORDER BY f.rank
         LIMIT 20
@@ -98,13 +98,13 @@ async def search(q: str, db: aiosqlite.Connection = Depends(get_db)):
     fts_track_query = f"title:{q}*"
     async with db.execute(tracks_query, (fts_track_query,)) as cursor:
         async for row in cursor:
-            tracks.append(SearchResultTrack(
+            track.append(SearchResultTrack(
                 id=row['id'],
                 title=row['title'],
                 artist=row['artist'],
                 album=row['album'],
                 duration_seconds=row['duration_seconds'] or 0.0,
-                art_id=row['art_id'],
+                artwork_id=row['artwork_id'],
                 art_sha1=row['art_sha1']
             ))
 

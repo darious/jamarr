@@ -5,7 +5,7 @@
   export let data: {
     history: Array<{
       id: number;
-      timestamp: string;
+      timestamp: string | number;
       client_ip: string;
       client_id: string | null;
       user?: {
@@ -20,6 +20,7 @@
         artist: string;
         album: string;
         art_id: number | null;
+        art_sha1: string | null;
         duration_seconds: number;
         codec: string | null;
         bit_depth: number | null;
@@ -31,9 +32,28 @@
     days: number;
     stats: {
       daily: { day: string; plays: number }[];
-      artists: { artist: string; art_id: number | null; plays: number }[];
-      albums: { album: string; artist: string; art_id: number | null; plays: number }[];
-      tracks: { id: number; title: string; artist: string; album: string; art_id: number | null; plays: number }[];
+      artists: {
+        artist: string;
+        art_id: number | null;
+        art_sha1: string | null;
+        plays: number;
+      }[];
+      albums: {
+        album: string;
+        artist: string;
+        art_id: number | null;
+        art_sha1: string | null;
+        plays: number;
+      }[];
+      tracks: {
+        id: number;
+        title: string;
+        artist: string;
+        album: string;
+        art_id: number | null;
+        art_sha1: string | null;
+        plays: number;
+      }[];
     };
   };
 
@@ -51,8 +71,10 @@
     return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
-  function formatTimestamp(timestamp: string) {
-    const date = new Date(timestamp);
+  function formatTimestamp(timestamp: string | number) {
+    const date = new Date(
+      typeof timestamp === "number" ? timestamp * 1000 : timestamp,
+    );
     return date.toLocaleString();
   }
 
@@ -106,7 +128,9 @@
 <section
   class="relative z-10 mx-auto flex w-full max-w-[1700px] flex-col gap-8 px-8 py-10"
 >
-  <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+  <div
+    class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
+  >
     <div class="space-y-2">
       <p class="pill w-max bg-white/10 text-white/70 backdrop-blur-md">
         Playback
@@ -148,7 +172,9 @@
       <div class="flex items-center justify-between">
         <div>
           <p class="text-sm text-white/60">Playback trend</p>
-          <h2 class="text-xl font-semibold text-white">Plays per day (last {days} days)</h2>
+          <h2 class="text-xl font-semibold text-white">
+            Plays per day (last {days} days)
+          </h2>
         </div>
       </div>
       {#if data.stats.daily.length === 0}
@@ -159,7 +185,9 @@
             {#each data.stats.daily as dayStat (dayStat.day)}
               <div class="flex items-center gap-3 text-sm text-white/80">
                 <span class="w-28 text-white/60 font-mono">{dayStat.day}</span>
-                <div class="flex-1 h-2.5 rounded-full bg-white/5 overflow-hidden border border-white/5">
+                <div
+                  class="flex-1 h-2.5 rounded-full bg-white/5 overflow-hidden border border-white/5"
+                >
                   <div
                     class="h-full rounded-full bg-gradient-to-r from-primary/70 via-primary to-white/80 transition-[width] duration-500"
                     style:width="{(dayStat.plays / dailyMax) * 100}%"
@@ -176,7 +204,9 @@
     </div>
 
     <div class="grid md:grid-cols-3 gap-6">
-      <div class="rounded-2xl border border-white/5 bg-white/5 p-4 backdrop-blur">
+      <div
+        class="rounded-2xl border border-white/5 bg-white/5 p-4 backdrop-blur"
+      >
         <h3 class="text-md font-semibold mb-3">Top Artists</h3>
         {#if data.stats.artists.length === 0}
           <p class="text-white/60 text-sm">No data.</p>
@@ -185,14 +215,21 @@
             {#each data.stats.artists as artist (artist.artist)}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
-                  <div class="h-10 w-10 rounded bg-white/5 overflow-hidden flex-shrink-0">
+                  <div
+                    class="h-10 w-10 rounded bg-white/5 overflow-hidden flex-shrink-0"
+                  >
                     <img
-                      src={artist.art_id ? `/art/${artist.art_id}` : "/assets/logo.png"}
+                      src={artist.art_sha1
+                        ? `/api/art/file/${artist.art_sha1}?max_size=50`
+                        : "/assets/logo.png"}
                       alt={artist.artist}
                       class="h-full w-full object-cover"
                     />
                   </div>
-                  <a class="hover:text-white hover:underline truncate" href={`/artist/${encodeURIComponent(artist.artist)}`}>
+                  <a
+                    class="hover:text-white hover:underline truncate"
+                    href={`/artist/${encodeURIComponent(artist.artist)}`}
+                  >
                     {artist.artist}
                   </a>
                 </div>
@@ -202,7 +239,9 @@
           </div>
         {/if}
       </div>
-      <div class="rounded-2xl border border-white/5 bg-white/5 p-4 backdrop-blur">
+      <div
+        class="rounded-2xl border border-white/5 bg-white/5 p-4 backdrop-blur"
+      >
         <h3 class="text-md font-semibold mb-3">Top Albums</h3>
         {#if data.stats.albums.length === 0}
           <p class="text-white/60 text-sm">No data.</p>
@@ -211,9 +250,13 @@
             {#each data.stats.albums as album (album.album + album.artist)}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
-                  <div class="h-10 w-10 rounded bg-white/5 overflow-hidden flex-shrink-0">
+                  <div
+                    class="h-10 w-10 rounded bg-white/5 overflow-hidden flex-shrink-0"
+                  >
                     <img
-                      src={album.art_id ? `/art/${album.art_id}` : "/assets/logo.png"}
+                      src={album.art_sha1
+                        ? `/api/art/file/${album.art_sha1}?max_size=50`
+                        : "/assets/logo.png"}
                       alt={album.album}
                       class="h-full w-full object-cover"
                     />
@@ -239,7 +282,9 @@
           </div>
         {/if}
       </div>
-      <div class="rounded-2xl border border-white/5 bg-white/5 p-4 backdrop-blur">
+      <div
+        class="rounded-2xl border border-white/5 bg-white/5 p-4 backdrop-blur"
+      >
         <h3 class="text-md font-semibold mb-3">Top Tracks</h3>
         {#if data.stats.tracks.length === 0}
           <p class="text-white/60 text-sm">No data.</p>
@@ -248,9 +293,13 @@
             {#each data.stats.tracks as track (track.id)}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
-                  <div class="h-10 w-10 rounded bg-white/5 overflow-hidden flex-shrink-0">
+                  <div
+                    class="h-10 w-10 rounded bg-white/5 overflow-hidden flex-shrink-0"
+                  >
                     <img
-                      src={track.art_id ? `/art/${track.art_id}` : "/assets/logo.png"}
+                      src={track.art_sha1
+                        ? `/api/art/file/${track.art_sha1}?max_size=50`
+                        : "/assets/logo.png"}
                       alt={track.title}
                       class="h-full w-full object-cover"
                     />
@@ -288,10 +337,12 @@
           class="group flex items-center gap-4 px-4 py-3 hover:bg-white/5 transition-colors"
         >
           <!-- Artwork -->
-          <div class="h-14 w-14 flex-shrink-0 rounded bg-white/10 overflow-hidden relative">
+          <div
+            class="h-14 w-14 flex-shrink-0 rounded bg-white/10 overflow-hidden relative"
+          >
             <img
-              src={entry.track.art_id
-                ? `/art/${entry.track.art_id}`
+              src={entry.track.art_sha1
+                ? `/api/art/file/${entry.track.art_sha1}?max_size=60`
                 : "/assets/logo.png"}
               alt="Art"
               class="h-full w-full object-cover"
@@ -313,10 +364,14 @@
 
           <!-- Track Info -->
           <div class="flex-1 min-w-0">
-            <p class="truncate text-sm font-semibold text-white/90 group-hover:text-white">
+            <p
+              class="truncate text-sm font-semibold text-white/90 group-hover:text-white"
+            >
               {entry.track.title}
             </p>
-            <div class="flex items-center gap-2 text-xs text-white/50 mt-0.5 flex-wrap">
+            <div
+              class="flex items-center gap-2 text-xs text-white/50 mt-0.5 flex-wrap"
+            >
               <a
                 href={`/artist/${encodeURIComponent(entry.track.artist)}`}
                 class="hover:text-white hover:underline"
@@ -341,7 +396,9 @@
               {#if entry.track.bit_depth && entry.track.sample_rate_hz}
                 <span class="text-white/30">•</span>
                 <span>
-                  {entry.track.bit_depth}bit / {(entry.track.sample_rate_hz / 1000).toFixed(1)}kHz
+                  {entry.track.bit_depth}bit / {(
+                    entry.track.sample_rate_hz / 1000
+                  ).toFixed(1)}kHz
                 </span>
               {/if}
             </div>
@@ -350,7 +407,8 @@
           <!-- Timestamp & Client Info -->
           <div class="flex items-center gap-4">
             <div class="flex flex-col items-end gap-1 text-xs text-white/60">
-              <span class="font-medium">{formatTimestamp(entry.timestamp)}</span>
+              <span class="font-medium">{formatTimestamp(entry.timestamp)}</span
+              >
               <div class="flex flex-col items-end text-[11px] text-white/50">
                 {#if entry.user}
                   <span>{entry.user.display_name || entry.user.username}</span>
