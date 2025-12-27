@@ -401,7 +401,7 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
     query = """
         SELECT 
             t.album, 
-            t.artwork_id, 
+            MAX(t.artwork_id) as artwork_id, 
             MAX(a.sha1) as art_sha1,
             COALESCE(t.album_artist, t.artist) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
@@ -425,7 +425,7 @@ async def get_recently_added_albums(limit: int = 20, db: asyncpg.Connection = De
     query = """
         SELECT 
             t.album, 
-            t.artwork_id, 
+            MAX(t.artwork_id) as artwork_id, 
             MAX(a.sha1) as art_sha1,
             COALESCE(t.album_artist, t.artist) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
@@ -450,7 +450,7 @@ async def get_recently_played_albums(limit: int = 20, db: asyncpg.Connection = D
     query = """
         SELECT 
             t.album, 
-            t.artwork_id, 
+            MAX(t.artwork_id) as artwork_id, 
             MAX(a.sha1) as art_sha1,
             COALESCE(t.album_artist, t.artist) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,

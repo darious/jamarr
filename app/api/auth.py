@@ -75,6 +75,52 @@ def _validate_password(password: str) -> None:
         )
 
 
+@router.post("/api/auth/signup")
+async def signup(
+    payload: SignupBody,
+    request: Request,
+    response: Response,
+    db: asyncpg.Connection = Depends(get_db),
+):
+    username = payload.username.strip()
+    email = payload.email.strip()
+    _validate_password(payload.password)
+
+    existing = await db.fetchrow(
+        'SELECT 1 FROM "user" WHERE username = $1 OR email = $2',
+        username, email
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username or email already taken.",
+        )
+
+    password_hash = hash_password(payload.password)
+    
+    # Insert new user
+    user = await db.fetchrow(
+        """
+        INSERT INTO "user" (username, email, password_hash, display_name, created_at, last_login_at)
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        RETURNING *
+        """,
+        username,
+        email,
+        password_hash,
+        payload.display_name.strip() if payload.display_name else None,
+    )
+
+    token = await create_session(
+        db,
+        user_id=user["id"],
+        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if request.client else None,
+    )
+    _set_session_cookie(response, token)
+    return _public_user_dict(user)
+
+
 @router.post("/api/auth/login")
 async def login(
     payload: LoginBody,

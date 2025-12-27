@@ -20,6 +20,7 @@ echo "No Docker rebuilds needed! 🎉"
 echo ""
 
 # Start services in detached mode
+docker compose down
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 echo ""
