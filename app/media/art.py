@@ -45,6 +45,13 @@ def _get_art_path(sha1: str, path_on_disk: str | None = None) -> str:
 
     return unified
 
+@router.get("/art/test")
+async def get_test_artwork():
+    """Serve a JPEG for UPnP album art testing."""
+    response = Response(content=_TEST_ART_BYTES, media_type="image/jpeg")
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
 @router.get("/art/{artwork_id}")
 @router.get("/art/{artwork_id}.jpg")
 async def get_artwork(artwork_id: int, max_size: int = 1000):
@@ -179,9 +186,4 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
     
     raise HTTPException(status_code=500, detail="Database error")
 
-@router.get("/art/test")
-async def get_test_artwork():
-    """Serve a JPEG for UPnP album art testing."""
-    response = Response(content=_TEST_ART_BYTES, media_type="image/jpeg")
-    response.headers["Cache-Control"] = "no-cache"
-    return response
+

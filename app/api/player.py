@@ -424,7 +424,7 @@ async def update_renderer_state_db(db: asyncpg.Connection, udn: str, state: Dict
             transport_state = excluded.transport_state,
             volume = excluded.volume,
             updated_at = NOW()
-    """, (udn, queue_json, state.get("current_index", -1), state.get("position_seconds", 0), 1 if state.get("is_playing") else 0, state.get("transport_state", "STOPPED"), volume))
+    """, udn, queue_json, state.get("current_index", -1), state.get("position_seconds", 0), bool(state.get("is_playing")), state.get("transport_state", "STOPPED"), volume)
 
 def _reset_history_tracker(key: str):
     if key in _history_tracker:
@@ -522,11 +522,11 @@ async def get_playback_history(response: Response, scope: str = "all", request: 
             FROM playback_history h
             JOIN track t ON h.track_id = t.id
             LEFT JOIN artwork a ON t.artwork_id = a.id
-            LEFT JOIN user u ON u.id = h.user_id
+            LEFT JOIN "user" u ON u.id = h.user_id
             {filter_clause}
             ORDER BY h.timestamp DESC
         """
-        rows = await db.fetch(query, params)
+        rows = await db.fetch(query, *params)
         history = []
         for row in rows:
             history.append({
@@ -572,8 +572,9 @@ async def get_playback_history_stats(
 
     async for db in get_db():
         user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
+        from datetime import timedelta
         where_clauses = ["DATE(timestamp) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
-        params: List[Any] = [f"-{days - 1} days"]
+        params: List[Any] = [timedelta(days=-(days - 1))]
         if scope == "mine" and user_row:
             where_clauses.append("h.user_id = ?")
             params.append(user_row["id"])
@@ -587,7 +588,7 @@ async def get_playback_history_stats(
             GROUP BY day
             ORDER BY day DESC
         """
-        rows = await db.fetch(daily_query, params)
+        rows = await db.fetch(daily_query, *params)
         daily = [{"day": row[0], "plays": row[1]} for row in rows]
 
         # Top artists
@@ -601,7 +602,7 @@ async def get_playback_history_stats(
             ORDER BY plays DESC
             LIMIT 10
         """
-        rows = await db.fetch(artists_query, params)
+        rows = await db.fetch(artists_query, *params)
         artists = [
             {"artist": row[0], "artwork_id": row[1], "art_id": row[1], "art_sha1": row[2], "plays": row[3]}
             for row in rows
@@ -619,7 +620,7 @@ async def get_playback_history_stats(
                 ORDER BY plays DESC
                 LIMIT 10
             """
-        rows = await db.fetch(albums_query, params)
+        rows = await db.fetch(albums_query, *params)
         albums = [
             {"album": row[0], "artist": row[1], "artwork_id": row[2], "art_id": row[2], "art_sha1": row[3], "plays": row[4]}
             for row in rows
@@ -637,7 +638,7 @@ async def get_playback_history_stats(
             ORDER BY plays DESC
             LIMIT 10
         """
-        rows = await db.fetch(tracks_query, params)
+        rows = await db.fetch(tracks_query, *params)
         tracks = [
             {
                 "id": row[0],
@@ -701,7 +702,7 @@ async def set_queue(update: QueueUpdate, request: Request, client_id: str = Depe
         
         enriched_queue = []
         for t in update.queue:
-            track_dict = t.dict()
+            track_dict = t.model_dump()
             if user_id is not None:
                 track_dict["user_id"] = user_id
             enriched_queue.append(track_dict)
@@ -765,7 +766,7 @@ async def append_queue(update: AppendQueue, request: Request, client_id: str = D
         
         new_tracks = []
         for t in update.tracks:
-            track_dict = t.dict()
+            track_dict = t.model_dump()
             if user_id is not None:
                 track_dict["user_id"] = user_id
             new_tracks.append(track_dict)

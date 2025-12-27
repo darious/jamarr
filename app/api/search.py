@@ -55,13 +55,13 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
 
     # 2. Search Albums using FTS
     albums_query = """
-        SELECT t.album, t.artist, MAX(t.artwork_id) as artwork_id, a.sha1 as art_sha1
+        SELECT t.album, t.artist, MAX(t.artwork_id) as artwork_id, MAX(a.sha1) as art_sha1
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.fts_vector @@ plainto_tsquery('english', $1)
           AND t.album IS NOT NULL
         GROUP BY t.album, t.artist
-        ORDER BY ts_rank(t.fts_vector, plainto_tsquery('english', $1)) DESC
+        ORDER BY MAX(ts_rank(t.fts_vector, plainto_tsquery('english', $1))) DESC
         LIMIT 5
     """
     albums = []
