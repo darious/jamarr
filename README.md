@@ -41,42 +41,61 @@ For database details, see [Database Schema](database_schema.md).
 
 ## Deployment (Docker)
 
-The recommended way to run Jamarr is via Docker Compose.
+The recommended way to run Jamarr in production is via Docker Compose.
 
-1.  **Configure Volumes**:
-    Edit `docker-compose.yml` to point to your music library:
-    ```yaml
-    volumes:
-      - /path/to/your/music:/app/music
-      - ./cache:/app/cache
-    ```
+1. **Configure Volumes**:
+   Edit `docker-compose.yml` to point to your music library and set your server IP:
+   ```yaml
+   volumes:
+     music:
+       driver_opts:
+         device: ":/path/to/your/music"
+   environment:
+     - HOST_IP=192.168.1.xxx  # Your server IP
+   ```
 
-2.  **Run**:
-    ```bash
-    docker-compose up --build -d
-    ```
+2. **Build and Run**:
+   ```bash
+   docker compose build
+   docker compose up -d
+   ```
 
-3.  **Access**:
-    Open `http://localhost:8111`.
+3. **Access**:
+   Open `http://your-server-ip:8111`.
 
 **Note**: The container uses `network_mode: "host"` to enable UPnP device discovery on your local network.
 
 ## Development Setup
 
-### Prerequisites
-- Python 3.13+
-- `uv`
-- Node.js 20+
-- `ffmpeg` (optional, for analysis)
+For the best development experience, use the provided Docker Compose setup with hot-reload enabled for both frontend and backend.
 
-### Backend
-1.  Install deps: `uv sync`
-2.  Run (auto-uses the uv-managed `.venv`): `uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8111`
+### Quick Start
 
-### Frontend
-1.  Apps lives in `web/`.
-2.  Install: `cd web && npm install`
-3.  Run: `npm run dev -- --host 0.0.0.0 --port 4173`
+```bash
+./dev.sh
+```
+
+This starts all services in development mode:
+- **Backend API** (port 8111) - Auto-reloads on Python code changes
+- **Frontend** (port 5173) - Vite HMR for instant updates
+- **PostgreSQL** (port 8110) - Database
+- **CloudBeaver** (port 8978) - Database management UI
+
+**No Docker rebuilds needed** for code changes! See [Development Mode Guide](docs/DEV_MODE.md) for details.
+
+### Manual Development (Without Docker)
+
+If you prefer to run services manually:
+
+#### Backend
+1. Install deps: `uv sync`
+2. Start PostgreSQL (or use Docker: `docker compose up jamarr_db -d`)
+3. Run: `uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8111`
+
+#### Frontend
+1. Navigate to `web/`
+2. Install: `npm install`
+3. Run: `npm run dev:host`
 
 
 ### Running the Scanner (CLI)
@@ -215,21 +234,18 @@ The database has been normalized to improve data integrity and query performance
 
 ## Frontend (SvelteKit + Skeleton)
 
-The web UI now lives in a SvelteKit app with Skeleton UI and Tailwind.
+The web UI is built with SvelteKit, Skeleton UI, and Tailwind CSS.
 
-Install and run the frontend in dev mode:
+### Development
+Use the Docker Compose dev mode (see [Development Setup](#development-setup)) for the best experience with hot-reload.
+
+### Production Build
+The Dockerfile automatically builds the frontend and bundles it with the backend. To build manually:
 
 ```bash
 cd web
 npm install
-npm run dev -- --host 0.0.0.0 --port 4173
-```
-
-Build production assets (served by FastAPI from `web/build`):
-
-```bash
-cd web
 npm run build
 ```
 
-The FastAPI app is already configured to serve the built assets from `web/build`; rebuild whenever you change frontend code.
+The FastAPI backend serves the built assets from `web/build`.
