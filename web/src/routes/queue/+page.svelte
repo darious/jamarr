@@ -49,7 +49,7 @@
             class="h-12 w-12 flex-shrink-0 rounded bg-white/10 overflow-hidden"
           >
             <img
-              src={track.art_id ? `/art/${track.art_id}` : "/assets/logo.png"}
+              src={track.art_sha1 ? `/api/art/file/${track.art_sha1}?max_size=50` : "/assets/logo.png"}
               alt="Art"
               class="h-full w-full object-cover"
               on:error={(e) => {

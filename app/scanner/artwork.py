@@ -168,13 +168,13 @@ async def cleanup_orphaned_artwork(db):
         sql = """
             SELECT id, sha1 FROM artwork 
             WHERE id NOT IN (
-                SELECT DISTINCT artwork_id FROM image_mapping
+                SELECT DISTINCT artwork_id FROM image_map
                 UNION
-                SELECT DISTINCT art_id FROM tracks WHERE art_id IS NOT NULL
+                SELECT DISTINCT artwork_id FROM track WHERE artwork_id IS NOT NULL
                 UNION
-                SELECT DISTINCT art_id FROM artists WHERE art_id IS NOT NULL
+                SELECT DISTINCT artwork_id FROM artist WHERE artwork_id IS NOT NULL
                 UNION
-                SELECT DISTINCT art_id FROM albums WHERE art_id IS NOT NULL
+                SELECT DISTINCT artwork_id FROM album WHERE artwork_id IS NOT NULL
             )
         """
         
@@ -186,7 +186,7 @@ async def cleanup_orphaned_artwork(db):
             
         count = 0
         for row in rows:
-            art_id, sha1 = row
+            artwork_id, sha1 = row
             path = _resolve_or_migrate_art_path(sha1)
             
             # Delete file
@@ -197,7 +197,7 @@ async def cleanup_orphaned_artwork(db):
                     print(f"Error removing artwork file {path}: {e}")
             
             # Delete DB entry
-            await db.execute("DELETE FROM artwork WHERE id = ?", (art_id,))
+            await db.execute("DELETE FROM artwork WHERE id = ?", (artwork_id,))
             count += 1
             
         await db.commit()
@@ -232,7 +232,7 @@ async def upsert_artwork_record(db, sha1: str, meta: Optional[Dict[str, Any]] = 
     )
 
     if row:
-        art_id = row[0]
+        artwork_id = row[0]
         await db.execute(
             """
             UPDATE artwork
@@ -246,7 +246,7 @@ async def upsert_artwork_record(db, sha1: str, meta: Optional[Dict[str, Any]] = 
                 source_url=COALESCE(?, source_url)
             WHERE id=?
             """,
-            (*params, art_id),
+            (*params, artwork_id),
         )
     else:
         cursor = await db.execute(
@@ -256,12 +256,12 @@ async def upsert_artwork_record(db, sha1: str, meta: Optional[Dict[str, Any]] = 
             """,
             (sha1, *params),
         )
-        art_id = cursor.lastrowid
+        artwork_id = cursor.lastrowid
         # Note: aiosqlite cursors don't strictly require close if not iterating, but it's good practice.
         # However, db.execute returns a cursor that is awaitable (the coroutine), which returns the cursor.
         # So 'cursor' here allows access to lastrowid.
 
-    return art_id
+    return artwork_id
 
 async def upsert_image_mapping(
     db,
@@ -279,12 +279,12 @@ async def upsert_image_mapping(
 
     await db.execute(
         """
-        INSERT INTO image_mapping (artwork_id, entity_type, entity_id, image_type, score, created_at)
+        INSERT INTO image_map (artwork_id, entity_type, entity_id, image_type, score, created_at)
         VALUES (?, ?, ?, ?, ?, strftime('%s','now'))
         ON CONFLICT(entity_type, entity_id, image_type)
         DO UPDATE SET artwork_id=excluded.artwork_id,
-                      score=COALESCE(excluded.score, image_mapping.score),
-                      created_at=COALESCE(image_mapping.created_at, excluded.created_at)
+                      score=COALESCE(excluded.score, image_map.score),
+                      created_at=COALESCE(image_map.created_at, excluded.created_at)
         """,
         (artwork_id, entity_type, str(entity_id), image_type, score),
     )

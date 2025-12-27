@@ -164,7 +164,7 @@ async def monitor_upnp_playback(udn: str):
                         # if they were changed by another request while we were waiting on UPnP.
                         # await update_renderer_state_db(db, udn, state)
                         await db.execute("""
-                            UPDATE renderer_states 
+                            UPDATE renderer_state 
                             SET position_seconds = ?, transport_state = ?, is_playing = ?, updated_at = CURRENT_TIMESTAMP
                             WHERE renderer_udn = ?
                         """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
@@ -172,7 +172,7 @@ async def monitor_upnp_playback(udn: str):
                  else:
                      # Even if we thought we weren't playing, keep position fresh for the UI
                      await db.execute("""
-                         UPDATE renderer_states 
+                         UPDATE renderer_state 
                          SET position_seconds = ?, transport_state = ?, is_playing = ?, updated_at = CURRENT_TIMESTAMP
                          WHERE renderer_udn = ?
                      """, (state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn))
@@ -224,7 +224,9 @@ class Track(BaseModel):
     artist: str
     album: str
     duration_seconds: float
+    artwork_id: Optional[int] = None
     art_id: Optional[int] = None
+    art_sha1: Optional[str] = None
     codec: Optional[str] = None
     bit_depth: Optional[int] = None
     sample_rate_hz: Optional[int] = None
@@ -288,23 +290,34 @@ def _track_path_exists(track: Dict[str, Any]) -> bool:
         abs_path = os.path.join(get_music_path(), abs_path)
     return os.path.exists(abs_path)
 
+# ... (skip to enrich function)
+
 async def _enrich_track_metadata(track: Dict[str, Any], db: aiosqlite.Connection) -> Dict[str, Any]:
-    """Ensure track dict has path and mime; fallback to DB lookup."""
+    """Ensure track dict has path, mime, and artwork; fallback to DB lookup."""
     enriched = dict(track)
-    if not enriched.get("path") or not enriched.get("mime"):
+    # Always try to fetch missing critical fields
+    if not enriched.get("path") or not enriched.get("mime") or not enriched.get("art_sha1"):
         async with db.execute(
-            "SELECT path, codec, art_id FROM tracks WHERE id = ? LIMIT 1", (enriched.get("id"),)
+            """
+            SELECT t.path, t.codec, t.artwork_id, a.sha1 as art_sha1 
+            FROM track t
+            LEFT JOIN artwork a ON t.artwork_id = a.id
+            WHERE t.id = ? LIMIT 1
+            """, 
+            (enriched.get("id"),)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
                 if not enriched.get("path"):
-                    enriched["path"] = row["path"]
-                if not enriched.get("art_id"):
-                    enriched["art_id"] = row["art_id"]
+                    enriched["path"] = row[0]
+                if not enriched.get("artwork_id"):
+                    enriched["artwork_id"] = row[2]
+                if not enriched.get("art_sha1"):
+                    enriched["art_sha1"] = row[3]
                 if not enriched.get("mime"):
-                    mime, _ = mimetypes.guess_type(row["path"])
+                    mime, _ = mimetypes.guess_type(row[0])
                     if not mime:
-                        ext = os.path.splitext(row["path"])[1].lower()
+                        ext = os.path.splitext(row[0])[1].lower()
                         if ext == '.flac': mime = "audio/flac"
                         elif ext == '.mp3': mime = "audio/mpeg"
                         elif ext == '.m4a': mime = "audio/mp4"
@@ -312,11 +325,16 @@ async def _enrich_track_metadata(track: Dict[str, Any], db: aiosqlite.Connection
                         elif ext == '.ogg': mime = "audio/ogg"
                         else: mime = "audio/flac"
                     enriched["mime"] = mime
+    
+    # Frontend compat
+    if enriched.get("artwork_id") and not enriched.get("art_id"):
+        enriched["art_id"] = enriched["artwork_id"]
+        
     return enriched
 
 async def get_active_renderer(db: aiosqlite.Connection, client_id: str) -> str:
     """Get active renderer UDN for client. Defaults to local:<client_id>."""
-    async with db.execute("SELECT active_renderer_udn FROM client_sessions WHERE client_id = ?", (client_id,)) as cursor:
+    async with db.execute("SELECT active_renderer_udn FROM client_session WHERE client_id = ?", (client_id,)) as cursor:
         row = await cursor.fetchone()
         if row and row[0]:
             return row[0]
@@ -324,7 +342,7 @@ async def get_active_renderer(db: aiosqlite.Connection, client_id: str) -> str:
     # If no session found, implicitly create one for observability
     default_udn = f"local:{client_id}"
     await db.execute("""
-        INSERT OR IGNORE INTO client_sessions (client_id, active_renderer_udn, last_seen)
+        INSERT OR IGNORE INTO client_session (client_id, active_renderer_udn, last_seen_at)
         VALUES (?, ?, CURRENT_TIMESTAMP)
     """, (client_id, default_udn))
     await db.commit()
@@ -333,13 +351,57 @@ async def get_active_renderer(db: aiosqlite.Connection, client_id: str) -> str:
 
 async def get_renderer_state_db(db: aiosqlite.Connection, udn: str) -> Dict[str, Any]:
     """Get state from DB for a renderer. Returns default if not found."""
-    async with db.execute("SELECT queue, current_index, position_seconds, is_playing, transport_state, volume FROM renderer_states WHERE renderer_udn = ?", (udn,)) as cursor:
+    async with db.execute("SELECT queue, current_index, position_seconds, is_playing, transport_state, volume FROM renderer_state WHERE renderer_udn = ?", (udn,)) as cursor:
         row = await cursor.fetchone()
         if row:
             try:
                 queue = json.loads(row[0])
             except:
                 queue = []
+
+            # Backfill missing art_sha1 for legacy queues
+            missing_sha1_ids = set()
+            for t in queue:
+                if t.get("artwork_id") and not t.get("art_sha1"):
+                    # Use integer conversion for safety
+                    try:
+                        missing_sha1_ids.add(int(t["artwork_id"]))
+                    except:
+                        pass
+            
+            if missing_sha1_ids:
+                try:
+                    placeholders = ",".join("?" for _ in missing_sha1_ids)
+                    query = f"SELECT id, sha1 FROM artwork WHERE id IN ({placeholders})"
+                    async with db.execute(query, list(missing_sha1_ids)) as art_cursor:
+                        art_rows = await art_cursor.fetchall()
+                        art_map = {r[0]: r[1] for r in art_rows}
+                    
+                    updated = False
+                    for t in queue:
+                        aid = t.get("artwork_id")
+                        if aid and not t.get("art_sha1"):
+                             try:
+                                 aid_int = int(aid)
+                                 if aid_int in art_map:
+                                     t["art_sha1"] = art_map[aid_int]
+                                     updated = True
+                             except:
+                                 pass
+                    
+                    if updated:
+                        new_queue_json = json.dumps(queue)
+                        await db.execute("UPDATE renderer_state SET queue = ? WHERE renderer_udn = ?", (new_queue_json, udn))
+                        await db.commit()
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"[Player] Failed to backfill art_sha1: {e}")
+
+            # Ensure art_id is present for frontend
+            for t in queue:
+                if t.get("artwork_id") and not t.get("art_id"):
+                    t["art_id"] = t["artwork_id"]
+
             return {
                 "queue": queue,
                 "current_index": row[1],
@@ -362,7 +424,7 @@ async def update_renderer_state_db(db: aiosqlite.Connection, udn: str, state: Di
     queue_json = json.dumps(state.get("queue", []))
     volume = state.get("volume")
     await db.execute("""
-        INSERT INTO renderer_states (renderer_udn, queue, current_index, position_seconds, is_playing, transport_state, volume, updated_at)
+        INSERT INTO renderer_state (renderer_udn, queue, current_index, position_seconds, is_playing, transport_state, volume, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(renderer_udn) DO UPDATE SET
             queue = excluded.queue,
@@ -467,12 +529,14 @@ async def get_playback_history(response: Response, scope: str = "all", request: 
         query = f"""
             SELECT 
                 h.id, h.timestamp, h.client_ip, h.client_id, h.user_id,
-                t.id, t.title, t.artist, t.album, t.art_id, t.duration_seconds,
+                t.id, t.title, t.artist, t.album, t.artwork_id, t.duration_seconds,
                 t.codec, t.bit_depth, t.sample_rate_hz, t.date,
-                u.username, u.display_name, u.email
+                u.username, u.display_name, u.email,
+                a.sha1 as art_sha1
             FROM playback_history h
-            JOIN tracks t ON h.track_id = t.id
-            LEFT JOIN users u ON u.id = h.user_id
+            JOIN track t ON h.track_id = t.id
+            LEFT JOIN artwork a ON t.artwork_id = a.id
+            LEFT JOIN user u ON u.id = h.user_id
             {filter_clause}
             ORDER BY h.timestamp DESC
         """
@@ -487,21 +551,23 @@ async def get_playback_history(response: Response, scope: str = "all", request: 
                     "client_id": row[3],
                     "user": {
                         "id": row[4],
-                        "username": row[14],
-                        "display_name": row[15],
-                        "email": row[16],
+                        "username": row[15],
+                        "display_name": row[16],
+                        "email": row[17],
                     } if row[4] else None,
                     "track": {
                         "id": row[5],
                         "title": row[6],
                         "artist": row[7],
                         "album": row[8],
-                        "art_id": row[9],
+                        "artwork_id": row[9],
+                        "art_id": row[9], # Compat
+                        "art_sha1": row[18], # New standard
                         "duration_seconds": row[10],
                         "codec": row[11],
                         "bit_depth": row[12],
                         "sample_rate_hz": row[13],
-                        "date": row[17] if len(row) > 17 else row[13]
+                        "date": row[14]
                     }
                 })
             return history
@@ -521,7 +587,7 @@ async def get_playback_history_stats(
 
     async for db in get_db():
         user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
-        where_clauses = ["date(timestamp, 'localtime') >= date('now', 'localtime', ?)"]
+        where_clauses = ["date(timestamp, 'unixepoch', 'localtime') >= date('now', 'localtime', ?)"]
         params: List[Any] = [f"-{days - 1} days"]
         if scope == "mine" and user_row:
             where_clauses.append("h.user_id = ?")
@@ -530,7 +596,7 @@ async def get_playback_history_stats(
 
         # Plays per day
         daily_query = f"""
-            SELECT date(timestamp, 'localtime') as day, COUNT(*) as plays
+            SELECT date(timestamp, 'unixepoch', 'localtime') as day, COUNT(*) as plays
             FROM playback_history h
             WHERE {where_sql}
             GROUP BY day
@@ -542,9 +608,10 @@ async def get_playback_history_stats(
 
         # Top artists
         artists_query = f"""
-            SELECT t.artist, MIN(t.art_id) as art_id, COUNT(*) as plays
+            SELECT t.artist, MIN(t.artwork_id) as artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
             FROM playback_history h
-            JOIN tracks t ON t.id = h.track_id
+            JOIN track t ON t.id = h.track_id
+            LEFT JOIN artwork a ON t.artwork_id = a.id
             WHERE {where_sql}
             GROUP BY t.artist
             ORDER BY plays DESC
@@ -553,16 +620,17 @@ async def get_playback_history_stats(
         async with db.execute(artists_query, params) as cursor:
             rows = await cursor.fetchall()
             artists = [
-                {"artist": row[0], "art_id": row[1], "plays": row[2]}
+                {"artist": row[0], "artwork_id": row[1], "art_id": row[1], "art_sha1": row[2], "plays": row[3]}
                 for row in rows
                 if row[0]
             ]
 
         # Top albums
         albums_query = f"""
-            SELECT t.album, t.artist, MIN(t.art_id) as art_id, COUNT(*) as plays
+            SELECT t.album, t.artist, MIN(t.artwork_id) as artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
             FROM playback_history h
-            JOIN tracks t ON t.id = h.track_id
+            JOIN track t ON t.id = h.track_id
+            LEFT JOIN artwork a ON t.artwork_id = a.id
             WHERE {where_sql}
             GROUP BY t.album, t.artist
             ORDER BY plays DESC
@@ -571,18 +639,19 @@ async def get_playback_history_stats(
         async with db.execute(albums_query, params) as cursor:
             rows = await cursor.fetchall()
             albums = [
-                {"album": row[0], "artist": row[1], "art_id": row[2], "plays": row[3]}
+                {"album": row[0], "artist": row[1], "artwork_id": row[2], "art_id": row[2], "art_sha1": row[3], "plays": row[4]}
                 for row in rows
                 if row[0]
             ]
 
         # Top tracks
         tracks_query = f"""
-            SELECT t.id, t.title, t.artist, t.album, t.art_id, COUNT(*) as plays
+            SELECT t.id, t.title, t.artist, t.album, t.artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
             FROM playback_history h
-            JOIN tracks t ON t.id = h.track_id
+            JOIN track t ON t.id = h.track_id
+            LEFT JOIN artwork a ON t.artwork_id = a.id
             WHERE {where_sql}
-            GROUP BY t.id, t.title, t.artist, t.album, t.art_id
+            GROUP BY t.id, t.title, t.artist, t.album, t.artwork_id
             ORDER BY plays DESC
             LIMIT 10
         """
@@ -594,8 +663,10 @@ async def get_playback_history_stats(
                     "title": row[1],
                     "artist": row[2],
                     "album": row[3],
+                    "artwork_id": row[4],
                     "art_id": row[4],
-                    "plays": row[5],
+                    "art_sha1": row[5],
+                    "plays": row[6],
                 }
                 for row in rows
             ]
@@ -853,11 +924,11 @@ async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
     
     async for db in get_db():
         await db.execute("""
-            INSERT INTO client_sessions (client_id, active_renderer_udn, last_seen)
+            INSERT INTO client_session (client_id, active_renderer_udn, last_seen_at)
             VALUES (?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(client_id) DO UPDATE SET
                 active_renderer_udn = excluded.active_renderer_udn,
-                last_seen = CURRENT_TIMESTAMP
+                last_seen_at = CURRENT_TIMESTAMP
         """, (client_id, udn))
         await db.commit()
     return {"active": udn}
@@ -871,7 +942,7 @@ async def play_track(data: dict, request: Request, client_id: str = Depends(get_
     udn = await get_active_renderer(db, client_id)
 
     # Fetch track metadata
-    async with db.execute("SELECT id, title, artist, album, art_id, path, duration_seconds FROM tracks WHERE id = ?", (track_id,)) as cursor:
+    async with db.execute("SELECT id, title, artist, album, artwork_id, path, duration_seconds FROM track WHERE id = ?", (track_id,)) as cursor:
         row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Track not found")
@@ -892,7 +963,7 @@ async def play_track(data: dict, request: Request, client_id: str = Depends(get_
         if user_row:
             track["user_id"] = user_row["id"]
 
-        is_local = udn.startswith("local:")
+        is_local = udn.startswith("local:") or udn == "local"
 
         if not is_local:
             # UPnP Playback

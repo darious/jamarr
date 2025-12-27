@@ -10,7 +10,7 @@ import mimetypes
 
 @router.api_route("/api/stream/{track_id}", methods=["GET", "HEAD"])
 async def stream_track(track_id: int, db: aiosqlite.Connection = Depends(get_db)):
-    async with db.execute("SELECT path FROM tracks WHERE id = ?", (track_id,)) as cursor:
+    async with db.execute("SELECT path FROM track WHERE id = ?", (track_id,)) as cursor:
         row = await cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Track not found")
@@ -41,5 +41,6 @@ async def stream_track(track_id: int, db: aiosqlite.Connection = Depends(get_db)
                 media_type = "audio/ogg"
             else:
                 media_type = "application/octet-stream"
-            
+        
+        print(f"[Stream] Serving {track_id}: {path} as {media_type}")
         return FileResponse(path, media_type=media_type)

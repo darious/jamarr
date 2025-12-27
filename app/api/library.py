@@ -40,7 +40,7 @@ async def get_missing_albums(mbid: str, db: aiosqlite.Connection = Depends(get_d
             musicbrainz_url,
             tidal_url,
             qobuz_url
-        FROM missing_albums
+        FROM missing_album
         WHERE artist_mbid = ?
         ORDER BY release_date DESC
     """
@@ -66,7 +66,7 @@ async def get_artists(
             a.mbid,
             a.name,
             a.image_url, 
-            a.art_id,
+            a.artwork_id,
             ar.sha1 as art_sha1,
             a.bio,
             a.sort_name,
@@ -80,19 +80,19 @@ async def get_artists(
             MAX(CASE WHEN el.type = 'discogs' THEN el.url END) as discogs_url,
             COALESCE(ac.primary_album_count, 0) as primary_album_count,
             COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
-        FROM artists a
-        JOIN track_artists ta ON a.mbid = ta.mbid
-        LEFT JOIN artwork ar ON a.art_id = ar.id
-        LEFT JOIN external_links el ON a.mbid = el.entity_id AND el.entity_type = 'artist'
+        FROM artist a
+        JOIN track_artist ta ON a.mbid = ta.artist_mbid
+        LEFT JOIN artwork ar ON a.artwork_id = ar.id
+        LEFT JOIN external_link el ON a.mbid = el.entity_id AND el.entity_type = 'artist'
         LEFT JOIN (
             SELECT 
-                ta.mbid as artist_mbid,
-                COUNT(DISTINCT CASE WHEN t.mb_album_artist_id LIKE ta.mbid || '%' OR t.mb_album_artist_id = ta.mbid THEN t.album END) as primary_album_count,
-                COUNT(DISTINCT CASE WHEN NOT (t.mb_album_artist_id LIKE ta.mbid || '%' OR t.mb_album_artist_id = ta.mbid) THEN t.album END) as appears_on_album_count
-            FROM tracks t
-            JOIN track_artists ta ON t.id = ta.track_id
+                ta.artist_mbid,
+                COUNT(DISTINCT CASE WHEN t.album_artist_mbid LIKE ta.artist_mbid || '%' OR t.album_artist_mbid = ta.artist_mbid THEN t.album END) as primary_album_count,
+                COUNT(DISTINCT CASE WHEN NOT (t.album_artist_mbid LIKE ta.artist_mbid || '%' OR t.album_artist_mbid = ta.artist_mbid) THEN t.album END) as appears_on_album_count
+            FROM track t
+            JOIN track_artist ta ON t.id = ta.track_id
             WHERE t.album IS NOT NULL
-            GROUP BY ta.mbid
+            GROUP BY ta.artist_mbid
         ) ac ON ac.artist_mbid = a.mbid
         WHERE a.name IS NOT NULL 
     """
@@ -139,7 +139,7 @@ async def get_artists(
                 "mbid": row["mbid"],
                 "name": row["name"], 
                 "image_url": row["image_url"], 
-                "art_id": art_info.get("art_id") or row["art_id"],
+                "artwork_id": art_info.get("artwork_id") or row["artwork_id"],
                 "art_sha1": art_info.get("art_sha1") or row["art_sha1"],
                 "bio": row["bio"], 
                 "sort_name": row["sort_name"] or row["name"],
@@ -154,7 +154,7 @@ async def get_artists(
                 "primary_album_count": row["primary_album_count"],
                 "appears_on_album_count": row["appears_on_album_count"],
                 "albums": [],  # Deprecated
-                "background_art_id": bg_info.get("art_id"),
+                "background_art_id": bg_info.get("artwork_id"),
                 "background_sha1": bg_info.get("art_sha1"),
             }
 
@@ -165,8 +165,8 @@ async def get_artists(
                 top_tracks_query = """
                     SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec, 
                         t.bit_depth, t.sample_rate_hz, t.duration_seconds
-                    FROM tracks_top tt
-                    LEFT JOIN tracks t ON tt.track_id = t.id
+                    FROM top_track tt
+                    LEFT JOIN track t ON tt.track_id = t.id
                     WHERE tt.artist_mbid = ? AND tt.type = 'top'
                     ORDER BY tt.rank
                     LIMIT 50
@@ -193,8 +193,8 @@ async def get_artists(
                 singles_query = """
                     SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
                         t.bit_depth, t.sample_rate_hz
-                    FROM tracks_top tt
-                    LEFT JOIN tracks t ON tt.track_id = t.id
+                    FROM top_track tt
+                    LEFT JOIN track t ON tt.track_id = t.id
                     WHERE tt.artist_mbid = ? AND tt.type = 'single'
                     ORDER BY tt.external_date DESC
                 """
@@ -217,10 +217,10 @@ async def get_artists(
                 # Fetch similar artists
                 similar_query = """
                     SELECT sa.similar_artist_name, sa.similar_artist_mbid, 
-                        a.image_url, a.art_id, ar.sha1 as art_sha1
-                    FROM similar_artists sa
-                    LEFT JOIN artists a ON sa.similar_artist_mbid = a.mbid
-                    LEFT JOIN artwork ar ON a.art_id = ar.id
+                        a.image_url, a.artwork_id, ar.sha1 as art_sha1
+                    FROM similar_artist sa
+                    LEFT JOIN artist a ON sa.similar_artist_mbid = a.mbid
+                    LEFT JOIN artwork ar ON a.artwork_id = ar.id
                     WHERE sa.artist_mbid = ?
                     ORDER BY sa.rank
                     LIMIT 10
@@ -237,14 +237,14 @@ async def get_artists(
                             "name": sim_row["similar_artist_name"],
                             "mbid": sim_mbid,
                             "image_url": sim_row["image_url"],
-                            "art_id": sim_art.get("art_id") or sim_row["art_id"],
+                            "artwork_id": sim_art.get("artwork_id") or sim_row["artwork_id"],
                             "art_sha1": sim_art.get("art_sha1") or sim_row["art_sha1"],
                         })
 
                 # Fetch genres
                 genres_query = """
                     SELECT genre, count 
-                    FROM artist_genres 
+                    FROM artist_genre 
                     WHERE artist_mbid = ? 
                     ORDER BY count DESC
                 """
@@ -271,7 +271,7 @@ async def get_albums(artist: str = None, album_mbid: str = None, db: aiosqlite.C
         async with db.execute(
             """
             SELECT mbid 
-            FROM artists 
+            FROM artist 
             WHERE LOWER(REPLACE(name, '‐', '-')) = LOWER(REPLACE(?, '‐', '-'))
             LIMIT 1
             """,
@@ -284,25 +284,25 @@ async def get_albums(artist: str = None, album_mbid: str = None, db: aiosqlite.C
     query = """
         SELECT 
             t.album, 
-            t.art_id, 
+            t.artwork_id, 
             MAX(a.sha1) as art_sha1,
             COALESCE(t.album_artist, t.artist) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
             MIN(t.date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
-            MAX(t.mb_release_id) as mb_release_id,
+            MAX(t.release_mbid) as release_mbid,
             COALESCE(al_rg.mbid, al_title.mbid) as album_mbid,
             MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as mb_link,
             CASE 
-                WHEN ? IS NOT NULL AND (t.mb_album_artist_id LIKE ? || '%' OR t.mb_album_artist_id = ?) THEN 'main'
+                WHEN ? IS NOT NULL AND (t.album_artist_mbid LIKE ? || '%' OR t.album_artist_mbid = ?) THEN 'main'
                 ELSE 'appears_on' 
             END as type
-        FROM tracks t
-        LEFT JOIN artwork a ON t.art_id = a.id
-        LEFT JOIN albums al_rg ON al_rg.mbid = t.mb_release_group_id
-        LEFT JOIN albums al_title ON al_title.title = t.album
-        LEFT JOIN external_links el ON el.entity_type = 'album' AND el.entity_id = COALESCE(al_rg.mbid, al_title.mbid)
+        FROM track t
+        LEFT JOIN artwork a ON t.artwork_id = a.id
+        LEFT JOIN album al_rg ON al_rg.mbid = t.release_group_mbid
+        LEFT JOIN album al_title ON al_title.title = t.album
+        LEFT JOIN external_link el ON el.entity_type = 'album' AND el.entity_id = COALESCE(al_rg.mbid, al_title.mbid)
     """
     params = [target_mbid, target_mbid, target_mbid]
     
@@ -310,13 +310,13 @@ async def get_albums(artist: str = None, album_mbid: str = None, db: aiosqlite.C
     if artist:
         # Filter by any artist associated with the tracks via track_artists
         query += """
-            JOIN track_artists ta ON t.id = ta.track_id
-            JOIN artists ar ON ta.mbid = ar.mbid
+            JOIN track_artist ta ON t.id = ta.track_id
+            JOIN artist ar ON ta.artist_mbid = ar.mbid
         """
         filters.append("LOWER(REPLACE(ar.name, '‐', '-')) = LOWER(REPLACE(?, '‐', '-'))")
         params.append(artist)
     if album_mbid:
-        filters.append("(t.mb_release_group_id = ? OR t.mb_release_id = ?)")
+        filters.append("(t.release_group_mbid = ? OR t.release_mbid = ?)")
         params.extend([album_mbid, album_mbid])
     if filters:
         query += " WHERE " + " AND ".join(filters)
@@ -332,12 +332,17 @@ async def get_albums(artist: str = None, album_mbid: str = None, db: aiosqlite.C
         results = []
         for row in rows:
             d = dict(row)
-            if d.get("mb_release_id"):
-                d["musicbrainz_url"] = f"{mb_root}/release/{d['mb_release_id']}"
+            if d.get("release_mbid"):
+                d["musicbrainz_url"] = f"{mb_root}/release/{d['release_mbid']}"
             elif d.get("mb_link"):
                 d["musicbrainz_url"] = d["mb_link"]
             elif d.get("album_mbid"):
                 d["musicbrainz_url"] = f"{mb_root}/release-group/{d['album_mbid']}"
+            
+            # Frontend compatibility: expects art_id
+            if d.get("artwork_id"):
+                d["art_id"] = d["artwork_id"]
+                
             results.append(d)
         return results
 
@@ -350,18 +355,18 @@ async def get_tracks(album: str = None, artist: str = None, album_mbid: str = No
         SELECT t.*, 
         a.sha1 as art_sha1,
         (SELECT GROUP_CONCAT(a2.name, ', ') 
-         FROM track_artists ta2 
-         JOIN artists a2 ON ta2.mbid = a2.mbid 
+         FROM track_artist ta2 
+         JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
          WHERE ta2.track_id = t.id) as aggregated_artists
-        FROM tracks t
-        LEFT JOIN artwork a ON t.art_id = a.id
+        FROM track t
+        LEFT JOIN artwork a ON t.artwork_id = a.id
     """
     params = []
     
     query += " WHERE 1=1"
     
     if album_mbid:
-        query += " AND (t.mb_release_group_id = ? OR t.mb_release_id = ?)"
+        query += " AND (t.release_group_mbid = ? OR t.release_mbid = ?)"
         params.extend([album_mbid, album_mbid])
     if artist:
         # Relaxed filtering: Match Album Artist (tag), Artist (tag), or Linked Artist (DB)
@@ -369,8 +374,8 @@ async def get_tracks(album: str = None, artist: str = None, album_mbid: str = No
             t.album_artist = ? 
             OR t.artist = ?
             OR EXISTS (
-                SELECT 1 FROM track_artists ta 
-                JOIN artists a ON ta.mbid = a.mbid 
+                SELECT 1 FROM track_artist ta 
+                JOIN artist a ON ta.artist_mbid = a.mbid 
                 WHERE ta.track_id = t.id 
                 AND (REPLACE(REPLACE(a.name, '’', ''''), '`', '''') = REPLACE(REPLACE(?, '’', ''''), '`', '''') OR a.name = ?)
             )
@@ -399,20 +404,20 @@ async def get_new_releases(limit: int = 20, db: aiosqlite.Connection = Depends(g
     query = """
         SELECT 
             t.album, 
-            t.art_id, 
+            t.artwork_id, 
             MAX(a.sha1) as art_sha1,
             COALESCE(t.album_artist, t.artist) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
             MIN(t.date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
-            MAX(t.mb_release_id) as mb_release_id,
+            MAX(t.release_mbid) as release_mbid,
             'main' as type
-        FROM tracks t
-        LEFT JOIN artwork a ON t.art_id = a.id
+        FROM track t
+        LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.album IS NOT NULL
         GROUP BY t.album
-        ORDER BY year DESC, t.mtime DESC
+        ORDER BY year DESC, t.updated_at DESC
         LIMIT ?
     """
     async with db.execute(query, (limit,)) as cursor:
@@ -424,17 +429,17 @@ async def get_recently_added_albums(limit: int = 20, db: aiosqlite.Connection = 
     query = """
         SELECT 
             t.album, 
-            t.art_id, 
+            t.artwork_id, 
             MAX(a.sha1) as art_sha1,
             COALESCE(t.album_artist, t.artist) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
             MIN(t.date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
-            MAX(t.mb_release_id) as mb_release_id,
+            MAX(t.release_mbid) as release_mbid,
             'main' as type
-        FROM tracks t
-        LEFT JOIN artwork a ON t.art_id = a.id
+        FROM track t
+        LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.album IS NOT NULL
         GROUP BY t.album
         ORDER BY MAX(t.id) DESC
@@ -450,18 +455,18 @@ async def get_recently_played_albums(limit: int = 20, db: aiosqlite.Connection =
     query = """
         SELECT 
             t.album, 
-            t.art_id, 
+            t.artwork_id, 
             MAX(a.sha1) as art_sha1,
             COALESCE(t.album_artist, t.artist) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
             MIN(t.date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
-            MAX(t.mb_release_id) as mb_release_id,
+            MAX(t.release_mbid) as release_mbid,
             MAX(ph.timestamp) as last_played
         FROM playback_history ph
-        JOIN tracks t ON ph.track_id = t.id
-        LEFT JOIN artwork a ON t.art_id = a.id
+        JOIN track t ON ph.track_id = t.id
+        LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.album IS NOT NULL
         GROUP BY t.album
         ORDER BY last_played DESC
@@ -477,15 +482,15 @@ async def get_recently_played_artists(limit: int = 20, db: aiosqlite.Connection 
         SELECT DISTINCT 
             a.name,
             a.image_url, 
-            a.art_id,
+            a.artwork_id,
             ar.sha1 as art_sha1,
             a.bio, 
             MAX(ph.timestamp) as last_played
         FROM playback_history ph
-        JOIN tracks t ON ph.track_id = t.id
-        JOIN track_artists ta ON t.id = ta.track_id
-        JOIN artists a ON ta.mbid = a.mbid
-        LEFT JOIN artwork ar ON a.art_id = ar.id
+        JOIN track t ON ph.track_id = t.id
+        JOIN track_artist ta ON t.id = ta.track_id
+        JOIN artist a ON ta.artist_mbid = a.mbid
+        LEFT JOIN artwork ar ON a.artwork_id = ar.id
         WHERE a.name IS NOT NULL AND a.name != '' AND a.name != 'null'
         GROUP BY a.mbid
         ORDER BY last_played DESC
@@ -497,7 +502,7 @@ async def get_recently_played_artists(limit: int = 20, db: aiosqlite.Connection 
             {
                 "name": row[0], 
                 "image_url": row[1], 
-                "art_id": row[2],
+                "artwork_id": row[2],
                 "art_sha1": row[3],
                 "bio": row[4]
             } 
@@ -511,14 +516,14 @@ async def get_discover_artists(limit: int = 20, db: aiosqlite.Connection = Depen
         SELECT DISTINCT 
             a.name,
             a.image_url, 
-            a.art_id,
+            a.artwork_id,
             ar.sha1 as art_sha1,
             a.bio,
             MAX(t.id) as last_added
-        FROM artists a
-        JOIN track_artists ta ON a.mbid = ta.mbid
-        JOIN tracks t ON ta.track_id = t.id
-        LEFT JOIN artwork ar ON a.art_id = ar.id
+        FROM artist a
+        JOIN track_artist ta ON a.mbid = ta.artist_mbid
+        JOIN track t ON ta.track_id = t.id
+        LEFT JOIN artwork ar ON a.artwork_id = ar.id
         WHERE a.name IS NOT NULL AND a.name != '' AND a.name != 'null'
         GROUP BY a.mbid
         ORDER BY last_added DESC
@@ -530,7 +535,7 @@ async def get_discover_artists(limit: int = 20, db: aiosqlite.Connection = Depen
             {
                 "name": row[0], 
                 "image_url": row[1], 
-                "art_id": row[2],
+                "artwork_id": row[2],
                 "art_sha1": row[3],
                 "bio": row[4]
             } 
