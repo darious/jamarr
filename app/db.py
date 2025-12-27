@@ -257,7 +257,9 @@ async def init_db():
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 FOREIGN KEY(artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE,
                 FOREIGN KEY(track_id) REFERENCES track(id) ON DELETE SET NULL,
-                UNIQUE(artist_mbid, type, external_name, external_album)
+                UNIQUE(artist_mbid, type, external_name, external_album),
+                UNIQUE(artist_mbid, type, rank),
+                UNIQUE(artist_mbid, type, external_mbid)
             );
             
             -- Similar artists
@@ -268,8 +270,7 @@ async def init_db():
                 rank INTEGER,
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 PRIMARY KEY (artist_mbid, similar_artist_name),
-                FOREIGN KEY(artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE,
-                FOREIGN KEY(similar_artist_mbid) REFERENCES artist(mbid) ON DELETE SET NULL
+                FOREIGN KEY(artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE
             );
             
             -- Artist genres
