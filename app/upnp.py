@@ -242,6 +242,30 @@ class UPnPManager:
             renderer_info["supports_events"] = True  # async-upnp-client supports events
             renderer_info["supports_gapless"] = dmr.has_next_transport_uri
             
+            # Query supported MIME types
+            supported_mimes = await self.get_supported_protocols(udn)
+            
+            # Only update MIME types if we got data, otherwise preserve existing data
+            if supported_mimes:
+                renderer_info["supported_mime_types"] = ",".join(sorted(supported_mimes))
+                logger.debug(f"  Supports {len(supported_mimes)} MIME types")
+            else:
+                # Check if we have existing MIME types in the database
+                async for db in get_db():
+                    async with db.execute(
+                        "SELECT supported_mime_types FROM renderer WHERE udn = ?", (udn,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                        if row and row[0]:
+                            # Preserve existing MIME types from database
+                            renderer_info["supported_mime_types"] = row[0]
+                            logger.debug(f"  Preserving existing MIME types from database")
+                        else:
+                            # No data available
+                            renderer_info["supported_mime_types"] = ""
+                            logger.debug(f"  No MIME type data available")
+
+            
             # Store renderer info and DMR device
             self.renderers[udn] = renderer_info
             self.dmr_devices[udn] = dmr
@@ -293,14 +317,15 @@ class UPnPManager:
                 INSERT OR REPLACE INTO renderer 
                 (udn, friendly_name, location_url, ip, control_url, rendering_control_url, 
                  device_type, manufacturer, model_name, model_number, serial_number, 
-                 firmware_version, supports_events, supports_gapless, last_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                 firmware_version, supports_events, supports_gapless, supported_mime_types, last_seen_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """, (
                 r["udn"], r.get("friendly_name"), r.get("location"), r.get("ip"),
                 r.get("control_url"), r.get("rendering_control_url"),
                 r.get("device_type"), r.get("manufacturer"), r.get("model_name"),
                 r.get("model_number"), r.get("serial_number"), r.get("firmware_version"),
-                r.get("supports_events", False), r.get("supports_gapless", False)
+                r.get("supports_events", False), r.get("supports_gapless", False),
+                r.get("supported_mime_types", "")
             ))
             await db.commit()
     
@@ -375,6 +400,57 @@ class UPnPManager:
         else:
             raise ValueError(f"Renderer {udn} not found")
     
+    async def get_supported_protocols(self, udn: str) -> set:
+        """
+        Query device's supported MIME types via GetProtocolInfo.
+        
+        Returns:
+            Set of supported MIME types (e.g., {'audio/flac', 'audio/mpeg'})
+        """
+        dmr = self.dmr_devices.get(udn)
+        if not dmr:
+            return set()
+        
+        device = dmr.device
+        
+        # Find ConnectionManager service
+        cm_service = None
+        for service in device.services.values():
+            if "ConnectionManager" in service.service_type:
+                cm_service = service
+                break
+        
+        if not cm_service:
+            logger.debug(f"No ConnectionManager service found for {udn}")
+            return set()
+        
+        try:
+            action = cm_service.action("GetProtocolInfo")
+            result = await action.async_call()
+            
+            # Parse Sink protocols (what the device can play)
+            sink = result.get("Sink", "")
+            if not sink:
+                return set()
+            
+            # Extract unique MIME types
+            mime_types = set()
+            protocols = sink.split(',')
+            for proto in protocols:
+                parts = proto.split(':')
+                if len(parts) >= 3:
+                    mime = parts[2]
+                    if mime and mime != '*':
+                        mime_types.add(mime)
+            
+            logger.debug(f"Device {udn} supports {len(mime_types)} MIME types")
+            return mime_types
+            
+        except Exception as e:
+            logger.debug(f"Error querying protocols for {udn}: {e}")
+            return set()
+
+    
     async def play_track(self, track_id: int, track_path: str, metadata: Dict[str, Any], username: str = None):
         """
         Play a track on the active renderer.
@@ -397,14 +473,33 @@ class UPnPManager:
         # Get MIME type from metadata
         mime_type = metadata.get("mime", "audio/flac")
         
-        # Normalize MIME types for UPnP/DLNA compatibility
-        # Many devices (including Naim) reject "audio/flac" and require "audio/x-flac"
-        mime_type_map = {
-            "audio/flac": "audio/x-flac",
-            "audio/mp4": "audio/mp4",  # Keep as-is
-            "audio/mpeg": "audio/mpeg",  # Keep as-is
-        }
-        mime_type = mime_type_map.get(mime_type, mime_type)
+        # Get supported MIME types from renderer info (stored in database)
+        renderer_info = self.renderers.get(self.active_renderer, {})
+        supported_mimes_str = renderer_info.get("supported_mime_types", "")
+        supported_mimes = set(supported_mimes_str.split(",")) if supported_mimes_str else set()
+        
+        # Choose the best MIME type for this device
+        # Try to match the exact MIME type first, then try variants
+        if mime_type == "audio/flac":
+            # FLAC has two common variants: audio/flac and audio/x-flac
+            # Check which one the device supports
+            if "audio/flac" in supported_mimes:
+                mime_type = "audio/flac"  # Sonos prefers this
+                logger.debug(f"Device supports audio/flac")
+            elif "audio/x-flac" in supported_mimes:
+                mime_type = "audio/x-flac"  # Some devices prefer this
+                logger.debug(f"Device supports audio/x-flac")
+            else:
+                # Fallback: if we don't have device info, use audio/flac as default
+                mime_type = "audio/flac"
+                logger.debug(f"Device protocols unknown, using audio/flac as default")
+        elif mime_type == "audio/mp4":
+            # M4A/AAC - usually audio/mp4 or audio/x-m4a
+            if "audio/mp4" in supported_mimes:
+                mime_type = "audio/mp4"
+            elif "audio/x-m4a" in supported_mimes:
+                mime_type = "audio/x-m4a"
+        # For other types (audio/mpeg, etc.), keep as-is
         
         # Build art URL if available
         art_url = None
