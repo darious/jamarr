@@ -1,6 +1,6 @@
 # Database Schema
 
-The application uses a SQLite database located at `cache/library.sqlite`.
+The application uses a PostgreSQL database (running in Docker on port 8110).
 
 ## Tables
 
