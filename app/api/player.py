@@ -115,95 +115,91 @@ async def monitor_upnp_playback(udn: str):
             
             # 2. Update DB
             async for db in get_db():
-                 # Check what we *think* we are doing
-                 state = await get_renderer_state_db(db, udn)
-                 was_playing = state['is_playing']
-                 
-                 # Update Live Stats
-                 # Some renderers (e.g., Rygel) return 0 or NOT_IMPLEMENTED for RelTime.
-                 # If we see PLAYING but rel_time didn't move, fall back to incrementing locally.
-                 if transport_state == "PLAYING" and (rel_time is None or rel_time == 0):
-                     rel_time = max(0, state.get("position_seconds", 0) + 1)
-                 state['position_seconds'] = rel_time
-                 state['transport_state'] = transport_state
-                 # Align is_playing with transport state
-                 state['is_playing'] = transport_state not in ["PAUSED_PLAYBACK", "STOPPED", "NO_MEDIA_PRESENT"]
-                 
-                 # Save partial update (position/transport)
-                 # await update_renderer_state_db(db, udn, state) 
-                 # Optimization: Batch update at end? No, we need fresh state for logic.
-                 
-                 # --- Auto-Advance Logic ---
-                 # If we think we are playing, but device says STOPPED (and position is near 0 or we don't care),
-                 # it implies track finished.
-                 # Note: "NO_MEDIA_PRESENT" or "TRANSITIONING" handling?
-                 
-                 if was_playing:
-                     if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
-                         # Check for race condition: STOPPED detected too soon after play
-                         time_since_start = time.time() - last_track_start_time.get(udn, 0)
-                         if time_since_start < 5.0:
-                             logger.info(f"[Player] Ignoring STOPPED state during transition (started {time_since_start:.1f}s ago)")
-                             continue
-                         logger.info(f"[Player] Track finished detection: State={transport_state}, Expected=Playing")
-                         # Trigger Next Track
-                         # We must run this OUTSIDE the current DB transaction if helper uses its own?
-                         # Helper `play_next_track_internal` opens its own connection. 
-                         # We should close this one or just run helper after.
-                         pass
-                     else:
-                         # Still playing or paused or buffering
-                         # If Paused, do we set is_playing=False? 
-                        # If user paused via remote, transport is PAUSED_PLAYBACK.
-                        # We should sync is_playing to False?
+                # What the DB currently thinks (may differ from the device)
+                state = await get_renderer_state_db(db, udn)
+                was_playing = state["is_playing"]
+
+                # Update live stats from the device
+                if transport_state == "PLAYING" and (rel_time is None or rel_time == 0):
+                    # Some renderers report 0 at start; keep moving forward based on last known position.
+                    rel_time = max(0, state.get("position_seconds", 0) + 1)
+                state["position_seconds"] = rel_time
+                state["transport_state"] = transport_state
+                state["is_playing"] = transport_state not in [
+                    "PAUSED_PLAYBACK",
+                    "STOPPED",
+                    "NO_MEDIA_PRESENT",
+                ]
+
+                # Auto-advance logic:
+                # If we think we are playing but the device reports STOPPED/NO_MEDIA_PRESENT and position ~0,
+                # assume the track finished. Keep this separate from the normal play/pause flow so we do not
+                # overwrite queue/volume fields while a user action is in flight.
+                if was_playing:
+                    if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
+                        # Ignore STOPPED if it arrives immediately after a Play/Skip (renderer churn).
+                        time_since_start = time.time() - last_track_start_time.get(udn, 0)
+                        if time_since_start < 5.0:
+                            logger.info(
+                                f"[Player] Ignoring STOPPED state during transition (started {time_since_start:.1f}s ago)"
+                            )
+                            continue
+                        logger.info(f"[Player] Track finished detection: State={transport_state}, Expected=Playing")
+                        # Trigger next track outside DB loop; helper opens its own connection.
+                    else:
+                        # Still playing or paused/buffering. If user paused via remote, sync is_playing to False.
                         if "PAUSE" in transport_state:
-                            state['is_playing'] = False
-                         
-                        # Race Condition Fix:
-                        # Use a specific UPDATE for status fields to avoid overwriting volume/queue
-                        # if they were changed by another request while we were waiting on UPnP.
-                        # await update_renderer_state_db(db, udn, state)
-                        await db.execute("""
-                            UPDATE renderer_state 
+                            state["is_playing"] = False
+
+                        # Race Condition Fix: status-only UPDATE so we do not overwrite queue/volume changes
+                        # that might have happened via API while this UPnP poll was in flight.
+                        await db.execute(
+                            """
+                            UPDATE renderer_state
                             SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
                             WHERE renderer_udn = $4
-                        """, state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn)
-                 else:
-                     # Even if we thought we weren't playing, keep position fresh for the UI
-                     await db.execute("""
-                         UPDATE renderer_state 
-                         SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
-                         WHERE renderer_udn = $4
-                     """, state['position_seconds'], state['transport_state'], 1 if state['is_playing'] else 0, udn)
-                 last_position = state['position_seconds']
-                 # History logging for remote playback (based on renderer state queue)
-                 if state['is_playing'] and state['current_index'] is not None and state['current_index'] >= 0:
-                     queue = state.get("queue") or []
-                     if 0 <= state['current_index'] < len(queue):
-                         track = queue[state['current_index']]
-                         track_id = track.get("id")
-                         duration = track.get("duration_seconds") or 0
-                         renderer_ip = upnp.renderers.get(udn, {}).get("ip") if upnp.renderers else None
-                         if _should_log_history(udn, track_id, rel_time, duration):
-                             await log_history(
-                                 db,
-                                 track_id,
-                                 client_ip=renderer_ip or "unknown",
-                                 client_id=udn,
-                                 user_id=track.get("user_id"),
-                             )
+                            """,
+                            state["position_seconds"],
+                            state["transport_state"],
+                            bool(state["is_playing"]),
+                            udn,
+                        )
+                else:
+                    # Not previously playing; just persist snapshot of state.
+                    await db.execute(
+                        """
+                        UPDATE renderer_state
+                        SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
+                        WHERE renderer_udn = $4
+                        """,
+                        state["position_seconds"],
+                        state["transport_state"],
+                        bool(state["is_playing"]),
+                        udn,
+                    )
+
+                last_position = state["position_seconds"]
+                # History logging for remote playback (based on renderer state queue)
+                if state["is_playing"] and state["current_index"] is not None and state["current_index"] >= 0:
+                    queue = state.get("queue") or []
+                    if 0 <= state["current_index"] < len(queue):
+                        track = queue[state["current_index"]]
+                        track_id = track.get("id")
+                        duration = track.get("duration_seconds") or 0
+                        renderer_ip = upnp.renderers.get(udn, {}).get("ip") if upnp.renderers else None
+                        if _should_log_history(udn, track_id, rel_time, duration):
+                            await log_history(
+                                db,
+                                track_id,
+                                client_ip=renderer_ip or "unknown",
+                                client_id=udn,
+                                user_id=track.get("user_id"),
+                            )
             
-            # Execute Side Effects outside DB context
+            # Execute side effects outside DB context (avoids holding a transaction open)
             if was_playing and transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
-                 # Double check we didn't just start? 
-                 # Ideally we'd validte track duration vs position, but STOPPED is strong signal.
-                 # Debounce? UPnP might report STOPPED briefly between tracks if we are fast?
-                 # If we just sent a Play command, we might see STOPPED for a split second.
-                 # BUT `play_track` waits for `Play` SOAP action. 
-                 # So it should be PLAYING or TRANSITIONING.
-                 
-                 await play_next_track_internal(udn)
-                 await asyncio.sleep(4) # Wait a bit to let new track start
+                await play_next_track_internal(udn)
+                await asyncio.sleep(4)  # Give the new track a moment to start
             
             await asyncio.sleep(1)
             
@@ -424,7 +420,7 @@ async def update_renderer_state_db(db: asyncpg.Connection, udn: str, state: Dict
             transport_state = excluded.transport_state,
             volume = excluded.volume,
             updated_at = NOW()
-    """, (udn, queue_json, state.get("current_index", -1), state.get("position_seconds", 0), 1 if state.get("is_playing") else 0, state.get("transport_state", "STOPPED"), volume))
+    """, udn, queue_json, state.get("current_index", -1), state.get("position_seconds", 0), bool(state.get("is_playing")), state.get("transport_state", "STOPPED"), volume)
 
 def _reset_history_tracker(key: str):
     if key in _history_tracker:
@@ -488,7 +484,7 @@ async def log_history(db: asyncpg.Connection, track_id: int, client_ip: str, cli
 
             await db.execute(
                 "INSERT INTO playback_history (track_id, client_ip, client_id, user_id) VALUES ($1, $2, $3, $4)",
-                (track_id, client_ip, client_id, user_id)
+                track_id, client_ip, client_id, user_id
             )
         except Exception as e:
             logger.error(f"Failed to log history: {e}")
@@ -522,11 +518,11 @@ async def get_playback_history(response: Response, scope: str = "all", request: 
             FROM playback_history h
             JOIN track t ON h.track_id = t.id
             LEFT JOIN artwork a ON t.artwork_id = a.id
-            LEFT JOIN user u ON u.id = h.user_id
+            LEFT JOIN "user" u ON u.id = h.user_id
             {filter_clause}
             ORDER BY h.timestamp DESC
         """
-        rows = await db.fetch(query, params)
+        rows = await db.fetch(query, *params)
         history = []
         for row in rows:
             history.append({
@@ -572,8 +568,9 @@ async def get_playback_history_stats(
 
     async for db in get_db():
         user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
+        from datetime import timedelta
         where_clauses = ["DATE(timestamp) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
-        params: List[Any] = [f"-{days - 1} days"]
+        params: List[Any] = [timedelta(days=-(days - 1))]
         if scope == "mine" and user_row:
             where_clauses.append("h.user_id = ?")
             params.append(user_row["id"])
@@ -587,7 +584,7 @@ async def get_playback_history_stats(
             GROUP BY day
             ORDER BY day DESC
         """
-        rows = await db.fetch(daily_query, params)
+        rows = await db.fetch(daily_query, *params)
         daily = [{"day": row[0], "plays": row[1]} for row in rows]
 
         # Top artists
@@ -601,7 +598,7 @@ async def get_playback_history_stats(
             ORDER BY plays DESC
             LIMIT 10
         """
-        rows = await db.fetch(artists_query, params)
+        rows = await db.fetch(artists_query, *params)
         artists = [
             {"artist": row[0], "artwork_id": row[1], "art_id": row[1], "art_sha1": row[2], "plays": row[3]}
             for row in rows
@@ -619,7 +616,7 @@ async def get_playback_history_stats(
                 ORDER BY plays DESC
                 LIMIT 10
             """
-        rows = await db.fetch(albums_query, params)
+        rows = await db.fetch(albums_query, *params)
         albums = [
             {"album": row[0], "artist": row[1], "artwork_id": row[2], "art_id": row[2], "art_sha1": row[3], "plays": row[4]}
             for row in rows
@@ -637,7 +634,7 @@ async def get_playback_history_stats(
             ORDER BY plays DESC
             LIMIT 10
         """
-        rows = await db.fetch(tracks_query, params)
+        rows = await db.fetch(tracks_query, *params)
         tracks = [
             {
                 "id": row[0],
@@ -701,7 +698,7 @@ async def set_queue(update: QueueUpdate, request: Request, client_id: str = Depe
         
         enriched_queue = []
         for t in update.queue:
-            track_dict = t.dict()
+            track_dict = t.model_dump()
             if user_id is not None:
                 track_dict["user_id"] = user_id
             enriched_queue.append(track_dict)
@@ -765,7 +762,7 @@ async def append_queue(update: AppendQueue, request: Request, client_id: str = D
         
         new_tracks = []
         for t in update.tracks:
-            track_dict = t.dict()
+            track_dict = t.model_dump()
             if user_id is not None:
                 track_dict["user_id"] = user_id
             new_tracks.append(track_dict)
@@ -910,7 +907,7 @@ async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
             ON CONFLICT(client_id) DO UPDATE SET
                 active_renderer_udn = excluded.active_renderer_udn,
                 last_seen_at = NOW()
-        """, (client_id, udn))
+        """, client_id, udn)
     return {"active": udn}
 
 @router.post("/api/player/play")

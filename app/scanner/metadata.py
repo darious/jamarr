@@ -11,6 +11,7 @@ import difflib
 import math
 from app.config import get_spotify_credentials, get_musicbrainz_root_url, get_musicbrainz_rate_limit, get_qobuz_region, get_fanarttv_api_key, get_max_workers, get_lastfm_credentials
 from app.db import get_db
+from app.scanner.stats import get_api_tracker
 
 logger = logging.getLogger("scanner.metadata")
 
@@ -54,6 +55,16 @@ class RateLimiter:
 mb_limit_val = get_musicbrainz_rate_limit()
 mb_limiter = RateLimiter(rate_limit=mb_limit_val, burst_limit=5 if mb_limit_val is None else 2)
 
+def get_client(client: httpx.AsyncClient = None):
+    """
+    Small helper to reuse a provided client or create/close a new one.
+    """
+    if client:
+        # Contextlib.nullcontext avoids closing the passed-in client
+        from contextlib import nullcontext
+        return nullcontext(client)
+    return httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"})
+
 async def fetch_fanart_artist_images(client: httpx.AsyncClient, mbid: str):
     """
     Fetch best artist thumb and background URLs from Fanart.tv for a given MusicBrainz ID.
@@ -80,6 +91,7 @@ async def fetch_fanart_artist_images(client: httpx.AsyncClient, mbid: str):
         return url
 
     try:
+        get_api_tracker().increment("fanart")
         resp = await client.get(f"{FANART_API_ROOT}/{mbid}", params={"api_key": api_key}, timeout=20.0)
         if resp.status_code != 200:
             logger.debug(f"Fanart.tv lookup failed for {mbid}: {resp.status_code}")
@@ -107,6 +119,7 @@ async def get_spotify_token(client: httpx.AsyncClient):
     b64_auth = base64.b64encode(auth_str.encode()).decode()
     
     try:
+        get_api_tracker().increment("spotify")
         resp = await client.post(
             SPOTIFY_TOKEN_URL,
             data={"grant_type": "client_credentials"},
@@ -131,6 +144,7 @@ def _similarity(a: str, b: str) -> float:
 
 async def _evaluate_spotify_candidate(client: httpx.AsyncClient, headers: dict, candidate_id: str, target_name: str):
     try:
+        get_api_tracker().increment("spotify")
         resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{candidate_id}", headers=headers)
         if resp.status_code == 429:
              raise RuntimeError("Spotify Rate Limit Exceeded")
@@ -191,7 +205,7 @@ async def _pick_best_spotify_candidate(client: httpx.AsyncClient, headers: dict,
 
     return best["id"], best.get("url")
 
-async def fetch_wikidata_external_links(client: httpx.AsyncClient, wikidata_url: str, existing_links: dict) -> dict:
+async def fetch_wikidata_external_links(client: httpx.AsyncClient, wikidata_url: str, existing_links: dict, cached_entity: dict = None) -> dict:
     """
     Fetch external service IDs from Wikidata and construct URLs.
     Only returns links that are missing from existing_links.
@@ -200,6 +214,7 @@ async def fetch_wikidata_external_links(client: httpx.AsyncClient, wikidata_url:
         client: HTTP client
         wikidata_url: Wikidata entity URL (e.g., https://www.wikidata.org/wiki/Q45188)
         existing_links: Dict of existing links to check against
+        cached_entity: Optional dict of entity data if already fetched
         
     Returns:
         Dict of {service: url} for missing links only
@@ -209,17 +224,23 @@ async def fetch_wikidata_external_links(client: httpx.AsyncClient, wikidata_url:
     try:
         # Extract QID from URL
         qid = wikidata_url.split("/")[-1]
-        wd_api = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
         
-        logger.debug(f"Fetching Wikidata external links for {qid}...")
-        resp = await client.get(wd_api)
-        if resp.status_code != 200:
-            logger.warning(f"Wikidata fetch failed: {resp.status_code}")
-            return missing_links
-        
-        wd_data = resp.json()
-        entities = wd_data.get("entities", {})
-        entity = entities.get(qid, {})
+        if cached_entity:
+            entity = cached_entity
+        else:
+            wd_api = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
+            
+            logger.debug(f"Fetching Wikidata external links for {qid}...")
+            get_api_tracker().increment("wikidata")
+            resp = await client.get(wd_api)
+            if resp.status_code != 200:
+                logger.warning(f"Wikidata fetch failed: {resp.status_code}")
+                return missing_links
+            
+            wd_data = resp.json()
+            entities = wd_data.get("entities", {})
+            entity = entities.get(qid, {})
+
         claims = entity.get("claims", {})
         
         # Property mapping: Wikidata property ID -> (service_name, URL_template)
@@ -267,14 +288,14 @@ async def fetch_wikidata_external_links(client: httpx.AsyncClient, wikidata_url:
         if missing_links:
             # Create a comprehensive log message showing all filled links
             link_types = ", ".join(missing_links.keys())
-            logger.info(f"Wikidata filled {len(missing_links)} missing link(s): {link_types}")
+            logger.debug(f"Wikidata filled {len(missing_links)} missing link(s): {link_types}")
         
     except Exception as e:
         logger.warning(f"Wikidata external links fetch failed: {e}")
     
     return missing_links
 
-async def fetch_lastfm_top_tracks(mbid, artist_name):
+async def fetch_lastfm_top_tracks(mbid, artist_name, client: httpx.AsyncClient = None):
     """
     Fetch top tracks from Last.fm using MBID strict.
     """
@@ -294,43 +315,50 @@ async def fetch_lastfm_top_tracks(mbid, artist_name):
         "limit": 15  # Fetch slightly more to allow filtering if needed
     }
 
+    async def _do_fetch(c):
+        get_api_tracker().increment("lastfm")
+        resp = await c.get(url, params=params, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            tracks_data = data.get("toptracks", {}).get("track", [])
+            if not tracks_data: return []
+            
+            # Normalize result to list if single dict
+            if isinstance(tracks_data, dict): tracks_data = [tracks_data]
+            
+            results = []
+            rank = 1
+            for t in tracks_data:
+                if rank > 10: break
+                
+                # Extract MBID if available (Track MBID)
+                track_mbid = t.get("mbid")
+                
+                results.append({
+                    "name": t.get("name"),
+                    "mbid": track_mbid, # Use this for matching
+                    "rank": rank,
+                    "playcount": t.get("playcount"),
+                    "popularity": t.get("playcount"), # Map playcount to popularity for storage
+                    "album": None # Last.fm top tracks often don't have album info directly
+                })
+                rank += 1
+            return results
+        else:
+            logger.warning(f"Last.fm Top Tracks error {resp.status_code} for {mbid}")
+            return []
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=10.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                tracks_data = data.get("toptracks", {}).get("track", [])
-                if not tracks_data: return []
-                
-                # Normalize result to list if single dict
-                if isinstance(tracks_data, dict): tracks_data = [tracks_data]
-                
-                results = []
-                rank = 1
-                for t in tracks_data:
-                    if rank > 10: break
-                    
-                    # Extract MBID if available (Track MBID)
-                    track_mbid = t.get("mbid")
-                    
-                    results.append({
-                        "name": t.get("name"),
-                        "mbid": track_mbid, # Use this for matching
-                        "rank": rank,
-                        "playcount": t.get("playcount"),
-                        "popularity": t.get("playcount"), # Map playcount to popularity for storage
-                        "album": None # Last.fm top tracks often don't have album info directly
-                    })
-                    rank += 1
-                return results
-            else:
-                logger.warning(f"Last.fm Top Tracks error {resp.status_code} for {mbid}")
-                return []
+        if client:
+            return await _do_fetch(client)
+        else:
+             async with httpx.AsyncClient() as c:
+                 return await _do_fetch(c)
     except Exception as e:
         logger.error(f"Last.fm Top Tracks failed for {mbid}: {e}")
         return []
 
-async def fetch_lastfm_artist_url(mbid: str):
+async def fetch_lastfm_artist_url(mbid: str, client: httpx.AsyncClient = None):
     """
     Fetch artist URL from Last.fm using MBID.
     """
@@ -347,21 +375,28 @@ async def fetch_lastfm_artist_url(mbid: str):
         "format": "json"
     }
 
+    async def _do_fetch(c):
+        get_api_tracker().increment("lastfm")
+        resp = await c.get(url, params=params, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("artist", {}).get("url")
+        else:
+            logger.debug(f"Last.fm Artist Info error {resp.status_code} for {mbid}")
+            return None
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=10.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("artist", {}).get("url")
-            else:
-                logger.debug(f"Last.fm Artist Info error {resp.status_code} for {mbid}")
-                return None
+        if client:
+            return await _do_fetch(client)
+        else:
+            async with httpx.AsyncClient() as c:
+                return await _do_fetch(c)
     except Exception as e:
         logger.debug(f"Last.fm Artist Info failed for {mbid}: {e}")
         return None
 
 
-async def fetch_lastfm_similar_artists(mbid, artist_name):
+async def fetch_lastfm_similar_artists(mbid, artist_name, client: httpx.AsyncClient = None):
     """
     Fetch similar artists from Last.fm using MBID strict.
     """
@@ -379,35 +414,42 @@ async def fetch_lastfm_similar_artists(mbid, artist_name):
         "limit": 15
     }
 
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=10.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                similar_data = data.get("similarartists", {}).get("artist", [])
-                if not similar_data: return []
+    async def _do_fetch(c):
+        get_api_tracker().increment("lastfm")
+        resp = await c.get(url, params=params, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            similar_data = data.get("similarartists", {}).get("artist", [])
+            if not similar_data: return []
+            
+            if isinstance(similar_data, dict): similar_data = [similar_data]
+
+            results = []
+            count = 0
+            for a in similar_data:
+                if count >= 10: break
                 
-                if isinstance(similar_data, dict): similar_data = [similar_data]
+                # Last.fm can handle excluding the artist itself, but just in case
+                if a.get("mbid") == mbid: continue
+                if a.get("name") == artist_name: continue
 
-                results = []
-                count = 0
-                for a in similar_data:
-                    if count >= 10: break
-                    
-                    # Last.fm can handle excluding the artist itself, but just in case
-                    if a.get("mbid") == mbid: continue
-                    if a.get("name") == artist_name: continue
+                results.append({
+                    "name": a.get("name"),
+                    "mbid": a.get("mbid"),
+                    "match": a.get("match") 
+                })
+                count += 1
+            return results
+        else:
+            logger.warning(f"Last.fm Similar Artists error {resp.status_code} for {mbid}")
+            return []
 
-                    results.append({
-                        "name": a.get("name"),
-                        "mbid": a.get("mbid"),
-                        "match": a.get("match") 
-                    })
-                    count += 1
-                return results
-            else:
-                logger.warning(f"Last.fm Similar Artists error {resp.status_code} for {mbid}")
-                return []
+    try:
+        if client:
+            return await _do_fetch(client)
+        else:
+             async with httpx.AsyncClient() as c:
+                 return await _do_fetch(c)
     except Exception as e:
         logger.error(f"Last.fm Similar Artists failed for {mbid}: {e}")
         return []
@@ -507,6 +549,7 @@ async def fetch_artist_metadata(
     known_wikipedia_url: str = None,
     known_spotify_url: str = None,
     fetch_similar_artists: bool = False,
+    client: httpx.AsyncClient = None,
 ):
     """
     Fetches comprehensive artist metadata from MusicBrainz + Spotify + Wikidata.
@@ -514,7 +557,7 @@ async def fetch_artist_metadata(
     if local_release_group_ids is None:
         local_release_group_ids = set()
 
-    logger.info(f"Fetching metadata for {artist_name} ({mbid})...")
+    logger.info(f"Fetching metadata for {artist_name or 'Unknown'} ({mbid})...")
 
     # If nothing is requested, return immediately
     if not any([fetch_metadata, fetch_bio, fetch_artwork, fetch_links, fetch_top_tracks, fetch_singles, bio_only, fetch_similar_artists]):
@@ -566,36 +609,45 @@ async def fetch_artist_metadata(
 
     # Fast path: artwork-only (skip MusicBrainz release/link fetch)
     only_art = fetch_artwork and not (fetch_metadata or fetch_bio or fetch_links or fetch_top_tracks or fetch_singles or bio_only)
+    
     if only_art:
         try:
-            async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
-                fanart = await fetch_fanart_artist_images(client, mbid)
+            async with get_client(client) as c:
+                fanart = await fetch_fanart_artist_images(c, mbid)
                 if fanart.get("thumb"):
-                    metadata["image_url"] = fanart["thumb"]
-                    metadata["image_source"] = "fanart.tv"
+                     metadata["image_url"] = fanart["thumb"]
+                     metadata["image_source"] = "fanart.tv"
                 if fanart.get("background"):
-                    metadata["background_url"] = fanart["background"]
-                    metadata["background_source"] = "fanart.tv"
+                     metadata["background_url"] = fanart["background"]
+                     metadata["background_source"] = "fanart.tv"
         except Exception:
             pass
         return metadata
 
     try:
-        async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
-            # 1. MusicBrainz Core Data & Relations
-            # For singles-only runs we don't need core artist data/relations.
-            # OPTIMIZATION: If we only want Bio and we already have the URL, skip MB.
-            skip_mb_for_bio = bio_only and known_wikipedia_url
+        async with get_client(client) as client:
             
-            needs_mb = (fetch_metadata or fetch_links or (fetch_bio and not skip_mb_for_bio))
-            mb_data = None
-            if needs_mb:
+            # Helper Tasks to run in parallel
+            # Each returns a dict of updates to merge into metadata
+
+            async def _task_mb_core():
+                # 1. MusicBrainz Core Data & Relations (Wikidata, Links)
+                updates = {}
+                # OPTIMIZATION: If we only want Bio and we already have the URL, skip MB.
+                skip_mb_for_bio = bio_only and known_wikipedia_url
+                needs_mb = (fetch_metadata or fetch_links or (fetch_bio and not skip_mb_for_bio))
+                
+                if not needs_mb: 
+                    return updates
+
                 logger.debug(f"Fetching Core Data from MusicBrainz for {artist_name} ({mbid})...")
                 await mb_limiter.acquire()
                 mb_url = f"{MB_API_ROOT}/artist/{mbid}?inc=url-rels+genres&fmt=json"
                 
+                mb_data = None
                 for attempt in range(3):
                     try:
+                        get_api_tracker().increment("musicbrainz")
                         resp = await client.get(mb_url)
                         if resp.status_code == 200:
                             mb_data = resp.json()
@@ -611,186 +663,269 @@ async def fetch_artist_metadata(
                          logger.warning(f"MB Fetch Error (Attempt {attempt+1}): {e}")
                          await asyncio.sleep(1)
 
-            wikidata_url = None
-            spotify_id = None
-            spotify_candidates = []
-            
-            if mb_data:
-                # Update Core Info
-                if mb_data.get("name"): metadata["name"] = mb_data["name"]
-                if mb_data.get("sort-name"): metadata["sort_name"] = mb_data["sort-name"]
-                metadata["musicbrainz_url"] = f"{get_musicbrainz_root_url()}/artist/{mbid}"
-
-                logger.debug(f"Processsing relations for {metadata['name']}...")
-                
-                # Relations
-                relations = mb_data.get("relations", [])
-                for rel in relations:
-                    target = rel.get("url", {}).get("resource")
-                    type_ = rel.get("type", "")
+                if mb_data:
+                    if mb_data.get("name"): updates["name"] = mb_data["name"]
+                    if mb_data.get("sort-name"): updates["sort_name"] = mb_data["sort-name"]
+                    updates["musicbrainz_url"] = f"{get_musicbrainz_root_url()}/artist/{mbid}"
                     
-                    if type_ == "official homepage" and not metadata["homepage"]:
-                        metadata["homepage"] = target
-                        logger.debug(f"data source: MusicBrainz (Homepage) -> {target}")
-                    elif type_ == "wikidata":
-                        wikidata_url = target
-                        logger.debug(f"data source: MusicBrainz (Wikidata) -> {target}")
-                    elif "tidal.com" in target:
-                         metadata["tidal_url"] = target
-                         logger.debug(f"data source: MusicBrainz (Tidal) -> {target}")
-                    elif "qobuz.com" in target:
-                         # We accept any Qobuz artist link provided by MB
-                         metadata["qobuz_url"] = target
-                         logger.debug(f"data source: MusicBrainz (Qobuz) -> {target}")
-                    elif "discogs.com" in target:
-                         metadata["discogs_url"] = target
-                         logger.debug(f"data source: MusicBrainz (Discogs) -> {target}")
-                    elif "spotify.com" in target and type_ in ("streaming", "free streaming"):
-                         # Collect all candidate Spotify URLs/IDs from MB
-                         parts = target.split("/")
-                         if parts:
-                             cand_id = parts[-1].split("?")[0]
-                             if cand_id and not any(cand_id == c[0] for c in spotify_candidates):
-                                 spotify_candidates.append((cand_id, target))
-                                 logger.debug(f"data source: MusicBrainz (Spotify candidate) -> {target}")
-                
-                # Genres
-                if mb_data.get("genres"):
-                    metadata["genres"] = [
-                        {"name": g["name"], "count": g.get("count", 0)} 
-                        for g in mb_data["genres"]
-                    ]
-                    # Sort by count descending
-                    metadata["genres"].sort(key=lambda x: x["count"], reverse=True)
-                    logger.debug(f"Found {len(metadata['genres'])} genres for {artist_name}")
-
-            if fetch_artwork:
-                fanart = await fetch_fanart_artist_images(client, mbid)
-                if fanart.get("thumb"):
-                    metadata["image_url"] = fanart["thumb"]
-                    metadata["image_source"] = "fanart.tv"
-                if fanart.get("background"):
-                    metadata["background_url"] = fanart["background"]
-                    metadata["background_source"] = "fanart.tv"
-            
-            # 2. Wikipedia (Bio via Wikidata OR Known URL)
-            # Logic: If we have a wikipedia_url (known or from relations? wait relations give wikidata not wikipedia),
-            # we need to handle that. MB relations gives Wikidata usually, not direct Wikipedia.
-            # But if known_wikipedia_url is passed, use it.
-            
-            target_wiki_url = metadata["wikipedia_url"] # Starts with known_url
-            
-            # If we have a Wikidata URL from MB, use it to resolve Wikipedia if we don't have one
-            if wikidata_url and fetch_bio and not target_wiki_url:
-                try:
-                    logger.debug(f"Fetching Wikipedia link via Wikidata ({wikidata_url})...")
-                    qid = wikidata_url.split("/")[-1]
-                    wd_api = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
-                    wd_resp = await client.get(wd_api)
-                    if wd_resp.status_code == 200:
-                        wd_data = wd_resp.json()
-                        entities = wd_data.get("entities", {})
-                        entity = entities.get(qid, {})
-                        sitelinks = entity.get("sitelinks", {})
-                        enwiki = sitelinks.get("enwiki", {})
-                        wiki_title = enwiki.get("title")
+                    logger.debug(f"Processsing relations for {mb_data.get('name', artist_name)}...")
+                    relations = mb_data.get("relations", [])
+                    spotify_cands = []
+                    
+                    for rel in relations:
+                        target = rel.get("url", {}).get("resource")
+                        type_ = rel.get("type", "")
                         
-                        if wiki_title:
-                            target_wiki_url = f"https://en.wikipedia.org/wiki/{wiki_title}"
-                            metadata["wikipedia_url"] = target_wiki_url
-                except Exception as e:
-                     logger.warning(f"Wikidata resolution failed: {e}")
-
-            if target_wiki_url and fetch_bio:
-                 # Fetch bio extract from Wikipedia REST API
-                 # Extract title from URL
-                 # URL format: https://en.wikipedia.org/wiki/Title_Here
-                 try:
-                     wiki_title = target_wiki_url.split("/wiki/")[-1]
-                     if wiki_title:
-                        logger.debug(f"Fetching bio from Wikipedia for {wiki_title}...")
-                        from urllib.parse import quote, unquote
-                        # Decode first in case it's encoded, then re-quote for API?
-                        # Actually the API handles it, but let's be safe.
-                        safe_title = unquote(wiki_title)
-                        
-                        wiki_summary_url = f"{WIKI_API_ROOT}/{quote(safe_title)}"
-                        wiki_resp = await client.get(wiki_summary_url)
-                        if wiki_resp.status_code == 200:
-                            wiki_data = wiki_resp.json()
-                            extract = wiki_data.get("extract")
-                            if extract:
-                                metadata["bio"] = extract
-                                logger.debug(f"Bio fetched: {len(extract)} characters")
-                 except Exception as e:
-                     logger.warning(f"Wikipedia bio fetch failed for {target_wiki_url}: {e}")
-
-            # 2b. Wikidata Fallback for Missing External Links
-            # If we have a Wikidata URL and fetch_links is enabled, try to fill missing links
-            if wikidata_url and fetch_links:
-                try:
-                    # Check which links are missing
-                    existing_links = {
-                        "spotify_url": metadata.get("spotify_url"),
-                        "tidal_url": metadata.get("tidal_url"),
-                        "qobuz_url": metadata.get("qobuz_url"),
-                        "lastfm_url": metadata.get("lastfm_url"),
-                        "discogs_url": metadata.get("discogs_url"),
-                        "homepage": metadata.get("homepage"),
-                    }
+                        if type_ == "official homepage" and not metadata["homepage"]:
+                            updates["homepage"] = target
+                            logger.debug(f"data source: MusicBrainz (Homepage) -> {target}")
+                        elif type_ == "wikidata":
+                            updates["wikidata_url"] = target
+                            logger.debug(f"data source: MusicBrainz (Wikidata) -> {target}")
+                        elif "tidal.com" in target:
+                            updates["tidal_url"] = target
+                            logger.debug(f"data source: MusicBrainz (Tidal) -> {target}")
+                        elif "qobuz.com" in target:
+                            updates["qobuz_url"] = target
+                            logger.debug(f"data source: MusicBrainz (Qobuz) -> {target}")
+                        elif "discogs.com" in target:
+                            updates["discogs_url"] = target
+                            logger.debug(f"data source: MusicBrainz (Discogs) -> {target}")
+                        elif "spotify.com" in target and type_ in ("streaming", "free streaming"):
+                             parts = target.split("/")
+                             if parts:
+                                 cand_id = parts[-1].split("?")[0]
+                                 if cand_id and not any(cand_id == c[0] for c in spotify_cands):
+                                     spotify_cands.append((cand_id, target))
+                                     logger.debug(f"data source: MusicBrainz (Spotify candidate) -> {target}")
                     
-                    # Fetch missing links from Wikidata
-                    wikidata_links = await fetch_wikidata_external_links(client, wikidata_url, existing_links)
+                    updates["_spotify_candidates"] = spotify_cands
                     
-                    # Merge Wikidata links into metadata (only for missing links)
-                    for service, url in wikidata_links.items():
-                        if not metadata.get(service):
-                            metadata[service] = url
-                            logger.debug(f"data source: Wikidata ({service}) -> {url}")
+                    if mb_data.get("genres"):
+                        updates["genres"] = [
+                            {"name": g["name"], "count": g.get("count", 0)} 
+                            for g in mb_data["genres"]
+                        ]
+                        updates["genres"].sort(key=lambda x: x["count"], reverse=True)
+                        logger.debug(f"Found {len(updates['genres'])} genres for {artist_name}")
+
+                return updates
+
+            async def _task_fanart():
+                # 2. Fanart.tv
+                updates = {}
+                if fetch_artwork:
+                     try:
+                        fanart = await fetch_fanart_artist_images(client, mbid)
+                        if fanart.get("thumb"):
+                             updates["image_url"] = fanart["thumb"]
+                             updates["image_source"] = "fanart.tv"
+                        if fanart.get("background"):
+                             updates["background_url"] = fanart["background"]
+                             updates["background_source"] = "fanart.tv"
+                     except Exception:
+                         logger.warning(f"Fanart.tv fetch failed for {mbid}")
+                         pass
+                return updates
+
+            async def _task_lastfm():
+                # 3. Last.fm (Top Tracks, Similar, Link)
+                updates = {}
+                if fetch_top_tracks:
+                    logger.debug(f"Fetching Top Tracks from Last.fm for {artist_name}...")
+                    updates["top_tracks"] = await fetch_lastfm_top_tracks(mbid, artist_name, client=client)
+                    logger.debug(f"Found {len(updates['top_tracks'])} top tracks")
+                
+                if fetch_similar_artists:
+                     logger.debug(f"Fetching Similar Artists from Last.fm for {artist_name}...")
+                     updates["similar_artists"] = await fetch_lastfm_similar_artists(mbid, artist_name, client=client)
+                     logger.debug(f"Found {len(updates['similar_artists'])} similar artists")
+                
+                if fetch_links:
+                     logger.debug(f"Fetching Last.fm URL for {artist_name}...")
+                     updates["lastfm_url"] = await fetch_lastfm_artist_url(mbid, client=client)
+                return updates
+
+            # Parallel Fetch Group 1: Core, Fanart, LastFM, MB Releases
+            tasks = [
+                _task_mb_core(),
+                _task_fanart(),
+                _task_lastfm()
+            ]
+
+            # MB Releases (Singles, Albums, EPs) - also parallel
+            async def _task_releases(rtype):
+                 logger.debug(f"Fetching {rtype.capitalize()} (Release Groups) from MusicBrainz...")
+                 return await fetch_artist_release_groups(mbid, rtype, client)
+
+            if fetch_singles:
+                 tasks.append(_task_releases("single"))
+            else:
+                 tasks.append(asyncio.sleep(0, result=[])) # Dummy
+
+            if fetch_metadata or fetch_links:
+                 tasks.append(_task_releases("album"))
+                 tasks.append(_task_releases("ep"))
+            else:
+                 tasks.append(asyncio.sleep(0, result=[])) # Dummy
+                 tasks.append(asyncio.sleep(0, result=[])) # Dummy
+
+            # Execute Parallel Block 1
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Unpack Results
+            # Core
+            core_res = results[0]
+            if isinstance(core_res, dict):
+                 metadata.update({k:v for k,v in core_res.items() if not k.startswith("_")})
+                 spotify_candidates = core_res.get("_spotify_candidates", [])
+                 wikidata_url = core_res.get("wikidata_url")
+            else:
+                 logger.error(f"MB Core Task Error: {core_res}")
+                 wikidata_url = None
+                 spotify_candidates = []
+
+            # Fanart
+            fan_res = results[1]
+            if isinstance(fan_res, dict): metadata.update(fan_res)
+            elif isinstance(fan_res, Exception): logger.error(f"Fanart Task Error: {fan_res}")
+
+            # LastFM
+            lfm_res = results[2]
+            if isinstance(lfm_res, dict): metadata.update(lfm_res)
+            elif isinstance(lfm_res, Exception): logger.error(f"Last.fm Task Error: {lfm_res}")
+
+            # Releases
+            singles_res = results[3]
+            albums_res = results[4]
+            eps_res = results[5]
+
+            if isinstance(singles_res, list): metadata["singles"] = singles_res
+            elif isinstance(singles_res, Exception): logger.error(f"Singles Task Error: {singles_res}")
+
+            if isinstance(albums_res, list): metadata["albums"] = albums_res
+            elif isinstance(albums_res, Exception): logger.error(f"Albums Task Error: {albums_res}")
+
+            if isinstance(eps_res, list):
+                # Optimization: We used to resolve links for every missing album here.
+                # User requested to skip this expensive lookup.
+                # We will rely on Release Group MBIDs for linking.
+                metadata["albums"].extend(eps_res)
+            elif isinstance(eps_res, Exception): logger.error(f"EPs Task Error: {eps_res}")
+
+            # Phase 2: Wikidata/Wikipedia (Needs URL from Core)
+            # This must run AFTER MB Core because we need the wikidata_url discovered there
+            async def _task_wiki_bio_links():
+                updates = {}
+                target_wiki_url = known_wikipedia_url or metadata.get("wikipedia_url") # Start with known or what MB might have given
+                
+                # Resolve Wikidata -> Wiki URL
+                if wikidata_url and not target_wiki_url and (fetch_bio or fetch_links):
+                     try:
+                        logger.debug(f"Fetching Wikipedia link via Wikidata ({wikidata_url})...")
+                        qid = wikidata_url.split("/")[-1]
+                        wd_api = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
+                        get_api_tracker().increment("wikidata")
+                        wd_resp = await client.get(wd_api)
+                        if wd_resp.status_code == 200:
+                            wd_data = wd_resp.json()
+                            entities = wd_data.get("entities", {})
+                            entity = entities.get(qid, {})
+                            sitelinks = entity.get("sitelinks", {})
+                            enwiki = sitelinks.get("enwiki", {})
+                            wiki_title = enwiki.get("title")
                             
-                except Exception as e:
-                    logger.warning(f"Wikidata fallback failed: {e}")
+                            if wiki_title:
+                                target_wiki_url = f"https://en.wikipedia.org/wiki/{wiki_title}"
+                                updates["wikipedia_url"] = target_wiki_url
+                                logger.debug(f"data source: Wikidata (Wikipedia) -> {target_wiki_url}")
+                                  
+                                # Fetch Extra Links from Wikidata
+                                if fetch_links:
+                                     existing_links = {
+                                         "spotify_url": metadata.get("spotify_url"), # Might be missing still
+                                         "tidal_url": metadata.get("tidal_url"),
+                                         "qobuz_url": metadata.get("qobuz_url"),
+                                         "lastfm_url": metadata.get("lastfm_url"),
+                                         "discogs_url": metadata.get("discogs_url"),
+                                         "homepage": metadata.get("homepage"),
+                                     }
+                                     # Pass the entity we just fetched to avoid a second API call
+                                     wd_links = await fetch_wikidata_external_links(client, wikidata_url, existing_links, cached_entity=entity)
+                                     for service, url in wd_links.items():
+                                         if not metadata.get(service) and not updates.get(service): # Only add if not already set by MB or this task
+                                             updates[service] = url
+                                             logger.debug(f"data source: Wikidata ({service}) -> {url}")
+                     except Exception as e:
+                         logger.warning(f"Wikidata resolution failed: {e}")
 
-            # 3. Last.fm (Top Tracks & Similar Artists)
-            if fetch_top_tracks:
-                logger.debug(f"Fetching Top Tracks from Last.fm for {artist_name}...")
-                metadata["top_tracks"] = await fetch_lastfm_top_tracks(mbid, artist_name)
-                logger.debug(f"Found {len(metadata['top_tracks'])} top tracks")
+                # Fetch Bio from Wiki
+                if target_wiki_url and fetch_bio:
+                     try:
+                         # Extract title from URL
+                         wiki_title = target_wiki_url.split("/wiki/")[-1]
+                         if wiki_title:
+                            logger.debug(f"Fetching bio from Wikipedia for {wiki_title}...")
+                            from urllib.parse import quote, unquote
+                            safe_title = unquote(wiki_title)
+                            
+                            wiki_summary_url = f"{WIKI_API_ROOT}/{quote(safe_title)}"
+                            get_api_tracker().increment("wikipedia")
+                            wiki_resp = await client.get(wiki_summary_url)
+                            if wiki_resp.status_code == 200:
+                                wiki_data = wiki_resp.json()
+                                extract = wiki_data.get("extract")
+                                if extract:
+                                    updates["bio"] = extract
+                                    logger.debug(f"Bio fetched: {len(extract)} characters")
+                     except Exception as e:
+                         logger.warning(f"Wikipedia bio fetch failed for {target_wiki_url}: {e}")
+                
+                return updates
 
-            if fetch_similar_artists:
-                 logger.debug(f"Fetching Similar Artists from Last.fm for {artist_name}...")
-                 metadata["similar_artists"] = await fetch_lastfm_similar_artists(mbid, artist_name)
-                 logger.debug(f"Found {len(metadata['similar_artists'])} similar artists")
+            # Execute Phase 2
+            wiki_updates = await _task_wiki_bio_links()
+            if isinstance(wiki_updates, dict): metadata.update(wiki_updates)
+            elif isinstance(wiki_updates, Exception): logger.error(f"Wiki/Bio Task Error: {wiki_updates}")
 
-            if fetch_links:
-                 logger.debug(f"Fetching Last.fm URL for {artist_name}...")
-                 metadata["lastfm_url"] = await fetch_lastfm_artist_url(mbid)
+            # Phase 3: Spotify (Strictly Conditional)
+            # Run only if image missing AND enabled
+            
+            # Resolve Spotify URL from MB/Wikidata candidates first
+            if fetch_links and not metadata.get("spotify_url") and spotify_candidates:
+                metadata["spotify_url"] = spotify_candidates[0][1]
+                logger.debug(f"Using Spotify URL from MusicBrainz (without verification): {metadata['spotify_url']}")
 
-            # 4. Spotify (Artwork & Links)
-            # We need to resolve Spotify ID if we want artwork OR if we want to store the Spotify link
-            if (fetch_spotify_artwork or fetch_links) and not SPOTIFY_SCANNING_DISABLED:
+            if fetch_spotify_artwork and not SPOTIFY_SCANNING_DISABLED and not metadata.get("image_url"):
                 logger.debug("Checking Spotify credentials for artwork...")
                 token = await get_spotify_token(client)
                 if token:
                     sp_headers = {"Authorization": f"Bearer {token}"}
-
+                    sp_id = None
+                    
+                    # Extract ID from URL
+                    if metadata.get("spotify_url"):
+                         parts = metadata["spotify_url"].split("/")
+                         if parts: sp_id = parts[-1].split("?")[0]
+                    
                     # If we have multiple candidates from MB, pick the best one using Spotify metadata
-                    if spotify_candidates:
+                    if spotify_candidates and not sp_id:
                         try:
                             picked_id, picked_url = await _pick_best_spotify_candidate(
                                 client, sp_headers, spotify_candidates, metadata["name"]
                             )
                             if picked_id and picked_url:
-                                spotify_id = picked_id
-                                metadata["spotify_url"] = picked_url
-                                logger.debug(f"Selected Spotify candidate from MB list: {spotify_id}")
+                                sp_id = picked_id
+                                metadata["spotify_url"] = picked_url # Update with verified one
+                                logger.debug(f"Selected Spotify candidate from MB list: {sp_id}")
                         except Exception as e:
                             logger.warning(f"Spotify candidate selection failed: {e}")
-
-                    # If no ID chosen yet, try a strict search
-                    if not spotify_id:
+                    
+                    # If no ID chosen yet, try a strict search (Only because we neeed ARTWORK)
+                    if not sp_id:
                          try:
                             logger.debug(f"No Spotify ID found in MB. Searching Spotify for 'artist:{metadata['name']}'...")
+                            get_api_tracker().increment("spotify")
                             from urllib.parse import quote
                             q = quote(metadata["name"])
                             search_url = f"{SPOTIFY_API_ROOT}/search?q=artist:{q}&type=artist&limit=3"
@@ -806,18 +941,20 @@ async def fetch_artist_metadata(
                                      scored.sort(key=lambda x: (x[0], x[1].get("popularity", 0)), reverse=True)
                                      best = scored[0]
                                      if best[0] >= 0.6:
-                                          spotify_id = best[1]["id"]
-                                          metadata["spotify_url"] = best[1]["external_urls"]["spotify"]
-                                          logger.debug(f"Found match via search: {spotify_id}")
+                                          sp_id = best[1]["id"]
+                                          if not metadata.get("spotify_url"):
+                                              metadata["spotify_url"] = best[1]["external_urls"]["spotify"]
+                                          logger.debug(f"Found match via search: {sp_id}")
                          except Exception as e:
                              logger.warning(f"Spotify Search Failed: {e}")
 
-                    if spotify_id:
+                    if sp_id:
                         try:
                             # Get Artist (Image)
                             if fetch_artwork:
-                                logger.debug(f"Fetching Spotify Artist details (Bio/Image) for {spotify_id}...")
-                                art_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{spotify_id}", headers=sp_headers)
+                                logger.debug(f"Fetching Spotify Artist details (Bio/Image) for {sp_id}...")
+                                get_api_tracker().increment("spotify")
+                                art_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{sp_id}", headers=sp_headers)
                                 if art_resp.status_code == 429: raise RuntimeError("Spotify Rate Limit Exceeded")
                                 if art_resp.status_code == 200:
                                     images = art_resp.json().get("images", [])
@@ -831,34 +968,8 @@ async def fetch_artist_metadata(
                             logger.warning(f"Spotify Artwork Fetch Failed: {e}")
                 else:
                     logger.debug("No Spotify token available (credentials missing or failed).")
-                    # Fallback: if only one MB candidate, preserve that URL even without token
-                    if spotify_candidates and len(spotify_candidates) == 1 and not metadata["spotify_url"]:
-                        metadata["spotify_url"] = spotify_candidates[0][1]
-            elif (fetch_top_tracks or fetch_spotify_artwork) and SPOTIFY_SCANNING_DISABLED:
+            elif fetch_spotify_artwork and SPOTIFY_SCANNING_DISABLED:
                 logger.debug("Spotify scanning disabled; skipping Spotify API calls.")
-
-            # 4. MusicBrainz Singles & Albums (Release Groups)
-            if bio_only and not (fetch_links or fetch_singles):
-                 logger.debug("Bio-only mode: Skipping Release Groups and Link Resolution.")
-                 return metadata
-
-            if fetch_singles:
-                logger.debug("Fetching Singles (Release Groups) from MusicBrainz...")
-                singles = await fetch_artist_release_groups(mbid, "single", client)
-                metadata["singles"] = singles
-
-            if fetch_metadata or fetch_links:
-                logger.debug("Fetching Albums (Release Groups) from MusicBrainz...")
-                albums = await fetch_artist_release_groups(mbid, "album", client)
-                # Optimization: We used to resolve links for every missing album here.
-                # User requested to skip this expensive lookup.
-                # We will rely on Release Group MBIDs for linking.
-                metadata["albums"] = albums
-
-                logger.debug("Fetching EPs (Release Groups) from MusicBrainz...")
-                eps = await fetch_artist_release_groups(mbid, "ep", client)
-                # Skip link resolution for EPs when we already have them locally; only missing-albums flow needs links.
-                metadata["albums"].extend(eps)
 
     except Exception as e:
         logger.error(f"Critical error fetching metadata for {artist_name}: {e}")
@@ -891,6 +1002,7 @@ async def fetch_artist_release_groups(mbid: str, type_str: str, client: httpx.As
         while True:
             await mb_limiter.acquire()
             url = f"{MB_API_ROOT}/{base_endpoint}?artist={mbid}&type={type_str}&fmt=json&limit={limit}&offset={offset}&inc={inc_params}{extra_query}"
+            get_api_tracker().increment("musicbrainz")
             resp = await client.get(url)
             
             if resp.status_code != 200:

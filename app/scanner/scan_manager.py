@@ -5,6 +5,7 @@ import os
 from typing import Optional, Dict, Any
 from app.scanner.core import Scanner
 from app.config import get_music_path
+from app.scanner.stats import get_api_tracker
 
 logger = logging.getLogger("scanner.manager")
 
@@ -30,16 +31,9 @@ class ScanManager:
         self._configure_logging()
 
     def _configure_logging(self):
-        try:
-            os.makedirs("cache/log", exist_ok=True)
-        except Exception:
-            pass
+        # Central logging handles file output now.
+        # We only need to attach the UI Broadcast Handler to the scanner logger.
         scan_logger = logging.getLogger("scanner")
-        if not any(getattr(h, "_scanner_log", False) for h in scan_logger.handlers):
-            fh = logging.FileHandler("cache/log/scanner.log")
-            fh._scanner_log = True
-            fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-            scan_logger.addHandler(fh)
         
         # UI Broadcast Handler
         if not any(getattr(h, "_ui_broadcast", False) for h in scan_logger.handlers):
@@ -47,8 +41,6 @@ class ScanManager:
             bh._ui_broadcast = True
             bh.setLevel(logging.INFO) # Only show INFO+ in UI to avoid flood
             scan_logger.addHandler(bh)
-
-        scan_logger.setLevel(logging.DEBUG)
 
     class BroadcastLogHandler(logging.Handler):
         def __init__(self, manager):
@@ -114,6 +106,8 @@ class ScanManager:
             "percentage": percentage,
             "message": message,
             "phase": self._phase,
+            "api_stats": get_api_tracker().get_stats(),
+            "processed_stats": get_api_tracker().get_processed_stats(),
         }
         self._broadcast({
             "type": "progress",
@@ -122,6 +116,8 @@ class ScanManager:
             "percentage": percentage,
             "message": message,
             "phase": self._phase,
+            "api_stats": self._stats["api_stats"],
+            "processed_stats": self._stats["processed_stats"],
         })
 
     def _log_message(self, message):
@@ -139,6 +135,7 @@ class ScanManager:
             self._stop_event.clear()
             self._status = "Starting Scan..."
             self._phase = "filesystem"
+            get_api_tracker().reset()
             self.scanner.scan_logger = self.ManagerLogger(self)
             
             # Wrap in task to run in background
@@ -182,6 +179,7 @@ class ScanManager:
             self._stop_event.clear()
             self._status = "Starting Metadata Update..."
             self._phase = "metadata" if not links_only else "links"
+            get_api_tracker().reset()
             self.scanner.scan_logger = self.ManagerLogger(self)
             
             self._current_task = asyncio.create_task(self._run_metadata(artist_filter, mbid_filter, missing_only, bio_only, links_only, refresh_top_tracks, refresh_singles, fetch_metadata, fetch_bio, fetch_artwork, fetch_spotify_artwork, fetch_links, fetch_similar_artists))
@@ -236,6 +234,7 @@ class ScanManager:
             self._stop_event.clear()
             self._status = "Starting Full Scan..."
             self._phase = "filesystem"
+            get_api_tracker().reset()
             self.scanner.scan_logger = self.ManagerLogger(self)
 
             # For full runs: default to missing-only metadata unless force is requested.
@@ -394,6 +393,7 @@ class ScanManager:
             self._stop_event.clear()
             self._status = "Scanning Missing Albums..."
             self._phase = "missing_albums"
+            get_api_tracker().reset()
             self.scanner.scan_logger = self.ManagerLogger(self)
             
             self._current_task = asyncio.create_task(self._run_missing_albums_scan(artist_filter, mbid_filter))

@@ -45,6 +45,13 @@ def _get_art_path(sha1: str, path_on_disk: str | None = None) -> str:
 
     return unified
 
+@router.get("/art/test")
+async def get_test_artwork():
+    """Serve a JPEG for UPnP album art testing."""
+    response = Response(content=_TEST_ART_BYTES, media_type="image/jpeg")
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
 @router.get("/art/{artwork_id}")
 @router.get("/art/{artwork_id}.jpg")
 async def get_artwork(artwork_id: int, max_size: int = 1000):
@@ -52,11 +59,12 @@ async def get_artwork(artwork_id: int, max_size: int = 1000):
     Serve artwork by ID, always converting to JPEG and resizing if needed.
     """
     async for db in get_db():
-        row = await db.fetchrow("SELECT sha1, path_on_disk FROM artwork WHERE id = $1", artwork_id)
+        row = await db.fetchrow("SELECT sha1, path_on_disk, mime FROM artwork WHERE id = $1", artwork_id)
         if not row:
             raise HTTPException(status_code=404, detail="Artwork not found")
         
         sha1 = row["sha1"]
+        mime = row["mime"]
         path = _get_art_path(sha1, row["path_on_disk"])
         
         if not os.path.exists(path):
@@ -111,9 +119,25 @@ async def get_artwork(artwork_id: int, max_size: int = 1000):
                 
         except Exception as e:
             pass
-        
+
         # Fallback
-        response = FileResponse(path)
+        if not mime:
+            # Try to sniff mime from file header
+            try:
+                with open(path, "rb") as f:
+                    header = f.read(12)
+                    if header.startswith(b"\xff\xd8\xff"):
+                        mime = "image/jpeg"
+                    elif header.startswith(b"\x89PNG\r\n\x1a\n"):
+                        mime = "image/png"
+                    elif header.startswith(b"GIF8"):
+                        mime = "image/gif"
+                    elif header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+                        mime = "image/webp"
+            except Exception:
+                pass
+
+        response = FileResponse(path, media_type=mime)
         response.headers["Cache-Control"] = "no-cache"
         return response
     
@@ -123,11 +147,14 @@ async def get_artwork(artwork_id: int, max_size: int = 1000):
 async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
     # Lookup type to build path
     async for db in get_db():
-        row = await db.fetchrow("SELECT path_on_disk FROM artwork WHERE sha1 = $1", sha1)
+        row = await db.fetchrow("SELECT path_on_disk, mime FROM artwork WHERE sha1 = $1", sha1)
         if not row:
             raise HTTPException(status_code=404, detail="Artwork not found")
         
+        # path might rely on sha1 logic if db is outdated? No, db has path.
+        # But wait, original code used _get_art_path helper.
         path = _get_art_path(sha1, row["path_on_disk"])
+        mime = row["mime"]
         
         if not os.path.exists(path):
             raise HTTPException(status_code=404, detail="Artwork file missing")
@@ -173,15 +200,27 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
                  # Fallback to original file on error
                  pass
 
-        response = FileResponse(path)
+        # Fallback
+        if not mime:
+            # Try to sniff mime from file header
+            try:
+                with open(path, "rb") as f:
+                    header = f.read(12)
+                    if header.startswith(b"\xff\xd8\xff"):
+                        mime = "image/jpeg"
+                    elif header.startswith(b"\x89PNG\r\n\x1a\n"):
+                        mime = "image/png"
+                    elif header.startswith(b"GIF8"):
+                        mime = "image/gif"
+                    elif header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+                        mime = "image/webp"
+            except Exception:
+                pass
+
+        response = FileResponse(path, media_type=mime)
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
     
     raise HTTPException(status_code=500, detail="Database error")
 
-@router.get("/art/test")
-async def get_test_artwork():
-    """Serve a JPEG for UPnP album art testing."""
-    response = Response(content=_TEST_ART_BYTES, media_type="image/jpeg")
-    response.headers["Cache-Control"] = "no-cache"
-    return response
+

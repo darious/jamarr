@@ -1,4 +1,5 @@
 import os
+import httpx
 import asyncio
 import logging
 import json
@@ -6,6 +7,7 @@ import time
 from datetime import datetime, timezone
 from app.db import get_db
 from app.scanner.tags import extract_tags
+from app.scanner.stats import get_api_tracker
 from app.scanner.artwork import extract_and_save_artwork, download_and_save_artwork, cleanup_orphaned_artwork, upsert_artwork_record, upsert_image_mapping
 from app.config import get_music_path
 from app.scanner.metadata import fetch_artist_metadata, fetch_track_credits, SPOTIFY_SCANNING_DISABLED
@@ -453,6 +455,8 @@ class Scanner:
             else:
                 self.stats["added"] += 1
 
+            get_api_tracker().track_processed("tracks", track_id)
+
             # Map artwork to album or track fallback
             if artwork_id:
                 if mb_rg_id:
@@ -479,6 +483,7 @@ class Scanner:
 
                      # Remove from missing_album if we have it now
                      await db.execute("DELETE FROM missing_album WHERE release_group_mbid = $1", mb_rg_id)
+                     get_api_tracker().track_processed("albums", mb_rg_id)
                  except Exception as e:
                      logger.warning(f"Error upserting album {album_title} ({mb_rg_id}): {e}")
 
@@ -533,6 +538,7 @@ class Scanner:
                 """, 'artist', mbid, 'musicbrainz', mb_url)
                 
                 self._processed_artists_session.add((mbid, name))
+                get_api_tracker().track_processed("artists", mbid)
 
             await db.execute("INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, $2) ON CONFLICT (track_id, artist_mbid) DO NOTHING", track_id, mbid)
 
@@ -557,7 +563,7 @@ class Scanner:
                  if (mbid, name) not in self._processed_artists_session:
                      await db.execute("""
                         INSERT INTO artist (mbid, name, updated_at) VALUES ($1, $2, NOW())
-                        ON CONFLICT(mbid) DO UPDATE SET name=COALESCE(name, excluded.name)
+                        ON CONFLICT(mbid) DO UPDATE SET name=COALESCE(artist.name, excluded.name)
                      """, mbid, name)
                      
                      # Create MusicBrainz external link
@@ -570,6 +576,7 @@ class Scanner:
                  """, 'artist', mbid, 'appears_on', mb_url)
                      
                      self._processed_artists_session.add((mbid, name))
+                     get_api_tracker().track_processed("artists", mbid)
 
                  artist_mbids.add((mbid, name))
                  
@@ -581,6 +588,8 @@ class Scanner:
                         VALUES ($1, $2, $3, $4, NOW())
                         ON CONFLICT(mbid) DO NOTHING
                      """, mb_rg_id, safe_title, tags.get("date"), 'Album')
+                     
+                     get_api_tracker().track_processed("albums", mb_rg_id)
 
                      await db.execute("""
                         INSERT INTO artist_album (artist_mbid, album_mbid, type)
@@ -654,7 +663,7 @@ class Scanner:
                                  UPDATE top_track
                                  SET track_id = $1, updated_at = $2
                                  WHERE id = $3
-                              """, track_id, time.time(), tt_id)
+                             """, track_id, datetime.now(timezone.utc), tt_id)
 
     async def _cleanup_orphans(self, db, root_path, seen_paths):
         music_root = get_music_path()
@@ -751,14 +760,24 @@ class Scanner:
             # 6. Prune Artwork (The big one)
             logger.info("Pruning orphaned artwork...")
             
+            # Collect all artwork still referenced anywhere (direct refs + image_map)
             used_shas = set()
-            rows = await db.fetch("""
-                SELECT aw.sha1 FROM image_map im
-                JOIN artwork aw ON im.artwork_id = aw.id
-                WHERE im.entity_type = 'track' AND im.entity_id::bigint IN (
-                    SELECT id FROM track
+            rows = await db.fetch(
+                """
+                WITH used_ids AS (
+                    SELECT artwork_id FROM image_map
+                    UNION
+                    SELECT artwork_id FROM track WHERE artwork_id IS NOT NULL
+                    UNION
+                    SELECT artwork_id FROM album WHERE artwork_id IS NOT NULL
+                    UNION
+                    SELECT artwork_id FROM artist WHERE artwork_id IS NOT NULL
                 )
-            """)
+                SELECT DISTINCT aw.sha1
+                FROM artwork aw
+                JOIN used_ids u ON u.artwork_id = aw.id
+                """
+            )
             used_shas.update([r[0] for r in rows])
 
             art_paths = []
@@ -783,10 +802,20 @@ class Scanner:
             
             logger.info(f"Deleted {deleted_art} orphaned artwork files.")
             
-            await db.execute("""
+            await db.execute(
+                """
                 DELETE FROM artwork
-                WHERE id NOT IN (SELECT artwork_id FROM image_map)
-            """)
+                WHERE id NOT IN (
+                    SELECT artwork_id FROM image_map
+                    UNION
+                    SELECT artwork_id FROM track WHERE artwork_id IS NOT NULL
+                    UNION
+                    SELECT artwork_id FROM album WHERE artwork_id IS NOT NULL
+                    UNION
+                    SELECT artwork_id FROM artist WHERE artwork_id IS NOT NULL
+                )
+                """
+            )
             
             logger.info("Library Prune Complete.")
 
@@ -801,9 +830,9 @@ class Scanner:
             self.scan_logger.emit_progress(0, 0, "Starting Metadata Update...")
         
         # Concurrency Control (Producer Limit)
-        # We allow 20 concurrent network fetchers (Producers)
-        # Database writes (Consumer) are batched and sequential
-        semaphore = asyncio.Semaphore(20)
+        # 20 concurrent producers was causing DNS/Network exhaustion on some systems.
+        # Reduced to 10 to be safer.
+        semaphore = asyncio.Semaphore(10)
         
         async for db in get_db():
             # Get artists
@@ -841,9 +870,9 @@ class Scanner:
             
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
-            query += " GROUP BY a.mbid, aw.source"
+            query += " GROUP BY a.mbid, aw.source ORDER BY a.name"
             
-            rows = await db.fetch(query, params)
+            rows = await db.fetch(query, *params)
 
             # Helper for Gap Checking
             def has_selected_gaps(row, fetch_top, fetch_singles):
@@ -940,7 +969,7 @@ class Scanner:
             
             it = iter(tasks_to_spawn)
             
-            async def spawn_cleanup_consume():
+            async def spawn_cleanup_consume(client):
                 # Helper to handle task management: Spawn new until max, await completed, consume results
                 nonlocal processed_count
                 nonlocal pending_tasks
@@ -998,7 +1027,7 @@ class Scanner:
 
                             # Spawn Task
                             task = asyncio.create_task(self._produce_metadata_update(
-                                semaphore, row, flags, local_release_group_ids, known_wikipedia_url
+                                semaphore, row, flags, local_release_group_ids, known_wikipedia_url, client
                             ))
                             pending_tasks.add(task)
                         
@@ -1014,7 +1043,18 @@ class Scanner:
                     for t in done:
                         try:
                             res = await t
-                            if res: results_buffer.append(res)
+                            if res: 
+                                results_buffer.append(res)
+                                # Increment metadata counter IMMEDIATELY upon completion
+                                if res["row"] and res["row"][0]:
+                                     get_api_tracker().track_processed("metadata_artists", res["row"][0])
+                                
+                                # Update progress more frequently (every item) so API stats broadcast
+                                processed_count += 1
+                                if self.scan_logger:
+                                     last_name = res["row"][1] or "Unknown"
+                                     self.scan_logger.emit_progress(processed_count, total, f"Metadata: {last_name}")
+
                         except asyncio.CancelledError:
                             raise
                         except Exception as e:
@@ -1023,27 +1063,28 @@ class Scanner:
                     # Batch Write
                     if len(results_buffer) >= 50:
                         await self._consume_metadata_update(db, results_buffer)
-                        processed_count += len(results_buffer)
-                        
-                        if self.scan_logger:
-                             # Just use last item name for logs
-                             last_name = results_buffer[-1]["row"][1] or "Unknown"
-                             self.scan_logger.emit_progress(processed_count, total, f"Metadata: {last_name} (Batch)")
+                        # processed_count is already incremented above
                         
                         results_buffer.clear()
                         
-            await spawn_cleanup_consume()
+            # Use a shared client with tuned limits to prevent "Temporary failure in name resolution"
+            # Increase keepalive to hold connections to multiple domains (MB, LastFM, Spotify, Fanart, Wiki)
+            timeout = httpx.Timeout(20.0, connect=10.0)
+            limits = httpx.Limits(max_keepalive_connections=50, max_connections=100)
+            
+            async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}, timeout=timeout, limits=limits) as client:
+                await spawn_cleanup_consume(client)
             
             # Flush final buffer
             if results_buffer:
                 await self._consume_metadata_update(db, results_buffer)
-                processed_count += len(results_buffer)
+                # processed_count already incremented
                 if self.scan_logger:
                     self.scan_logger.emit_progress(processed_count, total, f"Metadata: Complete")
 
             logger.info(f"Metadata update complete. Processed {processed_count} artists.")
 
-    async def _produce_metadata_update(self, semaphore, row, flags, local_release_group_ids, known_wikipedia_url):
+    async def _produce_metadata_update(self, semaphore, row, flags, local_release_group_ids, known_wikipedia_url, client):
          eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists = flags
          mbid, name, updated_at, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
          
@@ -1067,6 +1108,7 @@ class Scanner:
                 known_wikipedia_url=known_wikipedia_url,
                 known_spotify_url=spotify_link_existing,
                 fetch_similar_artists=eff_fetch_similar_artists,
+                client=client
              )
              
              # Download artwork (Disk I/O + Network)
@@ -1336,7 +1378,9 @@ class Scanner:
                     if track_id:
                         await db.execute(
                             "UPDATE top_track SET track_id = $1, updated_at = $2 WHERE id = $3",
-                            (track_id, time.time(), tt_id),
+                            track_id,
+                            datetime.now(timezone.utc),
+                            tt_id,
                         )
 
     async def scan_missing_albums(self, artist_filter=None, mbid_filter=None):
@@ -1382,7 +1426,7 @@ class Scanner:
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
                 
-            artists = await db.fetch(query, params)
+            artists = await db.fetch(query, *params)
 
             total = len(artists)
             processed = 0

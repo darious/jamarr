@@ -11,9 +11,25 @@
         triggerOptimize,
     } from "$lib/api";
 
+    interface ScanStats {
+        scanned: number;
+        total: number;
+        percentage: number;
+        message: string;
+        phase: string;
+        completed: boolean;
+        completedStatus: string;
+        api_stats?: Record<string, number>;
+        processed_stats?: {
+            tracks?: number;
+            albums?: number;
+            artists?: number;
+        };
+    }
+
     let status = "Idle";
     let isRunning = false;
-    let stats = {
+    let stats: ScanStats = {
         scanned: 0,
         total: 0,
         percentage: 0,
@@ -21,6 +37,8 @@
         phase: "",
         completed: false,
         completedStatus: "",
+        api_stats: {},
+        processed_stats: {},
     };
     let logs: { timestamp: number; message: string }[] = [];
     let logContainer: HTMLElement;
@@ -145,6 +163,9 @@
                 phase: data.phase || stats.phase,
                 completed: false,
                 completedStatus: "",
+                api_stats: data.api_stats || stats.api_stats || {},
+                processed_stats:
+                    data.processed_stats || stats.processed_stats || {},
             };
         } else if (data.type === "log") {
             addLog(data.message);
@@ -506,6 +527,151 @@
                 {/if}
             </div>
 
+            <!-- API & Processed Stats -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <!-- Processed Counts -->
+                <div
+                    class="card bg-white/5 border border-white/10 p-4 md:col-span-1"
+                >
+                    <h3
+                        class="text-xs uppercase tracking-wide text-white/40 mb-3"
+                    >
+                        Processed Items
+                    </h3>
+                    <div class="flex gap-6">
+                        <div class="flex flex-col">
+                            <span
+                                class="text-2xl font-bold font-display text-white"
+                                >{stats.processed_stats?.tracks || 0}</span
+                            >
+                            <span class="text-xs text-white/50">Tracks</span>
+                        </div>
+                        <div class="flex flex-col">
+                            <span
+                                class="text-2xl font-bold font-display text-white"
+                                >{stats.processed_stats?.albums || 0}</span
+                            >
+                            <span class="text-xs text-white/50">Albums</span>
+                        </div>
+                        <div class="flex flex-col">
+                            <span
+                                class="text-2xl font-bold font-display text-white"
+                                >{stats.processed_stats?.artists || 0}</span
+                            >
+                            <span class="text-xs text-white/50">Artists</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Hits -->
+                <div
+                    class="card bg-white/5 border border-white/10 p-4 md:col-span-2"
+                >
+                    <h3
+                        class="text-xs uppercase tracking-wide text-white/40 mb-3"
+                    >
+                        API Requests
+                    </h3>
+                    <div class="flex flex-wrap gap-4">
+                        <!-- MusicBrainz -->
+                        <div
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="MusicBrainz"
+                        >
+                            <img
+                                src="/assets/logo-musicbrainz.svg"
+                                alt="MB"
+                                class="w-5 h-5 opacity-90"
+                            />
+                            <span
+                                class="font-mono text-sm font-bold text-white/90"
+                                >{stats.api_stats?.musicbrainz || 0}</span
+                            >
+                        </div>
+
+                        <!-- Fanart.tv -->
+                        <div
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Fanart.tv"
+                        >
+                            <img
+                                src="/assets/logo-fanarttv.svg"
+                                alt="Fanart"
+                                class="w-5 h-5 opacity-90"
+                            />
+                            <span
+                                class="font-mono text-sm font-bold text-white/90"
+                                >{stats.api_stats?.fanart || 0}</span
+                            >
+                        </div>
+
+                        <!-- Last.fm -->
+                        <div
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Last.fm"
+                        >
+                            <img
+                                src="/assets/logo-lastfm.png"
+                                alt="Last.fm"
+                                class="w-5 h-5 opacity-90"
+                            />
+                            <span
+                                class="font-mono text-sm font-bold text-white/90"
+                                >{stats.api_stats?.lastfm || 0}</span
+                            >
+                        </div>
+
+                        <!-- Wikidata -->
+                        <div
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Wikidata"
+                        >
+                            <img
+                                src="/assets/logo-wikidata.png"
+                                alt="Wikidata"
+                                class="w-6 h-6 opacity-90"
+                            />
+                            <span
+                                class="font-mono text-sm font-bold text-white/90"
+                                >{stats.api_stats?.wikidata || 0}</span
+                            >
+                        </div>
+
+                        <!-- Wikipedia -->
+                        <div
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Wikipedia"
+                        >
+                            <img
+                                src="/assets/logo-wikipedia.svg"
+                                alt="Wikipedia"
+                                class="w-6 h-6 opacity-90"
+                            />
+                            <span
+                                class="font-mono text-sm font-bold text-white/90"
+                                >{stats.api_stats?.wikipedia || 0}</span
+                            >
+                        </div>
+
+                        <!-- Spotify -->
+                        <div
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Spotify"
+                        >
+                            <img
+                                src="/assets/logo-spotify.svg"
+                                alt="Spotify"
+                                class="w-5 h-5 opacity-90"
+                            />
+                            <span
+                                class="font-mono text-sm font-bold text-white/90"
+                                >{stats.api_stats?.spotify || 0}</span
+                            >
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div
                 class="card bg-[#0d1117] border border-white/10 overflow-hidden flex flex-col font-mono text-sm shadow-inner"
             >
@@ -528,7 +694,7 @@
                     </span>
                 </div>
                 <div
-                    class="max-h-[320px] overflow-y-auto p-4 space-y-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
+                    class="h-96 overflow-y-auto p-4 space-y-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
                     bind:this={logContainer}
                     on:scroll={handleScroll}
                 >
