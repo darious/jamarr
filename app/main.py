@@ -53,16 +53,19 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 from app.media import art
-from app.api import library, stream, player, search, scan, auth, media_quality
+from app.api import library, stream, player, search, scan, auth
+
 
 app.include_router(art.router)
+app.include_router(art.router, prefix="/api")
 app.include_router(library.router)
 app.include_router(stream.router)
 app.include_router(player.router)
 app.include_router(search.router)
 app.include_router(scan.router)
 app.include_router(auth.router)
-app.include_router(media_quality.router)
+# app.include_router(media_quality.router)
+
 
 
 

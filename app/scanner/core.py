@@ -80,11 +80,11 @@ class Scanner:
                     start_t = time.time()
                     
                     # Step 1: Identify tracks and albums in scope
-                    cursor = await db.execute(f"SELECT id FROM tracks WHERE {limit_clause}", params)
+                    cursor = await db.execute(f"SELECT id FROM track WHERE {limit_clause}", params)
                     t_rows = await cursor.fetchall()
                     track_ids = [r[0] for r in t_rows]
                     
-                    cursor = await db.execute(f"SELECT DISTINCT mb_release_group_id FROM tracks WHERE {limit_clause}", params)
+                    cursor = await db.execute(f"SELECT DISTINCT release_group_mbid FROM track WHERE {limit_clause}", params)
                     a_rows = await cursor.fetchall()
                     album_mbids = [r[0] for r in a_rows if r[0]]
                     
@@ -93,7 +93,7 @@ class Scanner:
                     artist_mbids_to_clean = set()
                     if track_ids:
                         t_placeholders = ",".join("?" * len(track_ids))
-                        cursor = await db.execute(f"SELECT DISTINCT mbid FROM track_artists WHERE track_id IN ({t_placeholders})", track_ids)
+                        cursor = await db.execute(f"SELECT DISTINCT artist_mbid FROM track_artist WHERE track_id IN ({t_placeholders})", track_ids)
                         artist_rows = await cursor.fetchall()
                         artist_mbids_to_clean = {r[0] for r in artist_rows if r[0]}
 
@@ -108,15 +108,15 @@ class Scanner:
                     t_placeholders = ",".join("?" * len(track_ids))
                     
                     # Delete track-artist links
-                    cursor = await db.execute(f"DELETE FROM track_artists WHERE track_id IN ({t_placeholders})", track_ids)
+                    cursor = await db.execute(f"DELETE FROM track_artist WHERE track_id IN ({t_placeholders})", track_ids)
                     counts['track_artists'] = cursor.rowcount
                     
                     # Delete image mappings for tracks
-                    cursor = await db.execute(f"DELETE FROM image_mapping WHERE entity_type='track' AND entity_id IN ({t_placeholders})", [str(tid) for tid in track_ids])
+                    cursor = await db.execute(f"DELETE FROM image_map WHERE entity_type='track' AND entity_id IN ({t_placeholders})", [str(tid) for tid in track_ids])
                     counts['track_images'] = cursor.rowcount
                     
                     # Delete tracks themselves
-                    await db.execute(f"DELETE FROM tracks WHERE id IN ({t_placeholders})", track_ids)
+                    await db.execute(f"DELETE FROM track WHERE id IN ({t_placeholders})", track_ids)
                     counts['tracks'] = len(track_ids)
                     
                     # B. Album-level deletions
@@ -124,23 +124,23 @@ class Scanner:
                         a_placeholders = ",".join("?" * len(album_mbids))
                         
                         # Delete artist-album links
-                        cursor = await db.execute(f"DELETE FROM artist_albums WHERE album_mbid IN ({a_placeholders})", album_mbids)
+                        cursor = await db.execute(f"DELETE FROM artist_album WHERE album_mbid IN ({a_placeholders})", album_mbids)
                         counts['artist_albums'] = cursor.rowcount
                         
                         # Delete album external links
-                        cursor = await db.execute(f"DELETE FROM external_links WHERE entity_type='album' AND entity_id IN ({a_placeholders})", album_mbids)
+                        cursor = await db.execute(f"DELETE FROM external_link WHERE entity_type='album' AND entity_id IN ({a_placeholders})", album_mbids)
                         counts['album_links'] = cursor.rowcount
                         
                         # Delete album image mappings
-                        cursor = await db.execute(f"DELETE FROM image_mapping WHERE entity_type='album' AND entity_id IN ({a_placeholders})", album_mbids)
+                        cursor = await db.execute(f"DELETE FROM image_map WHERE entity_type='album' AND entity_id IN ({a_placeholders})", album_mbids)
                         counts['album_images'] = cursor.rowcount
                         
                         # Delete albums
-                        cursor = await db.execute(f"DELETE FROM albums WHERE mbid IN ({a_placeholders})", album_mbids)
+                        cursor = await db.execute(f"DELETE FROM album WHERE mbid IN ({a_placeholders})", album_mbids)
                         counts['albums'] = cursor.rowcount
                         
                         # Delete missing_albums entries (they'll be re-discovered if still missing)
-                        cursor = await db.execute(f"DELETE FROM missing_albums WHERE release_group_mbid IN ({a_placeholders})", album_mbids)
+                        cursor = await db.execute(f"DELETE FROM missing_album WHERE release_group_mbid IN ({a_placeholders})", album_mbids)
                         counts['missing_albums'] = cursor.rowcount
                     
                     # C. Artist metadata cleanup (for artists in this scope)
@@ -151,23 +151,23 @@ class Scanner:
                         artist_list = list(artist_mbids_to_clean)
                         
                         # Delete artist external links
-                        cursor = await db.execute(f"DELETE FROM external_links WHERE entity_type='artist' AND entity_id IN ({am_placeholders})", artist_list)
+                        cursor = await db.execute(f"DELETE FROM external_link WHERE entity_type='artist' AND entity_id IN ({am_placeholders})", artist_list)
                         counts['artist_links'] = cursor.rowcount
                         
                         # Delete artist image mappings
-                        cursor = await db.execute(f"DELETE FROM image_mapping WHERE entity_type='artist' AND entity_id IN ({am_placeholders})", artist_list)
+                        cursor = await db.execute(f"DELETE FROM image_map WHERE entity_type='artist' AND entity_id IN ({am_placeholders})", artist_list)
                         counts['artist_images'] = cursor.rowcount
                         
                         # Delete artist genres
-                        cursor = await db.execute(f"DELETE FROM artist_genres WHERE artist_mbid IN ({am_placeholders})", artist_list)
+                        cursor = await db.execute(f"DELETE FROM artist_genre WHERE artist_mbid IN ({am_placeholders})", artist_list)
                         counts['artist_genres'] = cursor.rowcount
                         
                         # Delete top tracks/singles
-                        cursor = await db.execute(f"DELETE FROM tracks_top WHERE artist_mbid IN ({am_placeholders})", artist_list)
+                        cursor = await db.execute(f"DELETE FROM top_track WHERE artist_mbid IN ({am_placeholders})", artist_list)
                         counts['tracks_top'] = cursor.rowcount
                         
                         # Delete similar artists
-                        cursor = await db.execute(f"DELETE FROM similar_artists WHERE artist_mbid IN ({am_placeholders})", artist_list)
+                        cursor = await db.execute(f"DELETE FROM similar_artist WHERE artist_mbid IN ({am_placeholders})", artist_list)
                         counts['similar_artists'] = cursor.rowcount
 
                     await db.commit()
@@ -202,7 +202,7 @@ class Scanner:
             self.stats["current_status"] = "Loading DB Cache..."
             logger.info("Pre-fetching file list from database...")
             self._db_files_cache = {}
-            async with db.execute("SELECT path, mtime FROM tracks") as cursor:
+            async with db.execute("SELECT path, updated_at FROM track") as cursor:
                 rows = await cursor.fetchall()
                 for r in rows:
                     self._db_files_cache[r[0]] = r[1]
@@ -234,7 +234,7 @@ class Scanner:
             
             # 4. Populate Artists Table
             # Ensure all referenced artists exist in the artists table (from current scan OR existing DB)
-            async with db.execute("SELECT DISTINCT mbid FROM track_artists") as cursor:
+            async with db.execute("SELECT DISTINCT artist_mbid FROM track_artist") as cursor:
                 rows = await cursor.fetchall()
                 db_mbids = {r[0] for r in rows if r[0]}
             
@@ -249,7 +249,7 @@ class Scanner:
             
             count = 0
             for mbid in all_mbids:
-                 await db.execute("INSERT OR IGNORE INTO artists (mbid) VALUES (?)", (mbid,))
+                 await db.execute("INSERT OR IGNORE INTO artist (mbid) VALUES (?)", (mbid,))
                  count += 1
                  if count % 100 == 0: await db.commit()
             
@@ -257,7 +257,7 @@ class Scanner:
             count = 0
             for mbid, name in artist_mbids:
                  if mbid and name:
-                     await db.execute("UPDATE artists SET name = ? WHERE mbid = ? AND (name IS NULL OR name = '')", (name, mbid))
+                     await db.execute("UPDATE artist SET name = ? WHERE mbid = ? AND (name IS NULL OR name = '')", (name, mbid))
                      count += 1
                      if count % 100 == 0: await db.commit()
 
@@ -391,22 +391,22 @@ class Scanner:
 
             # Artwork
             art_result = await extract_and_save_artwork(path)
-            art_id = None
+            artwork_id = None
             if art_result:
-                art_id = await upsert_artwork_record(
+                artwork_id = await upsert_artwork_record(
                     db,
                     art_result.get("sha1"),
                     meta=art_result.get("meta"),
                 )
                 # logger.debug(f"[filesystem] Artwork cached for {rel_path} sha1={art_result.get('sha1')}")
 
-            mb_rg_id = tags.get("mb_release_group_id")
+            mb_rg_id = tags.get("release_group_mbid")
 
             # Upsert Track
-            keys = ["path", "mtime", "title", "artist", "album", "album_artist", 
+            keys = ["path", "updated_at", "title", "artist", "album", "album_artist", 
                     "track_no", "disc_no", "date", "genre", "duration_seconds", 
                     "codec", "sample_rate_hz", "bit_depth", "bitrate", "channels", "label", 
-                    "mb_artist_id", "mb_album_artist_id", "mb_track_id", "mb_release_track_id", "mb_release_id", "mb_release_group_id", "art_id"]
+                    "artist_mbid", "album_artist_mbid", "track_mbid", "release_track_mbid", "release_mbid", "release_group_mbid", "artwork_id"]
             
             values = [
                 rel_path, mtime, tags.get("title"), tags.get("artist"), tags.get("album"), 
@@ -414,17 +414,17 @@ class Scanner:
                 tags.get("date"), tags.get("genre"), tags.get("duration_seconds"),
                 tags.get("codec"), tags.get("sample_rate_hz"), tags.get("bit_depth"),
                 tags.get("bitrate"), tags.get("channels"), tags.get("label"),
-                tags.get("mb_artist_id"), tags.get("mb_album_artist_id"), 
-                tags.get("mb_track_id"), tags.get("mb_release_track_id"), tags.get("mb_release_id"), mb_rg_id, art_id
+                tags.get("artist_mbid"), tags.get("album_artist_mbid"), 
+                tags.get("track_mbid"), tags.get("release_track_mbid"), tags.get("release_mbid"), mb_rg_id, artwork_id
             ]
             
             placeholders = ", ".join(["?"] * len(keys))
             columns = ", ".join(keys)
             
             sql = f"""
-                INSERT INTO tracks ({columns}) VALUES ({placeholders})
+                INSERT INTO track ({columns}) VALUES ({placeholders})
                 ON CONFLICT(path) DO UPDATE SET
-                    mtime=excluded.mtime,
+                    updated_at=excluded.updated_at,
                     title=excluded.title,
                     artist=excluded.artist,
                     album=excluded.album,
@@ -440,20 +440,20 @@ class Scanner:
                     bitrate=excluded.bitrate,
                     channels=excluded.channels,
                     label=excluded.label,
-                    mb_artist_id=excluded.mb_artist_id,
-                    mb_album_artist_id=excluded.mb_album_artist_id,
-                    mb_track_id=excluded.mb_track_id,
-                    mb_release_track_id=excluded.mb_release_track_id,
-                    mb_release_id=excluded.mb_release_id,
-                    mb_release_group_id=excluded.mb_release_group_id,
-                    art_id=excluded.art_id
+                    artist_mbid=excluded.artist_mbid,
+                    album_artist_mbid=excluded.album_artist_mbid,
+                    track_mbid=excluded.track_mbid,
+                    release_track_mbid=excluded.release_track_mbid,
+                    release_mbid=excluded.release_mbid,
+                    release_group_mbid=excluded.release_group_mbid,
+                    artwork_id=excluded.artwork_id
             """
             cursor = await db.execute(sql, values)
             
             if cursor.lastrowid:
                 track_id = cursor.lastrowid
             else:
-                async with db.execute("SELECT id FROM tracks WHERE path = ?", (rel_path,)) as c2:
+                async with db.execute("SELECT id FROM track WHERE path = ?", (rel_path,)) as c2:
                     row = await c2.fetchone()
                     track_id = row[0] if row else None
         
@@ -463,31 +463,31 @@ class Scanner:
                 self.stats["added"] += 1
 
             # Map artwork to album or track fallback
-            if art_id:
+            if artwork_id:
                 if mb_rg_id:
-                    await upsert_image_mapping(db, art_id, "album", mb_rg_id, "album")
+                    await upsert_image_mapping(db, artwork_id, "album", mb_rg_id, "album")
                 else:
-                    await upsert_image_mapping(db, art_id, "track", track_id, "album")
+                    await upsert_image_mapping(db, artwork_id, "track", track_id, "album")
 
             # --- Populate Normalized Tables from Tags ---
             
             # 1. Albums
-            mb_rg_id = tags.get("mb_release_group_id")
+            mb_rg_id = tags.get("release_group_mbid")
             album_title = tags.get("album")
             if mb_rg_id and album_title:
                  # Upsert Album
                  try:
                      await db.execute("""
-                        INSERT INTO albums (mbid, title, release_date, secondary_types, art_id, last_updated)
+                        INSERT INTO album (mbid, title, release_date, secondary_types, artwork_id, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?)
                         ON CONFLICT(mbid) DO UPDATE SET
                             title=COALESCE(excluded.title, title),
                             release_date=COALESCE(excluded.release_date, release_date),
-                            art_id=COALESCE(excluded.art_id, art_id)
-                     """, (mb_rg_id, album_title, tags.get("date"), 'Album', art_id, time.time()))
+                            artwork_id=COALESCE(excluded.artwork_id, artwork_id)
+                     """, (mb_rg_id, album_title, tags.get("date"), 'Album', artwork_id, time.time()))
 
-                     # Remove from missing_albums if we have it now
-                     await db.execute("DELETE FROM missing_albums WHERE release_group_mbid = ?", (mb_rg_id,))
+                     # Remove from missing_album if we have it now
+                     await db.execute("DELETE FROM missing_album WHERE release_group_mbid = ?", (mb_rg_id,))
                  except Exception as e:
                      logger.warning(f"Error upserting album {album_title} ({mb_rg_id}): {e}")
 
@@ -503,7 +503,7 @@ class Scanner:
 
     async def _process_track_artists(self, db, track_id, tags, artist_mbids, mb_rg_id=None):
         # Clear existing
-        await db.execute("DELETE FROM track_artists WHERE track_id = ?", (track_id,))
+        await db.execute("DELETE FROM track_artist WHERE track_id = ?", (track_id,))
         
         # Helper to extract IDs
         def extract_ids(raw):
@@ -512,25 +512,25 @@ class Scanner:
             return [x.strip() for x in cleaned.split(";") if x.strip()]
 
         aa_ids = []
-        if tags.get("mb_album_artist_id"):
-             aa_ids = extract_ids(tags["mb_album_artist_id"])
+        if tags.get("album_artist_mbid"):
+             aa_ids = extract_ids(tags["album_artist_mbid"])
 
         ids = []
-        if tags.get("mb_artist_id"):
-            ids = extract_ids(tags["mb_artist_id"])
+        if tags.get("artist_mbid"):
+            ids = extract_ids(tags["artist_mbid"])
 
         # Deduplicate IDs to prevent UNIQUE constraint violations
         ids = list(dict.fromkeys(ids))
 
         for mbid in ids:
-            await db.execute("INSERT OR IGNORE INTO track_artists (track_id, mbid) VALUES (?, ?)", (track_id, mbid))
+            await db.execute("INSERT OR IGNORE INTO track_artist (track_id, artist_mbid) VALUES (?, ?)", (track_id, mbid))
             
             # Upsert Artist (Track Artist)
             name = tags.get("artist") if len(ids) == 1 else None
             
             if (mbid, name) not in self._processed_artists_session:
                 await db.execute("""
-                    INSERT INTO artists (mbid, name, last_updated) VALUES (?, ?, ?)
+                    INSERT INTO artist (mbid, name, updated_at) VALUES (?, ?, ?)
                     ON CONFLICT(mbid) DO UPDATE SET name=COALESCE(name, excluded.name)
                 """, (mbid, name, time.time()))
                 
@@ -538,7 +538,7 @@ class Scanner:
                 from app.config import get_musicbrainz_root_url
                 mb_url = f"{get_musicbrainz_root_url()}/artist/{mbid}"
                 await db.execute("""
-                    INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url)
+                    INSERT OR IGNORE INTO external_link (entity_type, entity_id, type, url)
                     VALUES (?, ?, ?, ?)
                 """, ('artist', mbid, 'musicbrainz', mb_url))
                 
@@ -549,14 +549,14 @@ class Scanner:
             # Logic: Link to Album as 'appears_on' if not album artist
             if mb_rg_id and mbid not in aa_ids:
                  await db.execute("""
-                    INSERT INTO artist_albums (artist_mbid, album_mbid, type)
+                    INSERT INTO artist_album (artist_mbid, album_mbid, type)
                     VALUES (?, ?, ?)
                     ON CONFLICT(artist_mbid, album_mbid) DO NOTHING
                  """, (mbid, mb_rg_id, 'appears_on'))
         
         # Album Artist & Album Junction
-        if tags.get("mb_album_artist_id"):
-             aa_ids = extract_ids(tags["mb_album_artist_id"])
+        if tags.get("album_artist_mbid"):
+             aa_ids = extract_ids(tags["album_artist_mbid"])
              aa_name = tags.get("album_artist") or tags.get("artist")
              name = aa_name if len(aa_ids) == 1 else None
              
@@ -564,7 +564,7 @@ class Scanner:
                  # Upsert Artist (Album Artist)
                  if (mbid, name) not in self._processed_artists_session:
                      await db.execute("""
-                        INSERT INTO artists (mbid, name, last_updated) VALUES (?, ?, ?)
+                        INSERT INTO artist (mbid, name, updated_at) VALUES (?, ?, ?)
                         ON CONFLICT(mbid) DO UPDATE SET name=COALESCE(name, excluded.name)
                      """, (mbid, name, time.time()))
                      
@@ -572,7 +572,7 @@ class Scanner:
                      from app.config import get_musicbrainz_root_url
                      mb_url = f"{get_musicbrainz_root_url()}/artist/{mbid}"
                      await db.execute("""
-                        INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url)
+                        INSERT OR IGNORE INTO external_link (entity_type, entity_id, type, url)
                         VALUES (?, ?, ?, ?)
                      """, ('artist', mbid, 'musicbrainz', mb_url))
                      
@@ -584,18 +584,18 @@ class Scanner:
                  if mb_rg_id:
                      safe_title = tags.get("album") or f"Unknown Album ({mb_rg_id})"
                      await db.execute("""
-                        INSERT INTO albums (mbid, title, release_date, secondary_types, last_updated)
+                        INSERT INTO album (mbid, title, release_date, secondary_types, updated_at)
                         VALUES (?, ?, ?, ?, ?)
                         ON CONFLICT(mbid) DO NOTHING
                      """, (mb_rg_id, safe_title, tags.get("date"), 'Album', time.time()))
 
                      await db.execute("""
-                        INSERT INTO artist_albums (artist_mbid, album_mbid, type)
+                        INSERT INTO artist_album (artist_mbid, album_mbid, type)
                         VALUES (?, ?, ?)
                         ON CONFLICT(artist_mbid, album_mbid) DO NOTHING
                      """, (mbid, mb_rg_id, 'primary'))
 
-             # Update tracks_top if this track is a match
+             # Update top_track if this track is a match
              if tags.get("title"):
                  track_title = tags.get("title").strip().lower()
                  track_album = tags.get("album", "").strip().lower()
@@ -607,7 +607,7 @@ class Scanner:
                      top_tracks = []
                      async with db.execute("""
                          SELECT id, external_name, external_album, external_duration_ms
-                         FROM tracks_top
+                         FROM top_track
                          WHERE artist_mbid = ? AND track_id IS NULL
                      """, (mbid,)) as cursor:
                           top_tracks = await cursor.fetchall()
@@ -658,8 +658,8 @@ class Scanner:
                          
                          if final_score > 0.75:
                               await db.execute("""
-                                 UPDATE tracks_top
-                                 SET track_id = ?, last_updated = ?
+                                 UPDATE top_track
+                                 SET track_id = ?, updated_at = ?
                                  WHERE id = ?
                               """, (track_id, time.time(), tt_id))
 
@@ -671,7 +671,7 @@ class Scanner:
         # If we scanned the whole library, self._db_files_cache has everything.
         # But if we scanned a SUBFOLDER, we only want to prune tracks within that subfolder.
         # However, _db_files_cache was loaded with EVERYTHING from DB properly? 
-        # Wait, I loaded `SELECT path FROM tracks`. Yes, everything.
+        # Wait, I loaded `SELECT path FROM track`. Yes, everything.
         
         if os.path.abspath(root_path) == os.path.abspath(music_root):
             # Full scan: Orphans are simply DB - seen
@@ -690,10 +690,10 @@ class Scanner:
             orphans = db_paths_in_scope - seen_rel_paths
 
         if orphans:
-            logger.info(f"Removing {len(orphans)} orphaned tracks.")
+            logger.info(f"Removing {len(orphans)} orphaned track.")
             count = 0
             for orphan in orphans:
-                await db.execute("DELETE FROM tracks WHERE path = ?", (orphan,))
+                await db.execute("DELETE FROM track WHERE path = ?", (orphan,))
                 count += 1
                 if count % 100 == 0: await db.commit()
             await db.commit()
@@ -703,7 +703,7 @@ class Scanner:
         Comprehensive cleanup of the database and filesystem.
         Removes:
         1. Tracks not on disk.
-        2. Artists/Albums with no tracks.
+        2. Artists/Albums with no track.
         3. External links for deleted entities.
         4. Artwork not referenced in DB (Filesystem & DB).
         """
@@ -713,7 +713,7 @@ class Scanner:
         async for db in get_db():
             # 1. Prune Tracks (DB -> FS check)
             logger.info("Checking for deleted files...")
-            async with db.execute("SELECT id, path FROM tracks") as cursor:
+            async with db.execute("SELECT id, path FROM track") as cursor:
                 rows = await cursor.fetchall()
             
             music_root = get_music_path()
@@ -722,40 +722,40 @@ class Scanner:
                 abs_path = os.path.join(music_root, rel_path)
                 if not os.path.exists(abs_path):
                     # logger.debug(f"Pruning missing file: {path}")
-                    await db.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+                    await db.execute("DELETE FROM track WHERE id = ?", (track_id,))
                     deleted_tracks += 1
             if deleted_tracks:
                 await db.commit()
-                logger.info(f"Removed {deleted_tracks} missing tracks.")
+                logger.info(f"Removed {deleted_tracks} missing track.")
             
             # 2. Prune Orphaned Artists (No tracks in track_artists)
             # Find artists who are NOT in track_artists
             logger.info("Pruning orphaned artists...")
             await db.execute("""
-                DELETE FROM artists 
-                WHERE mbid NOT IN (SELECT DISTINCT mbid FROM track_artists)
+                DELETE FROM artist 
+                WHERE mbid NOT IN (SELECT DISTINCT mbid FROM track_artist)
             """)
             
             # 3. Prune Orphaned Albums (No tracks associated)
-            # Based on tracks.mb_release_group_id
+            # Based on track.release_group_mbid
             logger.info("Pruning orphaned albums...")
             await db.execute("""
-                DELETE FROM albums 
-                WHERE mbid NOT IN (SELECT DISTINCT mb_release_group_id FROM tracks WHERE mb_release_group_id IS NOT NULL)
+                DELETE FROM album 
+                WHERE mbid NOT IN (SELECT DISTINCT release_group_mbid FROM track WHERE release_group_mbid IS NOT NULL)
             """)
             
             # 4. Prune Orphaned Junctions (Artist-Albums)
             await db.execute("""
-                DELETE FROM artist_albums
-                WHERE artist_mbid NOT IN (SELECT mbid FROM artists)
-                OR album_mbid NOT IN (SELECT mbid FROM albums)
+                DELETE FROM artist_album
+                WHERE artist_mbid NOT IN (SELECT mbid FROM artist)
+                OR album_mbid NOT IN (SELECT mbid FROM album)
             """)
             
             # 5. Prune External Links
             await db.execute("""
-                DELETE FROM external_links
-                WHERE (entity_type='artist' AND entity_id NOT IN (SELECT mbid FROM artists))
-                OR (entity_type='album' AND entity_id NOT IN (SELECT mbid FROM albums))
+                DELETE FROM external_link
+                WHERE (entity_type='artist' AND entity_id NOT IN (SELECT mbid FROM artist))
+                OR (entity_type='album' AND entity_id NOT IN (SELECT mbid FROM album))
             """)
 
             await db.commit()
@@ -765,7 +765,7 @@ class Scanner:
             
             used_shas = set()
             async with db.execute("""
-                SELECT aw.sha1 FROM image_mapping im
+                SELECT aw.sha1 FROM image_map im
                 JOIN artwork aw ON aw.id = im.artwork_id
             """) as c:
                 used_shas.update([r[0] for r in await c.fetchall()])
@@ -794,7 +794,7 @@ class Scanner:
             
             await db.execute("""
                 DELETE FROM artwork
-                WHERE id NOT IN (SELECT artwork_id FROM image_mapping)
+                WHERE id NOT IN (SELECT artwork_id FROM image_map)
             """)
             await db.commit()
             
@@ -818,16 +818,16 @@ class Scanner:
         async for db in get_db():
             # Get artists
             query = """
-                SELECT a.mbid, a.name, a.last_updated, a.sort_name, a.bio, a.image_url, 
-                       a.art_id, aw.source as art_source,
-                       (SELECT url FROM external_links l WHERE l.entity_id=a.mbid AND l.type='spotify' LIMIT 1) as spotify_link_existing,
+                SELECT a.mbid, a.name, a.updated_at, a.sort_name, a.bio, a.image_url, 
+                       a.artwork_id, aw.source as art_source,
+                       (SELECT url FROM external_link l WHERE l.entity_id=a.mbid AND l.type='spotify' LIMIT 1) as spotify_link_existing,
                        COALESCE(SUM(CASE WHEN el.type != 'musicbrainz' THEN 1 ELSE 0 END), 0) as link_count,
-                       (SELECT COUNT(*) FROM tracks_top tt WHERE tt.artist_mbid=a.mbid AND tt.type='top') as top_track_count,
-                       (SELECT COUNT(*) FROM tracks_top ts WHERE ts.artist_mbid=a.mbid AND ts.type='single') as single_count,
-                       (SELECT COUNT(*) FROM similar_artists sa WHERE sa.artist_mbid=a.mbid) as similar_count
-                FROM artists a
-                LEFT JOIN artwork aw ON a.art_id = aw.id
-                LEFT JOIN external_links el 
+                       (SELECT COUNT(*) FROM top_track tt WHERE tt.artist_mbid=a.mbid AND tt.type='top') as top_track_count,
+                       (SELECT COUNT(*) FROM top_track ts WHERE ts.artist_mbid=a.mbid AND ts.type='single') as single_count,
+                       (SELECT COUNT(*) FROM similar_artist sa WHERE sa.artist_mbid=a.mbid) as similar_count
+                FROM artist a
+                LEFT JOIN artwork aw ON a.artwork_id = aw.id
+                LEFT JOIN external_link el 
                     ON el.entity_type='artist' AND el.entity_id = a.mbid
             """
             params = []
@@ -859,7 +859,7 @@ class Scanner:
 
             # Helper for Gap Checking
             def has_selected_gaps(row, fetch_top, fetch_singles):
-                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
+                mbid, name, updated_at, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
                 
                 # Check Explicit Missing Items
                 if fetch_metadata and (not name or not str(name).strip() or not sort_name or not str(sort_name).strip()): return True
@@ -886,7 +886,7 @@ class Scanner:
             tasks_to_spawn = []
             
             for row in rows:
-                mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
+                mbid, name, updated_at, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
                 if not mbid: continue
 
                 # Logic Check
@@ -977,17 +977,17 @@ class Scanner:
                             
                             # DB Read: Local RGs
                             async with db.execute("""
-                                SELECT DISTINCT t.mb_release_group_id 
-                                FROM tracks t
-                                JOIN track_artists ta ON t.id = ta.track_id
-                                WHERE ta.mbid = ? AND t.mb_release_group_id IS NOT NULL
+                                SELECT DISTINCT t.release_group_mbid 
+                                FROM track t
+                                JOIN track_artist ta ON t.id = ta.track_id
+                                WHERE ta.artist_mbid = ? AND t.release_group_mbid IS NOT NULL
                             """, (mbid,)) as cursor:
                                 local_rg_rows = await cursor.fetchall()
                                 local_release_group_ids = {r[0] for r in local_rg_rows}
 
                             # DB Read: Missing Only Top/Singles Check
                             if missing_only and (eff_refresh_top_tracks or eff_refresh_singles):
-                                 async with db.execute("SELECT type, count(*) FROM tracks_top WHERE artist_mbid=? GROUP BY type", (mbid,)) as cursor:
+                                 async with db.execute("SELECT type, count(*) FROM top_track WHERE artist_mbid=? GROUP BY type", (mbid,)) as cursor:
                                      rows_top = await cursor.fetchall()
                                      has_top_tracks = False
                                      has_singles = False
@@ -1005,7 +1005,7 @@ class Scanner:
                             known_wikipedia_url = None
                             is_bio_only = eff_fetch_bio and not any([eff_fetch_metadata, eff_fetch_links, eff_fetch_artwork, eff_fetch_spotify_artwork, eff_refresh_top_tracks, eff_refresh_singles])
                             if is_bio_only:
-                                async with db.execute("SELECT url FROM external_links WHERE entity_type='artist' AND entity_id=? AND type='wikipedia'", (mbid,)) as cursor:
+                                async with db.execute("SELECT url FROM external_link WHERE entity_type='artist' AND entity_id=? AND type='wikipedia'", (mbid,)) as cursor:
                                     row_wiki = await cursor.fetchone()
                                     if row_wiki: known_wikipedia_url = row_wiki[0]
 
@@ -1060,7 +1060,7 @@ class Scanner:
 
     async def _produce_metadata_update(self, semaphore, row, flags, local_release_group_ids, known_wikipedia_url):
          eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists = flags
-         mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
+         mbid, name, updated_at, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
          
          if self._stop_event.is_set(): return None
 
@@ -1112,21 +1112,21 @@ class Scanner:
             art_download = res["art_download"]
             bg_download = res["bg_download"]
             
-            mbid, name, last_updated, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
+            mbid, name, updated_at, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
             eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists = flags
 
             # 1. Upsert Artwork
-            art_id = art_id_existing
+            artwork_id = art_id_existing
             if art_download:
-                art_id = await upsert_artwork_record(
+                artwork_id = await upsert_artwork_record(
                     db,
                     art_download.get("sha1"),
                     meta=art_download.get("meta"),
                     source=meta.get("image_source"),
                     source_url=art_download.get("source_url") or meta.get("image_url"),
                 )
-                if art_id:
-                     await upsert_image_mapping(db, art_id, "artist", mbid, "artistthumb", meta.get("image_score"))
+                if artwork_id:
+                     await upsert_image_mapping(db, artwork_id, "artist", mbid, "artistthumb", meta.get("image_score"))
             
             bg_art_id = None
             if bg_download:
@@ -1142,27 +1142,27 @@ class Scanner:
 
             # 2. Update Artist Core
             await db.execute("""
-                UPDATE artists SET 
+                UPDATE artist SET 
                     name=CASE WHEN (name IS NULL OR name = '') THEN ? ELSE name END,
                     sort_name=CASE WHEN (sort_name IS NULL OR sort_name = '') THEN ? ELSE sort_name END,
                     bio=COALESCE(?, bio),
                     image_url=COALESCE(?, image_url),
-                    art_id=COALESCE(?, art_id),
-                    last_updated=?
+                    artwork_id=COALESCE(?, artwork_id),
+                    updated_at=?
                 WHERE mbid=?
             """, (
                 meta.get("name") if eff_fetch_metadata else name,
                 meta.get("sort_name") if eff_fetch_metadata else sort_name,
                 meta.get("bio") if eff_fetch_bio else bio,
                 meta.get("image_url") if eff_fetch_artwork else image_url,
-                art_id,
-                meta.get("last_updated") or time.time(),
+                artwork_id,
+                meta.get("updated_at") or time.time(),
                 mbid
             ))
             
             # 3. External Links
             if eff_fetch_links:
-                await db.execute("DELETE FROM external_links WHERE entity_type='artist' AND entity_id=?", (mbid,))
+                await db.execute("DELETE FROM external_link WHERE entity_type='artist' AND entity_id=?", (mbid,))
                 artist_links = []
                 try:
                     from app.config import get_musicbrainz_root_url
@@ -1179,64 +1179,64 @@ class Scanner:
                 if meta.get("discogs_url"): artist_links.append(("discogs", meta["discogs_url"]))
                 
                 for l_type, l_url in artist_links:
-                    await db.execute("INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)", 
+                    await db.execute("INSERT OR IGNORE INTO external_link (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)", 
                                      ('artist', mbid, l_type, l_url))
 
             # 4. Top Tracks
             should_refresh = eff_refresh_top_tracks and not SPOTIFY_SCANNING_DISABLED
             if should_refresh:
-                 await db.execute("DELETE FROM tracks_top WHERE artist_mbid=? AND type='top'", (mbid,))
+                 await db.execute("DELETE FROM top_track WHERE artist_mbid=? AND type='top'", (mbid,))
                  for idx, track in enumerate(meta.get("top_tracks", [])):
                         track_id = await match_track_to_library(
                             db, mbid, track["name"], track.get("album"), track.get("mbid")
                         )
                         await db.execute("""
-                            INSERT OR REPLACE INTO tracks_top 
+                            INSERT OR REPLACE INTO top_track 
                             (artist_mbid, type, track_id, external_name, external_album, 
-                             external_date, external_duration_ms, popularity, rank, last_updated)
+                             external_date, external_duration_ms, popularity, rank, updated_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (mbid, 'top', track_id, track["name"], track.get("album"), 
                               track.get("date"), track.get("duration_ms"), track.get("popularity"), idx + 1, time.time()))
 
             # 5. Singles
             if eff_refresh_singles:
-                 await db.execute("DELETE FROM tracks_top WHERE artist_mbid=? AND type='single'", (mbid,))
+                 await db.execute("DELETE FROM top_track WHERE artist_mbid=? AND type='single'", (mbid,))
                  for single in meta.get("singles", []):
                         track_id = await match_track_to_library(
                             db, mbid, single["title"], None
                         )
                         await db.execute("""
-                            INSERT OR REPLACE INTO tracks_top 
+                            INSERT OR REPLACE INTO top_track 
                             (artist_mbid, type, track_id, external_name, external_album, 
-                             external_date, external_mbid, last_updated)
+                             external_date, external_mbid, updated_at)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """, (mbid, 'single', track_id, single["title"], single.get("album"),
                               single["date"], single.get("mbid"), time.time()))
 
             # 6. Similar Artists
             if eff_fetch_similar_artists:
-                 await db.execute("DELETE FROM similar_artists WHERE artist_mbid=?", (mbid,))
+                 await db.execute("DELETE FROM similar_artist WHERE artist_mbid=?", (mbid,))
                  for idx, similar_item in enumerate(meta.get("similar_artists", [])):
                         sim_name = similar_item.get("name") if isinstance(similar_item, dict) else similar_item
                         sim_mbid = similar_item.get("mbid") if isinstance(similar_item, dict) else None
                         if not sim_name: continue
                         
                         if not sim_mbid:
-                             async with db.execute("SELECT mbid FROM artists WHERE LOWER(TRIM(name)) = ? LIMIT 1", (sim_name.lower().strip(),)) as c:
+                             async with db.execute("SELECT mbid FROM artist WHERE LOWER(TRIM(name)) = ? LIMIT 1", (sim_name.lower().strip(),)) as c:
                                  row_sim = await c.fetchone()
                                  if row_sim: sim_mbid = row_sim[0]
 
                         await db.execute("""
-                            INSERT OR REPLACE INTO similar_artists
-                            (artist_mbid, similar_artist_name, similar_artist_mbid, rank, last_updated)
+                            INSERT OR REPLACE INTO similar_artist
+                            (artist_mbid, similar_artist_name, similar_artist_mbid, rank, updated_at)
                             VALUES (?, ?, ?, ?, ?)
                         """, (mbid, sim_name, sim_mbid, idx + 1, time.time()))
             
             # 7. Genres
             if meta.get("genres"):
-                 await db.execute("DELETE FROM artist_genres WHERE artist_mbid=?", (mbid,))
+                 await db.execute("DELETE FROM artist_genre WHERE artist_mbid=?", (mbid,))
                  for g in meta["genres"]:
-                      await db.execute("INSERT INTO artist_genres (artist_mbid, genre, count, last_updated) VALUES (?, ?, ?, ?)", 
+                      await db.execute("INSERT INTO artist_genre (artist_mbid, genre, count, updated_at) VALUES (?, ?, ?, ?)", 
                                        (mbid, g["name"], g["count"], time.time()))
 
             # 8. Albums (Release Groups)
@@ -1244,11 +1244,11 @@ class Scanner:
             # We don't delete existing artist_albums blindly because we might lose primary links from scan?
             # Actually core scan populates 'primary'. This populates metadata.
             # Safe to overwrite if we have better data.
-            # But the logic in original was: DELETE FROM artist_albums WHERE artist_mbid...
+            # But the logic in original was: DELETE FROM artist_album WHERE artist_mbid...
             # Original logic:
-            # await db.execute("DELETE FROM artist_albums WHERE artist_mbid=?", (mbid,))
+            # await db.execute("DELETE FROM artist_album WHERE artist_mbid=?", (mbid,))
             if eff_fetch_metadata: # Only if we fetched albums
-                # await db.execute("DELETE FROM artist_albums WHERE artist_mbid=?", (mbid,))
+                # await db.execute("DELETE FROM artist_album WHERE artist_mbid=?", (mbid,))
                 pass
                 
                 for release in all_releases:
@@ -1259,7 +1259,7 @@ class Scanner:
                     
                     # Tagged Priority
                     tagged_release_ids = []
-                    async with db.execute("SELECT DISTINCT mb_release_id FROM tracks WHERE mb_release_group_id = ? AND mb_release_id IS NOT NULL", (r_mbid,)) as cursor:
+                    async with db.execute("SELECT DISTINCT release_mbid FROM track WHERE release_group_mbid = ? AND release_mbid IS NOT NULL", (r_mbid,)) as cursor:
                          rows_tagged = await cursor.fetchall()
                          tagged_release_ids = [r[0] for r in rows_tagged if r[0]]
                     if tagged_release_ids:
@@ -1267,16 +1267,16 @@ class Scanner:
                         r_release_ids = tagged_release_ids
                     
                     await db.execute("""
-                        INSERT INTO albums (mbid, title, release_date, primary_type, last_updated)
+                        INSERT INTO album (mbid, title, release_date, primary_type, updated_at)
                         VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT(mbid) DO UPDATE SET title=excluded.title, release_date=excluded.release_date, last_updated=excluded.last_updated
+                        ON CONFLICT(mbid) DO UPDATE SET title=excluded.title, release_date=excluded.release_date, updated_at=excluded.updated_at
                     """, (r_mbid, r_title, r_date, 'Album', time.time()))
 
                     if r_release_ids:
                         placeholders = ",".join("?" * len(r_release_ids))
-                        await db.execute(f"UPDATE tracks SET mb_release_group_id=? WHERE mb_release_id IN ({placeholders})", (r_mbid, *r_release_ids))
+                        await db.execute(f"UPDATE track SET release_group_mbid=? WHERE release_mbid IN ({placeholders})", (r_mbid, *r_release_ids))
                     
-                    await db.execute("INSERT OR IGNORE INTO artist_albums (artist_mbid, album_mbid, type) VALUES (?, ?, ?)", (mbid, r_mbid, 'primary'))
+                    await db.execute("INSERT OR IGNORE INTO artist_album (artist_mbid, album_mbid, type) VALUES (?, ?, ?)", (mbid, r_mbid, 'primary'))
                     
                     # Links
                     from app.config import get_musicbrainz_root_url
@@ -1292,9 +1292,9 @@ class Scanner:
                     if mb_release_link: link_payloads.append({"type": "musicbrainz", "url": mb_release_link})
                     link_payloads.extend(r_links)
                     
-                    await db.execute("DELETE FROM external_links WHERE entity_type='album' AND entity_id=?", (r_mbid,))
+                    await db.execute("DELETE FROM external_link WHERE entity_type='album' AND entity_id=?", (r_mbid,))
                     for link in link_payloads:
-                        await db.execute("INSERT OR IGNORE INTO external_links (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)", ("album", r_mbid, link["type"], link["url"]))
+                        await db.execute("INSERT OR IGNORE INTO external_link (entity_type, entity_id, type, url) VALUES (?, ?, ?, ?)", ("album", r_mbid, link["type"], link["url"]))
 
     async def update_links(self, artist_filter=None, mbid_filter=None):
         """
@@ -1324,7 +1324,7 @@ class Scanner:
             for mbid in artist_ids:
                 async with db.execute("""
                     SELECT id, external_name, external_album
-                    FROM tracks_top
+                    FROM top_track
                     WHERE artist_mbid = ? AND track_id IS NULL
                 """, (mbid,)) as cursor:
                     rows = await cursor.fetchall()
@@ -1337,7 +1337,7 @@ class Scanner:
                     track_id = await match_track_to_library(db, mbid, name, album)
                     if track_id:
                         await db.execute(
-                            "UPDATE tracks_top SET track_id = ?, last_updated = ? WHERE id = ?",
+                            "UPDATE top_track SET track_id = ?, updated_at = ? WHERE id = ?",
                             (track_id, time.time(), tt_id),
                         )
             await db.commit()
@@ -1358,7 +1358,7 @@ class Scanner:
             # Filter: Must be a primary artist on at least one album (present in artist_albums)
             # UNLESS we are specifically asking for an artist/mbid
             
-            query = "SELECT DISTINCT a.mbid, a.name FROM artists a"
+            query = "SELECT DISTINCT a.mbid, a.name FROM artist a"
             params = []
             clauses = []
             joins = []
@@ -1378,7 +1378,7 @@ class Scanner:
                 params.append(f"%{artist_filter}%")
             else:
                 # Only enforce "has albums" rule if doing a bulk scan
-                joins.append("JOIN artist_albums aa ON a.mbid = aa.artist_mbid")
+                joins.append("JOIN artist_album aa ON a.mbid = aa.artist_mbid")
             
             if joins:
                 query += " " + " ".join(joins)
@@ -1405,17 +1405,17 @@ class Scanner:
                     # Init per artist or once outside? Init is cheap.
                     tidal_client = TidalClient()
 
-                    # 2. Get Local Release Group IDs (from Albums table)
+                    # 2. Get Local Release Group IDs (from album table)
                     # We check the albums table but via artist_albums to be sure we attribute correctly
                     async with db.execute("""
-                        SELECT album_mbid FROM artist_albums WHERE artist_mbid = ?
+                        SELECT album_mbid FROM artist_album WHERE artist_mbid = ?
                     """, (mbid,)) as cursor:
                         local_rgs = {r[0] for r in await cursor.fetchall()}
 
 
 
                     # 3. Clear Old Missing entries for this artist
-                    await db.execute("DELETE FROM missing_albums WHERE artist_mbid = ?", (mbid,))
+                    await db.execute("DELETE FROM missing_album WHERE artist_mbid = ?", (mbid,))
                     
                     # 4. Fetch All Release Groups from MB
                     try:
@@ -1456,10 +1456,10 @@ class Scanner:
                                 except Exception as e:
                                     logger.debug(f"Tidal fallback search failed: {e}")
 
-                            # Insert into missing_albums
+                            # Insert into missing_album
                             await db.execute("""
-                                INSERT OR REPLACE INTO missing_albums
-                                (artist_mbid, release_group_mbid, title, release_date, primary_type, image_url, musicbrainz_url, tidal_url, qobuz_url, last_updated)
+                                INSERT OR REPLACE INTO missing_album
+                                (artist_mbid, release_group_mbid, title, release_date, primary_type, image_url, musicbrainz_url, tidal_url, qobuz_url, updated_at)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 mbid, rg_id, album["title"], album["date"], 'Album', 

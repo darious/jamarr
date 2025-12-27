@@ -34,7 +34,7 @@ async def get_user_by_username_or_email(
 ) -> Optional[aiosqlite.Row]:
     query = """
         SELECT *
-        FROM users
+        FROM user
         WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)
         LIMIT 1
     """
@@ -43,12 +43,12 @@ async def get_user_by_username_or_email(
 
 
 async def get_user_by_id(db: aiosqlite.Connection, user_id: int) -> Optional[aiosqlite.Row]:
-    async with db.execute("SELECT * FROM users WHERE id = ?", (user_id,)) as cursor:
+    async with db.execute("SELECT * FROM user WHERE id = ?", (user_id,)) as cursor:
         return await cursor.fetchone()
 
 
 async def purge_expired_sessions(db: aiosqlite.Connection) -> None:
-    await db.execute("DELETE FROM sessions WHERE expires_at <= ?", (time.time(),))
+    await db.execute("DELETE FROM session WHERE expires_at <= ?", (time.time(),))
 
 
 async def create_session(
@@ -59,7 +59,7 @@ async def create_session(
     expires_at = time.time() + SESSION_TTL_SECONDS
     await db.execute(
         """
-        INSERT INTO sessions (user_id, token, expires_at, user_agent, ip)
+        INSERT INTO session (user_id, token, expires_at, user_agent, ip)
         VALUES (?, ?, ?, ?, ?)
         """,
         (user_id, token, expires_at, user_agent, ip),
@@ -68,7 +68,7 @@ async def create_session(
 
 
 async def destroy_session(db: aiosqlite.Connection, token: str) -> None:
-    await db.execute("DELETE FROM sessions WHERE token = ?", (token,))
+    await db.execute("DELETE FROM session WHERE token = ?", (token,))
     await db.commit()
 
 
@@ -80,10 +80,10 @@ async def get_session_user(
 
     async with db.execute(
         """
-        SELECT users.*, sessions.expires_at
-        FROM sessions
-        JOIN users ON users.id = sessions.user_id
-        WHERE sessions.token = ?
+        SELECT user.*, session.expires_at
+        FROM session
+        JOIN user ON user.id = session.user_id
+        WHERE session.token = ?
         LIMIT 1
         """,
         (token,),
@@ -102,7 +102,7 @@ async def get_session_user(
 
     # Sliding expiration to keep users logged in
     new_expiration = now_ts + SESSION_TTL_SECONDS
-    await db.execute("UPDATE sessions SET expires_at = ? WHERE token = ?", (new_expiration, token))
+    await db.execute("UPDATE session SET expires_at = ? WHERE token = ?", (new_expiration, token))
     await db.commit()
     return row, token
 

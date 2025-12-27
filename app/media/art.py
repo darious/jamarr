@@ -44,14 +44,14 @@ def _get_art_path(sha1: str, path_on_disk: str | None = None) -> str:
 
     return unified
 
-@router.get("/art/{art_id}")
-@router.get("/art/{art_id}.jpg")
-async def get_artwork(art_id: int, max_size: int = 1000):
+@router.get("/art/{artwork_id}")
+@router.get("/art/{artwork_id}.jpg")
+async def get_artwork(artwork_id: int, max_size: int = 1000):
     """
     Serve artwork by ID, always converting to JPEG and resizing if needed.
     """
     async for db in get_db():
-        async with db.execute("SELECT sha1, path_on_disk FROM artwork WHERE id = ?", (art_id,)) as cursor:
+        async with db.execute("SELECT sha1, path_on_disk FROM artwork WHERE id = ?", (artwork_id,)) as cursor:
             row = await cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Artwork not found")
@@ -120,7 +120,7 @@ async def get_artwork(art_id: int, max_size: int = 1000):
     raise HTTPException(status_code=500, detail="Database error")
 
 @router.get("/art/file/{sha1}")
-async def get_artwork_by_sha1(sha1: str):
+async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
     # Lookup type to build path
     async for db in get_db():
         async with db.execute("SELECT path_on_disk FROM artwork WHERE sha1 = ?", (sha1,)) as cursor:
@@ -133,6 +133,47 @@ async def get_artwork_by_sha1(sha1: str):
             if not os.path.exists(path):
                 raise HTTPException(status_code=404, detail="Artwork file missing")
             
+            # If resizing requested
+            if max_size > 0:
+                from PIL import Image
+                try:
+                    with Image.open(path) as img:
+                         # Convert to RGB if needed (handles PNG with transparency)
+                        if img.mode in ('RGBA', 'LA', 'P'):
+                            background = Image.new('RGB', img.size, (255, 255, 255))
+                            if img.mode == 'P':
+                                img = img.convert('RGBA')
+                            background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+                            img = background
+                        elif img.mode != 'RGB':
+                            img = img.convert('RGB')
+                        
+                        width, height = img.size
+                        should_resize = width > max_size or height > max_size
+                        
+                        if should_resize:
+                            if width > height:
+                                new_width = max_size
+                                new_height = int(height * (max_size / width))
+                            else:
+                                new_height = max_size
+                                new_width = int(width * (max_size / height))
+                            
+                            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                        
+                        buf = io.BytesIO()
+                        # Use high quality for web, but reasonable size
+                        img.save(buf, format='JPEG', quality=85, optimize=True)
+                        buf.seek(0)
+                        
+                        response = Response(content=buf.getvalue(), media_type="image/jpeg")
+                        # Immutable cache for resized artifacts too - they are derived from SHA1
+                        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                        return response
+                except Exception as e:
+                     # Fallback to original file on error
+                     pass
+
             response = FileResponse(path)
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             return response

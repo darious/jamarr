@@ -260,7 +260,7 @@ class UPnPManager:
     async def load_persisted_renderers(self):
         """Load previously discovered renderers from database and verify they're still alive."""
         async for db in get_db():
-            async with db.execute("SELECT * FROM renderers") as cursor:
+            async with db.execute("SELECT * FROM renderer") as cursor:
                 rows = await cursor.fetchall()
                 for row in rows:
                     r = dict(row)
@@ -290,10 +290,10 @@ class UPnPManager:
         """Persist renderer to database."""
         async for db in get_db():
             await db.execute("""
-                INSERT OR REPLACE INTO renderers 
+                INSERT OR REPLACE INTO renderer 
                 (udn, friendly_name, location_url, ip, control_url, rendering_control_url, 
                  device_type, manufacturer, model_name, model_number, serial_number, 
-                 firmware_version, supports_events, supports_gapless, last_seen)
+                 firmware_version, supports_events, supports_gapless, last_seen_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             """, (
                 r["udn"], r.get("friendly_name"), r.get("location"), r.get("ip"),
@@ -382,7 +382,7 @@ class UPnPManager:
         Args:
             track_id: Track ID from database
             track_path: Path to track file
-            metadata: Track metadata (title, artist, album, art_id, duration, mime)
+            metadata: Track metadata (title, artist, album, artwork_id, duration, mime)
         """
         if not self.active_renderer:
             raise ValueError("No active renderer set")
@@ -408,8 +408,8 @@ class UPnPManager:
         
         # Build art URL if available
         art_url = None
-        if metadata.get("art_id"):
-            art_url = f"{self.base_url}/art/{metadata['art_id']}.jpg"
+        if metadata.get("artwork_id"):
+            art_url = f"{self.base_url}/art/{metadata['artwork_id']}.jpg"
         
         # Extract metadata fields
         title = metadata.get("title", "Unknown Track")
