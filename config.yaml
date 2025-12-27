@@ -1,4 +1,4 @@
-music_path: "/mnt/music/library"
+music_path: "/app/music/"
 
 spotify:
   client_id: "46650a3fe727435b89284c4362af8294"

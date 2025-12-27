@@ -1,0 +1,17 @@
+services:
+  jamarr:
+    environment:
+      - WATCHFILES_FORCE_POLLING=true
+    volumes:
+      - ./app:/app/app
+      - ./config.yaml:/app/config.yaml
+      - /mnt/config/q-dev/jamarr:/app/cache
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8111 --reload --reload-dir /app/app
+
+  jamarr_db:
+    volumes:
+      - /mnt/config/q-dev/jamarr/postgres:/var/lib/postgresql/data
+
+  cloudbeaver:
+    volumes:
+      - /mnt/config/q-dev/jamarr/cloudbeaver:/opt/cloudbeaver/workspace
