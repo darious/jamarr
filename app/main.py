@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from app.db import init_db
+from app.db import init_db, close_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -13,6 +13,7 @@ async def lifespan(app: FastAPI):
     yield
     await UPnPManager.get_instance().stop_background_scan()
     await ScanManager.get_instance().shutdown()
+    await close_db()
 
 app = FastAPI(lifespan=lifespan)
 

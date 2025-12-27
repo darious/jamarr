@@ -423,12 +423,10 @@ async def match_track_to_library(db, artist_mbid, track_name, album_name=None, e
         SELECT t.id, t.title, t.album, t.duration_seconds, t.track_mbid, t.release_track_mbid
         FROM track t
         JOIN track_artist ta ON t.id = ta.track_id
-        WHERE ta.artist_mbid = ? 
+        WHERE ta.artist_mbid = $1 
     """
     
-    candidates = []
-    async with db.execute(query, (artist_mbid,)) as cursor:
-        candidates = await cursor.fetchall()
+    candidates = await db.fetch(query, artist_mbid)
         
     if not candidates:
         return None
