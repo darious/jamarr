@@ -752,15 +752,24 @@ class Scanner:
             # 6. Prune Artwork (The big one)
             logger.info("Pruning orphaned artwork...")
             
+            # Collect all artwork still referenced anywhere (direct refs + image_map)
             used_shas = set()
-            rows = await db.fetch("""
-
-                SELECT DISTINCT aw.sha1 FROM image_map im
-                JOIN artwork aw ON im.artwork_id = aw.id
-                WHERE (im.entity_type = 'track' AND im.entity_id::bigint IN (SELECT id FROM track))
-                   OR (im.entity_type = 'album' AND im.entity_id IN (SELECT mbid FROM album))
-                   OR (im.entity_type = 'artist' AND im.entity_id IN (SELECT mbid FROM artist))
-            """)
+            rows = await db.fetch(
+                """
+                WITH used_ids AS (
+                    SELECT artwork_id FROM image_map
+                    UNION
+                    SELECT artwork_id FROM track WHERE artwork_id IS NOT NULL
+                    UNION
+                    SELECT artwork_id FROM album WHERE artwork_id IS NOT NULL
+                    UNION
+                    SELECT artwork_id FROM artist WHERE artwork_id IS NOT NULL
+                )
+                SELECT DISTINCT aw.sha1
+                FROM artwork aw
+                JOIN used_ids u ON u.artwork_id = aw.id
+                """
+            )
             used_shas.update([r[0] for r in rows])
 
             art_paths = []
@@ -785,10 +794,20 @@ class Scanner:
             
             logger.info(f"Deleted {deleted_art} orphaned artwork files.")
             
-            await db.execute("""
+            await db.execute(
+                """
                 DELETE FROM artwork
-                WHERE id NOT IN (SELECT artwork_id FROM image_map)
-            """)
+                WHERE id NOT IN (
+                    SELECT artwork_id FROM image_map
+                    UNION
+                    SELECT artwork_id FROM track WHERE artwork_id IS NOT NULL
+                    UNION
+                    SELECT artwork_id FROM album WHERE artwork_id IS NOT NULL
+                    UNION
+                    SELECT artwork_id FROM artist WHERE artwork_id IS NOT NULL
+                )
+                """
+            )
             
             logger.info("Library Prune Complete.")
 
