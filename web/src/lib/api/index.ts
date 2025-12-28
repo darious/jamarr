@@ -29,6 +29,8 @@ export interface Artist {
         bit_depth?: number | null;
         sample_rate_hz?: number | null;
         duration_seconds?: number | null;
+        art_id?: number | null;
+        art_sha1?: string | null;
     }[];
     singles?: {
         mbid: string;
@@ -39,6 +41,8 @@ export interface Artist {
         codec?: string | null;
         bit_depth?: number | null;
         sample_rate_hz?: number | null;
+        art_id?: number | null;
+        art_sha1?: string | null;
     }[];
     sort_name: string;
     primary_album_count?: number;

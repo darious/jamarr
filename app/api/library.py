@@ -161,9 +161,11 @@ async def get_artists(
             # Fetch top tracks
             top_tracks_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec, 
-                    t.bit_depth, t.sample_rate_hz, t.duration_seconds
+                    t.bit_depth, t.sample_rate_hz, t.duration_seconds,
+                    a.sha1 as art_sha1, t.artwork_id
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
+                LEFT JOIN artwork a ON t.artwork_id = a.id
                 WHERE tt.artist_mbid = $1 AND tt.type = 'top'
                 ORDER BY tt.rank
                 LIMIT 50
@@ -180,7 +182,9 @@ async def get_artists(
                     "codec": tt_row["codec"],
                     "bit_depth": tt_row["bit_depth"],
                     "sample_rate_hz": tt_row["sample_rate_hz"],
-                    "duration_seconds": tt_row["duration_seconds"]
+                    "duration_seconds": tt_row["duration_seconds"],
+                    "art_sha1": tt_row["art_sha1"],
+                    "art_id": tt_row["artwork_id"]
                 }
                 for tt_row in tt_rows
             ]
@@ -188,9 +192,11 @@ async def get_artists(
             # Fetch singles
             singles_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
-                    t.bit_depth, t.sample_rate_hz
+                    t.bit_depth, t.sample_rate_hz,
+                    a.sha1 as art_sha1, t.artwork_id
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
+                LEFT JOIN artwork a ON t.artwork_id = a.id
                 WHERE tt.artist_mbid = $1 AND tt.type = 'single'
                 ORDER BY tt.external_date DESC
             """
@@ -204,7 +210,9 @@ async def get_artists(
                     "local_track_id": s_row["local_track_id"],
                     "codec": s_row["codec"],
                     "bit_depth": s_row["bit_depth"],
-                    "sample_rate_hz": s_row["sample_rate_hz"]
+                    "sample_rate_hz": s_row["sample_rate_hz"],
+                    "art_sha1": s_row["art_sha1"],
+                    "art_id": s_row["artwork_id"]
                 }
                 for s_row in s_rows
             ]
@@ -365,19 +373,18 @@ async def get_tracks(album: str = None, artist: str = None, album_mbid: str = No
         params.extend([album_mbid, album_mbid])
         param_num += 2
     if artist:
-        # Relaxed filtering: Match Album Artist (tag), Artist (tag), or Linked Artist (DB)
+        # Simple artist filtering by tag or database link
         query += f""" AND (
             t.album_artist = ${param_num}
             OR t.artist = ${param_num + 1}
             OR EXISTS (
                 SELECT 1 FROM track_artist ta 
                 JOIN artist a ON ta.artist_mbid = a.mbid 
-                WHERE ta.track_id = t.id 
-                AND (REPLACE(REPLACE(a.name, ''', ''''), '`', '''') = REPLACE(REPLACE(${param_num + 2}, ''', ''''), '`', '''') OR a.name = ${param_num + 3})
+                WHERE ta.track_id = t.id AND a.name = ${param_num + 2}
             )
         )"""
-        params.extend([artist, artist, artist, artist])
-        param_num += 4
+        params.extend([artist, artist, artist])
+        param_num += 3
     
     if album:
         query += f" AND t.album = ${param_num}"
@@ -393,6 +400,11 @@ async def get_tracks(album: str = None, artist: str = None, album_mbid: str = No
         # Override artist tag with aggregated list if available
         if d.get("aggregated_artists"):
             d["artist"] = d["aggregated_artists"]
+        
+        # Frontend compatibility: expects art_id
+        if d.get("artwork_id"):
+            d["art_id"] = d["artwork_id"]
+            
         results.append(d)
     return results
 

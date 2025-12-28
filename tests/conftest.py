@@ -59,8 +59,6 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
     async for conn in get_db():
         # Clean relevant tables
         await conn.execute("""
-            TRUNCATE TABLE "user" RESTART IDENTITY CASCADE;
-            TRUNCATE TABLE session RESTART IDENTITY CASCADE;
             TRUNCATE TABLE client_session RESTART IDENTITY CASCADE;
             TRUNCATE TABLE renderer_state RESTART IDENTITY CASCADE;
             TRUNCATE TABLE playback_history RESTART IDENTITY CASCADE;
@@ -88,16 +86,36 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
         yield ac
 
 @pytest.fixture
-async def auth_token(client: AsyncClient) -> str:
+async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
     """Helper to create a user and log in, returning a session token."""
-    # Create user directly via API or DB? API is safer to test full flow
-    response = await client.post("/api/auth/signup", json={
+    user_data = {
         "username": "testuser",
         "email": "test@example.com",
         "password": "password123",
         "display_name": "Test User"
+    }
+
+    # 1. Try Signup
+    response = await client.post("/api/auth/signup", json=user_data)
+    
+    if response.status_code == 200:
+        return response.cookies["jamarr_session"]
+
+    # 2. If Signup Failed (User Exists), Try Login
+    response = await client.post("/api/auth/login", json={
+        "username": "testuser",
+        "password": "password123"
     })
-    assert response.status_code == 200
-    # Cookie is automatically handled by the client jar usually, 
-    # but we can return the token string if needed manually.
+    
+    if response.status_code == 200:
+        return response.cookies["jamarr_session"]
+        
+    # 3. If Login Failed (Stale/Wrong Password), Force Delete and Retry
+    # We must use the DB connection to nuke the user since we can't login
+    print("Login failed for existing user. Deleting and recreating.")
+    await db.execute("DELETE FROM \"user\" WHERE username = $1", "testuser")
+    
+    # Retry Signup
+    response = await client.post("/api/auth/signup", json=user_data)
+    assert response.status_code == 200, "Signup failed after user deletion"
     return response.cookies["jamarr_session"]
