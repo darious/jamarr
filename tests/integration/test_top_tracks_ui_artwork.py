@@ -64,7 +64,7 @@ async def test_top_tracks_ui_artwork_flow(client, db):
     assert len(artist["top_tracks"]) > 0
     top_track = artist["top_tracks"][0]
     
-    print(f"\n=== Top Track from Artist API ===")
+    print("\n=== Top Track from Artist API ===")
     print(f"local_track_id: {top_track.get('local_track_id')}")
     print(f"art_id: {top_track.get('art_id')}")
     print(f"art_sha1: {top_track.get('art_sha1')}")
@@ -77,13 +77,13 @@ async def test_top_tracks_ui_artwork_flow(client, db):
     assert top_track["art_sha1"] == artwork_sha1
     
     # Step 2: Fetch tracks (like the UI does) - query by album to avoid SQL bug
-    tracks_response = await client.get(f"/api/tracks?album=Test UI Album")
+    tracks_response = await client.get("/api/tracks?album=Test UI Album")
     assert tracks_response.status_code == 200
     tracks = tracks_response.json()
     assert len(tracks) > 0
     
     local_track = tracks[0]
-    print(f"\n=== Local Track from Tracks API ===")
+    print("\n=== Local Track from Tracks API ===")
     print(f"id: {local_track.get('id')}")
     print(f"art_id: {local_track.get('art_id')}")
     print(f"art_sha1: {local_track.get('art_sha1')}")

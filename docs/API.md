@@ -481,3 +481,49 @@ Get artwork image, optionally resized.
 - `max_size` (int): Max width/height in pixels.
 
 **Response:** Binary image (image/jpeg).
+
+## Media Quality (`/api/media-quality`)
+
+### Get Summary
+Get statistics about library media quality (metadata, artwork, etc.).
+
+**GET** `/api/media-quality/summary`
+
+**Response:** `200 OK`
+Returns summary statistics for artists (all and primary) and albums.
+```json
+{
+  "artist_stats": {
+    "all": { "total": 100, "with_background": 50, "sources": { ... }, "link_stats": { ... } },
+    "primary": { "total": 20, "with_background": 15, ... }
+  },
+  "album_stats": {
+    "total": 50,
+    "with_artwork": 45,
+    "link_stats": { ... }
+  }
+}
+```
+
+### Get Items
+Get a list of items matching a specific quality filter.
+
+**GET** `/api/media-quality/items`
+
+**Parameters:**
+- `category`: `artist`, `primary` (primary artist), or `album`.
+- `filter_type`: Filter logic to apply (`total`, `background`, `artwork`, `source`, `link_type`, `missing_link_type`).
+- `filter_value` (optional): Specific value for the filter (e.g. `Fanart`, `spotify`).
+
+**Response:** `200 OK`
+List of item summaries.
+```json
+[
+  {
+    "name": "Artist Name",
+    "mbid": "...",
+    "image_url": "...",
+    "artist_name": null 
+  }
+]
+```

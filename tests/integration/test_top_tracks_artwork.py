@@ -1,6 +1,4 @@
 import pytest
-import asyncio
-from app.db import get_db
 
 @pytest.mark.asyncio
 async def test_top_tracks_have_artwork(client, db):

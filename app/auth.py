@@ -10,7 +10,9 @@ from fastapi import Depends, HTTPException, Request
 from app.db import get_db
 
 SESSION_COOKIE_NAME = "jamarr_session"
-SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", str(60 * 60 * 24 * 30)))  # 30 days default
+SESSION_TTL_SECONDS = int(
+    os.getenv("SESSION_TTL_SECONDS", str(60 * 60 * 24 * 30))
+)  # 30 days default
 COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true"
 
 _password_hasher = PasswordHasher()
@@ -42,7 +44,9 @@ async def get_user_by_username_or_email(
     return await db.fetchrow(query, username_or_email)
 
 
-async def get_user_by_id(db: asyncpg.Connection, user_id: int) -> Optional[asyncpg.Record]:
+async def get_user_by_id(
+    db: asyncpg.Connection, user_id: int
+) -> Optional[asyncpg.Record]:
     """Get user by ID."""
     return await db.fetchrow('SELECT * FROM "user" WHERE id = $1', user_id)
 
@@ -59,13 +63,17 @@ async def create_session(
     await purge_expired_sessions(db)
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=SESSION_TTL_SECONDS)
-    
+
     await db.execute(
         """
         INSERT INTO session (user_id, token, expires_at, user_agent, ip)
         VALUES ($1, $2, $3, $4, $5)
         """,
-        user_id, token, expires_at, user_agent, ip,
+        user_id,
+        token,
+        expires_at,
+        user_agent,
+        ip,
     )
     return token
 
@@ -104,7 +112,9 @@ async def get_session_user(
 
     # Sliding expiration to keep users logged in
     new_expiration = now + timedelta(seconds=SESSION_TTL_SECONDS)
-    await db.execute("UPDATE session SET expires_at = $1 WHERE token = $2", new_expiration, token)
+    await db.execute(
+        "UPDATE session SET expires_at = $1 WHERE token = $2", new_expiration, token
+    )
     return row, token
 
 
