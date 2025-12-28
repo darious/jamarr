@@ -12,7 +12,9 @@
   }
 </script>
 
-<div class="flex gap-1 p-1 bg-white/5 rounded-lg w-fit backdrop-blur-md border border-white/5">
+<div
+  class="flex gap-1 p-1 bg-white/5 rounded-lg w-fit backdrop-blur-md border border-white/5"
+>
   {#each items as item}
     <button
       class="px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200"
@@ -34,13 +36,7 @@
   .bg-white-10 {
     background-color: rgba(255, 255, 255, 0.1);
   }
-  .bg-white-5 {
-    background-color: rgba(255, 255, 255, 0.05);
-  }
   .text-white-50 {
     color: rgba(255, 255, 255, 0.5);
-  }
-  .text-white-80 {
-    color: rgba(255, 255, 255, 0.8);
   }
 </style>

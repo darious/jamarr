@@ -101,7 +101,9 @@
   }
 </script>
 
-<div class="min-h-screen bg-gradient-to-br from-black via-surface-50/70 to-black text-white">
+<div
+  class="min-h-screen bg-gradient-to-br from-black via-surface-50/70 to-black text-white"
+>
   <div class="mx-auto max-w-5xl px-6 py-10">
     <div class="mb-8 flex flex-col gap-2">
       <p class="text-sm text-white/60">Settings</p>
@@ -112,35 +114,47 @@
     </div>
 
     <div class="grid gap-6 lg:grid-cols-2">
-      <div class="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+      <div
+        class="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur"
+      >
         <div class="mb-4">
           <h2 class="text-lg font-semibold">Profile</h2>
-          <p class="text-sm text-white/60">Update your email or display name.</p>
+          <p class="text-sm text-white/60">
+            Update your email or display name.
+          </p>
         </div>
 
         {#if profileMessage}
-          <div class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+          <div
+            class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100"
+          >
             {profileMessage}
           </div>
         {/if}
         {#if profileError}
-          <div class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+          <div
+            class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100"
+          >
             {profileError}
           </div>
         {/if}
 
         <form class="space-y-4" on:submit|preventDefault={saveProfile}>
           <div class="space-y-2">
-            <label class="block text-sm text-white/70">Username</label>
+            <label class="block text-sm text-white/70" for="username"
+              >Username</label
+            >
             <input
+              id="username"
               class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
               value={user?.username || ""}
               disabled
             />
           </div>
           <div class="space-y-2">
-            <label class="block text-sm text-white/70">Email</label>
+            <label class="block text-sm text-white/70" for="email">Email</label>
             <input
+              id="email"
               class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
               type="email"
               bind:value={email}
@@ -148,8 +162,11 @@
             />
           </div>
           <div class="space-y-2">
-            <label class="block text-sm text-white/70">Display name</label>
+            <label class="block text-sm text-white/70" for="display_name"
+              >Display name</label
+            >
             <input
+              id="display_name"
               class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
               bind:value={displayName}
               placeholder="How your name appears"
@@ -166,27 +183,38 @@
         </form>
       </div>
 
-      <div class="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+      <div
+        class="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur"
+      >
         <div class="mb-4">
           <h2 class="text-lg font-semibold">Change password</h2>
-          <p class="text-sm text-white/60">Keep your account secure with a new password.</p>
+          <p class="text-sm text-white/60">
+            Keep your account secure with a new password.
+          </p>
         </div>
 
         {#if passwordMessage}
-          <div class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+          <div
+            class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100"
+          >
             {passwordMessage}
           </div>
         {/if}
         {#if passwordError}
-          <div class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+          <div
+            class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100"
+          >
             {passwordError}
           </div>
         {/if}
 
         <form class="space-y-4" on:submit|preventDefault={savePassword}>
           <div class="space-y-2">
-            <label class="block text-sm text-white/70">Current password</label>
+            <label class="block text-sm text-white/70" for="current_password"
+              >Current password</label
+            >
             <input
+              id="current_password"
               class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
               type="password"
               autocomplete="current-password"
@@ -195,8 +223,11 @@
             />
           </div>
           <div class="space-y-2">
-            <label class="block text-sm text-white/70">New password</label>
+            <label class="block text-sm text-white/70" for="new_password"
+              >New password</label
+            >
             <input
+              id="new_password"
               class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
               type="password"
               autocomplete="new-password"
@@ -206,8 +237,11 @@
             />
           </div>
           <div class="space-y-2">
-            <label class="block text-sm text-white/70">Confirm new password</label>
+            <label class="block text-sm text-white/70" for="confirm_password"
+              >Confirm new password</label
+            >
             <input
+              id="confirm_password"
               class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
               type="password"
               autocomplete="new-password"
