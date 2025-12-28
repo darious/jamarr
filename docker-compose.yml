@@ -12,15 +12,6 @@ services:
     volumes:
       - ./cache/postgres:/var/lib/postgresql/data
 
-  cloudbeaver:
-    image: dbeaver/cloudbeaver:latest
-    container_name: cloudbeaver
-    network_mode: "host"
-    restart: unless-stopped
-    environment:
-      CB_SERVER_PORT: 8978
-    volumes:
-      - ./cache/cloudbeaver:/opt/cloudbeaver/workspace
 
   jamarr:
     build: .

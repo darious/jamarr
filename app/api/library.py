@@ -137,6 +137,7 @@ async def get_artists(
             "name": row["name"], 
             "image_url": row["image_url"], 
             "artwork_id": art_info.get("artwork_id") or row["artwork_id"],
+            "art_id": art_info.get("artwork_id") or row["artwork_id"], # Frontend compatibility
             "art_sha1": art_info.get("art_sha1") or row["art_sha1"],
             "bio": row["bio"], 
             "sort_name": row["sort_name"] or row["name"],
@@ -486,6 +487,7 @@ async def get_recently_played_albums(limit: int = 20, db: asyncpg.Connection = D
 async def get_recently_played_artists(limit: int = 20, db: asyncpg.Connection = Depends(get_db)):
     query = """
         SELECT DISTINCT 
+            a.mbid,
             a.name,
             a.image_url, 
             a.artwork_id,
@@ -505,9 +507,11 @@ async def get_recently_played_artists(limit: int = 20, db: asyncpg.Connection = 
     rows = await db.fetch(query, limit)
     return [
         {
+            "mbid": row["mbid"],
             "name": row["name"], 
             "image_url": row["image_url"], 
             "artwork_id": row["artwork_id"],
+            "art_id": row["artwork_id"], # Compat
             "art_sha1": row["art_sha1"],
             "bio": row["bio"]
         } 
@@ -519,6 +523,7 @@ async def get_discover_artists(limit: int = 20, db: asyncpg.Connection = Depends
     # Newly added artists (based on track mtime)
     query = """
         SELECT DISTINCT 
+            a.mbid,
             a.name,
             a.image_url, 
             a.artwork_id,
@@ -537,9 +542,11 @@ async def get_discover_artists(limit: int = 20, db: asyncpg.Connection = Depends
     rows = await db.fetch(query, limit)
     return [
         {
+            "mbid": row["mbid"],
             "name": row["name"], 
             "image_url": row["image_url"], 
             "artwork_id": row["artwork_id"],
+            "art_id": row["artwork_id"], # Compat
             "art_sha1": row["art_sha1"],
             "bio": row["bio"]
         } 

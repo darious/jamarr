@@ -488,7 +488,7 @@ async def log_history(db: asyncpg.Connection, track_id: int, client_ip: str, cli
 
             await db.execute(
                 "INSERT INTO playback_history (track_id, client_ip, client_id, user_id) VALUES ($1, $2, $3, $4)",
-                (track_id, client_ip, client_id, user_id)
+                track_id, client_ip, client_id, user_id
             )
         except Exception as e:
             logger.error(f"Failed to log history: {e}")
