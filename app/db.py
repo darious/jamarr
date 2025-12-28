@@ -20,7 +20,7 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
     """
     if _pool is None:
         raise RuntimeError("Database pool not initialized. Call init_db() first.")
-    
+
     async with _pool.acquire() as conn:
         yield conn
 
@@ -30,7 +30,7 @@ async def init_db():
     Initialize the PostgreSQL connection pool and create schema.
     """
     global _pool
-    
+
     # Create connection pool
     _pool = await asyncpg.create_pool(
         host=DB_HOST,
@@ -42,16 +42,16 @@ async def init_db():
         max_size=20,
         command_timeout=60,
     )
-    
+
     # Initialize schema
     async with _pool.acquire() as conn:
         # Enable extensions
         await conn.execute("CREATE EXTENSION IF NOT EXISTS citext")
-        
+
         # Enable slow query logging in development
         if os.getenv("ENV") == "development":
             await conn.execute("SET log_min_duration_statement = 200")
-        
+
         # Create tables
         await conn.execute("""
             -- Track table with FTS vector
@@ -300,7 +300,7 @@ async def init_db():
                 FOREIGN KEY(artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE
             );
         """)
-        
+
         # Create indexes
         await conn.execute("""
             -- FTS index
@@ -349,7 +349,7 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_playback_history_track_ts ON playback_history(track_id, timestamp);
             CREATE INDEX IF NOT EXISTS idx_artwork_source ON artwork(source);
         """)
-        
+
         # Create FTS trigger function
         await conn.execute("""
             CREATE OR REPLACE FUNCTION track_fts_trigger() RETURNS trigger AS $$
@@ -363,7 +363,7 @@ async def init_db():
             END;
             $$ LANGUAGE plpgsql;
         """)
-        
+
         # Create FTS trigger (disabled by default for bulk operations)
         await conn.execute("""
             DROP TRIGGER IF EXISTS track_fts_update ON track;
@@ -371,10 +371,10 @@ async def init_db():
                 BEFORE INSERT OR UPDATE ON track
                 FOR EACH ROW EXECUTE FUNCTION track_fts_trigger();
         """)
-        
+
         # Disable trigger by default (will be enabled after initial scan)
         await conn.execute("ALTER TABLE track DISABLE TRIGGER track_fts_update")
-        
+
         print("✅ PostgreSQL database initialized successfully")
 
 
