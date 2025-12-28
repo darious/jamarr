@@ -11,6 +11,7 @@ import difflib
 import math
 from app.config import get_spotify_credentials, get_musicbrainz_root_url, get_musicbrainz_rate_limit, get_qobuz_region, get_fanarttv_api_key, get_max_workers, get_lastfm_credentials
 from app.db import get_db
+from app.scanner.stats import get_api_tracker
 
 logger = logging.getLogger("scanner.metadata")
 
@@ -90,6 +91,7 @@ async def fetch_fanart_artist_images(client: httpx.AsyncClient, mbid: str):
         return url
 
     try:
+        get_api_tracker().increment("fanart")
         resp = await client.get(f"{FANART_API_ROOT}/{mbid}", params={"api_key": api_key}, timeout=20.0)
         if resp.status_code != 200:
             logger.debug(f"Fanart.tv lookup failed for {mbid}: {resp.status_code}")
@@ -117,6 +119,7 @@ async def get_spotify_token(client: httpx.AsyncClient):
     b64_auth = base64.b64encode(auth_str.encode()).decode()
     
     try:
+        get_api_tracker().increment("spotify")
         resp = await client.post(
             SPOTIFY_TOKEN_URL,
             data={"grant_type": "client_credentials"},
@@ -141,6 +144,7 @@ def _similarity(a: str, b: str) -> float:
 
 async def _evaluate_spotify_candidate(client: httpx.AsyncClient, headers: dict, candidate_id: str, target_name: str):
     try:
+        get_api_tracker().increment("spotify")
         resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{candidate_id}", headers=headers)
         if resp.status_code == 429:
              raise RuntimeError("Spotify Rate Limit Exceeded")
@@ -222,6 +226,8 @@ async def fetch_wikidata_external_links(client: httpx.AsyncClient, wikidata_url:
         wd_api = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
         
         logger.debug(f"Fetching Wikidata external links for {qid}...")
+        logger.debug(f"Fetching Wikidata external links for {qid}...")
+        get_api_tracker().increment("wikidata")
         resp = await client.get(wd_api)
         if resp.status_code != 200:
             logger.warning(f"Wikidata fetch failed: {resp.status_code}")
@@ -305,6 +311,7 @@ async def fetch_lastfm_top_tracks(mbid, artist_name, client: httpx.AsyncClient =
     }
 
     async def _do_fetch(c):
+        get_api_tracker().increment("lastfm")
         resp = await c.get(url, params=params, timeout=10.0)
         if resp.status_code == 200:
             data = resp.json()
@@ -364,6 +371,7 @@ async def fetch_lastfm_artist_url(mbid: str, client: httpx.AsyncClient = None):
     }
 
     async def _do_fetch(c):
+        get_api_tracker().increment("lastfm")
         resp = await c.get(url, params=params, timeout=10.0)
         if resp.status_code == 200:
             data = resp.json()
@@ -402,6 +410,7 @@ async def fetch_lastfm_similar_artists(mbid, artist_name, client: httpx.AsyncCli
     }
 
     async def _do_fetch(c):
+        get_api_tracker().increment("lastfm")
         resp = await c.get(url, params=params, timeout=10.0)
         if resp.status_code == 200:
             data = resp.json()
@@ -626,6 +635,7 @@ async def fetch_artist_metadata(
                 
                 for attempt in range(3):
                     try:
+                        get_api_tracker().increment("musicbrainz")
                         resp = await client.get(mb_url)
                         if resp.status_code == 200:
                             mb_data = resp.json()
@@ -715,7 +725,9 @@ async def fetch_artist_metadata(
                 try:
                     logger.debug(f"Fetching Wikipedia link via Wikidata ({wikidata_url})...")
                     qid = wikidata_url.split("/")[-1]
+                    qid = wikidata_url.split("/")[-1]
                     wd_api = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
+                    get_api_tracker().increment("wikidata")
                     wd_resp = await client.get(wd_api)
                     if wd_resp.status_code == 200:
                         wd_data = wd_resp.json()
@@ -745,6 +757,21 @@ async def fetch_artist_metadata(
                         safe_title = unquote(wiki_title)
                         
                         wiki_summary_url = f"{WIKI_API_ROOT}/{quote(safe_title)}"
+                        # Wiki summary is part of Wikidata/Wikipedia ecosystem, often considered same source or separate.
+                        # User said "use wikipedia logo for wikidata", implying "wikidata" category covers wiki stuff too?
+                        # Or we should track them separately?
+                        # Let's count it as wikipedia/wikidata. Using 'wikidata' to reuse that bucket per user request to use that logo?
+                        # Actually strict wikipedia is separate.
+                        # But typically users want to see "Wikipedia" calls.
+                        # Plan said: "Services to track: ... Wikidata (use Wikipedia icon)"
+                        # Let's track as "wikidata" so it uses that same bucket/icon, OR "wikipedia" if we want distinct count.
+                        # User's request "use wikipedia logo for wikidata" implies visual merging or preference for that logo for the wikidata service.
+                        # I'll track this as 'wikipedia' and we can map it or just track as 'wikidata'.
+                        # Let's stick to 'wikidata' for simplicity unless we want granular.
+                        # Actually standard web requests to wikipedia.org... let's count as 'wikipedia' and maybe show combined or separate.
+                        # Request said "to each service we hit... wikidata... etc".
+                        # Let's count this as 'wikipedia' for accuracy, but frontend might just show one if needed.
+                        get_api_tracker().increment("wikipedia")
                         wiki_resp = await client.get(wiki_summary_url)
                         if wiki_resp.status_code == 200:
                             wiki_data = wiki_resp.json()
