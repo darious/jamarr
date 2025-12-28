@@ -39,11 +39,11 @@ async def library_data(db):
     # Tracks
     # Schema has 'artwork_id'
     await db.execute("""
-        INSERT INTO track (path, title, artist, album, duration_seconds, track_no, disc_no, artist_mbid, release_group_mbid, date, artwork_id)
+        INSERT INTO track (path, title, artist, album, duration_seconds, track_no, disc_no, artist_mbid, album_artist_mbid, release_group_mbid, date, artwork_id)
         VALUES 
-            ('/music/test1.flac', 'Track One', 'The Testers', 'Test Album', 180, 1, 1, 'artist-1', 'album-1', '2023', 201),
-            ('/music/test2.flac', 'Track Two', 'The Testers', 'Test Album', 200, 2, 1, 'artist-1', 'album-1', '2023', 201),
-            ('/music/test3.flac', 'Solo Hit', 'Solo Guy', 'Single Hit', 210, 1, 1, 'artist-2', 'album-2', '2023', NULL)
+            ('/music/test1.flac', 'Track One', 'The Testers', 'Test Album', 180, 1, 1, 'artist-1', 'artist-1', 'album-1', '2023', 201),
+            ('/music/test2.flac', 'Track Two', 'The Testers', 'Test Album', 200, 2, 1, 'artist-1', 'artist-1', 'album-1', '2023', 201),
+            ('/music/test3.flac', 'Solo Hit', 'Solo Guy', 'Single Hit', 210, 1, 1, 'artist-2', 'artist-2', 'album-2', '2023', NULL)
     """)
     # Track-Artist Relations
     row1 = await db.fetchrow("SELECT id FROM track WHERE title = 'Track One'")
@@ -115,6 +115,37 @@ async def test_get_albums(client: AsyncClient, db, library_data):
     data = response.json()
     assert len(data) == 1
     assert data[0]["album"] == "Test Album"
+
+@pytest.mark.asyncio
+async def test_get_albums_appears_on(client: AsyncClient, db, library_data):
+    # Insert a track where "The Testers" are a featured artist (appears on)
+    # Primary artist is "Solo Guy", Track Artist is "Solo Guy feat. The Testers"
+    # We need to link "The Testers" (artist-1) to this track in track_artist
+    
+    # 1. Get track ID for 'Solo Hit'
+    row = await db.fetchrow("SELECT id FROM track WHERE title = 'Solo Hit'")
+    track_id = row['id']
+    
+    # 2. Add 'The Testers' as a secondary artist
+    await db.execute("INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, 'artist-1') ON CONFLICT DO NOTHING", track_id)
+    
+    # 3. Query albums for "The Testers"
+    response = await client.get("/api/albums", params={"artist": "The Testers"})
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Should have 2 albums now: "Test Album" (main) and "Single Hit" (appears_on)
+    # The order depends on year, both are 2023.
+    assert len(data) == 2
+    
+    main_album = next((a for a in data if a["album"] == "Test Album"), None)
+    appears_album = next((a for a in data if a["album"] == "Single Hit"), None)
+    
+    assert main_album is not None
+    assert main_album["type"] == "main"
+    
+    assert appears_album is not None
+    assert appears_album["type"] == "appears_on"
 
 @pytest.mark.asyncio
 async def test_get_tracks(client: AsyncClient, db, library_data):
