@@ -204,21 +204,36 @@ async def monitor_upnp_playback(udn: str):
                     queue = state.get("queue") or []
                     if 0 <= state["current_index"] < len(queue):
                         track = queue[state["current_index"]]
-                        track_id = track.get("id")
-                        duration = track.get("duration_seconds") or 0
-                        renderer_ip = (
-                            upnp.renderers.get(udn, {}).get("ip")
-                            if upnp.renderers
-                            else None
-                        )
-                        if _should_log_history(udn, track_id, rel_time, duration):
-                            await log_history(
-                                db,
-                                track_id,
-                                client_ip=renderer_ip or "unknown",
-                                client_id=udn,
-                                user_id=track.get("user_id"),
-                            )
+                        
+                        # Only check if not already logged
+                        if not track.get("logged", False):
+                            track_id = track.get("id")
+                            duration = track.get("duration_seconds") or 0
+                            
+                            # Threshold check
+                            threshold = min(30, duration * 0.2) if duration > 0 else 30
+                            
+                            if rel_time >= threshold:
+                                renderer_ip = (
+                                    upnp.renderers.get(udn, {}).get("ip")
+                                    if upnp.renderers
+                                    else None
+                                )
+                                await log_history(
+                                    db,
+                                    track_id,
+                                    client_ip=renderer_ip or "unknown",
+                                    client_id=udn,
+                                    user_id=track.get("user_id"),
+                                )
+                                
+                                # Mark logged and persist
+                                track["logged"] = True
+                                await db.execute(
+                                    "UPDATE renderer_state SET queue = $1 WHERE renderer_udn = $2",
+                                    json.dumps(queue),
+                                    udn,
+                                )
 
             # Execute side effects outside DB context (avoids holding a transaction open)
             if was_playing and transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
@@ -257,6 +272,7 @@ class Track(BaseModel):
     disc_no: Optional[int] = None
     date: Optional[str] = None
     bitrate: Optional[int] = None
+    logged: bool = False
 
 
 class PlayerState(BaseModel):
@@ -711,7 +727,7 @@ async def get_playback_history_stats(
         where_clauses = ["DATE(timestamp) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
         params: List[Any] = [timedelta(days=-(days - 1))]
         if scope == "mine" and user_row:
-            where_clauses.append("h.user_id = ?")
+            where_clauses.append("h.user_id = $2")
             params.append(user_row["id"])
         where_sql = " AND ".join(where_clauses)
 
@@ -728,12 +744,16 @@ async def get_playback_history_stats(
 
         # Top artists
         artists_query = f"""
-            SELECT t.artist, MIN(t.artwork_id) as artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
+            SELECT 
+                COALESCE(NULLIF(t.album_artist, ''), t.artist) as artist_name, 
+                MIN(t.artwork_id) as artwork_id, 
+                MAX(a.sha1) as art_sha1, 
+                COUNT(*) as plays
             FROM playback_history h
             JOIN track t ON t.id = h.track_id
             LEFT JOIN artwork a ON t.artwork_id = a.id
             WHERE {where_sql}
-            GROUP BY t.artist
+            GROUP BY COALESCE(NULLIF(t.album_artist, ''), t.artist)
             ORDER BY plays DESC
             LIMIT 10
         """
@@ -752,12 +772,17 @@ async def get_playback_history_stats(
 
         # Top albums
         albums_query = f"""
-            SELECT t.album, t.artist, MIN(t.artwork_id) as artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
+            SELECT 
+                t.album, 
+                COALESCE(NULLIF(t.album_artist, ''), t.artist) as artist_name, 
+                MIN(t.artwork_id) as artwork_id, 
+                MAX(a.sha1) as art_sha1, 
+                COUNT(*) as plays
             FROM playback_history h
             JOIN track t ON t.id = h.track_id
             LEFT JOIN artwork a ON t.artwork_id = a.id
                 WHERE {where_sql}
-                GROUP BY t.album, t.artist
+                GROUP BY t.album, COALESCE(NULLIF(t.album_artist, ''), t.artist)
                 ORDER BY plays DESC
                 LIMIT 10
             """
@@ -1036,29 +1061,42 @@ async def update_progress(
             state = await get_renderer_state_db(db, udn)
             state["position_seconds"] = update.position_seconds
             state["is_playing"] = update.is_playing
-            await update_renderer_state_db(db, udn, state)
 
-            # Server-side history logging for local playback
+            # Check for history logging
             if state["current_index"] is not None and state["current_index"] >= 0:
                 queue = state.get("queue") or []
                 if 0 <= state["current_index"] < len(queue):
                     track = queue[state["current_index"]]
-                    track_id = track.get("id")
-                    duration = track.get("duration_seconds") or 0
-                    if _should_log_history(
-                        client_id, track_id, update.position_seconds, duration
-                    ):
-                        # Prefer session user, fall back to queued track owner if missing
-                        effective_user_id = (
-                            user_id if user_id is not None else track.get("user_id")
-                        )
-                        await log_history(
-                            db,
-                            track_id,
-                            client_ip=client_ip,
-                            client_id=client_id,
-                            user_id=effective_user_id,
-                        )
+                    
+                    # Only log if not already logged
+                    if not track.get("logged", False):
+                        duration = track.get("duration_seconds") or 0
+                        # Check threshold (30s or 20%)
+                        threshold = min(30, duration * 0.2) if duration > 0 else 30
+                        
+                        if update.position_seconds >= threshold:
+                            # Log it
+                            effective_user_id = (
+                                user_id if user_id is not None else track.get("user_id")
+                            )
+                            try:
+                                await log_history(
+                                    db,
+                                    track.get("id"),
+                                    client_ip=client_ip,
+                                    client_id=client_id,
+                                    user_id=effective_user_id,
+                                )
+                            except Exception as e:
+                                logger.error(f"Failed to log history: {e}")
+                            
+                            # Mark as logged and persist
+                            track["logged"] = True
+                            # Queue is already ref in state, so just save state
+                            await update_renderer_state_db(db, udn, state)
+            
+            # Save state (position/playing updates)
+            await update_renderer_state_db(db, udn, state)
         else:
             # For remote renderers, skip logging here to avoid double-reporting with UPnP monitor
             state = await get_renderer_state_db(db, udn)

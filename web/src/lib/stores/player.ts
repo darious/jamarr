@@ -271,29 +271,25 @@ export async function previous() {
     }
 }
 
-// Debounce progress updates
-let progressUpdateTimeout: any;
-export function updateProgress(seconds: number, isPlaying: boolean) {
+// Throttling handled by caller (PlayerBar.svelte)
+export async function updateProgress(seconds: number, isPlaying: boolean) {
     playerState.update(s => ({ ...s, position_seconds: seconds, is_playing: isPlaying }));
 
-    clearTimeout(progressUpdateTimeout);
-    progressUpdateTimeout = setTimeout(async () => {
-        // console.log('[updateProgress] Sending to server:', { position_seconds: seconds, is_playing: isPlaying });
-        try {
-            const res = await fetch('/api/player/progress', {
-                method: 'POST',
-                headers: getHeaders(),
-                body: JSON.stringify({ position_seconds: seconds, is_playing: isPlaying })
-            });
-            if (res.ok) {
-                // console.log('[updateProgress] Server updated successfully');
-            } else {
-                console.error('[updateProgress] Server update failed:', res.status);
-            }
-        } catch (e) {
-            console.error('[updateProgress] Failed to update progress', e);
+    console.log('[updateProgress] Sending to server:', { position_seconds: seconds, is_playing: isPlaying });
+    try {
+        const res = await fetch('/api/player/progress', {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ position_seconds: seconds, is_playing: isPlaying })
+        });
+        if (res.ok) {
+            // console.log('[updateProgress] Server updated successfully');
+        } else {
+            console.error('[updateProgress] Server update failed:', res.status);
         }
-    }, 5000); // Update server every 5 seconds
+    } catch (e) {
+        console.error('[updateProgress] Failed to update progress', e);
+    }
 }
 
 

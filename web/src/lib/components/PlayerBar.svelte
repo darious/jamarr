@@ -81,10 +81,16 @@
   } 
   */
 
+  let lastUpdateTime = 0; // Track last time we sent progress to server
+
   // Reset logged flag when track ID actually changes
   $: if (currentTrack && currentTrack.id !== lastLoggedTrackId) {
     hasLoggedCurrentTrack = false;
-    console.log("[PlayerBar] Track changed, reset hasLoggedCurrentTrack");
+    lastLoggedTrackId = currentTrack.id;
+    lastUpdateTime = 0; // Reset progress reporting timer
+    console.log(
+      "[PlayerBar] Track changed, reset hasLoggedCurrentTrack and lastUpdateTime",
+    );
   }
 
   // Auto-resume playback when queue is loaded (reactive)
@@ -247,7 +253,6 @@
         "[PlayerBar] Audio element found, adding timeupdate and ended listeners",
       );
       let timeupdateCount = 0;
-      let lastUpdateTime = 0;
       audio.addEventListener("timeupdate", () => {
         timeupdateCount++;
         const oldProgress = progress;
