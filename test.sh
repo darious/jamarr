@@ -10,16 +10,25 @@ docker compose -f docker-compose.test.yml up -d jamarr_test_db
 
 # Wait for DB to be ready
 echo "⏳ Waiting for Test Database to be ready..."
-# Retrying for up to 30 seconds using a disposable runner container
+# Small grace period before first check
+sleep 1
+
+# Retrying for up to 30 seconds using pg_isready from the DB container
+DB_READY=0
 for i in {1..30}; do
-    if docker compose -f docker-compose.test.yml run --rm jamarr_test_runner \
-        python3 -c "import socket, sys; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', 8109)); s.close()" 2>/dev/null; then
+    if docker compose -f docker-compose.test.yml exec -T jamarr_test_db pg_isready -h 127.0.0.1 -p 8109 -U jamarr_test >/dev/null 2>&1; then
         echo "✅ Test Database is ready!"
+        DB_READY=1
         break
     fi
     echo "..."
     sleep 1
 done
+
+if [ "$DB_READY" -ne 1 ]; then
+    echo "❌ Test Database did not become ready on port 8109."
+    exit 1
+fi
 
 echo "🧪 Running tests..."
 # Run pytest inside the container with Test DB environment variables
