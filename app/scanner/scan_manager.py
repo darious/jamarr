@@ -31,16 +31,9 @@ class ScanManager:
         self._configure_logging()
 
     def _configure_logging(self):
-        try:
-            os.makedirs("cache/log", exist_ok=True)
-        except Exception:
-            pass
+        # Central logging handles file output now.
+        # We only need to attach the UI Broadcast Handler to the scanner logger.
         scan_logger = logging.getLogger("scanner")
-        if not any(getattr(h, "_scanner_log", False) for h in scan_logger.handlers):
-            fh = logging.FileHandler("cache/log/scanner.log")
-            fh._scanner_log = True
-            fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-            scan_logger.addHandler(fh)
         
         # UI Broadcast Handler
         if not any(getattr(h, "_ui_broadcast", False) for h in scan_logger.handlers):
@@ -48,8 +41,6 @@ class ScanManager:
             bh._ui_broadcast = True
             bh.setLevel(logging.INFO) # Only show INFO+ in UI to avoid flood
             scan_logger.addHandler(bh)
-
-        scan_logger.setLevel(logging.DEBUG)
 
     class BroadcastLogHandler(logging.Handler):
         def __init__(self, manager):
