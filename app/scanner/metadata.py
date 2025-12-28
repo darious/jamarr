@@ -958,7 +958,7 @@ async def fetch_artist_metadata(
                 return [i for i in items if i["mbid"] in local_release_group_ids]
 
             if isinstance(singles_res, list):
-                metadata["singles"] = filter_local(singles_res)
+                metadata["singles"] = singles_res
             elif isinstance(singles_res, Exception):
                 logger.error(f"Singles Task Error: {singles_res}")
 

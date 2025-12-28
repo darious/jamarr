@@ -15,7 +15,7 @@ run_svelte() {
 
 run_python() {
     echo "🔍 Running Python Check (ruff)..."
-    if docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T jamarr uv run ruff check .; then
+    if uv run ruff check .; then
         echo "✅ Python Check Passed"
     else
         echo "❌ Python Check Failed"

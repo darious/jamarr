@@ -1,4 +1,3 @@
-import pytest
 from app.scanner.stats import get_api_tracker, ApiTracker
 
 def test_api_tracker_singleton():

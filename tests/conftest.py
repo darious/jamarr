@@ -1,5 +1,4 @@
 import pytest
-import asyncio
 import os
 import asyncpg
 from typing import AsyncGenerator
@@ -84,7 +83,7 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
         from app.scanner.scan_manager import ScanManager
         try:
             await ScanManager.get_instance().stop_scan()
-        except:
+        except Exception:
             pass
             
         yield conn

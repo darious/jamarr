@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 def assert_has_artwork_fields(item: Dict[str, Any], required: bool = True) -> None:
     """

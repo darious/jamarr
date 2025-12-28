@@ -4,7 +4,6 @@ from tests.utils.assertions import (
     assert_track_structure, 
     assert_artist_structure, 
     assert_album_structure,
-    assert_has_artwork_fields,
     SPECIAL_CHAR_STRINGS
 )
 
