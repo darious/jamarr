@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timezone
 from app.db import get_db
 from app.scanner.tags import extract_tags
+from app.scanner.stats import get_api_tracker
 from app.scanner.artwork import extract_and_save_artwork, download_and_save_artwork, cleanup_orphaned_artwork, upsert_artwork_record, upsert_image_mapping
 from app.config import get_music_path
 from app.scanner.metadata import fetch_artist_metadata, fetch_track_credits, SPOTIFY_SCANNING_DISABLED
@@ -454,6 +455,8 @@ class Scanner:
             else:
                 self.stats["added"] += 1
 
+            get_api_tracker().track_processed("tracks", track_id)
+
             # Map artwork to album or track fallback
             if artwork_id:
                 if mb_rg_id:
@@ -480,6 +483,7 @@ class Scanner:
 
                      # Remove from missing_album if we have it now
                      await db.execute("DELETE FROM missing_album WHERE release_group_mbid = $1", mb_rg_id)
+                     get_api_tracker().track_processed("albums", mb_rg_id)
                  except Exception as e:
                      logger.warning(f"Error upserting album {album_title} ({mb_rg_id}): {e}")
 
@@ -534,6 +538,7 @@ class Scanner:
                 """, 'artist', mbid, 'musicbrainz', mb_url)
                 
                 self._processed_artists_session.add((mbid, name))
+                get_api_tracker().track_processed("artists", mbid)
 
             await db.execute("INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, $2) ON CONFLICT (track_id, artist_mbid) DO NOTHING", track_id, mbid)
 
@@ -571,6 +576,7 @@ class Scanner:
                  """, 'artist', mbid, 'appears_on', mb_url)
                      
                      self._processed_artists_session.add((mbid, name))
+                     get_api_tracker().track_processed("artists", mbid)
 
                  artist_mbids.add((mbid, name))
                  
@@ -582,6 +588,8 @@ class Scanner:
                         VALUES ($1, $2, $3, $4, NOW())
                         ON CONFLICT(mbid) DO NOTHING
                      """, mb_rg_id, safe_title, tags.get("date"), 'Album')
+                     
+                     get_api_tracker().track_processed("albums", mb_rg_id)
 
                      await db.execute("""
                         INSERT INTO artist_album (artist_mbid, album_mbid, type)
@@ -1035,7 +1043,18 @@ class Scanner:
                     for t in done:
                         try:
                             res = await t
-                            if res: results_buffer.append(res)
+                            if res: 
+                                results_buffer.append(res)
+                                # Increment metadata counter IMMEDIATELY upon completion
+                                if res["row"] and res["row"][0]:
+                                     get_api_tracker().track_processed("metadata_artists", res["row"][0])
+                                
+                                # Update progress more frequently (every item) so API stats broadcast
+                                processed_count += 1
+                                if self.scan_logger:
+                                     last_name = res["row"][1] or "Unknown"
+                                     self.scan_logger.emit_progress(processed_count, total, f"Metadata: {last_name}")
+
                         except asyncio.CancelledError:
                             raise
                         except Exception as e:
@@ -1044,12 +1063,7 @@ class Scanner:
                     # Batch Write
                     if len(results_buffer) >= 50:
                         await self._consume_metadata_update(db, results_buffer)
-                        processed_count += len(results_buffer)
-                        
-                        if self.scan_logger:
-                             # Just use last item name for logs
-                             last_name = results_buffer[-1]["row"][1] or "Unknown"
-                             self.scan_logger.emit_progress(processed_count, total, f"Metadata: {last_name} (Batch)")
+                        # processed_count is already incremented above
                         
                         results_buffer.clear()
                         
@@ -1059,7 +1073,7 @@ class Scanner:
             # Flush final buffer
             if results_buffer:
                 await self._consume_metadata_update(db, results_buffer)
-                processed_count += len(results_buffer)
+                # processed_count already incremented
                 if self.scan_logger:
                     self.scan_logger.emit_progress(processed_count, total, f"Metadata: Complete")
 
