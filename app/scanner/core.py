@@ -1115,6 +1115,14 @@ class Scanner:
                         except asyncio.CancelledError:
                             raise
                         except Exception as e:
+                            # check if it's the rate limit error (since we import it inside function/method usually or it bubbles up)
+                            # Actually we need to import it or check name
+                            if type(e).__name__ == 'SpotifyRateLimitError':
+                                 retry_msg = f"Retry in {e.retry_after}s" if hasattr(e, 'retry_after') and e.retry_after else "Check Spotify Dashboard"
+                                 logger.critical(f"STOPPING SCAN: {e}. {retry_msg}")
+                                 # Re-raise to trigger finally block cleanup and exit
+                                 raise e
+                            
                             logger.error(f"Task failed: {e}")
                             
                     # Batch Write
@@ -1190,209 +1198,215 @@ class Scanner:
         from app.scanner.metadata import match_track_to_library
         
         for res in results:
-            row = res["row"]
-            flags = res["flags"]
-            meta = res["meta"]
-            art_download = res["art_download"]
-            bg_download = res["bg_download"]
-            
-            mbid, name, updated_at, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
-            eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists = flags
-
-            # 1. Upsert Artwork
-            artwork_id = art_id_existing
-            if art_download:
-                artwork_id = await upsert_artwork_record(
-                    db,
-                    art_download.get("sha1"),
-                    meta=art_download.get("meta"),
-                    source=meta.get("image_source"),
-                    source_url=art_download.get("source_url") or meta.get("image_url"),
-                )
-                if artwork_id:
-                     await upsert_image_mapping(db, artwork_id, "artist", mbid, "artistthumb", meta.get("image_score"))
-            
-            bg_art_id = None
-            if bg_download:
-                bg_art_id = await upsert_artwork_record(
-                    db,
-                    bg_download.get("sha1"),
-                    meta=bg_download.get("meta"),
-                    source=meta.get("background_source"),
-                    source_url=bg_download.get("source_url") or meta.get("background_url"),
-                )
-                if bg_art_id:
-                    await upsert_image_mapping(db, bg_art_id, "artist", mbid, "artistbackground", meta.get("background_score"))
-
-            # 2. Update Artist Core
-            await db.execute("""
-                UPDATE artist SET 
-                    name=CASE WHEN (name IS NULL OR name = '') THEN $1 ELSE name END,
-                    sort_name=CASE WHEN (sort_name IS NULL OR sort_name = '') THEN $2 ELSE sort_name END,
-                    bio=COALESCE($3, bio),
-                    image_url=COALESCE($4, image_url),
-                    artwork_id=COALESCE($5, artwork_id),
-                    updated_at=$6
-                WHERE mbid=$7
-            """, 
-                meta.get("name") if eff_fetch_metadata else name,
-                meta.get("sort_name") if eff_fetch_metadata else sort_name,
-                meta.get("bio") if eff_fetch_bio else bio,
-                meta.get("image_url") if eff_fetch_artwork else image_url,
-                artwork_id,
-                datetime.fromtimestamp(meta.get("updated_at"), timezone.utc) if isinstance(meta.get("updated_at"), (int, float)) else (meta.get("updated_at") or datetime.now(timezone.utc)),
-                mbid
-            )
-            
-            # 3. External Links
-            if eff_fetch_links:
-                await db.execute("DELETE FROM external_link WHERE entity_type='artist' AND entity_id=$1", mbid)
-                artist_links = []
-                try:
-                    from app.config import get_musicbrainz_root_url
-                    mb_url = f"{get_musicbrainz_root_url()}/artist/{mbid}"
-                    artist_links.append(("musicbrainz", mb_url))
-                except: pass
+            try:
+                row = res["row"]
+                flags = res["flags"]
+                meta = res["meta"]
+                art_download = res["art_download"]
+                bg_download = res["bg_download"]
                 
-                if meta.get("spotify_url"): artist_links.append(("spotify", meta["spotify_url"]))
-                if meta.get("tidal_url"): artist_links.append(("tidal", meta["tidal_url"]))
-                if meta.get("qobuz_url"): artist_links.append(("qobuz", meta["qobuz_url"]))
-                if meta.get("wikipedia_url"): artist_links.append(("wikipedia", meta["wikipedia_url"]))
-                if meta.get("homepage"): artist_links.append(("homepage", meta["homepage"]))
-                if meta.get("lastfm_url"): artist_links.append(("lastfm", meta["lastfm_url"]))
-                if meta.get("discogs_url"): artist_links.append(("discogs", meta["discogs_url"]))
-                
-                for l_type, l_url in artist_links:
-                    await db.execute(
-                        "INSERT INTO external_link (entity_type, entity_id, type, url) VALUES ($1, $2, $3, $4) ON CONFLICT (entity_type, entity_id, type) DO NOTHING", 
-                        'artist', mbid, l_type, l_url
+                mbid, name, updated_at, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
+                eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists = flags
+
+                # 1. Upsert Artwork
+                artwork_id = art_id_existing
+                if art_download:
+                    artwork_id = await upsert_artwork_record(
+                        db,
+                        art_download.get("sha1"),
+                        meta=art_download.get("meta"),
+                        source=meta.get("image_source"),
+                        source_url=art_download.get("source_url") or meta.get("image_url"),
                     )
-
-            # 4. Top Tracks
-            should_refresh = eff_refresh_top_tracks and not SPOTIFY_SCANNING_DISABLED
-            if should_refresh:
-                 await db.execute("DELETE FROM top_track WHERE artist_mbid=$1 AND type='top'", mbid,)
-                 for idx, track in enumerate(meta.get("top_tracks", [])):
-                        track_id = await match_track_to_library(
-                            db, mbid, track["name"], track.get("album"), track.get("mbid")
-                        )
-                        await db.execute("""
-                            INSERT INTO top_track 
-                            (artist_mbid, type, track_id, external_name, external_album, 
-                             external_date, external_duration_ms, popularity, rank, updated_at)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-                            ON CONFLICT (artist_mbid, type, rank) DO UPDATE SET
-                                track_id = EXCLUDED.track_id,
-                                external_name = EXCLUDED.external_name,
-                                external_album = EXCLUDED.external_album,
-                                external_date = EXCLUDED.external_date,
-                                external_duration_ms = EXCLUDED.external_duration_ms,
-                                popularity = EXCLUDED.popularity,
-                                updated_at = NOW()
-                        """, mbid, 'top', track_id, track["name"], track.get("album"), 
-                              track.get("date"), 
-                          int(track.get("duration_ms")) if track.get("duration_ms") else None, 
-                          int(track.get("popularity")) if track.get("popularity") else None, 
-                          idx + 1)
-
-            # 5. Singles
-            if eff_refresh_singles:
-                 await db.execute("DELETE FROM top_track WHERE artist_mbid=$1 AND type='single'", mbid,)
-                 for single in meta.get("singles", []):
-                        track_id = await match_track_to_library(
-                            db, mbid, single["title"], None
-                        )
-                        await db.execute("""
-                            INSERT INTO top_track 
-                            (artist_mbid, type, track_id, external_name, external_album, 
-                             external_date, external_mbid, updated_at)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-                            ON CONFLICT (artist_mbid, type, external_mbid) DO UPDATE SET
-                                track_id = EXCLUDED.track_id,
-                                external_name = EXCLUDED.external_name,
-                                external_album = EXCLUDED.external_album,
-                                external_date = EXCLUDED.external_date,
-                                updated_at = NOW()
-                        """, mbid, 'single', track_id, single["title"], single.get("album"),
-                              single["date"], single.get("mbid"))
-
-            # 6. Similar Artists
-            if eff_fetch_similar_artists:
-                 await db.execute("DELETE FROM similar_artist WHERE artist_mbid=$1", mbid,)
-                 for idx, similar_item in enumerate(meta.get("similar_artists", [])):
-                        sim_name, sim_mbid = parse_similar(similar_item)
-                        if not sim_name: continue
-
-                        await db.execute("""
-                            INSERT INTO similar_artist
-                            (artist_mbid, similar_artist_name, similar_artist_mbid, rank, updated_at)
-                            VALUES ($1, $2, $3, $4, NOW())
-                        """, mbid, sim_name, sim_mbid, idx + 1)
+                    if artwork_id:
+                         await upsert_image_mapping(db, artwork_id, "artist", mbid, "artistthumb", meta.get("image_score"))
             
-            # 7. Genres
-            if meta.get("genres"):
-                 await db.execute("DELETE FROM artist_genre WHERE artist_mbid=$1", mbid,)
-                 for g in meta["genres"]:
-                      await db.execute("INSERT INTO artist_genre (artist_mbid, genre, count, updated_at) VALUES ($1, $2, $3, NOW())", 
-                                       mbid, g["name"], g["count"])
+                bg_art_id = None
+                if bg_download:
+                    bg_art_id = await upsert_artwork_record(
+                        db,
+                        bg_download.get("sha1"),
+                        meta=bg_download.get("meta"),
+                        source=meta.get("background_source"),
+                        source_url=bg_download.get("source_url") or meta.get("background_url"),
+                    )
+                    if bg_art_id:
+                        await upsert_image_mapping(db, bg_art_id, "artist", mbid, "artistbackground", meta.get("background_score"))
 
-            # 8. Albums (Release Groups)
-            all_releases = meta.get("albums", []) + meta.get("singles", [])
-            # We don't delete existing artist_albums blindly because we might lose primary links from scan?
-            # Actually core scan populates 'primary'. This populates metadata.
-            # Safe to overwrite if we have better data.
-            # But the logic in original was: DELETE FROM artist_album WHERE artist_mbid...
-            # Original logic:
-            if eff_fetch_metadata:
-                # await db.execute("DELETE FROM artist_album WHERE artist_mbid=$1", mbid,)
-                # await db.execute("DELETE FROM artist_album WHERE artist_mbid=$1", mbid,)
-                pass
-                
-                for release in all_releases:
-                    r_mbid, r_title, r_date = release["mbid"], release["title"], release["date"]
-                    r_links = release.get("links") or []
-                    r_release_ids = release.get("release_ids") or []
-                    r_primary_release = release.get("primary_release_id")
+                # 2. Update Artist Core
+                await db.execute("""
+                    UPDATE artist SET 
+                        name=CASE WHEN (name IS NULL OR name = '') THEN $1 ELSE name END,
+                        sort_name=CASE WHEN (sort_name IS NULL OR sort_name = '') THEN $2 ELSE sort_name END,
+                        bio=COALESCE($3, bio),
+                        image_url=COALESCE($4, image_url),
+                        artwork_id=COALESCE($5, artwork_id),
+                        updated_at=$6
+                    WHERE mbid=$7
+                """, 
+                    meta.get("name") if eff_fetch_metadata else name,
+                    meta.get("sort_name") if eff_fetch_metadata else sort_name,
+                    meta.get("bio") if eff_fetch_bio else bio,
+                    meta.get("image_url") if eff_fetch_artwork else image_url,
+                    artwork_id,
+                    datetime.fromtimestamp(meta.get("updated_at"), timezone.utc) if isinstance(meta.get("updated_at"), (int, float)) else (meta.get("updated_at") or datetime.now(timezone.utc)),
+                    mbid
+                )
+            
+                # 3. External Links
+                if eff_fetch_links:
+                    await db.execute("DELETE FROM external_link WHERE entity_type='artist' AND entity_id=$1", mbid)
+                    artist_links = []
+                    try:
+                        from app.config import get_musicbrainz_root_url
+                        mb_url = f"{get_musicbrainz_root_url()}/artist/{mbid}"
+                        artist_links.append(("musicbrainz", mb_url))
+                    except: pass
                     
-                    # Tagged Priority
-                    tagged_release_ids = []
-                    rows = await db.fetch("SELECT DISTINCT release_mbid FROM track WHERE release_group_mbid = $1 AND release_mbid IS NOT NULL", r_mbid,)
-                    rows_tagged = rows
-                    tagged_release_ids = [r[0] for r in rows_tagged if r[0]]
-                    if tagged_release_ids:
-                        r_primary_release = tagged_release_ids[0]
-                        r_release_ids = tagged_release_ids
+                    if meta.get("spotify_url"): artist_links.append(("spotify", meta["spotify_url"]))
+                    if meta.get("tidal_url"): artist_links.append(("tidal", meta["tidal_url"]))
+                    if meta.get("qobuz_url"): artist_links.append(("qobuz", meta["qobuz_url"]))
+                    if meta.get("wikipedia_url"): artist_links.append(("wikipedia", meta["wikipedia_url"]))
+                    if meta.get("homepage"): artist_links.append(("homepage", meta["homepage"]))
+                    if meta.get("lastfm_url"): artist_links.append(("lastfm", meta["lastfm_url"]))
+                    if meta.get("discogs_url"): artist_links.append(("discogs", meta["discogs_url"]))
                     
-                    await db.execute("""
-                        INSERT INTO album (mbid, title, release_date, primary_type, updated_at)
-                        VALUES ($1, $2, $3, $4, NOW())
-                        ON CONFLICT(mbid) DO UPDATE SET title=excluded.title, release_date=excluded.release_date, updated_at=excluded.updated_at
-                    """, r_mbid, r_title, r_date, 'Album')
-
-                    if r_release_ids:
-                        await db.execute("UPDATE track SET release_group_mbid=$1 WHERE release_mbid = ANY($2::text[])", r_mbid, r_release_ids)
-                    await upsert_artist_album(db, mbid, r_mbid, 'primary')
-                    
-                    # Links
-                    from app.config import get_musicbrainz_root_url
-                    mb_release_link = None
-                    if r_primary_release: 
-                        mb_release_link = f"{get_musicbrainz_root_url()}/release/{r_primary_release}"
-                    elif r_release_ids: 
-                        mb_release_link = f"{get_musicbrainz_root_url()}/release/{r_release_ids[0]}"
-                    else:
-                        mb_release_link = f"{get_musicbrainz_root_url()}/release-group/{r_mbid}"
-
-                    link_payloads = []
-                    if mb_release_link: link_payloads.append({"type": "musicbrainz", "url": mb_release_link})
-                    link_payloads.extend(r_links)
-                    
-                    await db.execute("DELETE FROM external_link WHERE entity_type='album' AND entity_id=$1", r_mbid,)
-                    for link in link_payloads:
+                    for l_type, l_url in artist_links:
                         await db.execute(
                             "INSERT INTO external_link (entity_type, entity_id, type, url) VALUES ($1, $2, $3, $4) ON CONFLICT (entity_type, entity_id, type) DO NOTHING", 
-                            "album", r_mbid, link["type"], link["url"]
+                            'artist', mbid, l_type, l_url
                         )
+
+                # 4. Top Tracks
+                should_refresh = eff_refresh_top_tracks and not SPOTIFY_SCANNING_DISABLED
+                if should_refresh:
+                     await db.execute("DELETE FROM top_track WHERE artist_mbid=$1 AND type='top'", mbid,)
+                     for idx, track in enumerate(meta.get("top_tracks", [])):
+                            track_id = await match_track_to_library(
+                                db, mbid, track["name"], track.get("album"), track.get("mbid")
+                            )
+                            await db.execute("""
+                                INSERT INTO top_track 
+                                (artist_mbid, type, track_id, external_name, external_album, 
+                                 external_date, external_duration_ms, popularity, rank, updated_at)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                                ON CONFLICT (artist_mbid, type, rank) DO UPDATE SET
+                                    track_id = EXCLUDED.track_id,
+                                    external_name = EXCLUDED.external_name,
+                                    external_album = EXCLUDED.external_album,
+                                    external_date = EXCLUDED.external_date,
+                                    external_duration_ms = EXCLUDED.external_duration_ms,
+                                    popularity = EXCLUDED.popularity,
+                                    updated_at = NOW()
+                            """, mbid, 'top', track_id, track["name"], track.get("album"), 
+                                  track.get("date"), 
+                              int(track.get("duration_ms")) if track.get("duration_ms") else None, 
+                              int(track.get("popularity")) if track.get("popularity") else None, 
+                              idx + 1)
+
+                # 5. Singles
+                if eff_refresh_singles:
+                     await db.execute("DELETE FROM top_track WHERE artist_mbid=$1 AND type='single'", mbid,)
+                     for single in meta.get("singles", []):
+                            track_id = await match_track_to_library(
+                                db, mbid, single["title"], None
+                            )
+                            await db.execute("""
+                                INSERT INTO top_track 
+                                (artist_mbid, type, track_id, external_name, external_album, 
+                                 external_date, external_mbid, updated_at)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                                ON CONFLICT (artist_mbid, type, external_mbid) DO UPDATE SET
+                                    track_id = EXCLUDED.track_id,
+                                    external_name = EXCLUDED.external_name,
+                                    external_album = EXCLUDED.external_album,
+                                    external_date = EXCLUDED.external_date,
+                                    updated_at = NOW()
+                            """, mbid, 'single', track_id, single["title"], single.get("album"),
+                                  single["date"], single.get("mbid"))
+
+                # 6. Similar Artists
+                if eff_fetch_similar_artists:
+                     await db.execute("DELETE FROM similar_artist WHERE artist_mbid=$1", mbid,)
+                     for idx, similar_item in enumerate(meta.get("similar_artists", [])):
+                            sim_name, sim_mbid = parse_similar(similar_item)
+                            if not sim_name: continue
+    
+                            await db.execute("""
+                                INSERT INTO similar_artist
+                                (artist_mbid, similar_artist_name, similar_artist_mbid, rank, updated_at)
+                                VALUES ($1, $2, $3, $4, NOW())
+                                ON CONFLICT (artist_mbid, similar_artist_name) DO NOTHING
+                            """, mbid, sim_name, sim_mbid, idx + 1)
+            
+                # 7. Genres
+                if meta.get("genres"):
+                     await db.execute("DELETE FROM artist_genre WHERE artist_mbid=$1", mbid,)
+                     for g in meta["genres"]:
+                          await db.execute("INSERT INTO artist_genre (artist_mbid, genre, count, updated_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (artist_mbid, genre) DO NOTHING", 
+                                           mbid, g["name"], g["count"])
+
+                # 8. Albums (Release Groups)
+                all_releases = meta.get("albums", []) + meta.get("singles", [])
+                # We don't delete existing artist_albums blindly because we might lose primary links from scan?
+                # Actually core scan populates 'primary'. This populates metadata.
+                # Safe to overwrite if we have better data.
+                # But the logic in original was: DELETE FROM artist_album WHERE artist_mbid...
+                # Original logic:
+                if eff_fetch_metadata:
+                    # await db.execute("DELETE FROM artist_album WHERE artist_mbid=$1", mbid,)
+                    # await db.execute("DELETE FROM artist_album WHERE artist_mbid=$1", mbid,)
+                    pass
+                    
+                    for release in all_releases:
+                        r_mbid, r_title, r_date = release["mbid"], release["title"], release["date"]
+                        r_links = release.get("links") or []
+                        r_release_ids = release.get("release_ids") or []
+                        r_primary_release = release.get("primary_release_id")
+                        
+                        # Tagged Priority
+                        tagged_release_ids = []
+                        rows = await db.fetch("SELECT DISTINCT release_mbid FROM track WHERE release_group_mbid = $1 AND release_mbid IS NOT NULL", r_mbid,)
+                        rows_tagged = rows
+                        tagged_release_ids = [r[0] for r in rows_tagged if r[0]]
+                        if tagged_release_ids:
+                            r_primary_release = tagged_release_ids[0]
+                            r_release_ids = tagged_release_ids
+                        
+                        await db.execute("""
+                            INSERT INTO album (mbid, title, release_date, primary_type, updated_at)
+                            VALUES ($1, $2, $3, $4, NOW())
+                            ON CONFLICT(mbid) DO UPDATE SET title=excluded.title, release_date=excluded.release_date, updated_at=excluded.updated_at
+                        """, r_mbid, r_title, r_date, 'Album')
+    
+                        if r_release_ids:
+                            await db.execute("UPDATE track SET release_group_mbid=$1 WHERE release_mbid = ANY($2::text[])", r_mbid, r_release_ids)
+                        await upsert_artist_album(db, mbid, r_mbid, 'primary')
+                        
+                        # Links
+                        from app.config import get_musicbrainz_root_url
+                        mb_release_link = None
+                        if r_primary_release: 
+                            mb_release_link = f"{get_musicbrainz_root_url()}/release/{r_primary_release}"
+                        elif r_release_ids: 
+                            mb_release_link = f"{get_musicbrainz_root_url()}/release/{r_release_ids[0]}"
+                        else:
+                            mb_release_link = f"{get_musicbrainz_root_url()}/release-group/{r_mbid}"
+    
+                        link_payloads = []
+                        if mb_release_link: link_payloads.append({"type": "musicbrainz", "url": mb_release_link})
+                        link_payloads.extend(r_links)
+                        
+                        await db.execute("DELETE FROM external_link WHERE entity_type='album' AND entity_id=$1", r_mbid,)
+                        for link in link_payloads:
+                            await db.execute(
+                                "INSERT INTO external_link (entity_type, entity_id, type, url) VALUES ($1, $2, $3, $4) ON CONFLICT (entity_type, entity_id, type) DO NOTHING", 
+                                "album", r_mbid, link["type"], link["url"]
+                            )
+            except Exception as e:
+                logger.error(f"Error saving metadata batch for {mbid}: {e}")
+                # We continue to the next item in the batch rather than crashing
+                continue
 
     async def update_links(self, artist_filter=None, mbid_filter=None):
         """
