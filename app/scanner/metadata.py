@@ -25,6 +25,14 @@ SPOTIFY_SCANNING_DISABLED = False
 _spotify_token = None
 _token_expiry = 0
 
+class SpotifyRateLimitError(Exception):
+    def __init__(self, retry_after=None):
+        self.retry_after = retry_after
+        msg = "Spotify Rate Limit Exceeded"
+        if retry_after:
+            msg += f" (Retry after {retry_after}s)"
+        super().__init__(msg)
+
 class RateLimiter:
     def __init__(self, rate_limit: float, burst_limit: int = 1):
         self.rate_limit = rate_limit
@@ -130,6 +138,9 @@ async def get_spotify_token(client: httpx.AsyncClient):
             _spotify_token = data["access_token"]
             _token_expiry = time.time() + data["expires_in"] - 60
             return _spotify_token
+        elif resp.status_code == 429:
+             retry = resp.headers.get("Retry-After")
+             raise SpotifyRateLimitError(retry)
         else:
             logger.error(f"Spotify Auth Failed: {resp.status_code} {resp.text}")
     except Exception as e:
@@ -147,7 +158,8 @@ async def _evaluate_spotify_candidate(client: httpx.AsyncClient, headers: dict, 
         get_api_tracker().increment("spotify")
         resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{candidate_id}", headers=headers)
         if resp.status_code == 429:
-             raise RuntimeError("Spotify Rate Limit Exceeded")
+             retry = resp.headers.get("Retry-After")
+             raise SpotifyRateLimitError(retry)
         if resp.status_code != 200:
             return None
         data = resp.json()
@@ -930,7 +942,9 @@ async def fetch_artist_metadata(
                             q = quote(metadata["name"])
                             search_url = f"{SPOTIFY_API_ROOT}/search?q=artist:{q}&type=artist&limit=3"
                             s_resp = await client.get(search_url, headers=sp_headers)
-                            if s_resp.status_code == 429: raise RuntimeError("Spotify Rate Limit Exceeded")
+                            if s_resp.status_code == 429: 
+                                 retry = s_resp.headers.get("Retry-After")
+                                 raise SpotifyRateLimitError(retry)
                             if s_resp.status_code == 200:
                                  items = s_resp.json().get("artists", {}).get("items", [])
                                  if items:
@@ -955,15 +969,16 @@ async def fetch_artist_metadata(
                                 logger.debug(f"Fetching Spotify Artist details (Bio/Image) for {sp_id}...")
                                 get_api_tracker().increment("spotify")
                                 art_resp = await client.get(f"{SPOTIFY_API_ROOT}/artists/{sp_id}", headers=sp_headers)
-                                if art_resp.status_code == 429: raise RuntimeError("Spotify Rate Limit Exceeded")
+                                if art_resp.status_code == 429: 
+                                     retry = art_resp.headers.get("Retry-After")
+                                     raise SpotifyRateLimitError(retry)
                                 if art_resp.status_code == 200:
                                     images = art_resp.json().get("images", [])
                                     if images and not metadata["image_url"]:
                                         metadata["image_url"] = images[0]["url"]
                                         metadata["image_source"] = "spotify"
-                        except RuntimeError as re:
-                             # Re-raise critical errors like Rate Limit
-                             raise re
+                        except SpotifyRateLimitError:
+                             raise
                         except Exception as e:
                             logger.warning(f"Spotify Artwork Fetch Failed: {e}")
                 else:
@@ -971,6 +986,8 @@ async def fetch_artist_metadata(
             elif fetch_spotify_artwork and SPOTIFY_SCANNING_DISABLED:
                 logger.debug("Spotify scanning disabled; skipping Spotify API calls.")
 
+    except SpotifyRateLimitError:
+        raise
     except Exception as e:
         logger.error(f"Critical error fetching metadata for {artist_name}: {e}")
 
