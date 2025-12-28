@@ -830,9 +830,9 @@ class Scanner:
             self.scan_logger.emit_progress(0, 0, "Starting Metadata Update...")
         
         # Concurrency Control (Producer Limit)
-        # We allow 20 concurrent network fetchers (Producers)
-        # Database writes (Consumer) are batched and sequential
-        semaphore = asyncio.Semaphore(20)
+        # 20 concurrent producers was causing DNS/Network exhaustion on some systems.
+        # Reduced to 10 to be safer.
+        semaphore = asyncio.Semaphore(10)
         
         async for db in get_db():
             # Get artists
@@ -870,7 +870,7 @@ class Scanner:
             
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
-            query += " GROUP BY a.mbid, aw.source"
+            query += " GROUP BY a.mbid, aw.source ORDER BY a.name"
             
             rows = await db.fetch(query, *params)
 
@@ -1067,7 +1067,12 @@ class Scanner:
                         
                         results_buffer.clear()
                         
-            async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
+            # Use a shared client with tuned limits to prevent "Temporary failure in name resolution"
+            # Increase keepalive to hold connections to multiple domains (MB, LastFM, Spotify, Fanart, Wiki)
+            timeout = httpx.Timeout(20.0, connect=10.0)
+            limits = httpx.Limits(max_keepalive_connections=50, max_connections=100)
+            
+            async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}, timeout=timeout, limits=limits) as client:
                 await spawn_cleanup_consume(client)
             
             # Flush final buffer
