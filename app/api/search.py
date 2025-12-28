@@ -10,11 +10,15 @@ class SearchResultArtist(BaseModel):
     name: str
     mbid: str
     image_url: Optional[str] = None
+    artwork_id: Optional[int] = None
+    art_id: Optional[int] = None
+    art_sha1: Optional[str] = None
 
 class SearchResultAlbum(BaseModel):
     title: str
     artist: str
     artwork_id: Optional[int] = None
+    art_id: Optional[int] = None
     art_sha1: Optional[str] = None
     
 class SearchResultTrack(BaseModel):
@@ -24,6 +28,7 @@ class SearchResultTrack(BaseModel):
     album: str
     duration_seconds: float
     artwork_id: Optional[int] = None
+    art_id: Optional[int] = None
     art_sha1: Optional[str] = None
 
 class SearchResponse(BaseModel):
@@ -38,10 +43,11 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
 
     # 1. Search Artists (case-insensitive via citext)
     artists_query = """
-        SELECT name, mbid, image_url 
-        FROM artist 
-        WHERE name ILIKE $1
-        ORDER BY LENGTH(name) ASC, name ASC 
+        SELECT a.name, a.mbid, a.image_url, a.artwork_id, ar.sha1 as art_sha1
+        FROM artist a
+        LEFT JOIN artwork ar ON a.artwork_id = ar.id
+        WHERE a.name ILIKE $1
+        ORDER BY LENGTH(a.name) ASC, a.name ASC 
         LIMIT 5
     """
     artists = []
@@ -50,7 +56,10 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
         artists.append(SearchResultArtist(
             name=row['name'],
             mbid=row['mbid'],
-            image_url=row['image_url']
+            image_url=row['image_url'],
+            artwork_id=row['artwork_id'],
+            art_id=row['artwork_id'],
+            art_sha1=row['art_sha1']
         ))
 
     # 2. Search Albums using FTS
@@ -71,6 +80,7 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
             title=row['album'],
             artist=row['artist'],
             artwork_id=row['artwork_id'],
+            art_id=row['artwork_id'],
             art_sha1=row['art_sha1']
         ))
 
@@ -93,6 +103,7 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
             album=row['album'],
             duration_seconds=row['duration_seconds'] or 0.0,
             artwork_id=row['artwork_id'],
+            art_id=row['artwork_id'],
             art_sha1=row['art_sha1']
         ))
 

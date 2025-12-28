@@ -59,13 +59,25 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
     async for conn in get_db():
         # Clean relevant tables
         await conn.execute("""
-            TRUNCATE TABLE client_session RESTART IDENTITY CASCADE;
-            TRUNCATE TABLE renderer_state RESTART IDENTITY CASCADE;
-            TRUNCATE TABLE playback_history RESTART IDENTITY CASCADE;
-            TRUNCATE TABLE track RESTART IDENTITY CASCADE;
-            TRUNCATE TABLE artist RESTART IDENTITY CASCADE;
-            TRUNCATE TABLE album RESTART IDENTITY CASCADE;
-            TRUNCATE TABLE missing_album RESTART IDENTITY CASCADE;
+            TRUNCATE TABLE 
+                session,
+                client_session,
+                renderer_state,
+                playback_history,
+                track,
+                artist,
+                album,
+                missing_album,
+                artwork,
+                renderer,
+                top_track,
+                similar_artist,
+                artist_genre,
+                external_link,
+                image_map,
+                track_artist,
+                artist_album
+            RESTART IDENTITY CASCADE;
         """)
         
         # Reset ScanManager
