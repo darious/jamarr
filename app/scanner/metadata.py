@@ -812,17 +812,26 @@ async def fetch_artist_metadata(
             albums_res = results[4]
             eps_res = results[5]
 
-            if isinstance(singles_res, list): metadata["singles"] = singles_res
+            # Filter logic: Only keep releases that exist locally (have tracks)
+            def filter_local(items):
+                if not isinstance(items, list): return items
+                if not local_release_group_ids: return []
+                return [i for i in items if i["mbid"] in local_release_group_ids]
+
+            if isinstance(singles_res, list): 
+                metadata["singles"] = filter_local(singles_res)
             elif isinstance(singles_res, Exception): logger.error(f"Singles Task Error: {singles_res}")
 
-            if isinstance(albums_res, list): metadata["albums"] = albums_res
+            if isinstance(albums_res, list): 
+                metadata["albums"] = filter_local(albums_res)
             elif isinstance(albums_res, Exception): logger.error(f"Albums Task Error: {albums_res}")
 
             if isinstance(eps_res, list):
                 # Optimization: We used to resolve links for every missing album here.
                 # User requested to skip this expensive lookup.
                 # We will rely on Release Group MBIDs for linking.
-                metadata["albums"].extend(eps_res)
+                filtered_eps = filter_local(eps_res)
+                metadata["albums"].extend(filtered_eps)
             elif isinstance(eps_res, Exception): logger.error(f"EPs Task Error: {eps_res}")
 
             # Phase 2: Wikidata/Wikipedia (Needs URL from Core)
