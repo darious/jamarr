@@ -35,3 +35,49 @@ async def test_repro_metadata_update_interface_error(db):
     # Using missing_only=True logic inside scan_missing_albums logic? No, it has different args.
     # It just takes filters.
     await scanner.scan_missing_albums(artist_filter=None, mbid_filter=None)
+
+
+@pytest.mark.asyncio
+async def test_rematch_tracks_top_updates_track_id(monkeypatch, db):
+    """
+    Ensure rematch_tracks_top passes arguments correctly to asyncpg (no InterfaceError)
+    and updates track_id/updated_at when match_track_to_library returns a hit.
+    """
+    scanner = Scanner()
+    artist_mbid = "rematch-artist-001"
+    track_id = 4242
+
+    # Insert minimal artist and track
+    await db.execute("INSERT INTO artist (mbid, name) VALUES ($1, 'Rematch Artist') ON CONFLICT DO NOTHING", artist_mbid)
+    await db.execute(
+        """
+        INSERT INTO track (id, title, artist, album, path, duration_seconds)
+        VALUES ($1, 'Rematch Track', 'Rematch Artist', 'Rematch Album', '/tmp/rematch.flac', 123)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        track_id,
+    )
+
+    # Top track with no local match yet
+    await db.execute(
+        """
+        INSERT INTO top_track (artist_mbid, type, rank, external_name, external_album, track_id)
+        VALUES ($1, 'top', 1, 'Rematch Track', 'Rematch Album', NULL)
+        """,
+        artist_mbid,
+    )
+
+    # Force match_track_to_library to return our track_id
+    async def _fake_match_track_to_library(_db, _mbid, _name, _album):
+        return track_id
+
+    monkeypatch.setattr(
+        "app.scanner.metadata.match_track_to_library",
+        _fake_match_track_to_library,
+    )
+
+    await scanner.rematch_tracks_top({(artist_mbid, "Rematch Artist")})
+
+    row = await db.fetchrow("SELECT track_id, updated_at FROM top_track WHERE artist_mbid=$1", artist_mbid)
+    assert row["track_id"] == track_id
+    assert row["updated_at"] is not None

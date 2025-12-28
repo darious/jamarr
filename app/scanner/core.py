@@ -655,7 +655,7 @@ class Scanner:
                                  UPDATE top_track
                                  SET track_id = $1, updated_at = $2
                                  WHERE id = $3
-                              """, track_id, time.time(), tt_id)
+                             """, track_id, datetime.now(timezone.utc), tt_id)
 
     async def _cleanup_orphans(self, db, root_path, seen_paths):
         music_root = get_music_path()
@@ -1359,7 +1359,9 @@ class Scanner:
                     if track_id:
                         await db.execute(
                             "UPDATE top_track SET track_id = $1, updated_at = $2 WHERE id = $3",
-                            (track_id, time.time(), tt_id),
+                            track_id,
+                            datetime.now(timezone.utc),
+                            tt_id,
                         )
 
     async def scan_missing_albums(self, artist_filter=None, mbid_filter=None):
