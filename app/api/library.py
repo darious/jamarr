@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.db import get_db, optimize_db
 import asyncpg
-import json
-from typing import List, Optional
+from typing import Optional
 
 from app.config import get_musicbrainz_root_url
 from app.scanner.scan_manager import ScanManager
@@ -10,14 +9,18 @@ from app.media.image_lookup import fetch_primary_images
 
 router = APIRouter()
 
+
 @router.post("/api/scan/missing")
 async def scan_missing_albums(artist: str = None, mbid: str = None):
     try:
         scan_manager = ScanManager.get_instance()
-        await scan_manager.start_missing_albums_scan(artist_filter=artist, mbid_filter=mbid)
+        await scan_manager.start_missing_albums_scan(
+            artist_filter=artist, mbid_filter=mbid
+        )
         return {"status": "started", "message": "Missing albums scan started"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.post("/api/library/optimize")
 async def trigger_optimize():
@@ -26,6 +29,7 @@ async def trigger_optimize():
         return {"status": "success", "message": "Database optimized"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/api/artists/{mbid}/missing")
 async def get_missing_albums(mbid: str, db: asyncpg.Connection = Depends(get_db)):
@@ -46,13 +50,14 @@ async def get_missing_albums(mbid: str, db: asyncpg.Connection = Depends(get_db)
     rows = await db.fetch(query, mbid)
     return [dict(row) for row in rows]
 
+
 @router.get("/api/artists")
 async def get_artists(
-    limit: int = 1000, 
-    offset: int = 0, 
-    name: Optional[str] = None, 
-    mbid: Optional[str] = None, 
-    db: asyncpg.Connection = Depends(get_db)
+    limit: int = 1000,
+    offset: int = 0,
+    name: Optional[str] = None,
+    mbid: Optional[str] = None,
+    db: asyncpg.Connection = Depends(get_db),
 ):
     # Base query for artist info
     query = """
@@ -90,7 +95,7 @@ async def get_artists(
         ) ac ON ac.artist_mbid = a.mbid
         WHERE a.name IS NOT NULL 
     """
-    
+
     params = []
     param_num = 1
     if name:
@@ -102,9 +107,9 @@ async def get_artists(
         query += f" AND a.mbid = ${param_num}"
         params.append(mbid)
         param_num += 1
-        
+
     query += " GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio, a.sort_name, ac.primary_album_count, ac.appears_on_album_count ORDER BY a.sort_name"
-    
+
     # Apply limit/offset only if not filtering by specific artist (which usually returns 1)
     if not name and not mbid:
         query += f" LIMIT ${param_num} OFFSET ${param_num + 1}"
@@ -120,26 +125,29 @@ async def get_artists(
     # Optimization: Only fetch primary images if we are returning a list
     # For single artist details, we might want backgrounds too
     artist_images = await fetch_primary_images(db, "artist", artist_ids, "artistthumb")
-    
+
     # Only fetch background art if we are fetching a single artist or small number
     artist_backgrounds = {}
-    if len(rows) <= 1: 
-         artist_backgrounds = await fetch_primary_images(db, "artist", artist_ids, "artistbackground")
+    if len(rows) <= 1:
+        artist_backgrounds = await fetch_primary_images(
+            db, "artist", artist_ids, "artistbackground"
+        )
 
     artists = []
     for row in rows:
         mbid_val = row["mbid"]
         art_info = artist_images.get(mbid_val, {})
         bg_info = artist_backgrounds.get(mbid_val, {})
-        
+
         artist_data = {
             "mbid": row["mbid"],
-            "name": row["name"], 
-            "image_url": row["image_url"], 
+            "name": row["name"],
+            "image_url": row["image_url"],
             "artwork_id": art_info.get("artwork_id") or row["artwork_id"],
-            "art_id": art_info.get("artwork_id") or row["artwork_id"], # Frontend compatibility
+            "art_id": art_info.get("artwork_id")
+            or row["artwork_id"],  # Frontend compatibility
             "art_sha1": art_info.get("art_sha1") or row["art_sha1"],
-            "bio": row["bio"], 
+            "bio": row["bio"],
             "sort_name": row["sort_name"] or row["name"],
             "homepage": row["homepage"],
             "spotify_url": row["spotify_url"],
@@ -185,11 +193,11 @@ async def get_artists(
                     "sample_rate_hz": tt_row["sample_rate_hz"],
                     "duration_seconds": tt_row["duration_seconds"],
                     "art_sha1": tt_row["art_sha1"],
-                    "art_id": tt_row["artwork_id"]
+                    "art_id": tt_row["artwork_id"],
                 }
                 for tt_row in tt_rows
             ]
-            
+
             # Fetch singles
             singles_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
@@ -213,11 +221,11 @@ async def get_artists(
                     "bit_depth": s_row["bit_depth"],
                     "sample_rate_hz": s_row["sample_rate_hz"],
                     "art_sha1": s_row["art_sha1"],
-                    "art_id": s_row["artwork_id"]
+                    "art_id": s_row["artwork_id"],
                 }
                 for s_row in s_rows
             ]
-            
+
             # Fetch similar artists
             similar_query = """
                 SELECT sa.similar_artist_name, sa.similar_artist_mbid, 
@@ -230,19 +238,28 @@ async def get_artists(
                 LIMIT 10
             """
             sim_rows = await db.fetch(similar_query, mbid_val)
-            sim_mbids = [r["similar_artist_mbid"] for r in sim_rows if r["similar_artist_mbid"]]
-            sim_images = await fetch_primary_images(db, "artist", sim_mbids, "artistthumb") if sim_mbids else {}
+            sim_mbids = [
+                r["similar_artist_mbid"] for r in sim_rows if r["similar_artist_mbid"]
+            ]
+            sim_images = (
+                await fetch_primary_images(db, "artist", sim_mbids, "artistthumb")
+                if sim_mbids
+                else {}
+            )
             artist_data["similar_artists"] = []
             for sim_row in sim_rows:
                 sim_mbid = sim_row["similar_artist_mbid"]
                 sim_art = sim_images.get(sim_mbid, {}) if sim_mbid else {}
-                artist_data["similar_artists"].append({
-                    "name": sim_row["similar_artist_name"],
-                    "mbid": sim_mbid,
-                    "image_url": sim_row["image_url"],
-                    "artwork_id": sim_art.get("artwork_id") or sim_row["artwork_id"],
-                    "art_sha1": sim_art.get("art_sha1") or sim_row["art_sha1"],
-                })
+                artist_data["similar_artists"].append(
+                    {
+                        "name": sim_row["similar_artist_name"],
+                        "mbid": sim_mbid,
+                        "image_url": sim_row["image_url"],
+                        "artwork_id": sim_art.get("artwork_id")
+                        or sim_row["artwork_id"],
+                        "art_sha1": sim_art.get("art_sha1") or sim_row["art_sha1"],
+                    }
+                )
 
             # Fetch genres
             genres_query = """
@@ -252,21 +269,26 @@ async def get_artists(
                 ORDER BY count DESC
             """
             g_rows = await db.fetch(genres_query, mbid_val)
-            artist_data["genres"] = [{"name": r["genre"], "count": r["count"]} for r in g_rows]
-        
+            artist_data["genres"] = [
+                {"name": r["genre"], "count": r["count"]} for r in g_rows
+            ]
+
         else:
             # Lightweight response for lists
             artist_data["top_tracks"] = []
             artist_data["singles"] = []
             artist_data["similar_artists"] = []
             artist_data["genres"] = []
-        
+
         artists.append(artist_data)
-    
+
     return artists
 
+
 @router.get("/api/albums")
-async def get_albums(artist: str = None, album_mbid: str = None, db: asyncpg.Connection = Depends(get_db)):
+async def get_albums(
+    artist: str = None, album_mbid: str = None, db: asyncpg.Connection = Depends(get_db)
+):
     # 1. If artist is provided, find their MBID to classify 'main' vs 'appears_on'
     target_mbid = None
     if artist:
@@ -307,7 +329,7 @@ async def get_albums(artist: str = None, album_mbid: str = None, db: asyncpg.Con
     """
     params = [target_mbid]
     param_num = 2
-    
+
     filters = []
     if artist:
         # Filter by any artist associated with the tracks via track_artists
@@ -319,7 +341,9 @@ async def get_albums(artist: str = None, album_mbid: str = None, db: asyncpg.Con
         params.append(artist)
         param_num += 1
     if album_mbid:
-        filters.append(f"(t.release_group_mbid = ${param_num} OR t.release_mbid = ${param_num + 1})")
+        filters.append(
+            f"(t.release_group_mbid = ${param_num} OR t.release_mbid = ${param_num + 1})"
+        )
         params.extend([album_mbid, album_mbid])
         param_num += 2
     if filters:
@@ -328,7 +352,6 @@ async def get_albums(artist: str = None, album_mbid: str = None, db: asyncpg.Con
         query += " WHERE t.album IS NOT NULL"
 
     query += " GROUP BY t.album ORDER BY year ASC"
-    
 
     rows = await db.fetch(query, *params)
     mb_root = get_musicbrainz_root_url()
@@ -341,16 +364,22 @@ async def get_albums(artist: str = None, album_mbid: str = None, db: asyncpg.Con
             d["musicbrainz_url"] = d["mb_link"]
         elif d.get("album_mbid"):
             d["musicbrainz_url"] = f"{mb_root}/release-group/{d['album_mbid']}"
-        
+
         # Frontend compatibility: expects art_id
         if d.get("artwork_id"):
             d["art_id"] = d["artwork_id"]
-            
+
         results.append(d)
     return results
 
+
 @router.get("/api/tracks")
-async def get_tracks(album: str = None, artist: str = None, album_mbid: str = None, db: asyncpg.Connection = Depends(get_db)):
+async def get_tracks(
+    album: str = None,
+    artist: str = None,
+    album_mbid: str = None,
+    db: asyncpg.Connection = Depends(get_db),
+):
     # Base query
     # Use subquery to aggregate all artists for the track (Main + Feature)
     # This ensures "Taylor Swift, Ed Sheeran" is returned instead of just "Taylor Swift" tag
@@ -366,9 +395,9 @@ async def get_tracks(album: str = None, artist: str = None, album_mbid: str = No
     """
     params = []
     param_num = 1
-    
+
     query += " WHERE 1=1"
-    
+
     if album_mbid:
         query += f" AND (t.release_group_mbid = ${param_num} OR t.release_mbid = ${param_num + 1})"
         params.extend([album_mbid, album_mbid])
@@ -386,14 +415,14 @@ async def get_tracks(album: str = None, artist: str = None, album_mbid: str = No
         )"""
         params.extend([artist, artist, artist])
         param_num += 3
-    
+
     if album:
         query += f" AND t.album = ${param_num}"
         params.append(album)
         param_num += 1
-        
+
     query += " ORDER BY t.disc_no, t.track_no"
-    
+
     rows = await db.fetch(query, *params)
     results = []
     for row in rows:
@@ -401,13 +430,14 @@ async def get_tracks(album: str = None, artist: str = None, album_mbid: str = No
         # Override artist tag with aggregated list if available
         if d.get("aggregated_artists"):
             d["artist"] = d["aggregated_artists"]
-        
+
         # Frontend compatibility: expects art_id
         if d.get("artwork_id"):
             d["art_id"] = d["artwork_id"]
-            
+
         results.append(d)
     return results
+
 
 @router.get("/api/home/new-releases")
 async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get_db)):
@@ -433,8 +463,11 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
     rows = await db.fetch(query, limit)
     return [dict(row) for row in rows]
 
+
 @router.get("/api/home/recently-added-albums")
-async def get_recently_added_albums(limit: int = 20, db: asyncpg.Connection = Depends(get_db)):
+async def get_recently_added_albums(
+    limit: int = 20, db: asyncpg.Connection = Depends(get_db)
+):
     query = """
         SELECT 
             t.album, 
@@ -457,8 +490,11 @@ async def get_recently_added_albums(limit: int = 20, db: asyncpg.Connection = De
     rows = await db.fetch(query, limit)
     return [dict(row) for row in rows]
 
+
 @router.get("/api/home/recently-played-albums")
-async def get_recently_played_albums(limit: int = 20, db: asyncpg.Connection = Depends(get_db)):
+async def get_recently_played_albums(
+    limit: int = 20, db: asyncpg.Connection = Depends(get_db)
+):
     # Join playback_history to get specific albums
     query = """
         SELECT 
@@ -483,8 +519,11 @@ async def get_recently_played_albums(limit: int = 20, db: asyncpg.Connection = D
     rows = await db.fetch(query, limit)
     return [dict(row) for row in rows]
 
+
 @router.get("/api/home/recently-played-artists")
-async def get_recently_played_artists(limit: int = 20, db: asyncpg.Connection = Depends(get_db)):
+async def get_recently_played_artists(
+    limit: int = 20, db: asyncpg.Connection = Depends(get_db)
+):
     query = """
         SELECT DISTINCT 
             a.mbid,
@@ -508,18 +547,21 @@ async def get_recently_played_artists(limit: int = 20, db: asyncpg.Connection = 
     return [
         {
             "mbid": row["mbid"],
-            "name": row["name"], 
-            "image_url": row["image_url"], 
+            "name": row["name"],
+            "image_url": row["image_url"],
             "artwork_id": row["artwork_id"],
-            "art_id": row["artwork_id"], # Compat
+            "art_id": row["artwork_id"],  # Compat
             "art_sha1": row["art_sha1"],
-            "bio": row["bio"]
-        } 
+            "bio": row["bio"],
+        }
         for row in rows
     ]
 
+
 @router.get("/api/home/discover-artists")
-async def get_discover_artists(limit: int = 20, db: asyncpg.Connection = Depends(get_db)):
+async def get_discover_artists(
+    limit: int = 20, db: asyncpg.Connection = Depends(get_db)
+):
     # Newly added artists (based on track mtime)
     query = """
         SELECT DISTINCT 
@@ -543,12 +585,12 @@ async def get_discover_artists(limit: int = 20, db: asyncpg.Connection = Depends
     return [
         {
             "mbid": row["mbid"],
-            "name": row["name"], 
-            "image_url": row["image_url"], 
+            "name": row["name"],
+            "image_url": row["image_url"],
             "artwork_id": row["artwork_id"],
-            "art_id": row["artwork_id"], # Compat
+            "art_id": row["artwork_id"],  # Compat
             "art_sha1": row["art_sha1"],
-            "bio": row["bio"]
-        } 
+            "bio": row["bio"],
+        }
         for row in rows
     ]

@@ -2,11 +2,13 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.db import init_db, close_db
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     from app.upnp import UPnPManager
     from app.scanner.scan_manager import ScanManager
+
     UPnPManager.get_instance().start_background_scan()
     # ScanManager is lazy initialized but good to have it ready
     ScanManager.get_instance()
@@ -15,24 +17,21 @@ async def lifespan(app: FastAPI):
     await ScanManager.get_instance().shutdown()
     await close_db()
 
+
 app = FastAPI(lifespan=lifespan)
 
 
 # Configure Centralized Logging
-from app.logging_conf import configure_logging
+from app.logging_conf import configure_logging  # noqa: E402
+
 configure_logging()
 
 
-
-
-from fastapi import BackgroundTasks
-
-
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pathlib import Path
-from app.media import art
-from app.api import library, stream, player, search, scan, auth, media_quality
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
+from pathlib import Path  # noqa: E402
+from app.media import art  # noqa: E402
+from app.api import library, stream, player, search, scan, auth, media_quality  # noqa: E402
 
 
 app.include_router(art.router)
@@ -46,23 +45,31 @@ app.include_router(auth.router)
 app.include_router(media_quality.router)
 
 
-
-
 # Serve built SvelteKit frontend (output lives in web/build)
 build_dir = Path("web/build")
 
 if build_dir.exists():
     app.mount("/_app", StaticFiles(directory=build_dir / "_app"), name="svelte-app")
-    app.mount("/assets", StaticFiles(directory=build_dir / "assets", html=False, check_dir=False), name="assets")
-    app.mount("/favicon.ico", StaticFiles(directory=build_dir, html=False, check_dir=False), name="favicon")
+    app.mount(
+        "/assets",
+        StaticFiles(directory=build_dir / "assets", html=False, check_dir=False),
+        name="assets",
+    )
+    app.mount(
+        "/favicon.ico",
+        StaticFiles(directory=build_dir, html=False, check_dir=False),
+        name="favicon",
+    )
 else:
     print("Warning: web/build directory not found. Frontend will not be served.")
+
 
 @app.get("/{path:path}")
 async def spa(path: str):
     # Let API and art routes fall through to their handlers
     if path.startswith("api/") or path.startswith("art/"):
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Not Found")
 
     target = build_dir / path
@@ -74,4 +81,5 @@ async def spa(path: str):
         return FileResponse(index_path)
 
     from fastapi import HTTPException
+
     raise HTTPException(status_code=404, detail="Not Found")

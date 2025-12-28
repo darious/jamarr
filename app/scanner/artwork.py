@@ -3,7 +3,6 @@ import os
 import shutil
 from io import BytesIO
 from typing import Any, Dict, Optional
-from datetime import datetime, timezone
 
 import aiofiles
 import httpx
@@ -18,6 +17,7 @@ import base64
 
 CACHE_DIR = "cache/art"
 
+
 def _get_art_path(sha1: str) -> str:
     """
     Compute unified path for artwork file using subdirectory distribution.
@@ -25,6 +25,7 @@ def _get_art_path(sha1: str) -> str:
     """
     subdir = sha1[:2]
     return os.path.join(CACHE_DIR, subdir, sha1)
+
 
 def _resolve_or_migrate_art_path(sha1: str, path_on_disk: Optional[str] = None) -> str:
     """
@@ -37,11 +38,11 @@ def _resolve_or_migrate_art_path(sha1: str, path_on_disk: Optional[str] = None) 
     # Check unified path with possible extensions
     # Order matters: check precise matches first then generic
     unified_base = _get_art_path(sha1)
-    
+
     # 1. Check strict legacy (no ext)
     if os.path.exists(unified_base):
         return unified_base
-        
+
     # 2. Check known extensions
     for ext in [".jpg", ".png", ".gif", ".webp", ".bmp", ".tiff"]:
         p = unified_base + ext
@@ -72,6 +73,7 @@ def _resolve_or_migrate_art_path(sha1: str, path_on_disk: Optional[str] = None) 
     # Default to base (caller might handle missing)
     return unified_base
 
+
 def _extract_image_metadata(data: bytes) -> Dict[str, Any]:
     """Inspect image bytes to capture dimensions, mime, and format."""
     meta: Dict[str, Any] = {
@@ -91,6 +93,7 @@ def _extract_image_metadata(data: bytes) -> Dict[str, Any]:
         pass
     return meta
 
+
 async def extract_and_save_artwork(path: str) -> Optional[Dict[str, Any]]:
     """
     Extracts artwork from file at path, saves to cache, and returns details.
@@ -98,9 +101,10 @@ async def extract_and_save_artwork(path: str) -> Optional[Dict[str, Any]]:
     data = _extract_artwork_data(path)
     if not data:
         return None
-    
+
     sha1, meta = await _save_artwork_to_disk(data)
     return {"sha1": sha1, "meta": meta}
+
 
 def _extract_artwork_data(path: str) -> bytes:
     try:
@@ -128,72 +132,82 @@ def _extract_artwork_data(path: str) -> bytes:
 
         # Ogg Vorbis
         if isinstance(f, OggVorbis):
-             # METADATA_BLOCK_PICTURE is base64 encoded FLAC Picture structure
-             if f.tags:
-                 pics = f.tags.get("metadata_block_picture", [])
-                 if pics:
-                     try:
-                         p = Picture(base64.b64decode(pics[0]))
-                         return p.data
-                     except Exception:
-                         pass
-        
+            # METADATA_BLOCK_PICTURE is base64 encoded FLAC Picture structure
+            if f.tags:
+                pics = f.tags.get("metadata_block_picture", [])
+                if pics:
+                    try:
+                        p = Picture(base64.b64decode(pics[0]))
+                        return p.data
+                    except Exception:
+                        pass
+
         # TODO: Add other formats (Vorbis, etc)
-        
+
         return None
     except Exception:
         return None
 
+
 async def _save_artwork_to_disk(data: bytes) -> str:
     """
     Save artwork to disk with subdirectory distribution and file extension.
-    
+
     Args:
         data: Image data bytes
-    
+
     Returns:
         Tuple of SHA1 hash and extracted metadata
     """
     sha1 = hashlib.sha1(data).hexdigest()
-    
+
     # Extract metadata early to get format
     meta = _extract_image_metadata(data)
-    
+
     # Determine extension
     ext = ""
     fmt = meta.get("image_format")
-    if fmt == "JPEG": ext = ".jpg"
-    elif fmt == "PNG": ext = ".png"
-    elif fmt == "GIF": ext = ".gif"
-    elif fmt == "WEBP": ext = ".webp"
-    elif fmt == "BMP": ext = ".bmp"
-    elif fmt == "TIFF": ext = ".tiff"
-    
+    if fmt == "JPEG":
+        ext = ".jpg"
+    elif fmt == "PNG":
+        ext = ".png"
+    elif fmt == "GIF":
+        ext = ".gif"
+    elif fmt == "WEBP":
+        ext = ".webp"
+    elif fmt == "BMP":
+        ext = ".bmp"
+    elif fmt == "TIFF":
+        ext = ".tiff"
+
     # Build path with extension
     subdir = sha1[:2]
     filename = sha1 + ext
     path = os.path.join(CACHE_DIR, subdir, filename)
-    
+
     # If extensionless file exists (legacy), we might want to rename it?
     # Or just check if 'path' exists.
-    
+
     if not os.path.exists(path):
         # Create subdirectory if needed
         os.makedirs(os.path.dirname(path), exist_ok=True)
         async with aiofiles.open(path, "wb") as f:
             await f.write(data)
-            
+
     meta["path_on_disk"] = path
     return sha1, meta
 
-async def download_and_save_artwork(url: str, art_type: str = 'artistthumb') -> Optional[Dict[str, Any]]:
+
+async def download_and_save_artwork(
+    url: str, art_type: str = "artistthumb"
+) -> Optional[Dict[str, Any]]:
     """
     Download artwork from URL and save to cache.
-    
+
     Args:
         url: URL of the image to download
         art_type: semantic role (kept for compatibility; not used for path)
-    
+
     Returns:
         Dict with SHA1 hash, metadata, and source URL, or None if download failed
     """
@@ -208,6 +222,7 @@ async def download_and_save_artwork(url: str, art_type: str = 'artistthumb') -> 
         print(f"Failed to download artwork from {url}: {e}")
         return None
     return None
+
 
 async def cleanup_orphaned_artwork(db):
     """
@@ -226,35 +241,42 @@ async def cleanup_orphaned_artwork(db):
                 SELECT DISTINCT artwork_id FROM album WHERE artwork_id IS NOT NULL
             )
         """
-        
+
         rows = await db.fetch(sql)
-            
+
         if not rows:
             return 0
-            
+
         count = 0
         for row in rows:
             artwork_id, sha1, stored_path = row["id"], row["sha1"], row["path_on_disk"]
             path = _resolve_or_migrate_art_path(sha1, stored_path)
-            
+
             # Delete file
             if os.path.exists(path):
                 try:
                     os.remove(path)
                 except OSError as e:
                     print(f"Error removing artwork file {path}: {e}")
-            
+
             # Delete DB entry
             await db.execute("DELETE FROM artwork WHERE id = $1", artwork_id)
             count += 1
-        
+
         return count
-        
+
     except Exception as e:
         print(f"Error extracting orphaned artwork: {e}")
         return 0
 
-async def upsert_artwork_record(db: asyncpg.Connection, sha1: str, meta: Optional[Dict[str, Any]] = None, source: Optional[str] = None, source_url: Optional[str] = None) -> Optional[int]:
+
+async def upsert_artwork_record(
+    db: asyncpg.Connection,
+    sha1: str,
+    meta: Optional[Dict[str, Any]] = None,
+    source: Optional[str] = None,
+    source_url: Optional[str] = None,
+) -> Optional[int]:
     """
     Insert or update an artwork row with the provided metadata and return its ID.
     """
@@ -263,8 +285,10 @@ async def upsert_artwork_record(db: asyncpg.Connection, sha1: str, meta: Optiona
 
     meta = meta or {}
     if sha1 and not meta.get("path_on_disk"):
-        meta["path_on_disk"] = _resolve_or_migrate_art_path(sha1, meta.get("path_on_disk"))
-    
+        meta["path_on_disk"] = _resolve_or_migrate_art_path(
+            sha1, meta.get("path_on_disk")
+        )
+
     row = await db.fetchrow("SELECT id FROM artwork WHERE sha1 = $1", sha1)
 
     params = (
@@ -293,7 +317,8 @@ async def upsert_artwork_record(db: asyncpg.Connection, sha1: str, meta: Optiona
                 source_url=COALESCE($8, source_url)
             WHERE id=$9
             """,
-            *params, artwork_id,
+            *params,
+            artwork_id,
         )
     else:
         artwork_id = await db.fetchval(
@@ -302,10 +327,12 @@ async def upsert_artwork_record(db: asyncpg.Connection, sha1: str, meta: Optiona
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
             """,
-            sha1, *params,
+            sha1,
+            *params,
         )
 
     return artwork_id
+
 
 async def upsert_image_mapping(
     db: asyncpg.Connection,
@@ -330,5 +357,9 @@ async def upsert_image_mapping(
                       score=COALESCE(excluded.score, image_map.score),
                       created_at=COALESCE(image_map.created_at, excluded.created_at)
         """,
-        artwork_id, entity_type, str(entity_id), image_type, score,
+        artwork_id,
+        entity_type,
+        str(entity_id),
+        image_type,
+        score,
     )

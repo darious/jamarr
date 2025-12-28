@@ -62,7 +62,9 @@ def _public_user_dict(row: asyncpg.Record) -> dict:
         "email": row["email"],
         "display_name": row["display_name"] or row["username"],
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-        "last_login": row["last_login_at"].isoformat() if row["last_login_at"] else None,
+        "last_login": row["last_login_at"].isoformat()
+        if row["last_login_at"]
+        else None,
     }
 
 
@@ -87,8 +89,7 @@ async def signup(
     _validate_password(payload.password)
 
     existing = await db.fetchrow(
-        'SELECT 1 FROM "user" WHERE username = $1 OR email = $2',
-        username, email
+        'SELECT 1 FROM "user" WHERE username = $1 OR email = $2', username, email
     )
     if existing:
         raise HTTPException(
@@ -97,7 +98,7 @@ async def signup(
         )
 
     password_hash = hash_password(payload.password)
-    
+
     # Insert new user
     user = await db.fetchrow(
         """
@@ -152,13 +153,12 @@ async def login(
         ip=request.client.host if request.client else None,
     )
     await db.execute(
-        'UPDATE "user" SET last_login_at = $1 WHERE id = $2', 
-        datetime.now(timezone.utc), 
-        user["id"]
+        'UPDATE "user" SET last_login_at = $1 WHERE id = $2',
+        datetime.now(timezone.utc),
+        user["id"],
     )
     _set_session_cookie(response, token)
     return _public_user_dict(user)
-
 
 
 @router.post("/api/auth/logout")
@@ -181,7 +181,9 @@ async def me(
     token = request.cookies.get(SESSION_COOKIE_NAME)
     user, token_value = await get_session_user(db, token)
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated."
+        )
 
     # Refresh cookie to keep session alive
     _set_session_cookie(response, token_value or token)
@@ -197,11 +199,14 @@ async def update_profile(
 ):
     user, token = await require_current_user(request, db)
     email = payload.email.strip()
-    display_name = payload.display_name.strip() if payload.display_name else user["display_name"]
+    display_name = (
+        payload.display_name.strip() if payload.display_name else user["display_name"]
+    )
 
     existing = await db.fetchrow(
         'SELECT 1 FROM "user" WHERE email = $1 AND id != $2',
-        email, user["id"],
+        email,
+        user["id"],
     )
     if existing:
         raise HTTPException(
@@ -211,11 +216,14 @@ async def update_profile(
 
     await db.execute(
         'UPDATE "user" SET email = $1, display_name = $2 WHERE id = $3',
-        email, display_name, user["id"],
+        email,
+        display_name,
+        user["id"],
     )
     _set_session_cookie(response, token)
     updated_user = await db.fetchrow(
-        'SELECT * FROM "user" WHERE id = $1', user["id"],
+        'SELECT * FROM "user" WHERE id = $1',
+        user["id"],
     )
     return _public_user_dict(updated_user or user)
 
@@ -239,7 +247,8 @@ async def change_password(
     new_hash = hash_password(payload.new_password)
     await db.execute(
         'UPDATE "user" SET password_hash = $1 WHERE id = $2',
-        new_hash, user["id"],
+        new_hash,
+        user["id"],
     )
     # Invalidate other sessions but keep current one
     await db.execute(
