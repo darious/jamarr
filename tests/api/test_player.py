@@ -167,9 +167,23 @@ async def test_progress_logs_history(client: AsyncClient, db, player_data):
     assert response.status_code == 200
     
     # Verify insertion
-    # Allow small delay for async db ops if any (though here it's awaited)
     rows = await db.fetch("SELECT * FROM playback_history WHERE track_id = 10")
-    assert len(rows) > 0
+    assert len(rows) == 1
+
+    # Verify state persistence (logged flag)
+    response = await client.get("/api/player/state", headers=headers)
+    state = response.json()
+    assert state['queue'][0]['logged'] is True
+
+    # Send another progress update, should NOT log again
+    response = await client.post("/api/player/progress", 
+        json={"position_seconds": 40, "is_playing": True},
+        headers=headers
+    )
+    assert response.status_code == 200
+    
+    rows = await db.fetch("SELECT * FROM playback_history WHERE track_id = 10")
+    assert len(rows) == 1
 
 @pytest.mark.asyncio
 async def test_renderers(client: AsyncClient, db):
@@ -218,6 +232,61 @@ async def test_set_renderer_persists_session(client: AsyncClient, db):
     resp = await client.post("/api/player/renderer", json={"udn": udn}, headers=headers)
     assert resp.status_code == 200, resp.text
     assert resp.json()["active"] == udn
-
     row = await db.fetchrow("SELECT active_renderer_udn FROM client_session WHERE client_id=$1", "renderer-test")
     assert row and row["active_renderer_udn"] == udn
+
+@pytest.mark.asyncio
+async def test_history_grouping(client: AsyncClient, db, auth_token):
+    # Insert Album Artist = "Main", Artist = "Main"
+    await db.execute("""
+        INSERT INTO track (id, title, artist, album_artist, album, duration_seconds, track_no, path)
+        VALUES (101, 'Solo', 'Main', 'Main', 'AlbumX', 200, 1, '/music/solo.flac')
+    """)
+    # Insert Album Artist = "Main", Artist = "Main & Feat"
+    await db.execute("""
+        INSERT INTO track (id, title, artist, album_artist, album, duration_seconds, track_no, path)
+        VALUES (102, 'Feat', 'Main & Feat', 'Main', 'AlbumX', 200, 2, '/music/feat.flac')
+    """)
+    
+    # Log plays for both
+    for tid in [101, 102]:
+        await db.execute(
+            "INSERT INTO playback_history (track_id, timestamp, client_ip) VALUES ($1, NOW(), '127.0.0.1')",
+            tid
+        )
+        
+    response = await client.get("/api/player/history/stats")
+    stats = response.json()
+    
+    # Expect 1 Artist entry ("Main") with 2 plays
+    artists = stats["artists"]
+    assert len(artists) == 1
+    assert artists[0]["artist"] == "Main"
+    assert artists[0]["plays"] == 2
+    
+    # Expect 1 Album entry ("AlbumX") with 2 plays
+    albums = stats["albums"]
+    assert len(albums) == 1
+    assert albums[0]["album"] == "AlbumX"
+    assert albums[0]["plays"] == 2
+
+@pytest.mark.asyncio
+async def test_history_stats_mine_scope(client: AsyncClient, db, player_data, auth_token):
+    # Get user id from generated token
+    user = await db.fetchrow("SELECT id FROM \"user\" WHERE username = $1", "testuser")
+    assert user is not None
+    user_id = user["id"]
+
+    # Insert history for this user
+    await db.execute("""
+        INSERT INTO playback_history (track_id, client_ip, user_id, timestamp)
+        VALUES (10, '127.0.0.1', $1, NOW())
+    """, user_id)
+    
+    # Request with scope=mine
+    client.cookies = {"jamarr_session": auth_token}
+    response = await client.get("/api/player/history/stats?scope=mine")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["tracks"]) >= 1
+    assert data["tracks"][0]["plays"] == 1

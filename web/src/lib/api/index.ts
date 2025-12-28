@@ -202,12 +202,14 @@ export type MetadataOptions = {
     fetchSimilarArtists?: boolean;
 };
 
-export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<void> {
+export async function triggerMetadataScan(opts: MetadataOptions & { path?: string } = {} as any): Promise<void> {
+    const path = opts.path;
     const res = await fetch('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             type: 'metadata',
+            path: path || null,
             artist_filter: opts.artistFilter || null,
             mbid_filter: opts.mbidFilter || null,
             missing_only: Boolean(opts.missingOnly),
@@ -215,7 +217,7 @@ export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<v
             fetch_bio: Boolean(opts.fetchBio),
             fetch_artwork: Boolean(opts.fetchArtwork),
             fetch_spotify_artwork: Boolean(opts.fetchSpotifyArtwork),
-            fetch_links: Boolean(opts.fetchLinks),
+            fetch_links: opts.fetchLinks,
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
             fetch_similar_artists: Boolean(opts.fetchSimilarArtists),
@@ -229,14 +231,15 @@ export async function cancelScan(): Promise<void> {
     if (!res.ok) throw new Error('Failed to cancel scan');
 }
 
-export async function triggerFullScan(opts: { force?: boolean; path?: string } & MetadataOptions = {}): Promise<void> {
+export async function triggerFullScan(opts: { force?: boolean; path?: string } & MetadataOptions): Promise<void> {
+    const path = opts?.path;
     const res = await fetch('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             type: 'full',
             force: Boolean(opts.force),
-            path: opts.path || null,
+            path: path || null,
             artist_filter: opts.artistFilter || null,
             mbid_filter: opts.mbidFilter || null,
             missing_only: Boolean(opts.missingOnly),
@@ -319,12 +322,14 @@ export async function fetchMissingAlbums(mbid: string, fetchFn: any = fetch): Pr
 }
 
 export async function triggerMissingAlbumsScan(mbid?: string, artistName?: string): Promise<void> {
-    const params = new URLSearchParams();
-    if (mbid) params.append('mbid', mbid);
-    if (artistName) params.append('artist', artistName);
-
-    const res = await fetch(`/api/scan/missing?${params.toString()}`, {
+    const res = await fetch('/api/library/scan', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            type: 'missing_albums',
+            artist_filter: artistName || null,
+            mbid_filter: mbid || null,
+        })
     });
     if (!res.ok) throw new Error('Failed to trigger missing albums scan');
 }

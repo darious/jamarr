@@ -1,6 +1,6 @@
 <script lang="ts">
   import { setQueue } from "$stores/player";
-  import { goto } from "$app/navigation";
+  import { goto, invalidateAll } from "$app/navigation";
 
   export let data: {
     history: Array<{
@@ -150,6 +150,26 @@
         on:click={() => switchScope("all")}
       >
         All History
+      </button>
+      <button
+        class="btn btn-sm btn-square border border-white/10 bg-white/5 text-white hover:bg-white/10"
+        on:click={() => invalidateAll()}
+        title="Refresh History"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="1.5"
+          stroke="currentColor"
+          class="w-4 h-4"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+          />
+        </svg>
       </button>
       <div class="flex items-center gap-2 text-sm text-white/70">
         <label for="days" class="hidden md:inline">Days</label>

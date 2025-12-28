@@ -142,3 +142,48 @@ async def test_get_tracks_with_special_characters_in_artist_name(client, db):
     tracks = response.json()
     assert len(tracks) > 0
     assert tracks[0]["artist"] == artist_name
+
+
+@pytest.mark.asyncio
+async def test_tracks_response_excludes_quick_hash_and_maps_release_ids(client, db):
+    """
+    Ensure /api/tracks does not include quick_hash (binary column) and exposes
+    release IDs via mb_release_id/mb_release_group_id aliases.
+    """
+    artist_name = "Quick Hash Artist"
+    artist_mbid = "quick-hash-artist-mbid"
+    track_id = 990010
+    release_id = "release-123"
+    release_group_id = "rg-456"
+
+    # Artist + track with quick_hash populated (bytea)
+    await db.execute(
+        "INSERT INTO artist (mbid, name) VALUES ($1, $2) ON CONFLICT (mbid) DO NOTHING",
+        artist_mbid, artist_name
+    )
+    await db.execute(
+        """
+        INSERT INTO track (id, title, artist, album, path, duration_seconds, quick_hash, release_mbid, release_group_mbid)
+        VALUES ($1, 'Quick Hash Track', $2, 'Quick Album', '/tmp/qh.flac', 123, decode('01020304', 'hex'), $3, $4)
+        ON CONFLICT (path) DO NOTHING
+        """,
+        track_id, artist_name, release_id, release_group_id
+    )
+    await db.execute(
+        "INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        track_id, artist_mbid
+    )
+
+    response = await client.get(f"/api/tracks?artist={artist_name}")
+    assert response.status_code == 200
+
+    tracks = response.json()
+    assert tracks, "Expected at least one track in response"
+    track = tracks[0]
+
+    # quick_hash should not be present in response payload
+    assert "quick_hash" not in track
+
+    # Release IDs should be exposed via frontend-friendly keys
+    assert track.get("mb_release_id") == release_id
+    assert track.get("mb_release_group_id") == release_group_id

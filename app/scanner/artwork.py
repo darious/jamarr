@@ -1,6 +1,7 @@
 import hashlib
 import os
 import shutil
+import asyncio
 from io import BytesIO
 from typing import Any, Dict, Optional
 
@@ -98,7 +99,8 @@ async def extract_and_save_artwork(path: str) -> Optional[Dict[str, Any]]:
     """
     Extracts artwork from file at path, saves to cache, and returns details.
     """
-    data = _extract_artwork_data(path)
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, _extract_artwork_data, path)
     if not data:
         return None
 
