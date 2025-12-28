@@ -2,6 +2,8 @@
 
 Base URL: `/` (Relative to server root)
 
+Auth: session cookie `jamarr_session`. Many player endpoints also expect `X-Jamarr-Client-Id` (unique per browser/device); if omitted it defaults to `unknown_client`.
+
 ## Authentication (`/api/auth`)
 
 Authentication is cookie-based using `jamarr_session`.
@@ -161,6 +163,7 @@ Retrieve a list of artists or details for a single artist.
 - `offset` (int, default=0): Offset for pagination.
 - `name` (str, optional): Filter by artist name (exact match, case-insensitive).
 - `mbid` (str, optional): Filter by MusicBrainz ID.
+- `with_missing` (bool, optional): Include artists with missing/blank names.
 
 **Response:** `200 OK`
 List of artist objects.
@@ -218,6 +221,7 @@ Retrieve a list of tracks.
 - `album` (str, optional): Filter by album title.
 - `artist` (str, optional): Filter by artist name.
 - `album_mbid` (str, optional): Filter by album MBID.
+- `limit` (int, optional) / `offset` (int, optional): Pagination.
 
 **Response:** `200 OK`
 List of track objects.
@@ -234,6 +238,11 @@ Get a list of missing albums for an artist (albums they released but are not in 
 
 **Response:** `200 OK`
 List of missing album details.
+
+**Curl:**
+```bash
+curl "http://localhost:8000/api/artists/mbid-here/missing"
+```
 
 ### Home Feeds
 Various endpoints for the home page.
@@ -302,6 +311,43 @@ Add tracks to the end of the queue.
 }
 ```
 
+### Set Active Renderer
+Persist the active renderer for this client (UPnP or local browser).
+
+**POST** `/api/player/renderer`
+
+**Headers:** `X-Jamarr-Client-Id`
+
+**Body:**
+```json
+{ "udn": "uuid:device-udn-or-local:<client-id>" }
+```
+
+**Response:** `200 OK`
+```json
+{ "active": "uuid:..." }
+```
+
+### List Renderers
+Returns all known renderers plus the local placeholder.
+
+**GET** `/api/renderers`
+- `refresh` (bool, optional): Trigger UPnP discovery before returning results.
+
+### Renderer Scan Status
+**GET** `/api/scan-status`
+Returns current UPnP scan status/logs for renderer discovery.
+
+### Playback Controls
+All require `X-Jamarr-Client-Id`.
+
+- **POST** `/api/player/play` — Body: `{ "track_id": 123 }`
+- **POST** `/api/player/pause`
+- **POST** `/api/player/resume`
+- **POST** `/api/player/seek` — Body: `{ "seconds": 42 }`
+- **POST** `/api/player/volume` — Body: `{ "percent": 50 }`
+- **POST** `/api/player/index` — Body: `{ "index": 1 }` (jump in queue)
+
 ### Set Index
 Skip to a specific track index in the queue.
 
@@ -331,6 +377,15 @@ Get listening statistics.
 - `scope`: `all` or `mine`.
 - `days`: Number of days to include (default 7).
 
+### Progress / Logging
+- **POST** `/api/player/progress` — `{ "position_seconds": <float>, "is_playing": true }` (logs play once thresholds are met)
+- **POST** `/api/player/log-play` — Legacy manual log helper; accepts `{ "track_id": <id>, "timestamp": "ISO" }`
+
+### Debug/UPnP Helpers
+- **GET** `/api/player/debug` — Current queue/state snapshot.
+- **POST** `/api/player/add_manual` — Add a manual renderer (for testing).
+- **GET** `/api/player/test_upnp` — Simple UPnP connectivity test.
+
 ## Scanner (`/api/library`)
 
 ### Trigger Scan
@@ -346,6 +401,12 @@ Start a library scan.
   "force": false
 }
 ```
+
+**Options for metadata/full runs:**
+- `missing_only` (bool): Only fill gaps.
+- `artist_filter` / `mbid_filter`: Limit to specific artist(s).
+- `fetch_metadata` / `fetch_bio` / `fetch_artwork` / `fetch_spotify_artwork` / `fetch_links` (bools)
+- `refresh_top_tracks` / `refresh_singles` / `fetch_similar_artists` (bools)
 
 **Curl:**
 ```bash
@@ -400,7 +461,7 @@ Stream audio file for a track.
 
 **GET** `/api/stream/{track_id}`
 
-**Response:** Binary stream (audio/flac, audio/mp3, etc.)
+**Response:** Binary stream (audio/flac, audio/mp3, etc.). Supports `Range` headers for seeking. `HEAD` returns headers only. 
 
 **Curl:**
 ```bash
