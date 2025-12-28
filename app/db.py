@@ -47,6 +47,7 @@ async def init_db():
     async with _pool.acquire() as conn:
         # Enable extensions
         await conn.execute("CREATE EXTENSION IF NOT EXISTS citext")
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
 
         # Enable slow query logging in development
         if os.getenv("ENV") == "development":
@@ -348,6 +349,9 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_playback_history_user_ts ON playback_history(user_id, timestamp);
             CREATE INDEX IF NOT EXISTS idx_playback_history_track_ts ON playback_history(track_id, timestamp);
             CREATE INDEX IF NOT EXISTS idx_artwork_source ON artwork(source);
+
+            -- Search Optimization Indexes (Trigram)
+            CREATE INDEX IF NOT EXISTS idx_artist_name_trgm ON artist USING GIN (name gin_trgm_ops);
         """)
 
         # Create FTS trigger function
@@ -372,8 +376,20 @@ async def init_db():
                 FOR EACH ROW EXECUTE FUNCTION track_fts_trigger();
         """)
 
-        # Disable trigger by default (will be enabled after initial scan)
-        await conn.execute("ALTER TABLE track DISABLE TRIGGER track_fts_update")
+        # Enable trigger (ensure it is active)
+        await conn.execute("ALTER TABLE track ENABLE TRIGGER track_fts_update")
+
+        # Backfill FTS vector if missing
+        # This fixes tracks that were imported while the trigger was disabled
+        await conn.execute("""
+            UPDATE track 
+            SET fts_vector = 
+                setweight(to_tsvector('english', COALESCE(title, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(artist, '')), 'B') ||
+                setweight(to_tsvector('english', COALESCE(album, '')), 'C') ||
+                setweight(to_tsvector('english', COALESCE(album_artist, '')), 'C')
+            WHERE fts_vector IS NULL;
+        """)
 
         print("✅ PostgreSQL database initialized successfully")
 
