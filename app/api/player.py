@@ -911,7 +911,7 @@ async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
             ON CONFLICT(client_id) DO UPDATE SET
                 active_renderer_udn = excluded.active_renderer_udn,
                 last_seen_at = NOW()
-        """, (client_id, udn))
+        """, client_id, udn)
     return {"active": udn}
 
 @router.post("/api/player/play")

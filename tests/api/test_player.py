@@ -208,3 +208,17 @@ async def test_queue_artwork(client: AsyncClient, db):
     q_track = data["queue"][0]
     assert q_track["art_id"] == 900
     assert q_track["art_sha1"] == "999999"
+
+
+@pytest.mark.asyncio
+async def test_set_renderer_persists_session(client: AsyncClient, db):
+    """Ensure renderer selection succeeds and stores client session mapping."""
+    headers = {"X-Jamarr-Client-Id": "renderer-test"}
+    udn = "uuid:6be59c1-eebb-41d6-9f70-b25a08e60797"
+
+    resp = await client.post("/api/player/renderer", json={"udn": udn}, headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["active"] == udn
+
+    row = await db.fetchrow("SELECT active_renderer_udn FROM client_session WHERE client_id=$1", "renderer-test")
+    assert row and row["active_renderer_udn"] == udn
