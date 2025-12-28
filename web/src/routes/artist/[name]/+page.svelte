@@ -162,10 +162,24 @@
     return fromMeta.map((t) => {
       let result: Track;
       if (t.local_track_id) {
-        // Track is in library - find full track object
+        // Track is in library - find full track object and MERGE with top track data
         const local = tracks.find((lt) => lt.id === t.local_track_id);
         if (local) {
-          result = { ...local };
+          // Merge local track data with top track metadata
+          // Local track provides: path, codec, bitrate, sample_rate, bit_depth, art_id, art_sha1
+          // Top track provides: name, album, date, duration_ms, popularity
+          result = {
+            ...local,
+            // Preserve top track metadata that might be different/better
+            title: t.name || local.title,
+            album: t.album || local.album,
+            date: t.date || local.date,
+            duration_seconds: t.duration_seconds || local.duration_seconds,
+            popularity: t.popularity,
+            // CRITICAL: Preserve artwork from EITHER source (top track API or local track)
+            art_id: t.art_id || local.art_id,
+            art_sha1: t.art_sha1 || local.art_sha1,
+          };
         } else {
           // Fallback if track not loaded yet - use API data
           result = {
@@ -181,7 +195,8 @@
             duration_seconds:
               t.duration_seconds ||
               (t.duration_ms ? Math.round(t.duration_ms / 1000) : 0),
-            art_id: null,
+            art_id: t.art_id || null,
+            art_sha1: t.art_sha1 || null,
             codec: t.codec || null,
             bitrate: null,
             sample_rate_hz: t.sample_rate_hz || null,
@@ -243,11 +258,19 @@
               sample_rate_hz: s.sample_rate_hz || localTrack.sample_rate_hz,
             };
 
-            // Get artwork from album
-            const album = data.albums.find((a) => a.album === localTrack.album);
-            if (album) {
-              art_id = album.art_id;
-              art_sha1 = album.art_sha1;
+            // Get artwork - prioritize from Singles API data, then from local track, then from album
+            art_id = s.art_id || localTrack.art_id;
+            art_sha1 = s.art_sha1 || localTrack.art_sha1;
+
+            // Fallback to album artwork if still not found
+            if (!art_id && !art_sha1) {
+              const album = data.albums.find(
+                (a) => a.album === localTrack.album,
+              );
+              if (album) {
+                art_id = album.art_id;
+                art_sha1 = album.art_sha1;
+              }
             }
           }
         }
@@ -723,6 +746,8 @@
               <div class="relative w-10 h-10 flex-shrink-0">
                 <img
                   src={(() => {
+                    if (track.art_sha1) return `/art/file/${track.art_sha1}`;
+                    if (track.art_id) return `/art/${track.art_id}`;
                     const alb = data.albums.find(
                       (a) => a.album === track.album,
                     );
