@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from typing import List, Optional
 from pydantic import BaseModel
 from app.db import get_db
 import asyncpg
 
 router = APIRouter()
+
 
 class SearchResultArtist(BaseModel):
     name: str
@@ -14,13 +15,15 @@ class SearchResultArtist(BaseModel):
     art_id: Optional[int] = None
     art_sha1: Optional[str] = None
 
+
 class SearchResultAlbum(BaseModel):
     title: str
     artist: str
     artwork_id: Optional[int] = None
     art_id: Optional[int] = None
     art_sha1: Optional[str] = None
-    
+
+
 class SearchResultTrack(BaseModel):
     id: int
     title: str
@@ -31,10 +34,12 @@ class SearchResultTrack(BaseModel):
     art_id: Optional[int] = None
     art_sha1: Optional[str] = None
 
+
 class SearchResponse(BaseModel):
     artists: List[SearchResultArtist]
     albums: List[SearchResultAlbum]
     tracks: List[SearchResultTrack]
+
 
 @router.get("/api/search", response_model=SearchResponse)
 async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
@@ -53,14 +58,16 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
     artists = []
     rows = await db.fetch(artists_query, f"%{q}%")
     for row in rows:
-        artists.append(SearchResultArtist(
-            name=row['name'],
-            mbid=row['mbid'],
-            image_url=row['image_url'],
-            artwork_id=row['artwork_id'],
-            art_id=row['artwork_id'],
-            art_sha1=row['art_sha1']
-        ))
+        artists.append(
+            SearchResultArtist(
+                name=row["name"],
+                mbid=row["mbid"],
+                image_url=row["image_url"],
+                artwork_id=row["artwork_id"],
+                art_id=row["artwork_id"],
+                art_sha1=row["art_sha1"],
+            )
+        )
 
     # 2. Search Albums using FTS
     albums_query = """
@@ -76,13 +83,15 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
     albums = []
     rows = await db.fetch(albums_query, q)
     for row in rows:
-        albums.append(SearchResultAlbum(
-            title=row['album'],
-            artist=row['artist'],
-            artwork_id=row['artwork_id'],
-            art_id=row['artwork_id'],
-            art_sha1=row['art_sha1']
-        ))
+        albums.append(
+            SearchResultAlbum(
+                title=row["album"],
+                artist=row["artist"],
+                artwork_id=row["artwork_id"],
+                art_id=row["artwork_id"],
+                art_sha1=row["art_sha1"],
+            )
+        )
 
     # 3. Search Tracks using FTS
     tracks_query = """
@@ -96,19 +105,17 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
     tracks = []
     rows = await db.fetch(tracks_query, q)
     for row in rows:
-        tracks.append(SearchResultTrack(
-            id=row['id'],
-            title=row['title'],
-            artist=row['artist'],
-            album=row['album'],
-            duration_seconds=row['duration_seconds'] or 0.0,
-            artwork_id=row['artwork_id'],
-            art_id=row['artwork_id'],
-            art_sha1=row['art_sha1']
-        ))
+        tracks.append(
+            SearchResultTrack(
+                id=row["id"],
+                title=row["title"],
+                artist=row["artist"],
+                album=row["album"],
+                duration_seconds=row["duration_seconds"] or 0.0,
+                artwork_id=row["artwork_id"],
+                art_id=row["artwork_id"],
+                art_sha1=row["art_sha1"],
+            )
+        )
 
-    return SearchResponse(
-        artists=artists,
-        albums=albums,
-        tracks=tracks
-    )
+    return SearchResponse(artists=artists, albums=albums, tracks=tracks)

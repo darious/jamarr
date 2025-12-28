@@ -1,7 +1,7 @@
-import itertools
 from typing import Dict, Iterable, Optional
 
 import asyncpg
+
 
 async def fetch_primary_images(
     db: asyncpg.Connection,

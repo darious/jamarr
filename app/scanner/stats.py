@@ -1,6 +1,6 @@
-import asyncio
 from collections import defaultdict
 import threading
+
 
 class ApiTracker:
     _instance = None
@@ -17,7 +17,7 @@ class ApiTracker:
                     cls._instance._processed_sets = {
                         "tracks": set(),
                         "albums": set(),
-                        "artists": set()
+                        "artists": set(),
                     }
         return cls._instance
 
@@ -38,11 +38,12 @@ class ApiTracker:
         entity_type: 'tracks', 'albums', 'artists'
         unique_id: The limits of the uniqueness (e.g. MBID or path)
         """
-        if not unique_id: return
+        if not unique_id:
+            return
         with self._stats_lock:
-             if entity_type not in self._processed_sets:
-                 self._processed_sets[entity_type] = set()
-             self._processed_sets[entity_type].add(unique_id)
+            if entity_type not in self._processed_sets:
+                self._processed_sets[entity_type] = set()
+            self._processed_sets[entity_type].add(unique_id)
 
     def get_stats(self):
         with self._stats_lock:
@@ -57,6 +58,7 @@ class ApiTracker:
             self._stats.clear()
             for s in self._processed_sets.values():
                 s.clear()
+
 
 def get_api_tracker():
     return ApiTracker()

@@ -8,7 +8,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import get_tidal_credentials
@@ -19,19 +18,24 @@ OPENAPI_BASE = "https://openapi.tidal.com/v2"
 TOKEN_URL = "https://auth.tidal.com/v1/oauth2/token"
 ACCEPT_JSONAPI = "application/vnd.api+json"
 
+
 def norm(s: str) -> str:
     return " ".join(s.lower().strip().split())
 
+
 def fuzzy(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, norm(a), norm(b)).ratio()
+
 
 _VERSION_RE = re.compile(
     r"\s*[\(\[\-–—]\s*(deluxe|expanded|remaster(ed)?|anniversary|edition|version|live).*?$",
     re.IGNORECASE,
 )
 
+
 def normalise_title(title: str) -> str:
     return _VERSION_RE.sub("", title).strip()
+
 
 def year_from_date(s: Optional[str]) -> Optional[int]:
     if not s:
@@ -41,15 +45,18 @@ def year_from_date(s: Optional[str]) -> Optional[int]:
     except Exception:
         return None
 
+
 class TidalClient:
     def __init__(self):
         self.client_id, self.client_secret = get_tidal_credentials()
-        self.country_code = "GB" # Default, maybe make configurable?
-        
+        self.country_code = "GB"  # Default, maybe make configurable?
+
         self.ssl = ssl.create_default_context()
         self.ssl.check_hostname = False
-        self.ssl.verify_mode = ssl.CERT_NONE  # Match cc_tidal2.py behavior for simplicity/robustness in some envs
-        
+        self.ssl.verify_mode = (
+            ssl.CERT_NONE
+        )  # Match cc_tidal2.py behavior for simplicity/robustness in some envs
+
         self.token: Optional[str] = None
         self.expiry: float = 0.0
 
@@ -87,7 +94,7 @@ class TidalClient:
         token = self.get_token()
         if not token:
             return {}
-            
+
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Accept", ACCEPT_JSONAPI)
@@ -96,12 +103,12 @@ class TidalClient:
             with urllib.request.urlopen(req, context=self.ssl) as r:
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
-             if e.code == 429:
-                 logger.warning(f"Tidal Rate Limit: {url}")
-                 time.sleep(1) # Simple backoff
-                 # Retry logic? For now return empty
-             # logger.debug(f"Tidal API error {e.code}: {e}")
-             return {}
+            if e.code == 429:
+                logger.warning(f"Tidal Rate Limit: {url}")
+                time.sleep(1)  # Simple backoff
+                # Retry logic? For now return empty
+            # logger.debug(f"Tidal API error {e.code}: {e}")
+            return {}
         except Exception as e:
             logger.error(f"Tidal/Network error: {e}")
             return {}
@@ -113,7 +120,9 @@ class TidalClient:
             f"?countryCode={self.country_code}&include=albums"
         )
         payload = self.get_json(url)
-        included = {r["id"]: r for r in payload.get("included", []) if r["type"] == "albums"}
+        included = {
+            r["id"]: r for r in payload.get("included", []) if r["type"] == "albums"
+        }
         out = []
         for rel in payload.get("data", []):
             rid = rel.get("id")
@@ -135,7 +144,9 @@ class TidalClient:
                     artists.append(name)
         return artists
 
-    def find_album_match(self, artist_name: str, album_title: str, release_year: Optional[int] = None) -> Optional[str]:
+    def find_album_match(
+        self, artist_name: str, album_title: str, release_year: Optional[int] = None
+    ) -> Optional[str]:
         """
         High-level helper to find a Tidal URL for an album.
         Returns Tidal URL if confidence is high, else None.
@@ -155,8 +166,9 @@ class TidalClient:
             scored.append((s, alb))
 
         scored.sort(key=lambda x: x[0][0], reverse=True)
-        if not scored: return None
-        
+        if not scored:
+            return None
+
         best_scores, best_album = scored[0]
         combined, title_s, artist_s, year_s = best_scores
 
@@ -164,15 +176,19 @@ class TidalClient:
         if artist_s < 0.4:
             artists = self.verify_album_artists(best_album["id"])
             combined, title_s, artist_s, year_s = self.score_album(
-                best_album, artist_name, album_title, release_year, verified_artists=artists
+                best_album,
+                artist_name,
+                album_title,
+                release_year,
+                verified_artists=artists,
             )
             # Re-evaluate confidence
-        
+
         confidence = self.confidence_level(title_s, artist_s, year_s)
-        
+
         if confidence == "high":
             return f"https://tidal.com/album/{best_album['id']}"
-        
+
         return None
 
     def score_album(
@@ -192,9 +208,7 @@ class TidalClient:
         )
 
         artists = verified_artists or [
-            a.get("name")
-            for a in attrs.get("artists", []) or []
-            if isinstance(a, dict)
+            a.get("name") for a in attrs.get("artists", []) or [] if isinstance(a, dict)
         ]
         artist_score = max((fuzzy(want_artist, a) for a in artists), default=0.0)
 

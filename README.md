@@ -124,6 +124,16 @@ Pass pytest arguments directly to the script:
 ./test.sh -k "test_search" # Run only specific tests
 ```
 
+### Linting
+
+We provide a helper script to run linters for both the backend (Python/Ruff) and frontend (Svelte/Check).
+
+```bash
+./lint_check.sh         # Run both Python and Svelte checks
+./lint_check.sh python  # Run only Python checks (ruff)
+./lint_check.sh svelte  # Run only Svelte checks
+```
+
 ### Running the Scanner (CLI)
 
 Jamarr includes a powerful CLI to manage the library and metadata.

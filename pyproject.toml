@@ -27,6 +27,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "httpx",
+    "ruff",
 ]
 
 [tool.uv]
