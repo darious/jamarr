@@ -1,0 +1,33 @@
+services:
+  jamarr_test_db:
+    image: postgres:18.1-alpine
+    container_name: jamarr_test_db
+    network_mode: "host"
+    command: postgres -p 8109
+    environment:
+      POSTGRES_USER: jamarr_test
+      POSTGRES_PASSWORD: jamarr_test
+      POSTGRES_DB: jamarr_test
+    # No persistent volume needed - we want it fresh every time, 
+    # but kept alive if tests fail for debugging.
+    restart: no
+
+  jamarr_test_runner:
+    build: .
+    container_name: jamarr_test_runner
+    network_mode: "host"
+    depends_on:
+      - jamarr_test_db
+    environment:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 8109
+      DB_USER: jamarr_test
+      DB_PASS: jamarr_test
+      DB_NAME: jamarr_test
+    working_dir: /app
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./config.yaml:/app/config.yaml
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./uv.lock:/app/uv.lock

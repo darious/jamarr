@@ -54,6 +54,16 @@ class RateLimiter:
 mb_limit_val = get_musicbrainz_rate_limit()
 mb_limiter = RateLimiter(rate_limit=mb_limit_val, burst_limit=5 if mb_limit_val is None else 2)
 
+def get_client(client: httpx.AsyncClient = None):
+    """
+    Small helper to reuse a provided client or create/close a new one.
+    """
+    if client:
+        # Contextlib.nullcontext avoids closing the passed-in client
+        from contextlib import nullcontext
+        return nullcontext(client)
+    return httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"})
+
 async def fetch_fanart_artist_images(client: httpx.AsyncClient, mbid: str):
     """
     Fetch best artist thumb and background URLs from Fanart.tv for a given MusicBrainz ID.
@@ -274,7 +284,7 @@ async def fetch_wikidata_external_links(client: httpx.AsyncClient, wikidata_url:
     
     return missing_links
 
-async def fetch_lastfm_top_tracks(mbid, artist_name):
+async def fetch_lastfm_top_tracks(mbid, artist_name, client: httpx.AsyncClient = None):
     """
     Fetch top tracks from Last.fm using MBID strict.
     """
@@ -294,43 +304,49 @@ async def fetch_lastfm_top_tracks(mbid, artist_name):
         "limit": 15  # Fetch slightly more to allow filtering if needed
     }
 
+    async def _do_fetch(c):
+        resp = await c.get(url, params=params, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            tracks_data = data.get("toptracks", {}).get("track", [])
+            if not tracks_data: return []
+            
+            # Normalize result to list if single dict
+            if isinstance(tracks_data, dict): tracks_data = [tracks_data]
+            
+            results = []
+            rank = 1
+            for t in tracks_data:
+                if rank > 10: break
+                
+                # Extract MBID if available (Track MBID)
+                track_mbid = t.get("mbid")
+                
+                results.append({
+                    "name": t.get("name"),
+                    "mbid": track_mbid, # Use this for matching
+                    "rank": rank,
+                    "playcount": t.get("playcount"),
+                    "popularity": t.get("playcount"), # Map playcount to popularity for storage
+                    "album": None # Last.fm top tracks often don't have album info directly
+                })
+                rank += 1
+            return results
+        else:
+            logger.warning(f"Last.fm Top Tracks error {resp.status_code} for {mbid}")
+            return []
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=10.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                tracks_data = data.get("toptracks", {}).get("track", [])
-                if not tracks_data: return []
-                
-                # Normalize result to list if single dict
-                if isinstance(tracks_data, dict): tracks_data = [tracks_data]
-                
-                results = []
-                rank = 1
-                for t in tracks_data:
-                    if rank > 10: break
-                    
-                    # Extract MBID if available (Track MBID)
-                    track_mbid = t.get("mbid")
-                    
-                    results.append({
-                        "name": t.get("name"),
-                        "mbid": track_mbid, # Use this for matching
-                        "rank": rank,
-                        "playcount": t.get("playcount"),
-                        "popularity": t.get("playcount"), # Map playcount to popularity for storage
-                        "album": None # Last.fm top tracks often don't have album info directly
-                    })
-                    rank += 1
-                return results
-            else:
-                logger.warning(f"Last.fm Top Tracks error {resp.status_code} for {mbid}")
-                return []
+        if client:
+            return await _do_fetch(client)
+        else:
+             async with httpx.AsyncClient() as c:
+                 return await _do_fetch(c)
     except Exception as e:
         logger.error(f"Last.fm Top Tracks failed for {mbid}: {e}")
         return []
 
-async def fetch_lastfm_artist_url(mbid: str):
+async def fetch_lastfm_artist_url(mbid: str, client: httpx.AsyncClient = None):
     """
     Fetch artist URL from Last.fm using MBID.
     """
@@ -347,21 +363,27 @@ async def fetch_lastfm_artist_url(mbid: str):
         "format": "json"
     }
 
+    async def _do_fetch(c):
+        resp = await c.get(url, params=params, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("artist", {}).get("url")
+        else:
+            logger.debug(f"Last.fm Artist Info error {resp.status_code} for {mbid}")
+            return None
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=10.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("artist", {}).get("url")
-            else:
-                logger.debug(f"Last.fm Artist Info error {resp.status_code} for {mbid}")
-                return None
+        if client:
+            return await _do_fetch(client)
+        else:
+            async with httpx.AsyncClient() as c:
+                return await _do_fetch(c)
     except Exception as e:
         logger.debug(f"Last.fm Artist Info failed for {mbid}: {e}")
         return None
 
 
-async def fetch_lastfm_similar_artists(mbid, artist_name):
+async def fetch_lastfm_similar_artists(mbid, artist_name, client: httpx.AsyncClient = None):
     """
     Fetch similar artists from Last.fm using MBID strict.
     """
@@ -379,35 +401,41 @@ async def fetch_lastfm_similar_artists(mbid, artist_name):
         "limit": 15
     }
 
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=10.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                similar_data = data.get("similarartists", {}).get("artist", [])
-                if not similar_data: return []
+    async def _do_fetch(c):
+        resp = await c.get(url, params=params, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            similar_data = data.get("similarartists", {}).get("artist", [])
+            if not similar_data: return []
+            
+            if isinstance(similar_data, dict): similar_data = [similar_data]
+
+            results = []
+            count = 0
+            for a in similar_data:
+                if count >= 10: break
                 
-                if isinstance(similar_data, dict): similar_data = [similar_data]
+                # Last.fm can handle excluding the artist itself, but just in case
+                if a.get("mbid") == mbid: continue
+                if a.get("name") == artist_name: continue
 
-                results = []
-                count = 0
-                for a in similar_data:
-                    if count >= 10: break
-                    
-                    # Last.fm can handle excluding the artist itself, but just in case
-                    if a.get("mbid") == mbid: continue
-                    if a.get("name") == artist_name: continue
+                results.append({
+                    "name": a.get("name"),
+                    "mbid": a.get("mbid"),
+                    "match": a.get("match") 
+                })
+                count += 1
+            return results
+        else:
+            logger.warning(f"Last.fm Similar Artists error {resp.status_code} for {mbid}")
+            return []
 
-                    results.append({
-                        "name": a.get("name"),
-                        "mbid": a.get("mbid"),
-                        "match": a.get("match") 
-                    })
-                    count += 1
-                return results
-            else:
-                logger.warning(f"Last.fm Similar Artists error {resp.status_code} for {mbid}")
-                return []
+    try:
+        if client:
+            return await _do_fetch(client)
+        else:
+             async with httpx.AsyncClient() as c:
+                 return await _do_fetch(c)
     except Exception as e:
         logger.error(f"Last.fm Similar Artists failed for {mbid}: {e}")
         return []
@@ -507,6 +535,7 @@ async def fetch_artist_metadata(
     known_wikipedia_url: str = None,
     known_spotify_url: str = None,
     fetch_similar_artists: bool = False,
+    client: httpx.AsyncClient = None,
 ):
     """
     Fetches comprehensive artist metadata from MusicBrainz + Spotify + Wikidata.
@@ -566,22 +595,23 @@ async def fetch_artist_metadata(
 
     # Fast path: artwork-only (skip MusicBrainz release/link fetch)
     only_art = fetch_artwork and not (fetch_metadata or fetch_bio or fetch_links or fetch_top_tracks or fetch_singles or bio_only)
+    
     if only_art:
         try:
-            async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
-                fanart = await fetch_fanart_artist_images(client, mbid)
+            async with get_client(client) as c:
+                fanart = await fetch_fanart_artist_images(c, mbid)
                 if fanart.get("thumb"):
-                    metadata["image_url"] = fanart["thumb"]
-                    metadata["image_source"] = "fanart.tv"
+                     metadata["image_url"] = fanart["thumb"]
+                     metadata["image_source"] = "fanart.tv"
                 if fanart.get("background"):
-                    metadata["background_url"] = fanart["background"]
-                    metadata["background_source"] = "fanart.tv"
+                     metadata["background_url"] = fanart["background"]
+                     metadata["background_source"] = "fanart.tv"
         except Exception:
             pass
         return metadata
 
     try:
-        async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
+        async with get_client(client) as client:
             # 1. MusicBrainz Core Data & Relations
             # For singles-only runs we don't need core artist data/relations.
             # OPTIMIZATION: If we only want Bio and we already have the URL, skip MB.
@@ -754,17 +784,17 @@ async def fetch_artist_metadata(
             # 3. Last.fm (Top Tracks & Similar Artists)
             if fetch_top_tracks:
                 logger.debug(f"Fetching Top Tracks from Last.fm for {artist_name}...")
-                metadata["top_tracks"] = await fetch_lastfm_top_tracks(mbid, artist_name)
+                metadata["top_tracks"] = await fetch_lastfm_top_tracks(mbid, artist_name, client=client)
                 logger.debug(f"Found {len(metadata['top_tracks'])} top tracks")
 
             if fetch_similar_artists:
                  logger.debug(f"Fetching Similar Artists from Last.fm for {artist_name}...")
-                 metadata["similar_artists"] = await fetch_lastfm_similar_artists(mbid, artist_name)
+                 metadata["similar_artists"] = await fetch_lastfm_similar_artists(mbid, artist_name, client=client)
                  logger.debug(f"Found {len(metadata['similar_artists'])} similar artists")
 
             if fetch_links:
                  logger.debug(f"Fetching Last.fm URL for {artist_name}...")
-                 metadata["lastfm_url"] = await fetch_lastfm_artist_url(mbid)
+                 metadata["lastfm_url"] = await fetch_lastfm_artist_url(mbid, client=client)
 
             # 4. Spotify (Artwork & Links)
             # We need to resolve Spotify ID if we want artwork OR if we want to store the Spotify link

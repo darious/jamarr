@@ -13,10 +13,6 @@ services:
     volumes:
       - /mnt/config/q-dev/jamarr/postgres:/var/lib/postgresql/data
 
-  cloudbeaver:
-    volumes:
-      - /mnt/config/q-dev/jamarr/cloudbeaver:/opt/cloudbeaver/workspace
-
   # Frontend dev server - runs separately with HMR
   jamarr_web:
     image: node:20-slim

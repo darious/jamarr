@@ -1,4 +1,5 @@
 import os
+import httpx
 import asyncio
 import logging
 import json
@@ -557,7 +558,7 @@ class Scanner:
                  if (mbid, name) not in self._processed_artists_session:
                      await db.execute("""
                         INSERT INTO artist (mbid, name, updated_at) VALUES ($1, $2, NOW())
-                        ON CONFLICT(mbid) DO UPDATE SET name=COALESCE(name, excluded.name)
+                        ON CONFLICT(mbid) DO UPDATE SET name=COALESCE(artist.name, excluded.name)
                      """, mbid, name)
                      
                      # Create MusicBrainz external link
@@ -941,7 +942,7 @@ class Scanner:
             
             it = iter(tasks_to_spawn)
             
-            async def spawn_cleanup_consume():
+            async def spawn_cleanup_consume(client):
                 # Helper to handle task management: Spawn new until max, await completed, consume results
                 nonlocal processed_count
                 nonlocal pending_tasks
@@ -999,7 +1000,7 @@ class Scanner:
 
                             # Spawn Task
                             task = asyncio.create_task(self._produce_metadata_update(
-                                semaphore, row, flags, local_release_group_ids, known_wikipedia_url
+                                semaphore, row, flags, local_release_group_ids, known_wikipedia_url, client
                             ))
                             pending_tasks.add(task)
                         
@@ -1033,7 +1034,8 @@ class Scanner:
                         
                         results_buffer.clear()
                         
-            await spawn_cleanup_consume()
+            async with httpx.AsyncClient(headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"}) as client:
+                await spawn_cleanup_consume(client)
             
             # Flush final buffer
             if results_buffer:
@@ -1044,7 +1046,7 @@ class Scanner:
 
             logger.info(f"Metadata update complete. Processed {processed_count} artists.")
 
-    async def _produce_metadata_update(self, semaphore, row, flags, local_release_group_ids, known_wikipedia_url):
+    async def _produce_metadata_update(self, semaphore, row, flags, local_release_group_ids, known_wikipedia_url, client):
          eff_fetch_metadata, eff_fetch_bio, eff_fetch_artwork, eff_fetch_links, eff_refresh_top_tracks, eff_refresh_singles, eff_fetch_spotify_artwork, eff_fetch_similar_artists = flags
          mbid, name, updated_at, sort_name, bio, image_url, art_id_existing, art_source_existing, spotify_link_existing, link_count, top_track_count, single_count, similar_count = row
          
@@ -1068,6 +1070,7 @@ class Scanner:
                 known_wikipedia_url=known_wikipedia_url,
                 known_spotify_url=spotify_link_existing,
                 fetch_similar_artists=eff_fetch_similar_artists,
+                client=client
              )
              
              # Download artwork (Disk I/O + Network)
