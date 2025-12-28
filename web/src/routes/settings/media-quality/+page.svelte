@@ -411,12 +411,20 @@
   <!-- Drill Down Modal -->
   {#if showModal}
     <div
+      role="button"
+      tabindex="0"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
       on:click={closeModal}
+      on:keydown|self={(e) => {
+        if (e.key === "Escape") closeModal();
+      }}
     >
       <div
-        class="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border border-white/10 bg-[#16161e] shadow-2xl"
+        role="button"
+        tabindex="0"
+        class="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border border-white/10 bg-[#16161e] shadow-2xl cursor-default"
         on:click|stopPropagation
+        on:keydown|stopPropagation
       >
         <div
           class="flex items-center justify-between p-4 border-b border-white/10"

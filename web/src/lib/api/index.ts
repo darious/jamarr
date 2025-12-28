@@ -127,7 +127,7 @@ export async function fetchArtists(
     return await res.json();
 }
 
-export async function fetchAlbums(params: { artist?: string } = {}, fetchFn: any = fetch): Promise<Album[]> {
+export async function fetchAlbums(params: { artist?: string; albumMbid?: string } = {}, fetchFn: any = fetch): Promise<Album[]> {
     let url = '/api/albums';
     if (params.artist) {
         url += `?artist=${encodeURIComponent(params.artist)}`;

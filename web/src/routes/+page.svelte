@@ -1,7 +1,7 @@
 <script lang="ts">
-    import type { Album, Artist } from "$lib/api";
-    import { fetchTracks } from "$lib/api";
-    import { setQueue, addToQueue } from "$stores/player";
+    import type { Album, Artist } from "../lib/api";
+    import { fetchTracks } from "../lib/api";
+    import { setQueue, addToQueue } from "../lib/stores/player";
 
     export let data: {
         newReleases: Album[];
