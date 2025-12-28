@@ -12,6 +12,9 @@ from PIL import Image
 from mutagen import File
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import ID3, APIC
+from mutagen.mp4 import MP4
+from mutagen.oggvorbis import OggVorbis
+import base64
 
 CACHE_DIR = "cache/art"
 
@@ -31,10 +34,21 @@ def _resolve_or_migrate_art_path(sha1: str, path_on_disk: Optional[str] = None) 
     if path_on_disk and os.path.exists(path_on_disk):
         return path_on_disk
 
-    unified_path = _get_art_path(sha1)
-    if os.path.exists(unified_path):
-        return unified_path
+    # Check unified path with possible extensions
+    # Order matters: check precise matches first then generic
+    unified_base = _get_art_path(sha1)
+    
+    # 1. Check strict legacy (no ext)
+    if os.path.exists(unified_base):
+        return unified_base
+        
+    # 2. Check known extensions
+    for ext in [".jpg", ".png", ".gif", ".webp", ".bmp", ".tiff"]:
+        p = unified_base + ext
+        if os.path.exists(p):
+            return p
 
+    # 3. Check legacy locations (and migrate)
     legacy_candidates = [
         os.path.join(CACHE_DIR, "artistthumb", sha1[:2], sha1),
         os.path.join(CACHE_DIR, "artist", sha1[:2], sha1),
@@ -43,17 +57,20 @@ def _resolve_or_migrate_art_path(sha1: str, path_on_disk: Optional[str] = None) 
 
     for legacy in legacy_candidates:
         if os.path.exists(legacy):
-            os.makedirs(os.path.dirname(unified_path), exist_ok=True)
+            # Migrate to unified (no extension, as we don't know it yet easily without probing)
+            # Or should we probe? For now, keep as legacy (no ext) in new location.
+            os.makedirs(os.path.dirname(unified_base), exist_ok=True)
             try:
-                shutil.move(legacy, unified_path)
+                shutil.move(legacy, unified_base)
             except Exception:
                 try:
-                    shutil.copyfile(legacy, unified_path)
+                    shutil.copyfile(legacy, unified_base)
                 except Exception:
                     return legacy
-            return unified_path
+            return unified_base
 
-    return unified_path
+    # Default to base (caller might handle missing)
+    return unified_base
 
 def _extract_image_metadata(data: bytes) -> Dict[str, Any]:
     """Inspect image bytes to capture dimensions, mime, and format."""
@@ -101,6 +118,25 @@ def _extract_artwork_data(path: str) -> bytes:
             for tag in f.tags.values():
                 if isinstance(tag, APIC):
                     return tag.data
+
+        # MP4 (M4A/ALAC)
+        if isinstance(f, MP4):
+            # covr is a list of MP4Cover objects (subclass of bytes)
+            covers = f.tags.get("covr") if f.tags else None
+            if covers:
+                return bytes(covers[0])
+
+        # Ogg Vorbis
+        if isinstance(f, OggVorbis):
+             # METADATA_BLOCK_PICTURE is base64 encoded FLAC Picture structure
+             if f.tags:
+                 pics = f.tags.get("metadata_block_picture", [])
+                 if pics:
+                     try:
+                         p = Picture(base64.b64decode(pics[0]))
+                         return p.data
+                     except Exception:
+                         pass
         
         # TODO: Add other formats (Vorbis, etc)
         
@@ -110,7 +146,7 @@ def _extract_artwork_data(path: str) -> bytes:
 
 async def _save_artwork_to_disk(data: bytes) -> str:
     """
-    Save artwork to disk with subdirectory distribution.
+    Save artwork to disk with subdirectory distribution and file extension.
     
     Args:
         data: Image data bytes
@@ -119,7 +155,27 @@ async def _save_artwork_to_disk(data: bytes) -> str:
         Tuple of SHA1 hash and extracted metadata
     """
     sha1 = hashlib.sha1(data).hexdigest()
-    path = _get_art_path(sha1)
+    
+    # Extract metadata early to get format
+    meta = _extract_image_metadata(data)
+    
+    # Determine extension
+    ext = ""
+    fmt = meta.get("image_format")
+    if fmt == "JPEG": ext = ".jpg"
+    elif fmt == "PNG": ext = ".png"
+    elif fmt == "GIF": ext = ".gif"
+    elif fmt == "WEBP": ext = ".webp"
+    elif fmt == "BMP": ext = ".bmp"
+    elif fmt == "TIFF": ext = ".tiff"
+    
+    # Build path with extension
+    subdir = sha1[:2]
+    filename = sha1 + ext
+    path = os.path.join(CACHE_DIR, subdir, filename)
+    
+    # If extensionless file exists (legacy), we might want to rename it?
+    # Or just check if 'path' exists.
     
     if not os.path.exists(path):
         # Create subdirectory if needed
@@ -127,7 +183,6 @@ async def _save_artwork_to_disk(data: bytes) -> str:
         async with aiofiles.open(path, "wb") as f:
             await f.write(data)
             
-    meta = _extract_image_metadata(data)
     meta["path_on_disk"] = path
     return sha1, meta
 
@@ -160,7 +215,7 @@ async def cleanup_orphaned_artwork(db):
     """
     try:
         sql = """
-            SELECT id, sha1 FROM artwork 
+            SELECT id, sha1, path_on_disk FROM artwork 
             WHERE id NOT IN (
                 SELECT DISTINCT artwork_id FROM image_map
                 UNION
@@ -179,8 +234,8 @@ async def cleanup_orphaned_artwork(db):
             
         count = 0
         for row in rows:
-            artwork_id, sha1 = row["id"], row["sha1"]
-            path = _resolve_or_migrate_art_path(sha1)
+            artwork_id, sha1, stored_path = row["id"], row["sha1"], row["path_on_disk"]
+            path = _resolve_or_migrate_art_path(sha1, stored_path)
             
             # Delete file
             if os.path.exists(path):

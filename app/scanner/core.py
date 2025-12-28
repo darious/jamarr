@@ -753,11 +753,12 @@ class Scanner:
             
             used_shas = set()
             rows = await db.fetch("""
-                SELECT aw.sha1 FROM image_map im
+
+                SELECT DISTINCT aw.sha1 FROM image_map im
                 JOIN artwork aw ON im.artwork_id = aw.id
-                WHERE im.entity_type = 'track' AND im.entity_id::bigint IN (
-                    SELECT id FROM track
-                )
+                WHERE (im.entity_type = 'track' AND im.entity_id::bigint IN (SELECT id FROM track))
+                   OR (im.entity_type = 'album' AND im.entity_id IN (SELECT mbid FROM album))
+                   OR (im.entity_type = 'artist' AND im.entity_id IN (SELECT mbid FROM artist))
             """)
             used_shas.update([r[0] for r in rows])
 
@@ -843,7 +844,7 @@ class Scanner:
                 query += " WHERE " + " AND ".join(clauses)
             query += " GROUP BY a.mbid, aw.source"
             
-            rows = await db.fetch(query, params)
+            rows = await db.fetch(query, *params)
 
             # Helper for Gap Checking
             def has_selected_gaps(row, fetch_top, fetch_singles):
@@ -1382,7 +1383,7 @@ class Scanner:
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
                 
-            artists = await db.fetch(query, params)
+            artists = await db.fetch(query, *params)
 
             total = len(artists)
             processed = 0
