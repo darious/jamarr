@@ -12,6 +12,7 @@
   import { addToQueue, loadQueueFromServer, setQueue } from "$stores/player";
   import { browser } from "$app/environment";
   import ColorThief from "colorthief";
+  import Tabs from "$lib/components/Tabs.svelte";
 
   export let data: {
     name: string;
@@ -103,6 +104,8 @@
 
   $: if (browser && data.canonicalName && data.canonicalName !== lastKey) {
     lastKey = data.canonicalName;
+    const hasMain = data.albums.some((a) => !a.type || a.type === "main");
+    activeTab = hasMain ? "albums" : "appears_on";
     void refreshTracks();
   }
 
@@ -400,6 +403,32 @@
     (e.currentTarget as HTMLImageElement).src =
       "/assets/default-artist-placeholder.svg";
   }
+
+  // Local state for tabs
+  let activeTab = data.albums.some((a) => !a.type || a.type === "main")
+    ? "albums"
+    : "appears_on";
+
+  // Reactive tab items
+  $: tabItems = [
+    {
+      label: `Albums (${mainAlbums.length})`,
+      value: "albums",
+      count: mainAlbums.length,
+      title: "Albums",
+    },
+    {
+      label: `Appears On (${appearsOnAlbums.length})`,
+      value: "appears_on",
+      count: appearsOnAlbums.length,
+      title: "Appears On",
+    },
+  ].filter((t) => t.count > 0);
+
+  // Ensure activeTab is valid
+  $: if (tabItems.length > 0 && !tabItems.find((t) => t.value === activeTab)) {
+    activeTab = tabItems[0].value;
+  }
 </script>
 
 <div
@@ -640,394 +669,493 @@
   >
     <!-- Albums Section -->
     <section>
-      <div class="flex items-center justify-between mb-6">
-        <h2 class="text-3xl font-bold text-white drop-shadow-md">Albums</h2>
-      </div>
+      <section>
+        {#if tabItems.length > 0}
+          <div class="flex items-center justify-start mb-6">
+            {#if tabItems.length > 1}
+              <Tabs items={tabItems} bind:activeValue={activeTab} />
+            {:else}
+              <h2 class="text-3xl font-bold text-white drop-shadow-md">
+                {tabItems[0].title}
+              </h2>
+            {/if}
+          </div>
+        {/if}
 
-      <div
-        class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
-      >
-        {#each mainAlbums as album}
-          <article class="group flex flex-col gap-4">
-            <button
-              class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
-              on:click={() =>
-                goto(
-                  `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-                )}
-            >
-              <img
-                src={album.art_sha1
-                  ? `/art/file/${album.art_sha1}`
-                  : album.art_id
-                    ? `/art/${album.art_id}`
-                    : "/assets/default-album-placeholder.svg"}
-                alt={album.album}
-                class="h-full w-full object-cover"
-                loading="lazy"
-              />
-              <!-- Play Overlay -->
-              <div
-                class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
-              >
-                <button
-                  class="btn-icon btn-icon-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
-                  title="Play"
-                  on:click|stopPropagation={() => playAlbum(album)}
-                >
-                  <svg
-                    class="h-8 w-8 ml-1"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
-                  >
-                </button>
-                <button
-                  class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
-                  title="Add to Queue"
-                  on:click|stopPropagation={() => addAlbumToQueue(album)}
-                >
-                  <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
-                    ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
-                  >
-                </button>
-              </div>
-
-              <!-- Hi-Res Badge -->
-              {#if album.is_hires}
-                <img
-                  src="/assets/logo-hires.png"
-                  class="absolute bottom-3 right-3 h-6 w-auto drop-shadow-lg"
-                  alt="Hi-Res"
-                />
-              {/if}
-            </button>
-            <div class="space-y-1">
-              <h3
-                class="text-base font-bold text-white leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
-                title={album.album}
-              >
-                {album.album}
-              </h3>
-              <p class="text-sm text-white/50 font-medium">
-                {album.year ? album.year.substring(0, 4) : "Unknown"}
-                <span class="mx-1 opacity-50">•</span>
-                {album.track_count} tracks
-              </p>
-            </div>
-          </article>
-        {/each}
-      </div>
-    </section>
-
-    <!-- Bottom Grids -->
-    <div class="grid lg:grid-cols-2 xl:grid-cols-3 gap-8 items-start">
-      <!-- Top Tracks -->
-      <section
-        class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
-      >
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-xl font-bold">Top Tracks</h3>
-          <button
-            class="btn btn-sm variant-ghost-surface"
-            on:click={playAllTopTracks}>Play All</button
+        {#if activeTab === "albums"}
+          <div
+            class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
           >
-        </div>
-        <div
-          class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
-        >
-          {#each displayedTopTracks as track, i}
-            <div
-              class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
-            >
-              <span
-                class="w-6 text-center text-xs text-white/40 font-mono flex-shrink-0"
-                >{i + 1}</span
-              >
-              <div class="relative w-10 h-10 flex-shrink-0">
-                <img
-                  src={(() => {
-                    if (track.art_sha1) return `/art/file/${track.art_sha1}`;
-                    if (track.art_id) return `/art/${track.art_id}`;
-                    const alb = data.albums.find(
-                      (a) => a.album === track.album,
-                    );
-                    if (alb?.art_sha1) return `/art/file/${alb.art_sha1}`;
-                    if (alb?.art_id) return `/art/${alb.art_id}`;
-                    return "/assets/default-artist-placeholder.svg";
-                  })()}
-                  class="w-full h-full rounded object-cover bg-surface-700"
-                  alt="Art"
-                />
+            {#each mainAlbums as album}
+              <article class="group flex flex-col gap-4">
                 <button
-                  class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
-                  on:click={() => track.id > 0 && playTrackById(track.id)}
+                  class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
+                  on:click={() =>
+                    goto(
+                      `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
+                    )}
                 >
-                  <svg
-                    class="w-5 h-5 text-white"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
-                  >
-                </button>
-              </div>
-
-              <div class="flex-1 min-w-0">
-                <p
-                  class={`text-sm font-medium truncate ${track.id > 0 ? "text-white" : "text-white/40 line-through"}`}
-                >
-                  {track.title}
-                </p>
-                <div class="flex items-center gap-2 text-xs text-white/40">
-                  <a
-                    href={`/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(track.album)}`}
-                    class="hover:text-white hover:underline truncate max-w-[150px]"
-                    >{track.album}</a
-                  >
-                  {#if track.popularity}
-                    <span class="opacity-30">•</span>
-                    <span>{formatPlays(track.popularity)}</span>
-                  {/if}
-                  {#if track.codec}
-                    <span class="opacity-30">•</span>
-                    <span class="uppercase">{track.codec}</span>
-                  {/if}
-                  {#if track.bit_depth && track.sample_rate_hz}
-                    <span class="opacity-30">•</span>
-                    <span>{track.bit_depth}/{track.sample_rate_hz / 1000}</span>
-                  {/if}
-                </div>
-              </div>
-
-              {#if track.id > 0}
-                <button
-                  class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Add to Queue"
-                  on:click={() => addTrackToQueue(track.id)}
-                >
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"
-                    ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
-                  >
-                </button>
-              {/if}
-              <span
-                class="text-xs text-white/30 font-mono w-10 text-right flex-shrink-0"
-                >{formatDuration(track.duration_seconds)}</span
-              >
-            </div>
-          {/each}
-        </div>
-      </section>
-
-      <!-- Singles -->
-      <section
-        class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
-      >
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-xl font-bold">Singles</h3>
-          <button
-            class="btn btn-sm variant-ghost-surface"
-            on:click={playAllSingles}>Play All</button
-          >
-        </div>
-        <div
-          class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
-        >
-          {#if displayedSingles.length === 0}
-            <p class="text-white/40 text-sm p-4 text-center">
-              No singles found.
-            </p>
-          {:else}
-            {#each displayedSingles as single}
-              <div
-                class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
-              >
-                <div class="relative w-10 h-10 flex-shrink-0">
                   <img
-                    src={single.art_sha1
-                      ? `/art/file/${single.art_sha1}`
-                      : single.art_id
-                        ? `/art/${single.art_id}`
-                        : "/assets/default-artist-placeholder.svg"}
-                    class="w-full h-full rounded object-cover bg-surface-700"
-                    alt="Art"
+                    src={album.art_sha1
+                      ? `/art/file/${album.art_sha1}`
+                      : album.art_id
+                        ? `/art/${album.art_id}`
+                        : "/assets/default-album-placeholder.svg"}
+                    alt={album.album}
+                    class="h-full w-full object-cover"
+                    loading="lazy"
                   />
-                  {#if single.localId}
+                  <!-- Play Overlay -->
+                  <div
+                    class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
+                  >
                     <button
-                      class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
-                      on:click={() => {
-                        if (
-                          single.tracksToPlay &&
-                          single.tracksToPlay.length > 0
-                        )
-                          setQueue(single.tracksToPlay, 0);
-                      }}
+                      class="btn-icon btn-icon-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                      title="Play"
+                      on:click|stopPropagation={() => playAlbum(album)}
                     >
                       <svg
-                        class="w-5 h-5 text-white"
+                        class="h-8 w-8 ml-1"
                         fill="currentColor"
                         viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
                       >
                     </button>
+                    <button
+                      class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                      title="Add to Queue"
+                      on:click|stopPropagation={() => addAlbumToQueue(album)}
+                    >
+                      <svg
+                        class="h-6 w-6"
+                        fill="currentColor"
+                        viewBox="0 0 24 24"
+                        ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
+                      >
+                    </button>
+                  </div>
+
+                  <!-- Hi-Res Badge -->
+                  {#if album.is_hires}
+                    <img
+                      src="/assets/logo-hires.png"
+                      class="absolute bottom-3 right-3 h-6 w-auto drop-shadow-lg"
+                      alt="Hi-Res"
+                    />
                   {/if}
+                </button>
+                <div class="space-y-1">
+                  <h3
+                    class="text-base font-bold text-white leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
+                    title={album.album}
+                  >
+                    {album.album}
+                  </h3>
+                  <p class="text-sm text-white/50 font-medium">
+                    {album.year ? album.year.substring(0, 4) : "Unknown"}
+                    <span class="mx-1 opacity-50">•</span>
+                    {album.track_count} tracks
+                  </p>
+                </div>
+              </article>
+            {/each}
+          </div>
+        {:else if activeTab === "appears_on"}
+          <div
+            class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+          >
+            {#each appearsOnAlbums as album}
+              <article class="group flex flex-col gap-4">
+                <button
+                  class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
+                  on:click={() =>
+                    goto(
+                      `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
+                    )}
+                >
+                  <img
+                    src={album.art_sha1
+                      ? `/art/file/${album.art_sha1}`
+                      : album.art_id
+                        ? `/art/${album.art_id}`
+                        : "/assets/default-album-placeholder.svg"}
+                    alt={album.album}
+                    class="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                  <!-- Play Overlay -->
+                  <div
+                    class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
+                  >
+                    <button
+                      class="btn-icon btn-icon-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                      title="Play"
+                      on:click|stopPropagation={() => playAlbum(album)}
+                    >
+                      <svg
+                        class="h-8 w-8 ml-1"
+                        fill="currentColor"
+                        viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                      >
+                    </button>
+                    <button
+                      class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                      title="Add to Queue"
+                      on:click|stopPropagation={() => addAlbumToQueue(album)}
+                    >
+                      <svg
+                        class="h-6 w-6"
+                        fill="currentColor"
+                        viewBox="0 0 24 24"
+                        ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
+                      >
+                    </button>
+                  </div>
+
+                  <!-- Hi-Res Badge -->
+                  {#if album.is_hires}
+                    <img
+                      src="/assets/logo-hires.png"
+                      class="absolute bottom-3 right-3 h-6 w-auto drop-shadow-lg"
+                      alt="Hi-Res"
+                    />
+                  {/if}
+                </button>
+                <div class="space-y-1">
+                  <h3
+                    class="text-base font-bold text-white leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
+                    title={album.album}
+                  >
+                    {album.album}
+                  </h3>
+                  <p class="text-sm text-white/50 font-medium">
+                    {album.artist_name}
+                    <span class="mx-1 opacity-50">•</span>
+                    {album.year ? album.year.substring(0, 4) : "Unknown"}
+                  </p>
+                </div>
+              </article>
+            {/each}
+          </div>
+        {/if}
+      </section>
+
+      <!-- Bottom Grids -->
+      <div class="grid lg:grid-cols-2 xl:grid-cols-3 gap-8 items-start">
+        <!-- Top Tracks -->
+        <section
+          class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
+        >
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xl font-bold">Top Tracks</h3>
+            <button
+              class="btn btn-sm variant-ghost-surface"
+              on:click={playAllTopTracks}>Play All</button
+            >
+          </div>
+          <div
+            class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
+          >
+            {#each displayedTopTracks as track, i}
+              <div
+                class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
+              >
+                <span
+                  class="w-6 text-center text-xs text-white/40 font-mono flex-shrink-0"
+                  >{i + 1}</span
+                >
+                <div class="relative w-10 h-10 flex-shrink-0">
+                  <img
+                    src={(() => {
+                      if (track.art_sha1) return `/art/file/${track.art_sha1}`;
+                      if (track.art_id) return `/art/${track.art_id}`;
+                      const alb = data.albums.find(
+                        (a) => a.album === track.album,
+                      );
+                      if (alb?.art_sha1) return `/art/file/${alb.art_sha1}`;
+                      if (alb?.art_id) return `/art/${alb.art_id}`;
+                      return "/assets/default-artist-placeholder.svg";
+                    })()}
+                    class="w-full h-full rounded object-cover bg-surface-700"
+                    alt="Art"
+                  />
+                  <button
+                    class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                    on:click={() => track.id > 0 && playTrackById(track.id)}
+                  >
+                    <svg
+                      class="w-5 h-5 text-white"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                    >
+                  </button>
                 </div>
 
                 <div class="flex-1 min-w-0">
                   <p
-                    class={`text-sm font-medium truncate ${single.localId ? "text-white" : "text-white/40 line-through"}`}
+                    class={`text-sm font-medium truncate ${track.id > 0 ? "text-white" : "text-white/40 line-through"}`}
                   >
-                    {single.title}
+                    {track.title}
                   </p>
                   <div class="flex items-center gap-2 text-xs text-white/40">
-                    <span>{single.date?.substring(0, 4) || "Unknown"}</span>
-                    {#if single.codec}
+                    <a
+                      href={`/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(track.album)}`}
+                      class="hover:text-white hover:underline truncate max-w-[150px]"
+                      >{track.album}</a
+                    >
+                    {#if track.popularity}
                       <span class="opacity-30">•</span>
-                      <span class="uppercase">{single.codec}</span>
+                      <span>{formatPlays(track.popularity)}</span>
                     {/if}
-                    {#if single.bit_depth && single.sample_rate_hz}
+                    {#if track.codec}
+                      <span class="opacity-30">•</span>
+                      <span class="uppercase">{track.codec}</span>
+                    {/if}
+                    {#if track.bit_depth && track.sample_rate_hz}
                       <span class="opacity-30">•</span>
                       <span
-                        >{single.bit_depth}/{single.sample_rate_hz / 1000}</span
+                        >{track.bit_depth}/{track.sample_rate_hz / 1000}</span
                       >
                     {/if}
                   </div>
                 </div>
 
-                {#if single.localId && single.tracksToPlay && single.tracksToPlay.length > 0}
+                {#if track.id > 0}
                   <button
                     class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
                     title="Add to Queue"
-                    on:click={() => addToQueue(single.tracksToPlay)}
+                    on:click={() => addTrackToQueue(track.id)}
                   >
                     <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"
                       ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
                     >
                   </button>
                 {/if}
+                <span
+                  class="text-xs text-white/30 font-mono w-10 text-right flex-shrink-0"
+                  >{formatDuration(track.duration_seconds)}</span
+                >
               </div>
             {/each}
-          {/if}
-        </div>
-      </section>
+          </div>
+        </section>
 
-      <!-- Similar Artists -->
-      <section
-        class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
-      >
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="text-xl font-bold">Similar Artists</h3>
-        </div>
-        <div
-          class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
+        <!-- Singles -->
+        <section
+          class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
         >
-          {#if displayedSimilarArtists.length === 0}
-            <p class="text-white/40 text-sm p-4 text-center">
-              No similar artists found.
-            </p>
-          {:else}
-            {#each displayedSimilarArtists as sim}
-              <button
-                class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
-                on:click={() => goto(`/artist/${encodeURIComponent(sim.name)}`)}
-              >
-                {#if sim.art_sha1 || sim.art_id}
-                  <img
-                    src={sim.art_sha1
-                      ? `/art/file/${sim.art_sha1}`
-                      : `/art/${sim.art_id}`}
-                    class="w-10 h-10 rounded-full object-cover bg-surface-700"
-                    alt={sim.name}
-                  />
-                {:else}
-                  <div
-                    class="w-10 h-10 rounded-full bg-surface-700 flex items-center justify-center text-xs font-bold text-white/50"
-                  >
-                    ?
-                  </div>
-                {/if}
-                <span
-                  class="text-sm font-medium text-white group-hover:text-primary-400 transition-colors"
-                  >{sim.name}</span
-                >
-              </button>
-            {/each}
-          {/if}
-        </div>
-      </section>
-    </div>
-
-    {#if missingAlbums.length > 0}
-      <section class="pb-10">
-        <div class="flex items-center justify-between mb-6">
-          <h2 class="text-2xl font-bold text-white/80">Missing Albums</h2>
-        </div>
-        <div
-          class="glass-surface rounded-2xl overflow-hidden border border-white/5 bg-surface-900/40 backdrop-blur-xl"
-        >
-          <table class="w-full text-left text-sm whitespace-nowrap">
-            <thead
-              class="uppercase tracking-wider border-b border-white/10 text-white/40 text-xs bg-white/5"
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xl font-bold">Singles</h3>
+            <button
+              class="btn btn-sm variant-ghost-surface"
+              on:click={playAllSingles}>Play All</button
             >
-              <tr>
-                <th class="px-6 py-4">Album</th>
-                <th class="px-6 py-4">Released</th>
-                <th class="px-6 py-4 text-center">Links</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-white/5">
-              {#each missingAlbums as album}
-                <tr class="hover:bg-white/5 transition-colors">
-                  <td class="px-6 py-4 font-medium text-white/90"
-                    >{album.title}</td
-                  >
-                  <td class="px-6 py-4 text-white/50"
-                    >{album.release_date || "—"}</td
-                  >
-                  <td class="px-6 py-4">
-                    <div class="flex items-center justify-center gap-3">
-                      {#if album.musicbrainz_url}
-                        <a
-                          href={album.musicbrainz_url}
-                          target="_blank"
-                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
-                          ><img
-                            src="/assets/logo-musicbrainz.svg"
-                            class="w-5 h-5"
-                            alt="MB"
-                          /></a
+          </div>
+          <div
+            class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
+          >
+            {#if displayedSingles.length === 0}
+              <p class="text-white/40 text-sm p-4 text-center">
+                No singles found.
+              </p>
+            {:else}
+              {#each displayedSingles as single}
+                <div
+                  class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
+                >
+                  <div class="relative w-10 h-10 flex-shrink-0">
+                    <img
+                      src={single.art_sha1
+                        ? `/art/file/${single.art_sha1}`
+                        : single.art_id
+                          ? `/art/${single.art_id}`
+                          : "/assets/default-artist-placeholder.svg"}
+                      class="w-full h-full rounded object-cover bg-surface-700"
+                      alt="Art"
+                    />
+                    {#if single.localId}
+                      <button
+                        class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                        on:click={() => {
+                          if (
+                            single.tracksToPlay &&
+                            single.tracksToPlay.length > 0
+                          )
+                            setQueue(single.tracksToPlay, 0);
+                        }}
+                      >
+                        <svg
+                          class="w-5 h-5 text-white"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
                         >
+                      </button>
+                    {/if}
+                  </div>
+
+                  <div class="flex-1 min-w-0">
+                    <p
+                      class={`text-sm font-medium truncate ${single.localId ? "text-white" : "text-white/40 line-through"}`}
+                    >
+                      {single.title}
+                    </p>
+                    <div class="flex items-center gap-2 text-xs text-white/40">
+                      <span>{single.date?.substring(0, 4) || "Unknown"}</span>
+                      {#if single.codec}
+                        <span class="opacity-30">•</span>
+                        <span class="uppercase">{single.codec}</span>
                       {/if}
-                      {#if album.tidal_url}
-                        <a
-                          href={album.tidal_url}
-                          target="_blank"
-                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
-                          ><img
-                            src="/assets/logo-tidal.png"
-                            class="w-5 h-5"
-                            alt="Tidal"
-                          /></a
-                        >
-                      {/if}
-                      {#if album.qobuz_url}
-                        <a
-                          href={album.qobuz_url}
-                          target="_blank"
-                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
-                          ><img
-                            src="/assets/logo-qobuz.png"
-                            class="w-5 h-5"
-                            alt="Qobuz"
-                          /></a
+                      {#if single.bit_depth && single.sample_rate_hz}
+                        <span class="opacity-30">•</span>
+                        <span
+                          >{single.bit_depth}/{single.sample_rate_hz /
+                            1000}</span
                         >
                       {/if}
                     </div>
-                  </td>
-                </tr>
+                  </div>
+
+                  {#if single.localId && single.tracksToPlay && single.tracksToPlay.length > 0}
+                    <button
+                      class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Add to Queue"
+                      on:click={() => addToQueue(single.tracksToPlay)}
+                    >
+                      <svg
+                        class="w-4 h-4"
+                        fill="currentColor"
+                        viewBox="0 0 24 24"
+                        ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
+                      >
+                    </button>
+                  {/if}
+                </div>
               {/each}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    {/if}
+            {/if}
+          </div>
+        </section>
+
+        <!-- Similar Artists -->
+        <section
+          class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
+        >
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xl font-bold">Similar Artists</h3>
+          </div>
+          <div
+            class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
+          >
+            {#if displayedSimilarArtists.length === 0}
+              <p class="text-white/40 text-sm p-4 text-center">
+                No similar artists found.
+              </p>
+            {:else}
+              {#each displayedSimilarArtists as sim}
+                <button
+                  class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
+                  on:click={() =>
+                    goto(`/artist/${encodeURIComponent(sim.name)}`)}
+                >
+                  {#if sim.art_sha1 || sim.art_id}
+                    <img
+                      src={sim.art_sha1
+                        ? `/art/file/${sim.art_sha1}`
+                        : `/art/${sim.art_id}`}
+                      class="w-10 h-10 rounded-full object-cover bg-surface-700"
+                      alt={sim.name}
+                    />
+                  {:else}
+                    <div
+                      class="w-10 h-10 rounded-full bg-surface-700 flex items-center justify-center text-xs font-bold text-white/50"
+                    >
+                      ?
+                    </div>
+                  {/if}
+                  <span
+                    class="text-sm font-medium text-white group-hover:text-primary-400 transition-colors"
+                    >{sim.name}</span
+                  >
+                </button>
+              {/each}
+            {/if}
+          </div>
+        </section>
+      </div>
+
+      {#if missingAlbums.length > 0}
+        <section class="pb-10">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-2xl font-bold text-white/80">Missing Albums</h2>
+          </div>
+          <div
+            class="glass-surface rounded-2xl overflow-hidden border border-white/5 bg-surface-900/40 backdrop-blur-xl"
+          >
+            <table class="w-full text-left text-sm whitespace-nowrap">
+              <thead
+                class="uppercase tracking-wider border-b border-white/10 text-white/40 text-xs bg-white/5"
+              >
+                <tr>
+                  <th class="px-6 py-4">Album</th>
+                  <th class="px-6 py-4">Released</th>
+                  <th class="px-6 py-4 text-center">Links</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/5">
+                {#each missingAlbums as album}
+                  <tr class="hover:bg-white/5 transition-colors">
+                    <td class="px-6 py-4 font-medium text-white/90"
+                      >{album.title}</td
+                    >
+                    <td class="px-6 py-4 text-white/50"
+                      >{album.release_date || "—"}</td
+                    >
+                    <td class="px-6 py-4">
+                      <div class="flex items-center justify-center gap-3">
+                        {#if album.musicbrainz_url}
+                          <a
+                            href={album.musicbrainz_url}
+                            target="_blank"
+                            class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                            ><img
+                              src="/assets/logo-musicbrainz.svg"
+                              class="w-5 h-5"
+                              alt="MB"
+                            /></a
+                          >
+                        {/if}
+                        {#if album.tidal_url}
+                          <a
+                            href={album.tidal_url}
+                            target="_blank"
+                            class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                            ><img
+                              src="/assets/logo-tidal.png"
+                              class="w-5 h-5"
+                              alt="Tidal"
+                            /></a
+                          >
+                        {/if}
+                        {#if album.qobuz_url}
+                          <a
+                            href={album.qobuz_url}
+                            target="_blank"
+                            class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                            ><img
+                              src="/assets/logo-qobuz.png"
+                              class="w-5 h-5"
+                              alt="Qobuz"
+                            /></a
+                          >
+                        {/if}
+                      </div>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {/if}
+    </section>
   </main>
 </div>
 

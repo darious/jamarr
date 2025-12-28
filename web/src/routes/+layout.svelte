@@ -57,7 +57,9 @@
     });
 
     unsubUser = currentUser.subscribe((value) => (user = value));
-    unsubAuthChecked = isAuthChecked.subscribe((value) => (authChecked = value));
+    unsubAuthChecked = isAuthChecked.subscribe(
+      (value) => (authChecked = value),
+    );
     // If server didn't provide a user, hydrate from the API on the client
     if (!user) {
       hydrateUser().catch((e) => console.error("Failed to hydrate user", e));
@@ -163,15 +165,11 @@
         class="mx-auto flex w-full max-w-[1700px] items-center justify-between px-6 py-3"
       >
         <a href="/" class="flex items-center">
-          <div
-            class="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-white/5"
-          >
-            <img
-              src="/assets/logo.png"
-              alt="Jamarr"
-              class="h-full w-full object-contain p-2"
-            />
-          </div>
+          <img
+            src="/assets/logo.png"
+            alt="Jamarr"
+            class="h-16 w-auto object-contain hover:scale-105 transition-transform duration-200"
+          />
         </a>
 
         <div class="flex-1 flex justify-center">
@@ -310,10 +308,14 @@
               >
                 <div class="p-2">
                   {#if user}
-                  <div class="rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-xs text-white/80 mb-1">
-                    <div class="font-semibold text-white">{user.display_name}</div>
-                    <div class="text-white/60">{user.email}</div>
-                  </div>
+                    <div
+                      class="rounded-lg border border-white/5 bg-white/5 px-3 py-2 text-xs text-white/80 mb-1"
+                    >
+                      <div class="font-semibold text-white">
+                        {user.display_name}
+                      </div>
+                      <div class="text-white/60">{user.email}</div>
+                    </div>
                     <a
                       class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
                       href="/settings/account"
