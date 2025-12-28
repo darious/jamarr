@@ -528,9 +528,11 @@
             </div>
 
             <!-- API & Processed Stats -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <!-- Processed Counts -->
-                <div class="card bg-white/5 border border-white/10 p-4">
+                <div
+                    class="card bg-white/5 border border-white/10 p-4 md:col-span-1"
+                >
                     <h3
                         class="text-xs uppercase tracking-wide text-white/40 mb-3"
                     >
@@ -562,7 +564,9 @@
                 </div>
 
                 <!-- API Hits -->
-                <div class="card bg-white/5 border border-white/10 p-4">
+                <div
+                    class="card bg-white/5 border border-white/10 p-4 md:col-span-2"
+                >
                     <h3
                         class="text-xs uppercase tracking-wide text-white/40 mb-3"
                     >
@@ -571,7 +575,8 @@
                     <div class="flex flex-wrap gap-4">
                         <!-- MusicBrainz -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5"
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="MusicBrainz"
                         >
                             <img
                                 src="/assets/logo-musicbrainz.svg"
@@ -584,24 +589,26 @@
                             >
                         </div>
 
-                        <!-- Spotify -->
+                        <!-- Fanart.tv -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5"
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Fanart.tv"
                         >
                             <img
-                                src="/assets/logo-spotify.svg"
-                                alt="Spotify"
+                                src="/assets/logo-fanarttv.svg"
+                                alt="Fanart"
                                 class="w-5 h-5 opacity-90"
                             />
                             <span
                                 class="font-mono text-sm font-bold text-white/90"
-                                >{stats.api_stats?.spotify || 0}</span
+                                >{stats.api_stats?.fanart || 0}</span
                             >
                         </div>
 
                         <!-- Last.fm -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5"
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Last.fm"
                         >
                             <img
                                 src="/assets/logo-lastfm.png"
@@ -614,34 +621,51 @@
                             >
                         </div>
 
-                        <!-- Wikidata (Wikipedia) -->
+                        <!-- Wikidata -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5"
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Wikidata"
                         >
                             <img
-                                src="/assets/logo-wikipedia.svg"
+                                src="/assets/logo-wikidata.png"
                                 alt="Wikidata"
                                 class="w-6 h-6 opacity-90"
                             />
                             <span
                                 class="font-mono text-sm font-bold text-white/90"
-                                >{(stats.api_stats?.wikidata || 0) +
-                                    (stats.api_stats?.wikipedia || 0)}</span
+                                >{stats.api_stats?.wikidata || 0}</span
                             >
                         </div>
 
-                        <!-- Fanart.tv -->
+                        <!-- Wikipedia -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5"
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Wikipedia"
                         >
                             <img
-                                src="/assets/logo-fanarttv.svg"
-                                alt="Fanart"
+                                src="/assets/logo-wikipedia.svg"
+                                alt="Wikipedia"
+                                class="w-6 h-6 opacity-90"
+                            />
+                            <span
+                                class="font-mono text-sm font-bold text-white/90"
+                                >{stats.api_stats?.wikipedia || 0}</span
+                            >
+                        </div>
+
+                        <!-- Spotify -->
+                        <div
+                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            title="Spotify"
+                        >
+                            <img
+                                src="/assets/logo-spotify.svg"
+                                alt="Spotify"
                                 class="w-5 h-5 opacity-90"
                             />
                             <span
                                 class="font-mono text-sm font-bold text-white/90"
-                                >{stats.api_stats?.fanart || 0}</span
+                                >{stats.api_stats?.spotify || 0}</span
                             >
                         </div>
                     </div>
