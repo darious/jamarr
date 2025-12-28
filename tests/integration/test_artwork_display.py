@@ -1,6 +1,7 @@
 import pytest
-import time
 from httpx import AsyncClient
+from unittest.mock import MagicMock, patch
+
 
 @pytest.mark.asyncio
 async def test_homepage_new_releases_artwork(client: AsyncClient, db, auth_token):
@@ -52,10 +53,6 @@ async def test_homepage_new_releases_artwork(client: AsyncClient, db, auth_token
     
     print(f"\nAPI Response Item: {album}")
 
-from unittest.mock import MagicMock, patch
-from app.scanner.core import Scanner
-from mutagen.mp4 import MP4Cover
-import os
 
 @pytest.mark.asyncio
 async def test_scanner_pipeline_mocked(db):
@@ -63,21 +60,19 @@ async def test_scanner_pipeline_mocked(db):
     Test the full scanner pipeline (process_file) by mocking Mutagen.
     We simulate scanning a file and verify Track and Artwork tables are populated.
     """
-    scanner = Scanner()
-    
     # Mock Data
-    fake_art_data = b"fake_image_bytes"
     fake_path = "/music/test_pipeline.m4a"
+
     
     # Create Mock Mutagen File (Simulating MP4/M4A)
     # We need it to pass isinstance(f, MP4) check in artwork.py
     # and have tags['covr']
     
-    with patch("app.scanner.tags.mutagen.File") as mock_file_tags, \
-         patch("app.scanner.artwork.File") as mock_file_art, \
+    with patch("app.scanner.tags.mutagen.File"), \
+         patch("app.scanner.artwork.File"), \
          patch("app.scanner.core.os.path.getmtime", return_value=1234567890), \
          patch("app.scanner.artwork.os.makedirs"), \
-         patch("app.scanner.artwork.aiofiles.open", new_callable=MagicMock) as mock_open:
+         patch("app.scanner.artwork.aiofiles.open", new_callable=MagicMock):
 
         # Setup Tag Extraction Mock (tags.py)
         # For M4A strings, we need to return a dict that mimics what extract_tags expects
@@ -89,8 +84,8 @@ async def test_scanner_pipeline_mocked(db):
         pass
 
     with patch("app.scanner.core.extract_tags") as mock_extract_tags, \
-         patch("app.scanner.artwork.File") as mock_mutagen_art, \
-         patch("app.scanner.artwork._save_artwork_to_disk") as mock_save_disk:
+         patch("app.scanner.artwork.File"), \
+         patch("app.scanner.artwork._save_artwork_to_disk"):
          
         # 1. Setup metadata (assume tags work as user says records exist)
         mock_extract_tags.return_value = {
@@ -106,8 +101,8 @@ async def test_scanner_pipeline_mocked(db):
         # We need _extract_artwork_data to find data.
         # It uses mutagen.File(path).
         # We simulate an MP4 file with 'covr'
-        
-        mock_mp4 = MagicMock()
+
+        _ = MagicMock()
         # Mocking isinstance check is tricky with MagicMock. 
         # Better to rely on the fact that we patched the class used in isinstance checks?
         # No, isinstance(m, Class) requires m to be instance.
@@ -128,7 +123,7 @@ async def test_artwork_extraction_logic():
     Unit test for the exact logic added to artwork.py for M4A/Ogg.
     """
     from app.scanner.artwork import _extract_artwork_data
-    from mutagen.mp4 import MP4, MP4Cover
+    from mutagen.mp4 import MP4
     
     # 1. Test MP4 Logic
     # We can't easily instantiate a real MP4 object without a file.
@@ -153,7 +148,6 @@ async def test_artwork_serving(client: AsyncClient, db, auth_token):
     Ensures that extensionless cache files are served with correct Content-Type (e.g. image/jpeg).
     """
     # 1. Create dummy artwork file (Extensionless)
-    import os
     sha1 = "11223344556677889900aabbccddeeff11223344"
     cache_path = f"/tmp/{sha1}"
     

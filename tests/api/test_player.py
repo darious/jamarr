@@ -1,6 +1,5 @@
 import pytest
 from httpx import AsyncClient
-import json
 
 @pytest.fixture
 async def player_data(db):

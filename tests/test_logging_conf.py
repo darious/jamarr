@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-import pytest
 from app.logging_conf import configure_logging
 
 def test_logging_configuration():

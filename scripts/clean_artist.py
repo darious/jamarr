@@ -2,10 +2,8 @@
 import asyncio
 import aiosqlite
 import os
-import shutil
 import logging
 import argparse
-import sys
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -72,14 +70,16 @@ async def clean_artist_data(name=None, mbid=None):
         for target_mbid in artist_mbids:
             async with db.execute("SELECT album_mbid FROM artist_albums WHERE artist_mbid = ?", (target_mbid,)) as c:
                 rows = await c.fetchall()
-                for r in rows: album_mbids.add(r[0])
+                for r in rows:
+                    album_mbids.add(r[0])
         
         # Via tracks
         for target_mbid in artist_mbids:
              async with db.execute("SELECT DISTINCT mb_release_group_id FROM tracks WHERE mb_album_artist_id LIKE ?", (f"%{target_mbid}%",)) as c:
                 rows = await c.fetchall()
                 for r in rows: 
-                    if r[0]: album_mbids.add(r[0])
+                    if r[0]:
+                        album_mbids.add(r[0])
                     
         logger.info(f"Found {len(album_mbids)} related Album MBIDs")
 
@@ -91,13 +91,15 @@ async def clean_artist_data(name=None, mbid=None):
         async with db.execute(f"SELECT art_id FROM artists WHERE mbid IN ({placeholders})", artist_mbids) as c:
             rows = await c.fetchall()
             for r in rows:
-                if r[0]: art_ids.add(r[0])
+                if r[0]:
+                    art_ids.add(r[0])
 
         # Album Art
         for q_mbid in album_mbids:
             async with db.execute("SELECT art_id FROM albums WHERE mbid = ?", (q_mbid,)) as c:
                 row = await c.fetchone()
-                if row and row[0]: art_ids.add(row[0])
+                if row and row[0]:
+                    art_ids.add(row[0])
         
         # Track Art
         track_ids = []
@@ -106,7 +108,8 @@ async def clean_artist_data(name=None, mbid=None):
                  rows = await c.fetchall()
                  for r in rows:
                      track_ids.append(r["id"])
-                     if r["art_id"]: art_ids.add(r["art_id"])
+                     if r["art_id"]:
+                         art_ids.add(r["art_id"])
 
         logger.info(f"Found {len(art_ids)} artwork IDs to verify/delete")
         
@@ -116,7 +119,8 @@ async def clean_artist_data(name=None, mbid=None):
             placeholders = ",".join("?" * len(art_ids))
             async with db.execute(f"SELECT sha1 FROM artwork WHERE id IN ({placeholders})", list(art_ids)) as c:
                 rows = await c.fetchall()
-                for r in rows: shas_to_delete.add(r[0])
+                for r in rows:
+                    shas_to_delete.add(r[0])
 
         # 4. DELETE FILES
         files_deleted = 0

@@ -1,5 +1,4 @@
 import pytest
-import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from app.scanner.core import Scanner
 from app.scanner.metadata import SpotifyRateLimitError
