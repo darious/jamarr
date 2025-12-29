@@ -543,9 +543,9 @@ async def match_track_to_library(
     Returns track_id if found, None otherwise.
     """
     # Get all tracks for this artist (including features)
-    # We also fetch MB IDs now
+    # We also fetch MB IDs and Date now
     query = """
-        SELECT t.id, t.title, t.album, t.duration_seconds, t.track_mbid, t.release_track_mbid
+        SELECT t.id, t.title, t.album, t.duration_seconds, t.track_mbid, t.release_track_mbid, t.date
         FROM track t
         JOIN track_artist ta ON t.id = ta.track_id
         WHERE ta.artist_mbid = $1 
@@ -559,7 +559,7 @@ async def match_track_to_library(
     # 1. Exact MBID Match (Highest Priority)
     if external_mb_track_id:
         for row in candidates:
-            cid, ctitle, calbum, cseconds, cmb_track_id, cmb_release_track_id = row
+            cid, ctitle, calbum, cseconds, cmb_track_id, cmb_release_track_id, cdate = row
             if (
                 cmb_track_id == external_mb_track_id
                 or cmb_release_track_id == external_mb_track_id
@@ -582,12 +582,33 @@ async def match_track_to_library(
     def fuzzy_score(s1, s2):
         return difflib.SequenceMatcher(None, normalize(s1), normalize(s2)).ratio()
 
+    def normalize_date(d_str):
+        """
+        Normalize date string to YYYY-MM-DD for comparison.
+        If only YYYY is provided, defaults to YYYY-01-01.
+        Returns None if invalid.
+        """
+        if not d_str:
+            return None
+        d_str = d_str.strip()
+        # Handle YYYY
+        if len(d_str) == 4 and d_str.isdigit():
+            return f"{d_str}-01-01"
+        # Handle YYYY-MM (Default to 01)
+        if len(d_str) == 7 and d_str.replace("-","").isdigit():
+            return f"{d_str}-01"
+        # Handle YYYY-MM-DD
+        if len(d_str) >= 10:
+            return d_str[:10]
+        return None
+
     # Calculate scores
     best_score = 0
     best_match = None
+    best_date = None
 
     for row in candidates:
-        cid, ctitle, calbum, cseconds, cmb_track_id, cmb_release_track_id = row
+        cid, ctitle, calbum, cseconds, cmb_track_id, cmb_release_track_id, cdate = row
 
         # Dynamic Weighting
         total_weight = 0.6
@@ -605,19 +626,24 @@ async def match_track_to_library(
             a_score = fuzzy_score(album_name, calbum)
             current_score += a_score * 0.2
 
-        # 3. Duration Score (Weight 0.2 if applicable)
-        # We rely on caller passing correct info, but currently they pass None mostly.
-        # However, checking if duration exists in DB row is good.
-        # But we need external duration to compare against.
-        # Since the function signature doesn't support duration yet, we skip this part
-        # basically making it Title(60%) + Album(20%) logic, which we verified works for Singles (Title 60/60 = 100%).
-
         # Normalize
         final_score = current_score / total_weight
+        norm_date = normalize_date(cdate)
 
         if final_score > best_score:
             best_score = final_score
             best_match = cid
+            best_date = norm_date
+        elif abs(final_score - best_score) < 0.001 and best_score > 0:
+            # Tie-breaker: Prefer earlier date
+            if norm_date and best_date:
+                if norm_date < best_date:
+                    best_match = cid
+                    best_date = norm_date
+            elif norm_date and not best_date:
+                # Prefer candidate with a date over one without
+                best_match = cid
+                best_date = norm_date
 
     if best_score > 0.75:
         return best_match
