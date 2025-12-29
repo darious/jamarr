@@ -544,8 +544,9 @@ class Scanner:
                 # logger.debug(f"[filesystem] Skipping unchanged file: {rel_path}")
                 return  # Unchanged
 
-            # Extract Tags
-            tags = extract_tags(path)
+            # Extract Tags (Offload to thread to avoid blocking main loop)
+            loop = asyncio.get_running_loop()
+            tags = await loop.run_in_executor(None, extract_tags, path)
             if not tags:
                 return
 
