@@ -1,0 +1,2 @@
+look in dev.sh, test.sh & lint.sh to see how things are run
+make sure every change has test coverage and all tests pass and linting checks pass

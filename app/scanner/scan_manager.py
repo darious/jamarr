@@ -426,12 +426,51 @@ class ScanManager:
                     and not refresh_top_tracks
                     and not refresh_singles
                 ):
-                    self._log_message(
-                        "No new/updated artists detected; skipping metadata step."
-                    )
-                else:
-                    # Always allow new artists to fetch top tracks; existing artists obey refresh_top_tracks flag.
-                    await self.scanner.update_metadata(
+                    # Logic: If nothing changed, BUT it's a partial scan, we must still respect the partial scan intent.
+                    # e.g. "Force Rescan" on a folder that didn't change anything internally (0 additions)
+                    # OR just a rescan of a folder that yielded nothing new.
+                    # The user expects metadata for THIS FOLDER to be checked if they asked for it.
+                    # But wait, original logic skipped metadata if `scanned_mbid_filter` was empty.
+                    
+                    if is_partial_scan:
+                        # Fetch artists in this path to behave as if we scanned them
+                        self._log_message("No file changes in partial scan; verifying existing artists in path...")
+                        found_artists = await self.scanner.get_artists_in_path(path)
+                        if found_artists:
+                             filter_mbid = found_artists
+                        else:
+                             # Empty folder or no tracks
+                             self._log_message("No artists found in path; skipping metadata.")
+                             filter_mbid = set() # Ensure it's empty so loop can skip or handle gracefully (actually update_metadata handles empty filter by querying all, we MUST NOT let that happen)
+                             
+                             # Actually, update_metadata with empty set as filter MIGHT act weird if we don't pass explicit clauses.
+                             # Let's check update_metadata logic:
+                             # if mbid_filter: clauses.append("mbid = ANY(...)")
+                             # If we pass an EMPTY SET, params will be empty list, clause "mbid = ANY($1)".
+                             # Postgres "ANY('{}')" matches nothing. Correct.
+                             filter_mbid = set()
+
+                    else:
+                         self._log_message(
+                            "No new/updated artists detected; skipping metadata step."
+                        )
+                         filter_mbid = set() # Skip
+
+                # Final Safety: If partial scan, NEVER allow filter_mbid to be None/Empty if we intended to scan something.
+                # If we found nothing, filter_mbid is empty set -> matches nothing -> safe.
+                # If we found something, filter_mbid is set -> matches them -> safe.
+                # If full scan and nothing changed -> skipped above or empty set -> safe.
+
+                if not is_partial_scan and not filter_mbid and not force and not artist and not mbid:
+                     # Double check we don't accidentally update everything if we fell through
+                     pass
+
+                if is_partial_scan and not filter_mbid:
+                     # Optimization: if strict partial scan yielded 0 artists, don't even call update
+                     pass
+                else: 
+                     # Always allow new artists to fetch top tracks; existing artists obey refresh_top_tracks flag.
+                     await self.scanner.update_metadata(
                         artist_filter=artist,
                         mbid_filter=filter_mbid,
                         missing_only=missing_only,

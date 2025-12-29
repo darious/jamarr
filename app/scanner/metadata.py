@@ -1317,6 +1317,10 @@ async def fetch_artist_release_groups(
                 title = rg.get("title")
                 norm_title = title.lower().strip()
 
+                # Filter out "Spotify" releases (Singles, Sessions, etc.)
+                if "spotify" in norm_title:
+                    continue
+
                 if norm_title in seen_titles:
                     continue
                 seen_titles.add(norm_title)
