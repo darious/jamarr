@@ -74,7 +74,7 @@ def check_rate_limit(token: str, artist_id: str = "43ZHCT0cAZBISjO8DG9PnE") -> N
 
     # If Spotify doesn't include rate headers on success, treat it as not limited.
     if remaining is None and limit is None and reset_at is None and retry_after is None:
-        print("Not rate limited (no rate-limit headers returned).")
+        print("Not rate limited (no rate-limit headers returned). Headers found:", list(headers.keys()))
         return
 
     message = []

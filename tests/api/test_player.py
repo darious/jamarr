@@ -284,8 +284,8 @@ async def test_history_stats_mine_scope(client: AsyncClient, db, player_data, au
     """, user_id)
     
     # Request with scope=mine
-    cookies = {"jamarr_session": auth_token}
-    response = await client.get("/api/player/history/stats?scope=mine", cookies=cookies)
+    client.cookies = {"jamarr_session": auth_token}
+    response = await client.get("/api/player/history/stats?scope=mine")
     assert response.status_code == 200
     data = response.json()
     assert len(data["tracks"]) >= 1

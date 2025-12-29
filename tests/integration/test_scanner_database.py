@@ -81,3 +81,38 @@ async def test_rematch_tracks_top_updates_track_id(monkeypatch, db):
     row = await db.fetchrow("SELECT track_id, updated_at FROM top_track WHERE artist_mbid=$1", artist_mbid)
     assert row["track_id"] == track_id
     assert row["updated_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_scanner_real_row_unpacking(monkeypatch, db):
+    """
+    Regression Test: Ensure the exact SQL query in update_metadata matching the
+    row unpacking logic in the consumer loops (has_selected_gaps, main loop, etc.).
+
+    This inserts a real artist, mocks the network fetch (to avoid external hits),
+    and runs update_metadata(). If unpacking fails (ValueError), this test will fail.
+    """
+    scanner = Scanner()
+    mbid = "unpacking-test-mbid"
+
+    # 1. Insert valid artist
+    await db.execute("INSERT INTO artist (mbid, name) VALUES ($1, 'Unpack Artist')", mbid)
+
+    # 2. Mock network calls so we don't actually hit APIs,
+    # but strictly verify the DB->App->DB cycle.
+    async def mock_fetch_meta(*args, **kwargs):
+        # Return mostly empty meta, we just want to ensure it gets here
+        return {"mbid": mbid, "name": "Unpack Artist"}
+
+    monkeypatch.setattr("app.scanner.core.fetch_artist_metadata", mock_fetch_meta)
+
+    # 3. Scanner should find the artist and process it.
+    # Note: we need at least one gap to trigger 'fetch'.
+    # Default artist w/o updated_at, link_count=0 etc should trigger scan.
+
+    await scanner.update_metadata(mbid_filter={mbid})
+
+    # 4. If we reached here without raising ValueError, the unpacking logic matches the SQL schema.
+    # Verify updated_at to ensure it actually ran.
+    row = await db.fetchrow("SELECT updated_at FROM artist WHERE mbid=$1", mbid)
+    assert row["updated_at"] is not None
