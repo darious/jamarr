@@ -24,7 +24,7 @@ class ScanRequest(BaseModel):
     fetch_bio: bool = False
     fetch_artwork: bool = False
     fetch_spotify_artwork: bool = False
-    fetch_links: bool = False
+    fetch_links: bool = True
     fetch_similar_artists: bool = False
 
 
