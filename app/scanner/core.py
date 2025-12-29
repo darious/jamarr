@@ -358,6 +358,40 @@ class Scanner:
 
             return artist_mbids
 
+    async def get_artists_in_path(self, root_path: str):
+        """
+        Returns a set of artist MBIDs for tracks physically located inside root_path.
+        Used to restrict metadata updates to a specific folder during partial scans.
+        """
+        if not root_path or not os.path.exists(root_path):
+            return set()
+
+        music_root = get_music_path()
+        rel_root = os.path.relpath(root_path, music_root)
+        
+        # Safety check: if rel_root starts with '..', it's outside music library (shouldn't happen but good to handle)
+        if rel_root.startswith(".."):
+             return set()
+
+        if rel_root == ".":
+            where_clause = "1=1"
+            params = []
+        else:
+            where_clause = "path LIKE $1 OR path = $2"
+            params = [f"{rel_root}/%", rel_root]
+
+        async for db in get_db():
+            query = f"""
+                SELECT DISTINCT ta.artist_mbid 
+                FROM track t
+                JOIN track_artist ta ON t.id = ta.track_id
+                WHERE {where_clause}
+            """
+            rows = await db.fetch(query, *params)
+            return {r[0] for r in rows if r[0]}
+        
+        return set()
+
     async def _apply_artist_name_consensus(self, db, mbids):
         """
         Updates artist names based on the most common name found in the track tags for each MBID.
