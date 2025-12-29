@@ -30,10 +30,14 @@ _token_expiry = 0
 
 class SpotifyRateLimitError(Exception):
     def __init__(self, retry_after=None):
-        self.retry_after = retry_after
+        try:
+            self.retry_after = int(retry_after) if retry_after is not None else None
+        except (ValueError, TypeError):
+            self.retry_after = None
+        
         msg = "Spotify Rate Limit Exceeded"
-        if retry_after:
-            msg += f" (Retry after {retry_after}s)"
+        if self.retry_after:
+            msg += f" (Retry after {self.retry_after}s)"
         super().__init__(msg)
 
 
@@ -713,7 +717,7 @@ async def fetch_artist_metadata(
         or fetch_top_tracks
         or fetch_singles
         or bio_only
-    )
+    ) and not fetch_spotify_artwork
 
     if only_art:
         try:

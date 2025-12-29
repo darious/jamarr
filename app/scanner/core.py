@@ -14,7 +14,11 @@ from app.scanner.artwork import (
     upsert_image_mapping,
 )
 from app.config import get_music_path
-from app.scanner.metadata import fetch_artist_metadata, SPOTIFY_SCANNING_DISABLED
+from app.scanner.metadata import (
+    fetch_artist_metadata,
+    SPOTIFY_SCANNING_DISABLED,
+    SpotifyRateLimitError,
+)
 from app.scanner.album_helpers import upsert_artist_album
 from app.scanner.similar_helpers import parse_similar
 import difflib
@@ -1133,7 +1137,8 @@ class Scanner:
                        COALESCE(SUM(CASE WHEN el.type != 'musicbrainz' THEN 1 ELSE 0 END), 0) as link_count,
                        (SELECT COUNT(*) FROM top_track tt WHERE tt.artist_mbid=a.mbid AND tt.type='top') as top_track_count,
                        (SELECT COUNT(*) FROM top_track ts WHERE ts.artist_mbid=a.mbid AND ts.type='single') as single_count,
-                       (SELECT COUNT(*) FROM similar_artist sa WHERE sa.artist_mbid=a.mbid) as similar_count
+                       (SELECT COUNT(*) FROM similar_artist sa WHERE sa.artist_mbid=a.mbid) as similar_count,
+                       (SELECT COUNT(*) FROM artist_album aa WHERE aa.artist_mbid = a.mbid AND aa.type = 'primary') as primary_album_count
                 FROM artist a
                 LEFT JOIN artwork aw ON a.artwork_id = aw.id
                 LEFT JOIN external_link el 
@@ -1160,7 +1165,7 @@ class Scanner:
 
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
-            query += " GROUP BY a.mbid, aw.source ORDER BY a.name"
+            query += " GROUP BY a.mbid, aw.source ORDER BY primary_album_count DESC, a.name"
 
             rows = await db.fetch(query, *params)
 
@@ -1180,6 +1185,7 @@ class Scanner:
                     top_track_count,
                     single_count,
                     similar_count,
+                    _,  # primary_album_count (ignored here)
                 ) = row
 
                 # Check Explicit Missing Items
@@ -1234,6 +1240,7 @@ class Scanner:
                     top_track_count,
                     single_count,
                     similar_count,
+                    _,  # primary_album_count (ignored here)
                 ) = row
                 if not mbid:
                     continue
@@ -1293,7 +1300,10 @@ class Scanner:
                     if has_bio:
                         eff_fetch_bio = False
                     if has_artwork:
-                        eff_fetch_artwork = False
+                        # If we have Spotify art and want to check specifically for artwork (upgrade path), keep it enabled.
+                        # Otherwise disable it.
+                        if not (has_spotify_art and fetch_artwork):
+                            eff_fetch_artwork = False
                     if has_links:
                         eff_fetch_links = False
 
@@ -1564,6 +1574,7 @@ class Scanner:
             top_track_count,
             single_count,
             similar_count,
+            _,
         ) = row
 
         if self._stop_event.is_set():
@@ -1572,35 +1583,46 @@ class Scanner:
         async with semaphore:
             # Call fetch_artist_metadata
             # Note: fetch_artist_metadata only does READS (Network).
-            meta = await fetch_artist_metadata(
-                mbid,
-                name,
-                local_release_group_ids=local_release_group_ids,
-                bio_only=(
-                    eff_fetch_bio
-                    and not any(
-                        [
-                            eff_fetch_metadata,
-                            eff_fetch_links,
-                            eff_fetch_artwork,
-                            eff_fetch_spotify_artwork,
-                            eff_refresh_top_tracks,
-                            eff_refresh_singles,
-                        ]
+            # Retry Loop for Rate Limits
+            while True:
+                try:
+                    meta = await fetch_artist_metadata(
+                        mbid,
+                        name,
+                        local_release_group_ids=local_release_group_ids,
+                        bio_only=(
+                            eff_fetch_bio
+                            and not any(
+                                [
+                                    eff_fetch_metadata,
+                                    eff_fetch_links,
+                                    eff_fetch_artwork,
+                                    eff_fetch_spotify_artwork,
+                                    eff_refresh_top_tracks,
+                                    eff_refresh_singles,
+                                ]
+                            )
+                        ),
+                        fetch_metadata=eff_fetch_metadata,
+                        fetch_bio=eff_fetch_bio,
+                        fetch_artwork=eff_fetch_artwork,
+                        fetch_spotify_artwork=eff_fetch_spotify_artwork,
+                        fetch_links=eff_fetch_links,
+                        fetch_top_tracks=eff_refresh_top_tracks,
+                        fetch_singles=eff_refresh_singles,
+                        known_wikipedia_url=known_wikipedia_url,
+                        known_spotify_url=spotify_link_existing,
+                        fetch_similar_artists=eff_fetch_similar_artists,
+                        client=client,
                     )
-                ),
-                fetch_metadata=eff_fetch_metadata,
-                fetch_bio=eff_fetch_bio,
-                fetch_artwork=eff_fetch_artwork,
-                fetch_spotify_artwork=eff_fetch_spotify_artwork,
-                fetch_links=eff_fetch_links,
-                fetch_top_tracks=eff_refresh_top_tracks,
-                fetch_singles=eff_refresh_singles,
-                known_wikipedia_url=known_wikipedia_url,
-                known_spotify_url=spotify_link_existing,
-                fetch_similar_artists=eff_fetch_similar_artists,
-                client=client,
-            )
+                    break
+                except SpotifyRateLimitError as e:
+                    sleep_time = (e.retry_after or 1) + 1
+                    logger.warning(
+                        f"Spotify Rate Limit Hit for {name}. Sleeping {sleep_time}s..."
+                    )
+                    await asyncio.sleep(sleep_time)
+                    # Loop continues to retry
 
             # Download artwork (Disk I/O + Network)
             art_download = None
@@ -1649,6 +1671,7 @@ class Scanner:
                     top_track_count,
                     single_count,
                     similar_count,
+                    _,
                 ) = row
                 (
                     eff_fetch_metadata,
