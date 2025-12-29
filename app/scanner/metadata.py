@@ -713,7 +713,7 @@ async def fetch_artist_metadata(
         or fetch_top_tracks
         or fetch_singles
         or bio_only
-    )
+    ) and not fetch_spotify_artwork
 
     if only_art:
         try:
