@@ -215,7 +215,7 @@ export async function triggerMetadataScan(opts: MetadataOptions = {}): Promise<v
             fetch_bio: Boolean(opts.fetchBio),
             fetch_artwork: Boolean(opts.fetchArtwork),
             fetch_spotify_artwork: Boolean(opts.fetchSpotifyArtwork),
-            fetch_links: Boolean(opts.fetchLinks),
+            fetch_links: opts.fetchLinks,
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
             fetch_similar_artists: Boolean(opts.fetchSimilarArtists),

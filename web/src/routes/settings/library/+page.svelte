@@ -264,7 +264,7 @@
                             fetchBio: doBio,
                             fetchArtwork: doArtwork,
                             fetchSpotifyArtwork: doSpotifyArtwork,
-                            fetchLinks: doMetadata,
+                            // fetchLinks removed to rely on backend default (True)
                             refreshTopTracks: doTopTracks,
                             refreshSingles: doSingles,
                             fetchSimilarArtists: doSimilarArtists,
