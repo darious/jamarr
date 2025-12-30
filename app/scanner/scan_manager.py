@@ -185,6 +185,12 @@ class ScanManager:
 
                 await coordinator.update_metadata(artists, run_opts)
                 
+                # After fetching top tracks/singles, try to match them to local tracks
+                if options.get("refresh_top_tracks") or options.get("refresh_singles"):
+                    artist_mbids = [a["mbid"] for a in artists if a.get("mbid")]
+                    if artist_mbids:
+                        await self._rematch_tracks(db, artist_mbids)
+                
             self._status = "Idle"
             self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
             self._log_message("Metadata update complete.")
