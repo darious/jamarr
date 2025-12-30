@@ -972,6 +972,88 @@ async def append_queue(
     return {"status": "ok"}
 
 
+@router.post("/api/player/queue/reorder")
+async def reorder_queue(
+    update: QueueUpdate, client_id: str = Depends(get_client_id)
+):
+    """
+    Reorder the queue without changing playback state.
+    Expects the same queue items in a new order.
+    """
+    async for db in get_db():
+        udn = await get_active_renderer(db, client_id)
+        state = await get_renderer_state_db(db, udn)
+        existing_queue = state.get("queue") or []
+
+        # Preserve currently playing track (by id) to restore index
+        current_idx = state.get("current_index", -1)
+        current_track = (
+            existing_queue[current_idx] if 0 <= current_idx < len(existing_queue) else None
+        )
+
+        # Normalize incoming queue (pydantic models -> dict)
+        incoming_queue = [
+            t.model_dump() if hasattr(t, "model_dump") else dict(t)
+            if hasattr(t, "keys")
+            else t
+            for t in update.queue
+        ]
+
+        # Rebuild queue based on ids, fallback to incoming order if mismatch
+        id_to_tracks = {}
+        for i, t in enumerate(existing_queue):
+            id_to_tracks.setdefault(t.get("id"), []).append((i, t))
+
+        reordered = []
+        used = set()
+        for incoming in incoming_queue:
+            tid = incoming.get("id") if isinstance(incoming, dict) else None
+            if tid in id_to_tracks:
+                # pop first unused occurrence
+                candidates = id_to_tracks[tid]
+                chosen = None
+                for pos, track in candidates:
+                    if pos in used:
+                        continue
+                    chosen = (pos, track)
+                    break
+                if chosen:
+                    used.add(chosen[0])
+                    reordered.append(chosen[1])
+                    continue
+            # fallback to provided object
+            reordered.append(incoming)
+
+        state["queue"] = reordered
+
+        if current_track and current_track.get("id") is not None:
+            try:
+                new_idx = next(
+                    i for i, t in enumerate(reordered) if t.get("id") == current_track["id"]
+                )
+                state["current_index"] = new_idx
+            except StopIteration:
+                state["current_index"] = -1
+                state["is_playing"] = False
+                state["transport_state"] = "STOPPED"
+
+        await update_renderer_state_db(db, udn, state)
+        _reset_history_tracker(client_id if udn.startswith("local") else udn)
+
+        return {
+            "status": "ok",
+            "state": {
+                "queue": state["queue"],
+                "current_index": state.get("current_index", -1),
+                "position_seconds": state.get("position_seconds", 0),
+                "is_playing": state.get("is_playing", False),
+                "transport_state": state.get("transport_state", "STOPPED"),
+                "renderer": udn,
+                "volume": state.get("volume"),
+            },
+        }
+
+
 @router.post("/api/player/queue/clear")
 async def clear_queue(client_id: str = Depends(get_client_id)):
     """
