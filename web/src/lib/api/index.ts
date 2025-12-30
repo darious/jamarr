@@ -453,3 +453,99 @@ export async function fetchMediaQualitySummary(fetchFn: any = fetch): Promise<Me
     if (!res.ok) throw new Error('Failed to fetch media quality summary');
     return await res.json();
 }
+
+export interface Playlist {
+    id: number;
+    user_id: number;
+    name: string;
+    description?: string;
+    is_public: boolean;
+    updated_at: string;
+    track_count: number;
+    total_duration: number;
+    thumbnails?: string[];
+}
+
+export interface PlaylistTrack {
+    playlist_track_id: number;
+    position: number;
+    track_id: number;
+    title: string;
+    artist: string;
+    album: string;
+    duration_seconds: number;
+    art_sha1: string | null;
+    art_id: number | null;
+    path: string;
+    codec?: string;
+    sample_rate_hz?: number;
+    bit_depth?: number;
+}
+
+export interface PlaylistDetail extends Playlist {
+    tracks: PlaylistTrack[];
+}
+
+export async function fetchPlaylists(fetchFn: any = fetch): Promise<Playlist[]> {
+    const res = await fetchFn('/api/playlists');
+    if (!res.ok) throw new Error('Failed to fetch playlists');
+    return await res.json();
+}
+
+export async function createPlaylist(data: { name: string; description?: string; is_public?: boolean }): Promise<Playlist> {
+    const res = await fetch('/api/playlists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error('Failed to create playlist');
+    return await res.json();
+}
+
+export async function getPlaylist(id: string | number, fetchFn: any = fetch): Promise<PlaylistDetail> {
+    const res = await fetchFn(`/api/playlists/${id}`);
+    if (!res.ok) {
+        if (res.status === 404) throw new Error('Playlist not found');
+        throw new Error('Failed to fetch playlist');
+    }
+    return await res.json();
+}
+
+export async function updatePlaylist(id: number, data: { name?: string; description?: string; is_public?: boolean }): Promise<void> {
+    const res = await fetch(`/api/playlists/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) throw new Error('Failed to update playlist');
+}
+
+export async function deletePlaylist(id: number): Promise<void> {
+    const res = await fetch(`/api/playlists/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete playlist');
+}
+
+export async function addTracksToPlaylist(playlistId: number, trackIds: number[]): Promise<void> {
+    const res = await fetch(`/api/playlists/${playlistId}/tracks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track_ids: trackIds })
+    });
+    if (!res.ok) throw new Error('Failed to add tracks');
+}
+
+export async function removeTrackFromPlaylist(playlistId: number, playlistTrackId: number): Promise<void> {
+    const res = await fetch(`/api/playlists/${playlistId}/tracks/${playlistTrackId}`, {
+        method: 'DELETE'
+    });
+    if (!res.ok) throw new Error('Failed to remove track');
+}
+
+export async function reorderPlaylist(playlistId: number, orderedPlaylistTrackIds: number[]): Promise<void> {
+    const res = await fetch(`/api/playlists/${playlistId}/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowed_playlist_track_ids: orderedPlaylistTrackIds })
+    });
+    if (!res.ok) throw new Error('Failed to reorder playlist');
+}

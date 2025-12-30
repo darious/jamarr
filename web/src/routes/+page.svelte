@@ -355,7 +355,7 @@
                                     ? `/art/file/${artist.art_sha1}`
                                     : artist.art_id
                                       ? `/art/${artist.art_id}`
-                                      : "/assets/default-artist.svg"}
+                                      : "/assets/default-artist-placeholder.svg"}
                                 alt={artist.name}
                                 class="h-full w-full object-cover"
                                 loading="lazy"
@@ -397,7 +397,7 @@
                                     ? `/art/file/${artist.art_sha1}`
                                     : artist.art_id
                                       ? `/art/${artist.art_id}`
-                                      : "/assets/default-artist.svg"}
+                                      : "/assets/default-artist-placeholder.svg"}
                                 alt={artist.name}
                                 class="h-full w-full object-cover transition-all duration-500"
                                 loading="lazy"

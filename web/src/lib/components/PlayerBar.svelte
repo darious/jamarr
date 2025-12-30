@@ -12,6 +12,8 @@
     getHeaders,
     toggleNowPlaying,
     clearQueue,
+    shuffleQueue,
+    toggleRepeat,
   } from "$stores/player";
   import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
   import VolumeControl from "$components/VolumeControl.svelte";
@@ -560,6 +562,8 @@
     <!-- Controls -->
     <div class="flex flex-col items-center gap-2 w-1/3">
       <div class="flex items-center gap-4">
+        <!-- Shuffle and Repeat moved to right side -->
+
         <button
           class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
           on:click={previous}
@@ -631,6 +635,68 @@
 
     <!-- Volume / Extra -->
     <div class="w-1/3 flex justify-end items-center gap-4">
+      <div class="flex items-center gap-2 mr-4">
+        <button
+          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 border-none hover:scale-110 transition-transform {$playerState.repeatMode !==
+          'off'
+            ? 'text-primary-400 bg-white/10'
+            : 'text-white/40'}"
+          on:click={toggleRepeat}
+          title="Repeat: {$playerState.repeatMode}"
+        >
+          {#if $playerState.repeatMode === "one"}
+            <svg
+              class="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              /><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 11L12 17"
+              /></svg
+            >
+          {:else}
+            <svg
+              class="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              /></svg
+            >
+          {/if}
+        </button>
+
+        <button
+          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 border-none hover:scale-110 transition-transform text-white/40 hover:text-white"
+          on:click={shuffleQueue}
+          title="Shuffle Queue"
+        >
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            ><path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
+            /></svg
+          >
+        </button>
+      </div>
       <div class="text-xs text-white/40">{deviceName}</div>
       <div class="flex items-center gap-2 group">
         <VolumeControl
