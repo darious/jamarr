@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, patch
-from app.scanner import metadata
+from app.scanner.services import musicbrainz
 
 @pytest.mark.asyncio
 async def test_fetch_artist_release_groups_filters_spotify():
@@ -53,7 +53,8 @@ async def test_fetch_artist_release_groups_filters_spotify():
     client.get.return_value = mock_resp
 
     # Patch the rate limiter to avoid sleeping
-    with patch("app.scanner.metadata.mb_limiter.acquire", new_callable=AsyncMock):
+    # Access mb_limiter in musicbrainz module
+    with patch("app.scanner.services.musicbrainz.mb_limiter.acquire", new_callable=AsyncMock):
         # We test "album" type just to trigger the "release-group" path which is generic
         # The filter is in the loop, so it currently applies to both paths (release and release-group endpoints)
         # assuming the variable names align. Code check:
@@ -64,7 +65,7 @@ async def test_fetch_artist_release_groups_filters_spotify():
         # if "spotify" in norm_title: continue
         # ...
         
-        results = await metadata.fetch_artist_release_groups(mbid, "album", client)
+        results = await musicbrainz.fetch_release_groups(mbid, "album", client)
 
     titles = [r["title"] for r in results]
     

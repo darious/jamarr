@@ -25,6 +25,12 @@ async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
         yield conn
 
 
+def get_pool() -> asyncpg.Pool:
+    if _pool is None:
+        raise RuntimeError("Database pool not initialized. Call init_db() first.")
+    return _pool
+
+
 async def init_db():
     """
     Initialize the PostgreSQL connection pool and create schema.
@@ -82,8 +88,16 @@ async def init_db():
                 release_mbid TEXT,
                 release_group_mbid TEXT,
                 artwork_id BIGINT,
+                size_bytes BIGINT,
+                quick_hash BYTEA,
+                mtime DOUBLE PRECISION,
                 fts_vector tsvector
             );
+            
+            -- Manual auto-migration for existing DBs
+            ALTER TABLE track ADD COLUMN IF NOT EXISTS size_bytes BIGINT;
+            ALTER TABLE track ADD COLUMN IF NOT EXISTS quick_hash BYTEA;
+            ALTER TABLE track ADD COLUMN IF NOT EXISTS mtime DOUBLE PRECISION;
             
             -- Artist table with citext for case-insensitive name
             CREATE TABLE IF NOT EXISTS artist (
@@ -92,6 +106,7 @@ async def init_db():
                 sort_name TEXT,
                 bio TEXT,
                 image_url TEXT,
+                image_source TEXT,
                 artwork_id BIGINT,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );

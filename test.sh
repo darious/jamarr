@@ -31,11 +31,13 @@ if [ "$DB_READY" -ne 1 ]; then
 fi
 
 echo "🧪 Running tests..."
+PYTEST_MARK_EXPR=${PYTEST_MARK_EXPR:-"not slow"}
+
 # Run pytest inside the container with Test DB environment variables
 # We use set +e to capture the exit code
 set +e
 docker compose -f docker-compose.test.yml run --rm jamarr_test_runner \
-    env PYTHONPATH=/app uv run pytest "$@"
+    env PYTHONPATH=/app uv run pytest -m "$PYTEST_MARK_EXPR" "$@"
 
 EXIT_CODE=$?
 set -e

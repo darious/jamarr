@@ -10,6 +10,14 @@ from app.media.image_lookup import fetch_primary_images
 router = APIRouter()
 
 
+def sha1_to_hex(sha1_value):
+    """Convert binary SHA1 to hex string if needed"""
+    if sha1_value and isinstance(sha1_value, bytes):
+        return sha1_value.hex()
+    return sha1_value
+
+
+
 @router.post("/api/scan/missing")
 async def scan_missing_albums(artist: str = None, mbid: str = None):
     try:
@@ -146,7 +154,7 @@ async def get_artists(
             "artwork_id": art_info.get("artwork_id") or row["artwork_id"],
             "art_id": art_info.get("artwork_id")
             or row["artwork_id"],  # Frontend compatibility
-            "art_sha1": art_info.get("art_sha1") or row["art_sha1"],
+            "art_sha1": sha1_to_hex(art_info.get("art_sha1") or row["art_sha1"]),
             "bio": row["bio"],
             "sort_name": row["sort_name"] or row["name"],
             "homepage": row["homepage"],
@@ -161,7 +169,7 @@ async def get_artists(
             "appears_on_album_count": row["appears_on_album_count"],
             "albums": [],  # Deprecated
             "background_art_id": bg_info.get("artwork_id"),
-            "background_sha1": bg_info.get("art_sha1"),
+            "background_sha1": sha1_to_hex(bg_info.get("art_sha1")),
         }
 
         # If we are fetching a specific artist, populate the heavy details
@@ -192,7 +200,7 @@ async def get_artists(
                     "bit_depth": tt_row["bit_depth"],
                     "sample_rate_hz": tt_row["sample_rate_hz"],
                     "duration_seconds": tt_row["duration_seconds"],
-                    "art_sha1": tt_row["art_sha1"],
+                    "art_sha1": sha1_to_hex(tt_row["art_sha1"]),
                     "art_id": tt_row["artwork_id"],
                 }
                 for tt_row in tt_rows
@@ -220,7 +228,7 @@ async def get_artists(
                     "codec": s_row["codec"],
                     "bit_depth": s_row["bit_depth"],
                     "sample_rate_hz": s_row["sample_rate_hz"],
-                    "art_sha1": s_row["art_sha1"],
+                    "art_sha1": sha1_to_hex(s_row["art_sha1"]),
                     "art_id": s_row["artwork_id"],
                 }
                 for s_row in s_rows
@@ -257,7 +265,7 @@ async def get_artists(
                         "image_url": sim_row["image_url"],
                         "artwork_id": sim_art.get("artwork_id")
                         or sim_row["artwork_id"],
-                        "art_sha1": sim_art.get("art_sha1") or sim_row["art_sha1"],
+                        "art_sha1": sha1_to_hex(sim_art.get("art_sha1") or sim_row["art_sha1"]),
                     }
                 )
 
@@ -384,12 +392,29 @@ async def get_tracks(
     # Use subquery to aggregate all artists for the track (Main + Feature)
     # This ensures "Taylor Swift, Ed Sheeran" is returned instead of just "Taylor Swift" tag
     query = """
-        SELECT t.*, 
-        a.sha1 as art_sha1,
-        (SELECT STRING_AGG(a2.name, ', ' ORDER BY a2.name) 
-         FROM track_artist ta2 
-         JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
-         WHERE ta2.track_id = t.id) as aggregated_artists
+        SELECT 
+            t.id,
+            t.path,
+            t.title,
+            t.artist,
+            t.album,
+            t.album_artist,
+            t.track_no,
+            t.disc_no,
+            t.date,
+            t.duration_seconds,
+            t.codec,
+            t.sample_rate_hz,
+            t.bit_depth,
+            t.bitrate,
+            t.release_mbid,
+            t.release_group_mbid,
+            t.artwork_id,
+            a.sha1 as art_sha1,
+            (SELECT STRING_AGG(a2.name, ', ' ORDER BY a2.name) 
+             FROM track_artist ta2 
+             JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
+             WHERE ta2.track_id = t.id) as aggregated_artists
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
     """
@@ -434,6 +459,21 @@ async def get_tracks(
         # Frontend compatibility: expects art_id
         if d.get("artwork_id"):
             d["art_id"] = d["artwork_id"]
+
+        # Frontend compatibility: MusicBrainz IDs
+        if d.get("release_mbid"):
+            d["mb_release_id"] = d["release_mbid"]
+        if d.get("release_group_mbid"):
+            d["mb_release_group_id"] = d["release_group_mbid"]
+
+        # Convert binary SHA1 to hex
+        if d.get("art_sha1"):
+            d["art_sha1"] = sha1_to_hex(d["art_sha1"])
+
+        # Convert binary quick_hash (BLAKE3) to hex for JSON serialization
+        if d.get("quick_hash"):
+            qh = d["quick_hash"]
+            d["quick_hash"] = qh.hex() if isinstance(qh, (bytes, bytearray, memoryview)) else qh
 
         results.append(d)
     return results
@@ -551,7 +591,7 @@ async def get_recently_played_artists(
             "image_url": row["image_url"],
             "artwork_id": row["artwork_id"],
             "art_id": row["artwork_id"],  # Compat
-            "art_sha1": row["art_sha1"],
+            "art_sha1": sha1_to_hex(row["art_sha1"]),
             "bio": row["bio"],
         }
         for row in rows
@@ -589,7 +629,7 @@ async def get_discover_artists(
             "image_url": row["image_url"],
             "artwork_id": row["artwork_id"],
             "art_id": row["artwork_id"],  # Compat
-            "art_sha1": row["art_sha1"],
+            "art_sha1": sha1_to_hex(row["art_sha1"]),
             "bio": row["bio"],
         }
         for row in rows

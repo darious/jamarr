@@ -4,11 +4,12 @@ import time
 import os
 from typing import Optional, Dict, Any
 from app.scanner.core import Scanner
+from app.scanner.services.coordinator import MetadataCoordinator
 from app.config import get_music_path
 from app.scanner.stats import get_api_tracker
+from app.db import get_db
 
 logger = logging.getLogger("scanner.manager")
-
 
 class ScanManager:
     _instance = None
@@ -25,29 +26,24 @@ class ScanManager:
         self._current_task: Optional[asyncio.Task] = None
         self._status = "Idle"
         self._stats = {}
-        self._event_queues = set()  # Set of asyncio.Queue for connected clients
+        self._event_queues = set()
         self.scanner = Scanner()
         self._phase: Optional[str] = None
         self._music_path = get_music_path()
         self._configure_logging()
 
     def _configure_logging(self):
-        # Central logging handles file output now.
-        # We only need to attach the UI Broadcast Handler to the scanner logger.
         scan_logger = logging.getLogger("scanner")
-
-        # UI Broadcast Handler
         if not any(getattr(h, "_ui_broadcast", False) for h in scan_logger.handlers):
             bh = self.BroadcastLogHandler(self)
             bh._ui_broadcast = True
-            bh.setLevel(logging.INFO)  # Only show INFO+ in UI to avoid flood
+            bh.setLevel(logging.INFO) 
             scan_logger.addHandler(bh)
 
     class BroadcastLogHandler(logging.Handler):
         def __init__(self, manager):
             super().__init__()
             self.manager = manager
-
         def emit(self, record):
             try:
                 msg = self.format(record)
@@ -59,15 +55,10 @@ class ScanManager:
         return self._music_path
 
     async def subscribe(self):
-        """
-        Subscribe to progress events. Returns an async generator.
-        """
         queue = asyncio.Queue()
         self._event_queues.add(queue)
         try:
-            # Yield current status immediately
             yield {"type": "status", "status": self._status, "stats": self._stats}
-
             while True:
                 event = await queue.get()
                 if event is None:
@@ -77,20 +68,17 @@ class ScanManager:
             self._event_queues.remove(queue)
 
     async def shutdown(self):
-        """Stop any active scan and close all subscriber queues."""
         await self.stop_scan()
         for queue in self._event_queues:
             queue.put_nowait(None)
 
     def _broadcast(self, event: Dict[str, Any]):
-        """Push event to all connected clients"""
         for queue in self._event_queues:
             queue.put_nowait(event)
 
     class ManagerLogger:
         def __init__(self, manager):
             self.manager = manager
-
         def emit_progress(self, current, total, message):
             self.manager._update_progress(current, total, message)
 
@@ -105,19 +93,19 @@ class ScanManager:
             "phase": self._phase,
             "api_stats": get_api_tracker().get_stats(),
             "processed_stats": get_api_tracker().get_processed_stats(),
+            "detailed_stats": get_api_tracker().get_detailed_stats(),
         }
-        self._broadcast(
-            {
-                "type": "progress",
-                "current": current,
-                "total": total,
-                "percentage": percentage,
-                "message": message,
-                "phase": self._phase,
-                "api_stats": self._stats["api_stats"],
-                "processed_stats": self._stats["processed_stats"],
-            }
-        )
+        self._broadcast({
+            "type": "progress",
+            "current": current,
+            "total": total,
+            "percentage": percentage,
+            "message": message,
+            "phase": self._phase,
+            "api_stats": self._stats["api_stats"],
+            "processed_stats": self._stats["processed_stats"],
+            "detailed_stats": self._stats["detailed_stats"],
+        })
 
     def _log_message(self, message):
         self._broadcast({"type": "log", "message": message, "timestamp": time.time()})
@@ -132,513 +120,325 @@ class ScanManager:
             self._phase = "filesystem"
             get_api_tracker().reset()
             self.scanner.scan_logger = self.ManagerLogger(self)
-
-            # Wrap in task to run in background
             self._current_task = asyncio.create_task(self._run_scan(path, force))
             return self._current_task
 
     async def _run_scan(self, path, force):
         try:
-            self._broadcast(
-                {"type": "start", "mode": "filesystem", "phase": self._phase}
-            )
+            self._broadcast({"type": "start", "mode": "filesystem", "phase": self._phase})
             self._log_message(f"Starting filesystem scan. Force: {force}")
-
-            # The scanner core checks self._stop_event if we pass it or if we attach it to scanner?
-            # App Scanner has its own _stop_event. We should probably sync them or pass ours.
-            # Currently Scanner creates its own. Let's start by just calling it.
-            # TODO: Modify Scanner to accept stop_event or set it.
             self.scanner._stop_event = self._stop_event
-
             await self.scanner.scan_filesystem(root_path=path, force_rescan=force)
-
             self._status = "Idle"
-            self._broadcast(
-                {"type": "complete", "status": "success", "phase": self._phase}
-            )
+            self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
             self._log_message("Scan complete.")
         except asyncio.CancelledError:
             self._status = "Idle"
-            self._broadcast(
-                {"type": "complete", "status": "cancelled", "phase": self._phase}
-            )
+            self._broadcast({"type": "complete", "status": "cancelled", "phase": self._phase})
             self._log_message("Scan cancelled.")
         except Exception as e:
             logger.exception("Scan failed")
             self._status = "Idle"
-            self._broadcast(
-                {
-                    "type": "complete",
-                    "status": "error",
-                    "error": str(e),
-                    "phase": self._phase,
-                }
-            )
+            self._broadcast({"type": "complete", "status": "error", "error": str(e), "phase": self._phase})
             self._log_message(f"Scan failed: {e}")
         finally:
             self._current_task = None
             self._phase = None
 
-    async def start_metadata_update(
-        self,
-        artist_filter=None,
-        mbid_filter=None,
-        missing_only=False,
-        bio_only=False,
-        links_only=False,
-        refresh_top_tracks=False,
-        refresh_singles=False,
-        fetch_metadata=True,
-        fetch_bio=True,
-        fetch_artwork=True,
-        fetch_spotify_artwork=False,
-        fetch_links=True,
-        fetch_similar_artists=False,
-    ):
+    async def start_metadata_update(self, **kwargs):
         async with self._lock:
             if self._current_task and not self._current_task.done():
                 raise RuntimeError("Scan already in progress")
-
             self._stop_event.clear()
             self._status = "Starting Metadata Update..."
-            self._phase = "metadata" if not links_only else "links"
+            self._phase = "metadata"
             get_api_tracker().reset()
             self.scanner.scan_logger = self.ManagerLogger(self)
-
-            self._current_task = asyncio.create_task(
-                self._run_metadata(
-                    artist_filter,
-                    mbid_filter,
-                    missing_only,
-                    bio_only,
-                    links_only,
-                    refresh_top_tracks,
-                    refresh_singles,
-                    fetch_metadata,
-                    fetch_bio,
-                    fetch_artwork,
-                    fetch_spotify_artwork,
-                    fetch_links,
-                    fetch_similar_artists,
-                )
-            )
+            self._current_task = asyncio.create_task(self._run_metadata(**kwargs))
             return self._current_task
 
-    async def _run_metadata(
-        self,
-        artist,
-        mbid,
-        missing_only,
-        bio_only,
-        links_only,
-        refresh_top_tracks,
-        refresh_singles,
-        fetch_metadata,
-        fetch_bio,
-        fetch_artwork,
-        fetch_spotify_artwork,
-        fetch_links,
-        fetch_similar_artists,
-    ):
+    async def _run_metadata(self, artist_filter=None, mbid_filter=None, missing_only=False, path=None, **options):
         try:
-            self._broadcast(
-                {
-                    "type": "start",
-                    "mode": "metadata" if not links_only else "links",
-                    "phase": self._phase,
-                }
-            )
-            mode_name = "links-only refresh" if links_only else "metadata update"
-            self._log_message(f"Starting {mode_name}. Artist: {artist or 'All'}")
+            self._broadcast({"type": "start", "mode": "metadata", "phase": self._phase})
+            self._log_message(f"Starting metadata update. Filter: {artist_filter or mbid_filter or 'All'}")
+            
+            async for db in get_db():
+                coordinator = MetadataCoordinator(progress_cb=self._update_progress)
 
-            self.scanner._stop_event = self._stop_event
-            if links_only:
-                await self.scanner.update_links(artist_filter=artist, mbid_filter=mbid)
-            else:
-                await self.scanner.update_metadata(
-                    artist_filter=artist,
-                    mbid_filter=mbid,
-                    missing_only=missing_only,
-                    bio_only=bio_only or fetch_bio,
-                    refresh_top_tracks=refresh_top_tracks,
-                    refresh_singles=refresh_singles,
-                    fetch_metadata=fetch_metadata,
-                    fetch_bio=fetch_bio,
-                    fetch_artwork=fetch_artwork,
-                    fetch_spotify_artwork=fetch_spotify_artwork,
-                    fetch_links=fetch_links,
-                    fetch_similar_artists=fetch_similar_artists,
-                )
+                # Scope to path if provided
+                path_mbids = None
+                if path:
+                    path_mbids = await self.scanner.get_artists_in_path(path)
+                    if path_mbids is None:
+                        path_mbids = set()
+                    if not path_mbids:
+                        self._log_message(f"No artists found in path: {path}")
+                        break
 
+                # Fetch Artists
+                artists = await self._fetch_artists_for_update(db, artist_filter, mbid_filter, path_mbids)
+                self._log_message(f"Found {len(artists)} artists to process.")
+
+                # Run Update
+                run_opts = options.copy()
+                run_opts["missing_only"] = missing_only
+
+                await coordinator.update_metadata(artists, run_opts)
+                
             self._status = "Idle"
-            self._broadcast(
-                {"type": "complete", "status": "success", "phase": self._phase}
-            )
-            self._log_message(f"{mode_name.capitalize()} complete.")
+            self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
+            self._log_message("Metadata update complete.")
         except asyncio.CancelledError:
             self._status = "Idle"
-            self._broadcast(
-                {"type": "complete", "status": "cancelled", "phase": self._phase}
-            )
-            self._log_message(f"{mode_name.capitalize()} cancelled.")
+            self._broadcast({"type": "complete", "status": "cancelled", "phase": self._phase})
+            self._log_message("Metadata update cancelled.")
         except Exception as e:
             logger.exception("Metadata update failed")
             self._status = "Idle"
-            self._broadcast(
-                {
-                    "type": "complete",
-                    "status": "error",
-                    "error": str(e),
-                    "phase": self._phase,
-                }
-            )
+            self._broadcast({"type": "complete", "status": "error", "error": str(e), "phase": self._phase})
         finally:
             self._current_task = None
             self._phase = None
 
-    async def start_full(
-        self,
-        path: str = None,
-        force: bool = False,
-        artist_filter=None,
-        mbid_filter=None,
-        missing_only=False,
-        bio_only=False,
-        links_only=False,
-        refresh_top_tracks=False,
-        refresh_singles=False,
-        fetch_metadata=True,
-        fetch_bio=True,
-        fetch_artwork=True,
-        fetch_spotify_artwork=False,
-        fetch_links=True,
-        prune=True,
-        fetch_similar_artists=False,
-    ):
+    async def _fetch_artists_for_update(self, db, artist_filter, mbid_filter, path_mbids=None):
+        query = """
+            SELECT 
+                a.mbid, 
+                a.name, 
+                a.bio, 
+                a.image_url, 
+                a.image_source,
+                -- Presence flags for missing-only logic
+                EXISTS(SELECT 1 FROM top_track tt WHERE tt.artist_mbid = a.mbid AND tt.type = 'top') AS has_top_tracks,
+                EXISTS(SELECT 1 FROM top_track tt WHERE tt.artist_mbid = a.mbid AND tt.type = 'single') AS has_singles,
+                EXISTS(SELECT 1 FROM similar_artist sa WHERE sa.artist_mbid = a.mbid) AS has_similar,
+                EXISTS(SELECT 1 FROM artist_album aa WHERE aa.artist_mbid = a.mbid AND aa.type = 'primary') AS has_primary_album,
+                json_object_agg(el.type, el.url) FILTER (WHERE el.type IS NOT NULL) AS external_links
+            FROM artist a
+            LEFT JOIN external_link el ON el.entity_id = a.mbid AND el.entity_type = 'artist'
+        """
+        params = []
+        clauses = []
+        
+        if path_mbids is not None:
+            if not path_mbids:
+                return []
+            clauses.append(f"mbid = ANY(${len(params)+1}::text[])")
+            params.append(list(path_mbids))
+        
+        if mbid_filter:
+            if isinstance(mbid_filter, (list, set, tuple)):
+                f = [m for m in mbid_filter if m]
+                if f:
+                    clauses.append(f"mbid = ANY(${len(params)+1}::text[])")
+                    params.append(f)
+            else:
+                clauses.append(f"mbid = ${len(params)+1}")
+                params.append(mbid_filter)
+        elif artist_filter:
+            clauses.append(f"name ILIKE ${len(params)+1}")
+            params.append(f"%{artist_filter}%")
+            
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        
+        query += " GROUP BY a.mbid"
+            
+        rows = await db.fetch(query, *params)
+        artists = []
+        for r in rows:
+            d = dict(r)
+            # Flatten links
+            links = d.pop("external_links", None)
+            if links:
+                try:
+                     import json
+                     links_dict = json.loads(links) if isinstance(links, str) else links
+                     d["spotify_url"] = links_dict.get("spotify")
+                     d["homepage"] = links_dict.get("homepage")
+                     d["wiki_url"] = links_dict.get("wikipedia")
+                     d["wikidata_url"] = links_dict.get("wikidata")
+                     # Also pass others if needed by coordinator
+                     d["all_links"] = links_dict
+                except Exception:
+                     pass
+            artists.append(d)
+
+        # Sort order:
+        # 1) primary album link first
+        # 2) has name first
+        # 3) name alphabetically
+        # 4) mbid
+        artists.sort(
+            key=lambda r: (
+                -int(bool(r.get("has_primary_album"))),
+                -int(bool(r.get("name"))),
+                (r.get("name") or "").lower(),
+                r.get("mbid") or "",
+            )
+        )
+        return artists
+
+    async def start_full(self, path: str = None, force: bool = False, **options):
         async with self._lock:
             if self._current_task and not self._current_task.done():
                 raise RuntimeError("Scan already in progress")
-
             self._stop_event.clear()
+
             self._status = "Starting Full Scan..."
             self._phase = "filesystem"
             get_api_tracker().reset()
             self.scanner.scan_logger = self.ManagerLogger(self)
-
-            # For full runs: default to missing-only metadata unless force is requested.
-            metadata_missing_only = False if force else missing_only
-
-            self._current_task = asyncio.create_task(
-                self._run_full(
-                    path,
-                    force,
-                    artist_filter,
-                    mbid_filter,
-                    metadata_missing_only,
-                    bio_only,
-                    links_only,
-                    refresh_top_tracks,
-                    refresh_singles,
-                    fetch_metadata,
-                    fetch_bio,
-                    fetch_artwork,
-                    fetch_spotify_artwork,
-                    fetch_links,
-                    prune=True,
-                    fetch_similar_artists=fetch_similar_artists,
-                )
-            )
+            self._current_task = asyncio.create_task(self._run_full(path, force, **options))
             return self._current_task
 
-    async def _run_full(
-        self,
-        path,
-        force,
-        artist,
-        mbid,
-        missing_only,
-        bio_only,
-        links_only,
-        refresh_top_tracks,
-        refresh_singles,
-        fetch_metadata,
-        fetch_bio,
-        fetch_artwork,
-        fetch_spotify_artwork,
-        fetch_links,
-        prune,
-        fetch_similar_artists=False,
-    ):
+    async def _run_full(self, path, force, **options):
         try:
             self._broadcast({"type": "start", "mode": "full", "phase": self._phase})
-            self._log_message(
-                "Starting full library refresh (scan -> metadata -> prune)"
-            )
-
+            self._log_message("Starting full library refresh...")
+            
+            # Phase 1: Filesystem
             self.scanner._stop_event = self._stop_event
-
-            artist_mbids = (
-                await self.scanner.scan_filesystem(root_path=path, force_rescan=force)
-                or set()
-            )
-
-            # Logic: Determine if we should filter the metadata update
-            # 1. If it's a partial scan (subfolder), we ALWAYS filter to the artists found, even if Force=True.
-            # 2. If it's a full scan AND Force=True, we clear the filter to update everything efficiently (avoid huge IN clause).
-            # 3. If Force=False, we always filter to what changed (scanned_mbid_filter).
-
-            music_path = get_music_path()
-            # Normalize paths for comparison
-            p_abs = os.path.abspath(path) if path else os.path.abspath(music_path)
-            m_abs = os.path.abspath(music_path)
-            is_partial_scan = p_abs != m_abs
-
-            scanned_mbid_filter = {mb for mb, _ in artist_mbids if mb}
-
-            if not is_partial_scan and force:
-                # Full Library Error/Force Scan -> Update All (Efficiently)
-                scanned_mbid_filter = None
-
+            artist_mbids = await self.scanner.scan_filesystem(root_path=path, force_rescan=force) or set()
+            
             if self._stop_event.is_set():
                 raise asyncio.CancelledError()
-
-            # After adding/updating files, re-run local matching for existing top tracks
-            await self.scanner.rematch_tracks_top(artist_mbids)
-
-            self._phase = "links" if links_only else "metadata"
-            self._broadcast(
-                {"type": "start", "mode": self._phase, "phase": self._phase}
-            )
-            if links_only:
-                await self.scanner.update_links(artist_filter=artist, mbid_filter=mbid)
+            
+            # Phase 2: Metadata
+            self._phase = "metadata"
+            self._broadcast({"type": "start", "mode": "metadata", "phase": self._phase})
+            
+            scanned_mbids = {m[0] for m in artist_mbids if m[0]}
+            if path and not scanned_mbids:
+                scanned_mbids = await self.scanner.get_artists_in_path(path) or set()
+            is_partial = False 
+            if path and os.path.abspath(path) != os.path.abspath(get_music_path()):
+                is_partial = True
+                
+            filter_mbids = scanned_mbids
+            
+            # Logic for filtering
+            if not is_partial and force:
+                filter_mbids = None # Update all
+            elif not scanned_mbids and not is_partial:
+                # No changes, full scan -> skip metadata unless forced?
+                if not force:
+                    filter_mbids = set() 
+                
+            if is_partial and not scanned_mbids:
+                 # Partial scan, no changes. Should we update metadata for existing files in path?
+                 # Yes, assume user meant "Check this folder".
+                 found = await self.scanner.get_artists_in_path(path)
+                 filter_mbids = found
+            
+            if filter_mbids is not None and len(filter_mbids) == 0 and not force:
+                 self._log_message("No artists to update.")
             else:
-                # If force: run full metadata for all (or specified filter)
-                # If not force: restrict to artists touched in this scan
-                # LOGIC CHANGE: If we scanned specific files (scanned_mbid_filter), we MUST restrict metadata update to them.
-                # ignoring scanned_mbid_filter when force=True caused partial directory scans to trigger FULL DB metadata updates.
-                filter_mbid = scanned_mbid_filter if scanned_mbid_filter else mbid
-                # If nothing new/updated and no explicit filter, skip metadata to avoid touching everything
-                if (
-                    not force
-                    and not artist
-                    and not mbid
-                    and not scanned_mbid_filter
-                    and not refresh_top_tracks
-                    and not refresh_singles
-                ):
-                    # Logic: If nothing changed, BUT it's a partial scan, we must still respect the partial scan intent.
-                    # e.g. "Force Rescan" on a folder that didn't change anything internally (0 additions)
-                    # OR just a rescan of a folder that yielded nothing new.
-                    # The user expects metadata for THIS FOLDER to be checked if they asked for it.
-                    # But wait, original logic skipped metadata if `scanned_mbid_filter` was empty.
-                    
-                    if is_partial_scan:
-                        # Fetch artists in this path to behave as if we scanned them
-                        self._log_message("No file changes in partial scan; verifying existing artists in path...")
-                        found_artists = await self.scanner.get_artists_in_path(path)
-                        if found_artists:
-                             filter_mbid = found_artists
-                        else:
-                             # Empty folder or no tracks
-                             self._log_message("No artists found in path; skipping metadata.")
-                             filter_mbid = set() # Ensure it's empty so loop can skip or handle gracefully (actually update_metadata handles empty filter by querying all, we MUST NOT let that happen)
-                             
-                             # Actually, update_metadata with empty set as filter MIGHT act weird if we don't pass explicit clauses.
-                             # Let's check update_metadata logic:
-                             # if mbid_filter: clauses.append("mbid = ANY(...)")
-                             # If we pass an EMPTY SET, params will be empty list, clause "mbid = ANY($1)".
-                             # Postgres "ANY('{}')" matches nothing. Correct.
-                             filter_mbid = set()
-
-                    else:
-                         self._log_message(
-                            "No new/updated artists detected; skipping metadata step."
-                        )
-                         filter_mbid = set() # Skip
-
-                # Final Safety: If partial scan, NEVER allow filter_mbid to be None/Empty if we intended to scan something.
-                # If we found nothing, filter_mbid is empty set -> matches nothing -> safe.
-                # If we found something, filter_mbid is set -> matches them -> safe.
-                # If full scan and nothing changed -> skipped above or empty set -> safe.
-
-                if not is_partial_scan and not filter_mbid and not force and not artist and not mbid:
-                     # Double check we don't accidentally update everything if we fell through
-                     pass
-
-                if is_partial_scan and not filter_mbid:
-                     # Optimization: if strict partial scan yielded 0 artists, don't even call update
-                     pass
-                else: 
-                     # Always allow new artists to fetch top tracks; existing artists obey refresh_top_tracks flag.
-                     await self.scanner.update_metadata(
-                        artist_filter=artist,
-                        mbid_filter=filter_mbid,
-                        missing_only=missing_only,
-                        bio_only=bio_only,
-                        refresh_top_tracks=refresh_top_tracks,
-                        refresh_singles=refresh_singles,
-                        fetch_metadata=fetch_metadata,
-                        fetch_bio=fetch_bio,
-                        fetch_artwork=fetch_artwork,
-                        fetch_spotify_artwork=fetch_spotify_artwork,
-                        fetch_links=fetch_links,
-                        fetch_similar_artists=fetch_similar_artists,
-                    )
+                 async for db in get_db():
+                     coordinator = MetadataCoordinator(progress_cb=self._update_progress)
+                     artists = await self._fetch_artists_for_update(db, None, filter_mbids, scanned_mbids if is_partial or path else None)
+                     # Apply missing_only default logic
+                     # Use passed options, default valid for full scan
+                     await coordinator.update_metadata(artists, options)
+                     
+                     # Consolidate Top Tracks Matching
+                     if options.get("refresh_top_tracks") or options.get("refresh_singles"):
+                         await self._rematch_tracks(db, filter_mbids)
 
             if self._stop_event.is_set():
                 raise asyncio.CancelledError()
 
-            if prune:
+            # Phase 3: Prune
+            if options.get("prune", True):
                 self._phase = "prune"
-                self._broadcast(
-                    {"type": "start", "mode": "prune", "phase": self._phase}
-                )
+                self._broadcast({"type": "start", "mode": "prune", "phase": self._phase})
                 await self.scanner.prune_library()
-            else:
-                self._log_message("Prune skipped (not requested).")
 
             self._status = "Idle"
-            self._broadcast(
-                {"type": "complete", "status": "success", "phase": self._phase}
-            )
-            self._log_message("Full library refresh complete.")
+            self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
+            self._log_message("Full refresh complete.")
+            
         except asyncio.CancelledError:
             self._status = "Idle"
-            self._broadcast(
-                {"type": "complete", "status": "cancelled", "phase": self._phase}
-            )
-            self._log_message("Full refresh cancelled.")
+            self._broadcast({"type": "complete", "status": "cancelled", "phase": self._phase})
         except Exception as e:
             logger.exception("Full refresh failed")
             self._status = "Idle"
-            self._broadcast(
-                {
-                    "type": "complete",
-                    "status": "error",
-                    "error": str(e),
-                    "phase": self._phase,
-                }
-            )
-            self._log_message(f"Full refresh failed: {e}")
+            self._broadcast({"type": "complete", "status": "error", "error": str(e), "phase": self._phase})
         finally:
             self._current_task = None
             self._phase = None
 
+    async def _rematch_tracks(self, db, mbids):
+        from app.scanner.core import match_track_to_library
+        
+        query = "SELECT id, external_name, external_album, artist_mbid FROM top_track WHERE track_id IS NULL"
+        params = []
+        if mbids:
+             query += " AND artist_mbid = ANY($1::text[])"
+             params.append(list(mbids))
+             
+        rows = await db.fetch(query, *params)
+        
+        for row in rows:
+            tt_id, name, album, mbid = row
+            track_id = await match_track_to_library(db, mbid, name, album)
+            if track_id:
+                await db.execute("UPDATE top_track SET track_id = $1, updated_at = NOW() WHERE id = $2", track_id, tt_id)
+
     async def start_prune(self):
         async with self._lock:
             if self._current_task and not self._current_task.done():
-                raise RuntimeError("Scan already in progress")
-
+                raise RuntimeError("Busy")
             self._stop_event.clear()
-            self._status = "Pruning Library..."
+            self._status = "Pruning..."
             self._phase = "prune"
-            self.scanner.scan_logger = self.ManagerLogger(self)
-
             self._current_task = asyncio.create_task(self._run_prune())
             return self._current_task
 
     async def _run_prune(self):
         try:
-            self._broadcast({"type": "start", "mode": "prune", "phase": self._phase})
-            self._log_message("Starting library prune...")
-
-            self.scanner._stop_event = self._stop_event
-            await self.scanner.prune_library()
-
-            self._status = "Idle"
-            self._broadcast(
-                {"type": "complete", "status": "success", "phase": self._phase}
-            )
-            self._log_message("Prune complete.")
+             self._broadcast({"type": "start", "mode": "prune", "phase": self._phase})
+             await self.scanner.prune_library()
+             self._status = "Idle"
+             self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
         except Exception as e:
-            logger.exception("Prune failed")
-            self._status = "Idle"
-            self._broadcast(
-                {
-                    "type": "complete",
-                    "status": "error",
-                    "error": str(e),
-                    "phase": self._phase,
-                }
-            )
+             logger.exception("Prune failed")
+             self._status = "Idle"
+             self._broadcast({"type": "complete", "status": "error", "error": str(e)})
         finally:
-            self._current_task = None
-            self._phase = None
+             self._current_task = None
+             self._phase = None
 
     async def stop_scan(self):
         if self._current_task and not self._current_task.done():
             self._stop_event.set()
-            self._log_message("Stopping scan...")
             try:
-                # Wait for task to finish gracefully with a timeout
                 await asyncio.wait_for(self._current_task, timeout=5.0)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "Scan task did not stop gracefully, forcing cancellation..."
-                )
-                self._current_task.cancel()
-                try:
-                    await self._current_task
-                except asyncio.CancelledError:
-                    pass
-            except asyncio.CancelledError:
+            except Exception:
                 pass
-            except Exception as e:
-                logger.error(f"Error waiting for scan to stop: {e}")
 
-    async def start_missing_albums_scan(self, artist_filter=None, mbid_filter=None):
+    async def start_missing_albums_scan(self, **kwargs):
         async with self._lock:
             if self._current_task and not self._current_task.done():
-                raise RuntimeError("Scan already in progress")
-
+                raise RuntimeError("Busy")
             self._stop_event.clear()
-            self._status = "Scanning Missing Albums..."
+            self._status = "Scanning Missing Albums"
             self._phase = "missing_albums"
-            get_api_tracker().reset()
-            self.scanner.scan_logger = self.ManagerLogger(self)
-
-            self._current_task = asyncio.create_task(
-                self._run_missing_albums_scan(artist_filter, mbid_filter)
-            )
+            self._current_task = asyncio.create_task(self._run_missing_albums(**kwargs))
             return self._current_task
 
-    async def _run_missing_albums_scan(self, artist_filter, mbid_filter):
+    async def _run_missing_albums(self, artist_filter=None, mbid_filter=None):
         try:
-            self._broadcast(
-                {"type": "start", "mode": "missing_albums", "phase": self._phase}
-            )
-            self._log_message(
-                f"Starting Missing Albums Scan. Filter: {artist_filter or mbid_filter or 'All'}"
-            )
-
-            self.scanner._stop_event = self._stop_event
-            await self.scanner.scan_missing_albums(
-                artist_filter=artist_filter, mbid_filter=mbid_filter
-            )
-
-            self._status = "Idle"
-            self._broadcast(
-                {"type": "complete", "status": "success", "phase": self._phase}
-            )
-            self._log_message("Missing Albums Scan complete.")
-        except asyncio.CancelledError:
-            self._status = "Idle"
-            self._broadcast(
-                {"type": "complete", "status": "cancelled", "phase": self._phase}
-            )
-            self._log_message("Missing Albums Scan cancelled.")
+             self._broadcast({"type": "start", "mode": "missing_albums", "phase": self._phase})
+             coord = MetadataCoordinator()
+             await coord.scan_missing_albums(artist_filter, mbid_filter)
+             self._status = "Idle"
+             self._broadcast({"type": "complete", "status": "success"})
         except Exception as e:
-            logger.exception("Missing Albums Scan failed")
-            self._status = "Idle"
-            self._broadcast(
-                {
-                    "type": "complete",
-                    "status": "error",
-                    "error": str(e),
-                    "phase": self._phase,
-                }
-            )
-            self._log_message(f"Missing Albums Scan failed: {e}")
+             logger.exception("Missing albums scan failed")
+             self._status = "Idle"
+             self._broadcast({"type": "complete", "status": "error", "error": str(e)})
         finally:
-            self._current_task = None
-            self._phase = None
+             self._current_task = None
+             self._phase = None
