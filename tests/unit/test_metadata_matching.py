@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import AsyncMock
-from app.scanner.metadata import match_track_to_library
+from app.scanner.core import match_track_to_library
 
 @pytest.mark.asyncio
 async def test_match_track_basic_match():

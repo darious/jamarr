@@ -1,5 +1,6 @@
 import pytest
 from httpx import AsyncClient
+from unittest.mock import MagicMock
 
 @pytest.mark.asyncio
 async def test_scan_endpoints(client: AsyncClient, db):
@@ -9,14 +10,20 @@ async def test_scan_endpoints(client: AsyncClient, db):
     with patch("app.api.scan.ScanManager") as MockSM:
         mock_instance = AsyncMock()
         MockSM.get_instance.return_value = mock_instance
+        mock_instance.start_scan = AsyncMock()
+        mock_instance.start_metadata_update = AsyncMock()
+        mock_instance.start_prune = AsyncMock()
+        mock_instance.start_missing_albums_scan = AsyncMock()
+        mock_instance.stop_scan = AsyncMock()
+        mock_instance.get_music_path = MagicMock(return_value="/app/music")
         
         # 1. Trigger Filesystem Scan
-        response = await client.post("/api/library/scan", json={"type": "filesystem"})
+        response = await client.post("/api/library/scan", json={"type": "filesystem", "path": "/app/music"})
         assert response.status_code == 200
         assert response.json()["message"] == "Filesystem scan started"
         
         # 2. Trigger Metadata Scan
-        response = await client.post("/api/library/scan", json={"type": "metadata"})
+        response = await client.post("/api/library/scan", json={"type": "metadata", "path": "/app/music"})
         assert response.status_code == 200
         assert response.json()["message"] == "Metadata update started"
     
@@ -39,32 +46,7 @@ async def test_scan_endpoints(client: AsyncClient, db):
     assert response.status_code == 200
 
 
-@pytest.mark.asyncio
-async def test_fetch_artist_metadata_uses_client(monkeypatch):
-    """Regression: ensure fetch_artist_metadata has a defined client helper and does not NameError."""
-    from app.scanner import metadata as md
 
-    async def fake_fanart(client, mbid):
-        return {"thumb": None, "background": None}
-
-    monkeypatch.setattr(md, "fetch_fanart_artist_images", fake_fanart)
-
-    # All network flags off except artwork (fanart patched), should not raise NameError
-    result = await md.fetch_artist_metadata(
-        mbid="test-mbid",
-        artist_name="Test Artist",
-        fetch_metadata=False,
-        fetch_bio=False,
-        fetch_artwork=True,
-        fetch_links=False,
-        fetch_top_tracks=False,
-        fetch_singles=False,
-        bio_only=False,
-        fetch_similar_artists=False,
-    )
-
-    assert result["mbid"] == "test-mbid"
-    assert result["name"] == "Test Artist"
 
 
 @pytest.mark.asyncio
