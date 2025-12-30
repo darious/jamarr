@@ -2,12 +2,23 @@
     import { goto } from "$app/navigation";
     import { onMount } from "svelte";
     import { fade, slide } from "svelte/transition";
+    import AddToPlaylistModal from "$lib/components/AddToPlaylistModal.svelte";
 
     let query = "";
     let results: any = null;
     let timer: any;
     let inputElement: HTMLInputElement;
     let showResults = false;
+
+    // Playlist Modal
+    let showPlaylistModal = false;
+    let selectedTrackIds: number[] = [];
+
+    const openPlaylistModal = (trackId: number, e: MouseEvent) => {
+        e.stopPropagation();
+        selectedTrackIds = [trackId];
+        showPlaylistModal = true;
+    };
 
     interface SearchResponse {
         artists: { name: string; mbid: string; image_url?: string }[];
@@ -251,9 +262,14 @@
                         Tracks
                     </h3>
                     {#each results.tracks as track}
-                        <button
-                            class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/10"
+                        <div
+                            role="button"
+                            tabindex="0"
+                            class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/10 cursor-pointer group"
                             on:click={() =>
+                                navigateToAlbum(track.album, track.artist)}
+                            on:keydown={(e) =>
+                                e.key === "Enter" &&
                                 navigateToAlbum(track.album, track.artist)}
                         >
                             <div
@@ -308,7 +324,27 @@
                                     </a>
                                 </div>
                             </div>
-                        </button>
+                            <!-- Add to Playlist Action -->
+                            <button
+                                class="p-1.5 hover:bg-white/20 rounded-md text-white/40 group-hover:text-white/70 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+                                title="Add to playlist"
+                                on:click={(e) => openPlaylistModal(track.id, e)}
+                            >
+                                <svg
+                                    class="w-4 h-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M12 4v16m8-8H4"
+                                    />
+                                </svg>
+                            </button>
+                        </div>
                     {/each}
                 </div>
             {/if}
@@ -320,4 +356,9 @@
             {/if}
         </div>
     {/if}
+
+    <AddToPlaylistModal
+        bind:show={showPlaylistModal}
+        trackIds={selectedTrackIds}
+    />
 </div>

@@ -16,6 +16,7 @@ export interface PlayerState {
     position_seconds: number;
     volume: number | null;
     transport_state?: string;
+    repeatMode: 'off' | 'all' | 'one';
 }
 
 export const playerState = writable<PlayerState>({
@@ -25,7 +26,8 @@ export const playerState = writable<PlayerState>({
     current_index: -1,
     is_playing: false,
     position_seconds: 0,
-    volume: null
+    volume: null,
+    repeatMode: 'off'
 });
 
 // UI: Now Playing overlay visibility
@@ -324,16 +326,60 @@ export async function playFromQueue(index: number) {
 
 export async function next() {
     const s = get(playerState);
+    if (s.repeatMode === 'one') {
+        await playFromQueue(s.current_index);
+        return;
+    }
+
     if (s.current_index < s.queue.length - 1) {
         await playFromQueue(s.current_index + 1);
+    } else if (s.repeatMode === 'all' && s.queue.length > 0) {
+        await playFromQueue(0);
     }
 }
 
 export async function previous() {
     const s = get(playerState);
+    // If repeat one, maybe restart track? Standard behavior usually is dependent on time played (e.g. >3s restarts).
+    // For now simple prev logic.
     if (s.current_index > 0) {
         await playFromQueue(s.current_index - 1);
+    } else if (s.repeatMode === 'all' && s.queue.length > 0) {
+        await playFromQueue(s.queue.length - 1);
     }
+}
+
+export async function shuffleQueue() {
+    const s = get(playerState);
+    if (s.queue.length <= 1) return;
+
+    const currentTrack = s.queue[s.current_index];
+    // Filter out current track
+    let others = s.queue.filter((_, i) => i !== s.current_index);
+
+    // Shuffle others
+    for (let i = others.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [others[i], others[j]] = [others[j], others[i]];
+    }
+
+    // New queue: current + shuffled
+    const newQueue = currentTrack ? [currentTrack, ...others] : others;
+
+    // We must update the server
+    await reorderQueue(newQueue);
+
+    // Local update will happen via socket or response from reorderQueue ideally, 
+    // but reorderQueue function already updates store.
+}
+
+export function toggleRepeat() {
+    playerState.update(s => {
+        const modes: ('off' | 'all' | 'one')[] = ['off', 'all', 'one'];
+        const idx = modes.indexOf(s.repeatMode);
+        const nextMode = modes[(idx + 1) % modes.length];
+        return { ...s, repeatMode: nextMode };
+    });
 }
 
 // Throttling handled by caller (PlayerBar.svelte)

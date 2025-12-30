@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { playerState, playFromQueue, reorderQueue } from "$stores/player";
+  import AddToPlaylistModal from "$lib/components/AddToPlaylistModal.svelte";
 
   const dispatch = createEventDispatcher();
 
@@ -13,48 +14,34 @@
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  const formatTech = (track: any) => {
-    const parts: string[] = [];
-    if (track?.codec) parts.push(String(track.codec).toUpperCase());
-    if (track?.bit_depth && track?.sample_rate_hz) {
-      parts.push(
-        `${track.bit_depth}bit / ${Math.round(track.sample_rate_hz / 1000)}kHz`,
-      );
-    }
-    if (track?.bitrate) {
-      parts.push(`${Math.round(track.bitrate / 1000)}kbps`);
-    }
-    return parts.join(" • ");
-  };
-
   const close = () => dispatch("close");
   const clear = () => dispatch("clear");
+
+  // Playlist Modal
+  let showPlaylistModal = false;
+  let selectedTrackIds: number[] = [];
+
+  const openPlaylistModal = (trackId: number, e: MouseEvent) => {
+    e.stopPropagation();
+    selectedTrackIds = [trackId];
+    showPlaylistModal = true;
+  };
+
+  const openPlaylistModalForQueue = () => {
+    selectedTrackIds = $playerState.queue.map((t) => t.id);
+    showPlaylistModal = true;
+  };
 
   // Drag state
   let dragIndex: number | null = null;
   let isDragging = false;
   let dragPos = { x: 0, y: 0 };
-  let dropIndex: number | null = null; // Where the item will be dropped (insertion index)
+  let dropIndex: number | null = null;
   let dragTrack: any = null;
-
-  // We rely on $playerState.queue directly for rendering.
-  // We don't mutate it locally until drop.
 
   const moveItem = (arr: any[], from: number, to: number) => {
     const updated = [...arr];
     const [item] = updated.splice(from, 1);
-    // If we removed an item before the target index, 'to' shifts down by 1
-    // BUT 'to' here represents the insertion index in the *original* list logic?
-    // Let's standardise: 'to' is the index in the list *before* removal?
-    // No, standard array move usually treats 'to' as destination index.
-
-    // Simplest logic for "insert at index":
-    // If I drop at index 5, it goes before the item strictly at index 5.
-    // However, if I drag item 2 to index 5, I remove 2. Index 3,4,5 shift down.
-    // The "index 5" I dropped at corresponds to index 4 in the new array?
-
-    // Let's use standard splice logic on the removed array.
-    // If to > from, we need to decrement to by 1 because we removed an item before it.
     const target = to > from ? to - 1 : to;
     updated.splice(target, 0, item);
     return updated;
@@ -89,20 +76,15 @@
   const checkAutoScroll = (y: number) => {
     if (!scrollContainer) return;
     const rect = scrollContainer.getBoundingClientRect();
-    const threshold = 100; // Distance from edge to start scrolling
-    const maxSpeed = 15; // Max scroll speed
+    const threshold = 100;
+    const maxSpeed = 15;
 
-    // Check boundaries
     if (y < rect.top + threshold) {
-      // Scroll up
-      // speed increases as we get closer to the top edge
-      // normalize ratio 0..1
       const dist = Math.max(0, rect.top + threshold - y);
       const ratio = Math.min(1, dist / threshold);
       autoScrollSpeed = -maxSpeed * ratio;
       startAutoScroll();
     } else if (y > rect.bottom - threshold) {
-      // Scroll down
       const dist = Math.max(0, y - (rect.bottom - threshold));
       const ratio = Math.min(1, dist / threshold);
       autoScrollSpeed = maxSpeed * ratio;
@@ -116,13 +98,12 @@
     dragIndex = idx;
     isDragging = true;
     dragTrack = $playerState.queue[idx];
-    dropIndex = idx; // Default to dropping exactly where it is
+    dropIndex = idx;
     dragPos = { x: event.clientX, y: event.clientY };
 
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", String(idx));
-      // Set invisible drag image so we can use our custom one
       const img = new Image();
       img.src =
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PQbcbwAAAABJRU5ErkJggg==";
@@ -133,10 +114,7 @@
   const handleDragOver = (event: DragEvent, idx: number) => {
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-
-    // Track pos for visual
     dragPos = { x: event.clientX, y: event.clientY };
-    // Check for auto-scroll
     checkAutoScroll(event.clientY);
 
     if (dragIndex === null) return;
@@ -147,20 +125,14 @@
 
     const relY = event.clientY - rect.top;
     const mid = rect.height / 2;
-
-    // If above midpoint, insert before this item. If below, insert after (which is same as before next item)
     let dest = relY < mid ? idx : idx + 1;
-
     dropIndex = dest;
   };
 
-  // Handle drag over the empty space at bottom matching the last index
   const handleDragOverContainer = (event: DragEvent) => {
     event.preventDefault();
     dragPos = { x: event.clientX, y: event.clientY };
     checkAutoScroll(event.clientY);
-    // If we are over the container but not a specific item, usually means at the end
-    // But we have a specific drop zone at the bottom now.
   };
 
   const handleDrop = async (event: DragEvent) => {
@@ -172,17 +144,12 @@
       return;
     }
 
-    // Check for no-op
-    // If dropping at same index or index+1 (which puts it right back after itself), do nothing
     if (dropIndex === dragIndex || dropIndex === dragIndex + 1) {
       resetDrag();
       return;
     }
 
     const newQueue = moveItem($playerState.queue, dragIndex, dropIndex);
-
-    // Immediate optimistic update could be done here if store allows,
-    // but reorderQueue handles API + store update.
     await reorderQueue(newQueue);
     resetDrag();
   };
@@ -207,11 +174,8 @@
     if (e.key === "Escape") close();
   }}
   on:dragover={(e) => {
-    // Keep track of global drag pos for the floating preview
     if (isDragging) {
       dragPos = { x: e.clientX, y: e.clientY };
-      // Also check autoScroll here in case we are over non-droppable areas but still in window?
-      // Actually, we only care if we are over the container.
     }
   }}
 />
@@ -249,7 +213,7 @@
       </div>
     </div>
   {/if}
-  <!-- Click-away overlay -->
+
   <div
     class="fixed inset-0 z-[55]"
     role="button"
@@ -283,6 +247,25 @@
         </h2>
       </div>
       <div class="flex items-center gap-2">
+        <button
+          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/15 text-white border border-white/10"
+          title="Save queue as playlist"
+          on:click={openPlaylistModalForQueue}
+        >
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+        </button>
         <button
           class="btn btn-circle btn-sm bg-white/5 hover:bg-white/15 text-white border border-white/10"
           title="Clear queue"
@@ -331,7 +314,6 @@
         Queue is empty. Play something to get started.
       </div>
     {:else}
-      <!-- Drop Handler for entire list area -->
       <div
         class="flex-1 overflow-y-auto px-3 py-2 scrollbar-hide"
         role="list"
@@ -341,15 +323,17 @@
       >
         <div class="space-y-1">
           {#each $playerState.queue as track, idx}
-            <!-- Drop Indicator before item -->
             {#if isDragging && dropIndex === idx}
               <div
                 class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
               ></div>
             {/if}
 
-            <button
-              class={`w-full text-left rounded-xl border border-transparent bg-white/5 hover:bg-white/10 transition-all px-3 py-2.5 flex gap-3 items-center relative group
+            <!-- Converted from button to div for better nesting -->
+            <div
+              role="button"
+              tabindex="0"
+              class={`w-full text-left rounded-xl border border-transparent bg-white/5 hover:bg-white/10 transition-all px-3 py-2.5 flex gap-3 items-center relative group cursor-pointer
                 ${idx === $playerState.current_index ? "bg-primary/10 border-primary/40" : ""}
                 ${isDragging && idx === dragIndex ? "opacity-30 grayscale" : ""}
                 `}
@@ -361,6 +345,7 @@
               on:dragover={(e) => handleDragOver(e, idx)}
               on:dragend={handleDragEnd}
               on:click={() => playFromQueue(idx)}
+              on:keydown={(e) => e.key === "Enter" && playFromQueue(idx)}
             >
               {#if idx === $playerState.current_index}
                 <div
@@ -420,34 +405,59 @@
                 </div>
               </div>
 
-              <!-- Drag Handle Icon (visible on hover) -->
+              <!-- Actions Area (Add to Playlist + Drag Handle) -->
               <div
-                class="opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 text-white/40 cursor-grab active:cursor-grabbing p-1"
+                class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 bg-black/50 backdrop-blur-sm rounded-lg p-1"
               >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M4 8h16M4 16h16"
-                  ></path></svg
+                <!-- Add to Playlist Button -->
+                <button
+                  class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
+                  title="Add to playlist"
+                  on:click={(e) => openPlaylistModal(track.id, e)}
                 >
+                  <svg
+                    class="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                </button>
+
+                <!-- Drag Handle -->
+                <div
+                  class="p-1.5 text-white/40 cursor-grab active:cursor-grabbing"
+                >
+                  <svg
+                    class="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M4 8h16M4 16h16"
+                    />
+                  </svg>
+                </div>
               </div>
-            </button>
+            </div>
           {/each}
 
-          <!-- Drop Indicator at the very end -->
           {#if isDragging && dropIndex === $playerState.queue.length}
             <div
               class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
             ></div>
           {/if}
 
-          <!-- Bottom drop zone spacer -->
           <div
             role="listitem"
             class="h-12 w-full flex items-center justify-center text-transparent"
@@ -462,4 +472,9 @@
       </div>
     {/if}
   </aside>
+
+  <AddToPlaylistModal
+    bind:show={showPlaylistModal}
+    trackIds={selectedTrackIds}
+  />
 {/if}
