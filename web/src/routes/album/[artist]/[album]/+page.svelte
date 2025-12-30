@@ -2,6 +2,15 @@
   import type { Album, Track } from "$api";
   import { setQueue, addToQueue } from "$stores/player";
   import { goto } from "$app/navigation";
+  import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
+
+  let showPlaylistModal = false;
+  let selectedTrackIds: number[] = [];
+
+  function openPlaylistModal(trackId: number) {
+    selectedTrackIds = [trackId];
+    showPlaylistModal = true;
+  }
 
   export let data: {
     artist: string;
@@ -282,6 +291,24 @@
                     ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
                   >
                 </button>
+                <button
+                  class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Add to Playlist"
+                  on:click|stopPropagation={() => openPlaylistModal(track.id)}
+                >
+                  <svg
+                    class="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    ><path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
+                    /></svg
+                  >
+                </button>
                 <div
                   class="w-14 text-right text-xs text-white/60 font-medium tabular-nums"
                 >
@@ -295,3 +322,5 @@
     {/if}
   </div>
 </section>
+
+<AddToPlaylistModal bind:show={showPlaylistModal} trackIds={selectedTrackIds} />
