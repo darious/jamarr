@@ -228,6 +228,38 @@ export async function addToQueue(tracks: Track[]) {
     }
 }
 
+export async function reorderQueue(newQueue: Track[]) {
+    const current = get(playerState);
+    const currentTrackId = current.queue[current.current_index]?.id;
+    try {
+        const res = await fetch('/api/player/queue/reorder', {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ queue: newQueue })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const state = data.state || {};
+            playerState.update((s) => ({
+                ...s,
+                queue: state.queue ?? newQueue,
+                current_index:
+                    state.current_index ??
+                    (currentTrackId
+                        ? (state.queue || newQueue).findIndex((t: Track) => t.id === currentTrackId)
+                        : -1),
+                position_seconds: state.position_seconds ?? s.position_seconds,
+                is_playing: state.is_playing ?? s.is_playing,
+                transport_state: state.transport_state ?? s.transport_state,
+            }));
+        } else {
+            console.error('[reorderQueue] Failed, status:', res.status, await res.text());
+        }
+    } catch (e) {
+        console.error('[reorderQueue] Exception:', e);
+    }
+}
+
 export async function clearQueue(stopPlayback: boolean = true) {
     console.log('[clearQueue] Clearing queue (stopPlayback=%s)', stopPlayback);
     try {
