@@ -18,7 +18,10 @@ class ApiTracker:
                         "tracks": set(),
                         "albums": set(),
                         "artists": set(),
+                        "artists_metadata": set(),
                     }
+                    # Detailed stats: category -> {searched: int, found: int, missing: int}
+                    cls._instance._detailed_stats = defaultdict(lambda: {"searched": 0, "found": 0, "missing": 0})
         return cls._instance
 
     def increment(self, service: str):
@@ -45,6 +48,18 @@ class ApiTracker:
                 self._processed_sets[entity_type] = set()
             self._processed_sets[entity_type].add(unique_id)
 
+    def track_detailed(self, category: str, status: str):
+        """
+        Track detailed stats for a category.
+        status: 'found', 'missing'
+        """
+        with self._stats_lock:
+            self._detailed_stats[category]["searched"] += 1
+            if status == "found":
+                self._detailed_stats[category]["found"] += 1
+            elif status == "missing":
+                self._detailed_stats[category]["missing"] += 1
+
     def get_stats(self):
         with self._stats_lock:
             return dict(self._stats)
@@ -52,12 +67,18 @@ class ApiTracker:
     def get_processed_stats(self):
         with self._stats_lock:
             return {k: len(v) for k, v in self._processed_sets.items()}
+            
+    def get_detailed_stats(self):
+        with self._stats_lock:
+            # excessive defaultdict causes issues with serialization if not converted
+            return {k: dict(v) for k, v in self._detailed_stats.items()}
 
     def reset(self):
         with self._stats_lock:
             self._stats.clear()
             for s in self._processed_sets.values():
                 s.clear()
+            self._detailed_stats.clear()
 
 
 def get_api_tracker():

@@ -24,7 +24,13 @@
             tracks?: number;
             albums?: number;
             artists?: number;
+
+            artists_metadata?: number;
         };
+        detailed_stats?: Record<
+            string,
+            { searched: number; found: number; missing: number }
+        >;
     }
 
     let status = "Idle";
@@ -37,8 +43,9 @@
         phase: "",
         completed: false,
         completedStatus: "",
-        api_stats: {},
+
         processed_stats: {},
+        detailed_stats: {},
     };
     let logs: { timestamp: number; message: string }[] = [];
     let logContainer: HTMLElement;
@@ -166,6 +173,8 @@
                 api_stats: data.api_stats || stats.api_stats || {},
                 processed_stats:
                     data.processed_stats || stats.processed_stats || {},
+                detailed_stats:
+                    data.detailed_stats || stats.detailed_stats || {},
             };
         } else if (data.type === "log") {
             addLog(data.message);
@@ -211,6 +220,7 @@
 
     function buildTasks() {
         taskQueue = [];
+        const pathValue = scanPath?.trim();
         const wantsMetadata =
             doMetadata ||
             doBio ||
@@ -226,7 +236,7 @@
                 start: () =>
                     triggerFullScan({
                         force: forceRescan,
-                        path: scanPath || undefined,
+                        path: pathValue || undefined,
                         artistFilter: artistFilter || undefined,
                         mbidFilter: mbidFilter || undefined,
                         missingOnly,
@@ -247,7 +257,7 @@
                     start: () =>
                         triggerFilesystemScan({
                             force: forceRescan,
-                            path: scanPath || undefined,
+                            path: pathValue || undefined,
                         }),
                 });
             }
@@ -257,6 +267,7 @@
                     label: "Metadata",
                     start: () =>
                         triggerMetadataScan({
+                            path: pathValue || undefined,
                             artistFilter: artistFilter || undefined,
                             mbidFilter: mbidFilter || undefined,
                             missingOnly,
@@ -560,6 +571,16 @@
                             >
                             <span class="text-xs text-white/50">Artists</span>
                         </div>
+                        <div class="flex flex-col">
+                            <span
+                                class="text-2xl font-bold font-display text-white"
+                                >{stats.processed_stats?.artists_metadata ||
+                                    0}</span
+                            >
+                            <span class="text-xs text-white/50"
+                                >Artist Metadata</span
+                            >
+                        </div>
                     </div>
                 </div>
 
@@ -670,6 +691,76 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Detailed Stats Table -->
+            <!-- Detailed Stats Table -->
+            <div class="card bg-white/5 border border-white/10 p-4 mb-4">
+                <h3 class="text-xs uppercase tracking-wide text-white/40 mb-3">
+                    Detailed Statistics
+                </h3>
+                {#if stats.detailed_stats && Object.keys(stats.detailed_stats).length > 0}
+                    <div class="overflow-x-auto">
+                        <table class="table table-xs w-full text-left">
+                            <thead>
+                                <tr
+                                    class="text-white/40 border-b border-white/10"
+                                >
+                                    <th class="pb-2 font-normal">Category</th>
+                                    <th class="pb-2 font-normal text-right"
+                                        >Searched</th
+                                    >
+                                    <th class="pb-2 font-normal text-right"
+                                        >Found</th
+                                    >
+                                    <th class="pb-2 font-normal text-right"
+                                        >Missing</th
+                                    >
+                                    <th class="pb-2 font-normal text-right"
+                                        >Success Rate</th
+                                    >
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm">
+                                {#each Object.entries(stats.detailed_stats).sort( (a, b) => a[0].localeCompare(b[0]), ) as [category, data]}
+                                    <tr
+                                        class="border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors"
+                                    >
+                                        <td class="py-2 text-white font-medium"
+                                            >{category}</td
+                                        >
+                                        <td
+                                            class="py-2 text-right text-white/70"
+                                            >{data.searched}</td
+                                        >
+                                        <td
+                                            class="py-2 text-right text-green-400"
+                                            >{data.found}</td
+                                        >
+                                        <td class="py-2 text-right text-red-400"
+                                            >{data.missing}</td
+                                        >
+                                        <td
+                                            class="py-2 text-right text-white/50"
+                                        >
+                                            {data.searched > 0
+                                                ? Math.round(
+                                                      (data.found /
+                                                          data.searched) *
+                                                          100,
+                                                  )
+                                                : 0}%
+                                        </td>
+                                    </tr>
+                                {/each}
+                            </tbody>
+                        </table>
+                    </div>
+                {:else}
+                    <div class="text-white/20 text-sm italic">
+                        Run a scan to view detailed statistics...
+                    </div>
+                {/if}
             </div>
 
             <div
@@ -859,7 +950,7 @@
                                 on:change={updateScanAllState}
                                 class="checkbox checkbox-primary"
                             /><span class="label-text text-white"
-                                >Pull artist artwork (Spotify)</span
+                                >Pull artist artwork (Spotify fallback)</span
                             ></label
                         >
                     </div>

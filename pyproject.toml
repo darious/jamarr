@@ -19,6 +19,7 @@ dependencies = [
     "argon2-cffi",
     "email-validator",
     "pillow",
+    "blake3",
 ]
 
 
@@ -36,3 +37,6 @@ package = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "slow: long-running matrix/integration tests",
+]

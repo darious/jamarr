@@ -24,8 +24,9 @@ class ScanRequest(BaseModel):
     fetch_bio: bool = False
     fetch_artwork: bool = False
     fetch_spotify_artwork: bool = False
-    fetch_links: bool = True
+    fetch_links: bool = False
     fetch_similar_artists: bool = False
+    prune: bool = True
 
 
 @router.post("/api/library/scan")
@@ -33,17 +34,22 @@ async def trigger_scan(request: ScanRequest):
     manager = ScanManager.get_instance()
 
     try:
+        manager_path = manager.get_music_path()
+        target_path = request.path or manager_path
+        if not target_path:
+            raise HTTPException(status_code=400, detail="path is required for all scan types")
+
         if request.type == "filesystem":
-            await manager.start_scan(path=request.path, force=request.force)
+            await manager.start_scan(path=target_path, force=request.force)
             return {"message": "Filesystem scan started"}
 
         elif request.type == "metadata":
             await manager.start_metadata_update(
+                path=target_path,
                 artist_filter=request.artist_filter,
                 mbid_filter=request.mbid_filter,
                 missing_only=request.missing_only,
                 bio_only=request.bio_only or request.fetch_bio,
-                links_only=request.links_only or (not request.fetch_links and False),
                 refresh_top_tracks=request.refresh_top_tracks,
                 refresh_singles=request.refresh_singles,
                 fetch_metadata=request.fetch_metadata,
@@ -57,13 +63,12 @@ async def trigger_scan(request: ScanRequest):
 
         elif request.type == "full":
             await manager.start_full(
-                path=request.path,
+                path=target_path,
                 force=request.force,
                 artist_filter=request.artist_filter,
                 mbid_filter=request.mbid_filter,
                 missing_only=request.missing_only,
                 bio_only=request.bio_only or request.fetch_bio,
-                links_only=request.links_only or (not request.fetch_links and False),
                 refresh_top_tracks=request.refresh_top_tracks,
                 refresh_singles=request.refresh_singles,
                 fetch_metadata=request.fetch_metadata,
@@ -71,7 +76,7 @@ async def trigger_scan(request: ScanRequest):
                 fetch_artwork=request.fetch_artwork,
                 fetch_spotify_artwork=request.fetch_spotify_artwork,
                 fetch_links=request.fetch_links,
-                prune=False,  # Default false for combined scan unless explicitly added later
+                prune=request.prune,
                 fetch_similar_artists=request.fetch_similar_artists,
             )
             return {"message": "Full library refresh started"}
@@ -79,6 +84,12 @@ async def trigger_scan(request: ScanRequest):
         elif request.type == "prune":
             await manager.start_prune()
             return {"message": "Library prune started"}
+
+        elif request.type == "missing_albums":
+            await manager.start_missing_albums_scan(
+                artist_filter=request.artist_filter, mbid_filter=request.mbid_filter
+            )
+            return {"message": "Missing albums scan started"}
 
         else:
             raise HTTPException(status_code=400, detail="Invalid scan type")
