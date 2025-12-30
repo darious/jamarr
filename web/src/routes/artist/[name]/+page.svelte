@@ -2,8 +2,6 @@
   import type { Album, Artist, Track, MissingAlbum } from "$lib/api";
   import {
     fetchTracks,
-    refreshArtistMetadata,
-    refreshArtistSingles,
     fetchMissingAlbums,
     triggerMissingAlbumsScan,
     triggerMetadataScan,
@@ -315,20 +313,20 @@
 
   async function refreshMeta() {
     refreshing = true;
-    message = "Requesting fresh metadata...";
+    message = "Requesting artist refresh...";
     try {
-      if (artist?.mbid) {
-        await triggerMetadataScan({
-          mbidFilter: artist.mbid,
-          missingOnly: false,
-          fetchBio: true,
-          fetchLinks: true,
-          fetchArtwork: true,
-          fetchMetadata: true,
-        });
-      } else {
-        await refreshArtistMetadata(data.canonicalName || data.name);
-      }
+      await triggerMetadataScan({
+        artistFilter: data.canonicalName || data.name,
+        mbidFilter: artist?.mbid,
+        missingOnly: false,
+        fetchMetadata: true,
+        fetchBio: true,
+        fetchArtwork: true,
+        fetchSpotifyArtwork: true,
+        refreshTopTracks: true,
+        refreshSingles: true,
+        fetchSimilarArtists: true,
+      });
       message = "Metadata updated. Reloading...";
       await invalidateAll();
       message = "Metadata updated successfully!";
