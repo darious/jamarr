@@ -11,6 +11,15 @@
   import { browser } from "$app/environment";
   import ColorThief from "colorthief";
   import Tabs from "$lib/components/Tabs.svelte";
+  import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
+
+  let showPlaylistModal = false;
+  let selectedTrackIds: number[] = [];
+
+  function openPlaylistModal(ids: number | number[]) {
+    selectedTrackIds = Array.isArray(ids) ? ids : [ids];
+    showPlaylistModal = true;
+  }
 
   export let data: {
     name: string;
@@ -920,6 +929,24 @@
                 {#if track.id > 0}
                   <button
                     class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Add to Playlist"
+                    on:click={() => openPlaylistModal(track.id)}
+                  >
+                    <svg
+                      class="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
+                      /></svg
+                    >
+                  </button>
+                  <button
+                    class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
                     title="Add to Queue"
                     on:click={() => addTrackToQueue(track.id)}
                   >
@@ -1013,6 +1040,25 @@
                   </div>
 
                   {#if single.localId && single.tracksToPlay && single.tracksToPlay.length > 0}
+                    <button
+                      class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Add to Playlist"
+                      on:click={() =>
+                        openPlaylistModal(single.tracksToPlay.map((t) => t.id))}
+                    >
+                      <svg
+                        class="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        ><path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
+                        /></svg
+                      >
+                    </button>
                     <button
                       class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
                       title="Add to Queue"
@@ -1156,6 +1202,8 @@
     </section>
   </main>
 </div>
+
+<AddToPlaylistModal bind:show={showPlaylistModal} trackIds={selectedTrackIds} />
 
 <style>
   .custom-scrollbar::-webkit-scrollbar {

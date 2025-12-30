@@ -11,8 +11,8 @@ async def test_match_track_basic_match():
     mock_db = AsyncMock()
     # Mock data: id, title, album, duration, track_mbid, release_track_mbid, date
     candidates = [
-        (1, "Hometown Glory", "19", 250, "mbid-1", "rmbid-1", "2008-01-28"),
-        (2, "Some Other Song", "19", 200, "mbid-2", "rmbid-2", "2008-01-28"),
+        (1, "Hometown Glory", "19", 250, "mbid-1", "rmbid-1", "2008-01-28", None),
+        (2, "Some Other Song", "19", 200, "mbid-2", "rmbid-2", "2008-01-28", None),
     ]
     mock_db.fetch.return_value = candidates
 
@@ -35,8 +35,8 @@ async def test_match_track_date_tiebreaker_studio_vs_live():
     
     # We order them such that Live is first, to ensure "first found" isn't the winner
     candidates = [
-        (101, "Hometown Glory", "Live at the Royal Albert Hall", 250, "mbid-live", "rel-mbid-live", "2011-11-29"),
-        (102, "Hometown Glory", "19", 250, "mbid-19", "rel-mbid-19", "2008-01-28"),
+        (101, "Hometown Glory", "Live at the Royal Albert Hall", 250, "mbid-live", "rel-mbid-live", "2011-11-29", None),
+        (102, "Hometown Glory", "19", 250, "mbid-19", "rel-mbid-19", "2008-01-28", None),
     ]
     mock_db.fetch.return_value = candidates
 
@@ -53,8 +53,8 @@ async def test_match_track_date_tiebreaker_studio_vs_live_reverse_order():
     mock_db = AsyncMock()
     # Studio first this time
     candidates = [
-        (102, "Hometown Glory", "19", 250, "mbid-19", "rel-mbid-19", "2008-01-28"),
-        (101, "Hometown Glory", "Live at the Royal Albert Hall", 250, "mbid-live", "rel-mbid-live", "2011-11-29"),
+        (102, "Hometown Glory", "19", 250, "mbid-19", "rel-mbid-19", "2008-01-28", None),
+        (101, "Hometown Glory", "Live at the Royal Albert Hall", 250, "mbid-live", "rel-mbid-live", "2011-11-29", None),
     ]
     mock_db.fetch.return_value = candidates
 
@@ -70,8 +70,8 @@ async def test_match_track_date_normalization_year_only():
     """
     mock_db = AsyncMock()
     candidates = [
-        (201, "Track A", "Album A", 200, "m1", "r1", "2010"),      # Treating as 2010-01-01
-        (202, "Track A", "Album B", 200, "m2", "r2", "2009-12-31") # Earlier
+        (201, "Track A", "Album A", 200, "m1", "r1", "2010", None),      # Treating as 2010-01-01
+        (202, "Track A", "Album B", 200, "m2", "r2", "2009-12-31", None) # Earlier
     ]
     mock_db.fetch.return_value = candidates
     
@@ -85,8 +85,8 @@ async def test_match_track_date_vs_no_date():
     """
     mock_db = AsyncMock()
     candidates = [
-        (301, "Track X", "Album X", 200, "m1", "r1", None),     
-        (302, "Track X", "Album Y", 200, "m2", "r2", "2020"), 
+        (301, "Track X", "Album X", 200, "m1", "r1", None, None),     
+        (302, "Track X", "Album Y", 200, "m2", "r2", "2020", None), 
     ]
     mock_db.fetch.return_value = candidates
     
@@ -102,8 +102,8 @@ async def test_match_prefer_better_score_over_date():
     # Candidate 1: Exact title match, later date
     # Candidate 2: Partial title match, earlier date
     candidates = [
-        (401, "Exact Title Match", "Album New", 200, "m1", "r1", "2020"),
-        (402, "Exact Title But Not Really", "Album Old", 200, "m2", "r2", "1990"),
+        (401, "Exact Title Match", "Album New", 200, "m1", "r1", "2020", None),
+        (402, "Exact Title But Not Really", "Album Old", 200, "m2", "r2", "1990", None),
     ]
     mock_db.fetch.return_value = candidates
     

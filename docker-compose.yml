@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: jamarr
       POSTGRES_DB: jamarr
     volumes:
-      - ./cache/postgres:/var/lib/postgresql/data
+      - /mnt/config/q-docker/jamarr/postgres:/var/lib/postgresql/data
 
 
   jamarr:
@@ -26,12 +26,12 @@ services:
         read_only: true
         volume:
           nocopy: true
-      - ./cache:/app/cache
+      - /mnt/config/q-docker/jamarr:/app/cache
       - ./config.yaml:/app/config.yaml
     restart: unless-stopped
     environment:
       - HOST=0.0.0.0
-      - HOST_IP=REDACTED_IP # Updated to user specified IP
+      - HOST_IP=${HOST_IP:-127.0.0.1}
       - HOST_PORT=8111
       # Database connection info (Hardcoded for now as requested)
       - DB_HOST=127.0.0.1

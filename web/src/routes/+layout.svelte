@@ -257,7 +257,7 @@
             >
             <a
               class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
-              href="/queue">Queue</a
+              href="/playlists">Playlists</a
             >
             <a
               class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"

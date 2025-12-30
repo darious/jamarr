@@ -72,8 +72,12 @@ async def init_db():
                 album_artist TEXT,
                 track_no INTEGER,
                 disc_no INTEGER,
-                date TEXT,
-                genre TEXT,
+
+                release_date DATE,
+                release_type TEXT,
+                release_type_raw TEXT,
+                release_date_raw TEXT,
+                release_date_tag TEXT,
                 duration_seconds DOUBLE PRECISION,
                 codec TEXT,
                 sample_rate_hz INTEGER,
@@ -115,9 +119,10 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS album (
                 mbid TEXT PRIMARY KEY,
                 title TEXT,
-                release_date TEXT,
-                primary_type TEXT,
-                secondary_types TEXT,
+
+                release_date DATE,
+                release_type TEXT,
+                release_type_raw TEXT,
                 artwork_id BIGINT,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
@@ -315,6 +320,28 @@ async def init_db():
                 UNIQUE(artist_mbid, release_group_mbid),
                 FOREIGN KEY(artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE
             );
+
+            -- Playlists
+            CREATE TABLE IF NOT EXISTS playlist (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                is_public     BOOLEAN NOT NULL DEFAULT FALSE,
+                updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+            );
+
+            -- Playlist Tracks
+            CREATE TABLE IF NOT EXISTS playlist_track (
+                id BIGSERIAL PRIMARY KEY,
+                playlist_id BIGINT NOT NULL,
+                track_id BIGINT NOT NULL,
+                position INTEGER NOT NULL,
+                FOREIGN KEY(playlist_id) REFERENCES playlist(id) ON DELETE CASCADE,
+                FOREIGN KEY(track_id) REFERENCES track(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_playlist_track_playlist_pos ON playlist_track(playlist_id, position);
         """)
 
         # Create indexes

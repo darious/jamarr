@@ -16,6 +16,7 @@ export interface PlayerState {
     position_seconds: number;
     volume: number | null;
     transport_state?: string;
+    repeatMode: 'off' | 'all' | 'one';
 }
 
 export const playerState = writable<PlayerState>({
@@ -25,7 +26,8 @@ export const playerState = writable<PlayerState>({
     current_index: -1,
     is_playing: false,
     position_seconds: 0,
-    volume: null
+    volume: null,
+    repeatMode: 'off'
 });
 
 // UI: Now Playing overlay visibility
@@ -228,6 +230,71 @@ export async function addToQueue(tracks: Track[]) {
     }
 }
 
+export async function reorderQueue(newQueue: Track[]) {
+    const current = get(playerState);
+    const currentTrackId = current.queue[current.current_index]?.id;
+    try {
+        const res = await fetch('/api/player/queue/reorder', {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ queue: newQueue })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const state = data.state || {};
+            playerState.update((s) => ({
+                ...s,
+                queue: state.queue ?? newQueue,
+                current_index:
+                    state.current_index ??
+                    (currentTrackId
+                        ? (state.queue || newQueue).findIndex((t: Track) => t.id === currentTrackId)
+                        : -1),
+                position_seconds: state.position_seconds ?? s.position_seconds,
+                is_playing: state.is_playing ?? s.is_playing,
+                transport_state: state.transport_state ?? s.transport_state,
+            }));
+        } else {
+            console.error('[reorderQueue] Failed, status:', res.status, await res.text());
+        }
+    } catch (e) {
+        console.error('[reorderQueue] Exception:', e);
+    }
+}
+
+export async function clearQueue(stopPlayback: boolean = true) {
+    console.log('[clearQueue] Clearing queue (stopPlayback=%s)', stopPlayback);
+    try {
+        const res = await fetch('/api/player/queue/clear', {
+            method: 'POST',
+            headers: getHeaders()
+        });
+
+        if (res.ok) {
+            playerState.update(s => ({
+                ...s,
+                queue: [],
+                current_index: -1,
+                position_seconds: 0,
+                is_playing: false,
+                transport_state: 'STOPPED'
+            }));
+
+            if (stopPlayback) {
+                try {
+                    await pause();
+                } catch (err) {
+                    console.warn('[clearQueue] Failed to pause after clear:', err);
+                }
+            }
+        } else {
+            console.error('[clearQueue] Failed, status:', res.status, await res.text());
+        }
+    } catch (e) {
+        console.error('[clearQueue] Exception:', e);
+    }
+}
+
 export async function playFromQueue(index: number) {
     try {
         const hostname = window.location.hostname;
@@ -259,16 +326,60 @@ export async function playFromQueue(index: number) {
 
 export async function next() {
     const s = get(playerState);
+    if (s.repeatMode === 'one') {
+        await playFromQueue(s.current_index);
+        return;
+    }
+
     if (s.current_index < s.queue.length - 1) {
         await playFromQueue(s.current_index + 1);
+    } else if (s.repeatMode === 'all' && s.queue.length > 0) {
+        await playFromQueue(0);
     }
 }
 
 export async function previous() {
     const s = get(playerState);
+    // If repeat one, maybe restart track? Standard behavior usually is dependent on time played (e.g. >3s restarts).
+    // For now simple prev logic.
     if (s.current_index > 0) {
         await playFromQueue(s.current_index - 1);
+    } else if (s.repeatMode === 'all' && s.queue.length > 0) {
+        await playFromQueue(s.queue.length - 1);
     }
+}
+
+export async function shuffleQueue() {
+    const s = get(playerState);
+    if (s.queue.length <= 1) return;
+
+    const currentTrack = s.queue[s.current_index];
+    // Filter out current track
+    let others = s.queue.filter((_, i) => i !== s.current_index);
+
+    // Shuffle others
+    for (let i = others.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [others[i], others[j]] = [others[j], others[i]];
+    }
+
+    // New queue: current + shuffled
+    const newQueue = currentTrack ? [currentTrack, ...others] : others;
+
+    // We must update the server
+    await reorderQueue(newQueue);
+
+    // Local update will happen via socket or response from reorderQueue ideally, 
+    // but reorderQueue function already updates store.
+}
+
+export function toggleRepeat() {
+    playerState.update(s => {
+        const modes: ('off' | 'all' | 'one')[] = ['off', 'all', 'one'];
+        const idx = modes.indexOf(s.repeatMode);
+        const nextMode = modes[(idx + 1) % modes.length];
+        return { ...s, repeatMode: nextMode };
+    });
 }
 
 // Throttling handled by caller (PlayerBar.svelte)

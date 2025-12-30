@@ -2,10 +2,20 @@
 # Production mode startup script
 # This builds and starts all services for production deployment
 
-set -e
+set -euo pipefail
 
-# Get server IP from docker-compose.yml
-SERVER_IP=$(grep "HOST_IP=" docker-compose.yml | cut -d'=' -f2 | cut -d'#' -f1 | tr -d ' ')
+# Derive HOST_IP via internal route to DNS server (REDACTED_IP) unless provided
+if [[ -z "${HOST_IP:-}" ]]; then
+  HOST_IP="$(ip route get REDACTED_IP 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
+fi
+
+if [[ -z "${HOST_IP:-}" ]]; then
+  echo "Unable to determine HOST_IP (tried route to REDACTED_IP). Set HOST_IP manually and retry." >&2
+  exit 1
+fi
+
+export HOST_IP
+SERVER_IP="${HOST_IP}"
 
 echo "🚀 Building and starting Jamarr in production mode..."
 echo ""
