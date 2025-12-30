@@ -228,6 +228,39 @@ export async function addToQueue(tracks: Track[]) {
     }
 }
 
+export async function clearQueue(stopPlayback: boolean = true) {
+    console.log('[clearQueue] Clearing queue (stopPlayback=%s)', stopPlayback);
+    try {
+        const res = await fetch('/api/player/queue/clear', {
+            method: 'POST',
+            headers: getHeaders()
+        });
+
+        if (res.ok) {
+            playerState.update(s => ({
+                ...s,
+                queue: [],
+                current_index: -1,
+                position_seconds: 0,
+                is_playing: false,
+                transport_state: 'STOPPED'
+            }));
+
+            if (stopPlayback) {
+                try {
+                    await pause();
+                } catch (err) {
+                    console.warn('[clearQueue] Failed to pause after clear:', err);
+                }
+            }
+        } else {
+            console.error('[clearQueue] Failed, status:', res.status, await res.text());
+        }
+    } catch (e) {
+        console.error('[clearQueue] Exception:', e);
+    }
+}
+
 export async function playFromQueue(index: number) {
     try {
         const hostname = window.location.hostname;

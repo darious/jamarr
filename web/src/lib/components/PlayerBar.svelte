@@ -11,12 +11,12 @@
     seek,
     getHeaders,
     toggleNowPlaying,
+    clearQueue,
   } from "$stores/player";
   import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
   import VolumeControl from "$components/VolumeControl.svelte";
+  import QueueDrawer from "$components/QueueDrawer.svelte";
   import { onMount } from "svelte";
-  import { page } from "$app/stores";
-  import { goto } from "$app/navigation";
 
   let audio: HTMLAudioElement;
   let isPlaying = false;
@@ -29,6 +29,7 @@
   let hasLoggedCurrentTrack = false; // Track if we've logged this track to history
   let lastLoggedTrackId: number | null = null; // Track the last logged track ID
   let hasAttemptedAutoResume = false; // Track if we've already tried to auto-resume
+  let showQueue = false;
 
   // Subscribe to store
   $: currentTrack = $playerState.queue[$playerState.current_index];
@@ -462,11 +463,22 @@
   }
 
   function toggleQueue() {
-    if ($page.url.pathname === "/queue") {
-      history.back();
-    } else {
-      goto("/queue");
+    showQueue = !showQueue;
+  }
+
+  function closeQueue() {
+    showQueue = false;
+  }
+
+  async function clearAndStopQueue() {
+    await clearQueue(true);
+  }
+
+  $: if ($playerState.queue.length === 0 && audio) {
+    if (!audio.paused) {
+      audio.pause();
     }
+    audio.currentTime = 0;
   }
 
   function handleImageError(e: Event) {
@@ -667,5 +679,11 @@
 
   <audio bind:this={audio} bind:volume />
 </div>
+
+<QueueDrawer
+  visible={showQueue}
+  on:close={closeQueue}
+  on:clear={clearAndStopQueue}
+/>
 
 <NowPlayingOverlay />
