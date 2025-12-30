@@ -972,6 +972,52 @@ async def append_queue(
     return {"status": "ok"}
 
 
+@router.post("/api/player/queue/clear")
+async def clear_queue(client_id: str = Depends(get_client_id)):
+    """
+    Empty the active renderer queue and stop playback.
+    """
+    async for db in get_db():
+        udn = await get_active_renderer(db, client_id)
+        state = await get_renderer_state_db(db, udn)
+
+        state["queue"] = []
+        state["current_index"] = -1
+        state["position_seconds"] = 0
+        state["is_playing"] = False
+        state["transport_state"] = "STOPPED"
+        await update_renderer_state_db(db, udn, state)
+        _reset_history_tracker(client_id if udn.startswith("local") else udn)
+
+        if not udn.startswith("local:"):
+            try:
+                await upnp.set_renderer(udn)
+                await upnp.pause()
+            except Exception as e:
+                logger.warning(f"[Player] Failed to pause renderer {udn} on clear: {e}")
+
+            if udn in playback_monitors:
+                playback_monitors[udn].cancel()
+                try:
+                    await asyncio.wait([playback_monitors[udn]], timeout=1)
+                except Exception:
+                    pass
+                del playback_monitors[udn]
+
+        return {
+            "status": "ok",
+            "state": {
+                "queue": state["queue"],
+                "current_index": state["current_index"],
+                "position_seconds": state["position_seconds"],
+                "is_playing": state["is_playing"],
+                "transport_state": state.get("transport_state", "STOPPED"),
+                "renderer": udn,
+                "volume": state.get("volume"),
+            },
+        }
+
+
 @router.post("/api/player/index")
 async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)):
     async for db in get_db():

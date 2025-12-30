@@ -222,6 +222,30 @@ async def test_queue_artwork(client: AsyncClient, db):
     assert q_track["art_id"] == 900
     assert q_track["art_sha1"] == "999999"
 
+@pytest.mark.asyncio
+async def test_clear_queue_stops_playback(client: AsyncClient, db, player_data):
+    headers = {"X-Jamarr-Client-Id": "test-client"}
+    track1 = {"id": 10, "title": "Song A", "artist": "Artist A", "path": "/music/t1.flac", "duration_seconds": 200, "album": "Album A"}
+    track2 = {"id": 11, "title": "Song B", "artist": "Artist A", "path": "/music/t2.flac", "duration_seconds": 200, "album": "Album A"}
+
+    await client.post("/api/player/queue", json={"queue": [track1, track2], "start_index": 0}, headers=headers)
+
+    resp = await client.post("/api/player/queue/clear", headers=headers)
+    assert resp.status_code == 200, resp.text
+    cleared = resp.json()["state"]
+    assert cleared["queue"] == []
+    assert cleared["current_index"] == -1
+    assert cleared["is_playing"] is False
+    assert cleared["transport_state"] == "STOPPED"
+
+    # Verify persisted state
+    state_resp = await client.get("/api/player/state", headers=headers)
+    state = state_resp.json()
+    assert state["queue"] == []
+    assert state["current_index"] == -1
+    assert state["is_playing"] is False
+    assert state["transport_state"] == "STOPPED"
+
 
 @pytest.mark.asyncio
 async def test_set_renderer_persists_session(client: AsyncClient, db):
