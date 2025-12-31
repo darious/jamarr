@@ -1,7 +1,6 @@
 services:
   jamarr_test_db:
     image: postgres:18.1-alpine
-    container_name: jamarr_test_db
     network_mode: "host"
     command: postgres -p 8109
     environment:
@@ -14,7 +13,6 @@ services:
 
   jamarr_test_runner:
     build: .
-    container_name: jamarr_test_runner
     network_mode: "host"
     depends_on:
       - jamarr_test_db

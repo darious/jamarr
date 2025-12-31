@@ -13,17 +13,24 @@ ALTER TABLE track ADD COLUMN IF NOT EXISTS release_date_tag TEXT;
 -- We create the new column 'release_date' directly.
 ALTER TABLE track ADD COLUMN IF NOT EXISTS release_date DATE;
 
--- Populate release_date from the old 'date' column
-UPDATE track 
-SET release_date = CASE 
-    WHEN date ~ '^\d{4}$' THEN (date || '-01-01')::DATE
-    WHEN date ~ '^\d{4}-\d{2}$' THEN (date || '-01')::DATE
-    WHEN date ~ '^\d{4}-\d{2}-\d{2}$' THEN date::DATE
-    ELSE NULL -- potentially loose data if weird format, but scanner will re-fill
-END;
-
--- Drop the old date column
-ALTER TABLE track DROP COLUMN IF EXISTS date;
+-- Populate release_date from the old 'date' column if it exists
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'track' AND column_name = 'date'
+    ) THEN
+        UPDATE track 
+        SET release_date = CASE 
+            WHEN date ~ '^\d{4}$' THEN (date || '-01-01')::DATE
+            WHEN date ~ '^\d{4}-\d{2}$' THEN (date || '-01')::DATE
+            WHEN date ~ '^\d{4}-\d{2}-\d{2}$' THEN date::DATE
+            ELSE NULL -- potentially loose data if weird format, but scanner will re-fill
+        END;
+        ALTER TABLE track DROP COLUMN IF EXISTS date;
+    END IF;
+END
+$$;
 
 -- 4. ALBUM: Add new columns
 ALTER TABLE album ADD COLUMN IF NOT EXISTS release_type TEXT;
