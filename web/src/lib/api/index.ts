@@ -45,6 +45,7 @@ export interface Artist {
         sample_rate_hz?: number | null;
         art_id?: number | null;
         art_sha1?: string | null;
+        album?: string;
     }[];
     sort_name: string;
     primary_album_count?: number;
