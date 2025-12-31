@@ -1,5 +1,29 @@
 #!/bin/bash
-set -e
+set -euo pipefail
+
+# Use a dedicated compose project to avoid clashing with dev/prod containers
+export COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-jamarr-test}
+
+# Clean up any leftover stack or named containers from prior runs (even with different project labels)
+echo "🧹 Cleaning up any existing test stack..."
+docker compose -f docker-compose.test.yml down --remove-orphans >/dev/null 2>&1 || true
+docker rm -f jamarr_test_db jamarr_test_runner >/dev/null 2>&1 || true
+
+# Ensure any leftover containers from a previous run are removed
+echo "🧹 Cleaning up any existing test stack..."
+docker compose -f docker-compose.test.yml down >/dev/null 2>&1 || true
+
+# Derive HOST_IP via internal route to DNS server (192.168.0.11) unless provided
+if [[ -z "${HOST_IP:-}" ]]; then
+  HOST_IP="$(ip route get 192.168.0.11 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
+fi
+
+if [[ -z "${HOST_IP:-}" ]]; then
+  echo "Unable to determine HOST_IP (tried route to 192.168.0.11). Set HOST_IP manually and retry." >&2
+  exit 1
+fi
+
+export HOST_IP
 
 # Build test runner image (shares main image)
 echo "🔨 Building test runner image..."
