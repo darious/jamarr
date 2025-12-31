@@ -82,5 +82,28 @@ The frontend provides a polished, app-like user experience:
 ├── docker-compose.dev.yml # Development overrides
 ├── Dockerfile            # Production container build
 ├── dev.sh                # Development mode startup script
+├── prod.sh               # Production startup (no migrations)
+├── update.sh             # Production deploy (git pull + build + migrations + restart)
 └── config.yaml           # Application configuration
 ```
+
+## Deployment & Operations
+
+### Environments and Compose
+- **Production**: `docker-compose.yml` with host networking. `HOST_IP` is provided via environment (defaults to 127.0.0.1 in Compose).
+- **Development**: `docker-compose.yml` + `docker-compose.dev.yml` overrides; hot-reload for backend/frontend; local paths for cache/DB.
+- **Testing**: `docker-compose.test.yml` with isolated project name (`jamarr-test`) to avoid clashing with dev/prod.
+
+### Scripts
+- `prod.sh`: Builds and starts the prod stack (no migration step).
+- `dev.sh`: Starts dev stack with hot-reload; derives `HOST_IP` from an internal route if not provided.
+- `update.sh`: Full prod deploy. Steps: stop app container, `git pull --rebase`, ensure DB is up, build app image, run DB migrations (`docker compose run --rm jamarr python scripts/apply_migrations.py`), then start the app container.
+- `test.sh`: Runs the test suite in Docker; brings up the test DB, runs pytest inside `jamarr_test_runner`, tears down the stack on success (leaves DB running on failure for debugging).
+- `test-slow.sh`: Delegates to `test.sh -m "slow"` with the same lifecycle and project isolation.
+- `lint.sh [python|svelte|all]`: Runs Ruff and/or Svelte Check (Svelte via the dev Compose stack).
+
+### Database Migrations
+- Location: `scripts/migrations/*.sql`, ordered numerically (e.g., `001_*.sql`).
+- Tracking: `schema_migration` table stores applied versions and checksums; runner will rename an old `schema_migrations` table if present.
+- Runner: `scripts/apply_migrations.py` acquires a PostgreSQL advisory lock, validates checksums, and applies pending SQL files in order. Reads DB settings from environment (provided automatically inside the `jamarr` service by Compose).
+- Idempotency: Migrations use `IF NOT EXISTS`/`IF EXISTS` guards or DO blocks so they can be re-run safely.
