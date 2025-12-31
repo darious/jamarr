@@ -113,8 +113,8 @@
 
   $: if (browser && data.canonicalName && data.canonicalName !== lastKey) {
     lastKey = data.canonicalName;
-    const hasMain = data.albums.some((a) => !a.type || a.type === "main");
-    activeTab = hasMain ? "albums" : "appears_on";
+    const hasAlbums = data.albums.length > 0;
+    activeTab = "album"; // Reset logic will handle correct tab
     void refreshTracks();
   }
 
@@ -325,11 +325,46 @@
     });
   })();
 
-  $: mainAlbums = data.albums
-    .filter((a) => !a.type || a.type === "main")
-    .sort((a, b) => (b.year || "").localeCompare(a.year || "")); // Newest first
+  // Group Albums by Type
+  $: groupedAlbums = (() => {
+    const groups: Record<string, Album[]> = {
+      album: [],
+      ep: [],
+      single: [],
+      compilation: [],
+      live: [],
+      appears_on: [],
+    };
 
-  $: appearsOnAlbums = data.albums.filter((a) => a.type === "appears_on");
+    data.albums.forEach((album) => {
+      // Priority 1: Appears On
+      if (album.type === "appears_on") {
+        groups.appears_on.push(album);
+        return;
+      }
+
+      // Priority 2: Release Type (default to 'album')
+      const type = (album.release_type || "album").toLowerCase();
+      if (groups[type]) {
+        groups[type].push(album);
+      } else {
+        // Fallback for unknown types (e.g. remix, demo) -> 'album'
+        groups.album.push(album);
+      }
+    });
+
+    // Sort each group: Newest first
+    Object.values(groups).forEach((list) => {
+      list.sort((a, b) => (b.year || "").localeCompare(a.year || ""));
+    });
+
+    return groups;
+  })();
+
+  // Displayed Albums based on active tab
+  $: displayedAlbums = (() => {
+    return groupedAlbums[activeTab as keyof typeof groupedAlbums] || [];
+  })();
 
   async function refreshMeta() {
     refreshing = true;
@@ -423,25 +458,50 @@
   }
 
   // Local state for tabs
-  let activeTab = data.albums.some((a) => !a.type || a.type === "main")
-    ? "albums"
-    : "appears_on";
+  let activeTab = "album"; // Default, will update via reactive statement
 
+  // Reactive tab items
   // Reactive tab items
   $: tabItems = [
     {
-      label: `Albums (${mainAlbums.length})`,
-      value: "albums",
-      count: mainAlbums.length,
+      label: "Albums",
+      value: "album",
+      count: groupedAlbums.album.length,
       title: "Albums",
     },
     {
-      label: `Appears On (${appearsOnAlbums.length})`,
+      label: "EPs",
+      value: "ep",
+      count: groupedAlbums.ep.length,
+      title: "EPs",
+    },
+    {
+      label: "Singles",
+      value: "single",
+      count: groupedAlbums.single.length,
+      title: "Singles",
+    },
+    {
+      label: "Compilations",
+      value: "compilation",
+      count: groupedAlbums.compilation.length,
+      title: "Compilations",
+    },
+    {
+      label: "Live",
+      value: "live",
+      count: groupedAlbums.live.length,
+      title: "Live",
+    },
+    {
+      label: "Appears On",
       value: "appears_on",
-      count: appearsOnAlbums.length,
+      count: groupedAlbums.appears_on.length,
       title: "Appears On",
     },
-  ].filter((t) => t.count > 0);
+  ]
+    .filter((t) => t.count > 0)
+    .map((t) => ({ ...t, label: `${t.label} (${t.count})` }));
 
   // Ensure activeTab is valid
   $: if (tabItems.length > 0 && !tabItems.find((t) => t.value === activeTab)) {
@@ -760,12 +820,12 @@
             {/if}
           </div>
         {/if}
-
-        {#if activeTab === "albums"}
+        <!-- Albums Grid -->
+        {#if displayedAlbums.length > 0}
           <div
             class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
           >
-            {#each mainAlbums as album}
+            {#each displayedAlbums as album (album.album + album.artist_name)}
               <article class="group flex flex-col gap-4">
                 <button
                   class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
@@ -830,86 +890,13 @@
                     {album.album}
                   </h3>
                   <p class="text-sm text-white/50 font-medium">
+                    {#if activeTab === "appears_on"}
+                      {album.artist_name}
+                      <span class="mx-1 opacity-50">•</span>
+                    {/if}
                     {album.year ? album.year.substring(0, 4) : "Unknown"}
                     <span class="mx-1 opacity-50">•</span>
                     {album.track_count} tracks
-                  </p>
-                </div>
-              </article>
-            {/each}
-          </div>
-        {:else if activeTab === "appears_on"}
-          <div
-            class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
-          >
-            {#each appearsOnAlbums as album}
-              <article class="group flex flex-col gap-4">
-                <button
-                  class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
-                  on:click={() =>
-                    goto(
-                      `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-                    )}
-                >
-                  <img
-                    src={album.art_sha1
-                      ? `/art/file/${album.art_sha1}`
-                      : album.art_id
-                        ? `/art/${album.art_id}`
-                        : "/assets/default-album-placeholder.svg"}
-                    alt={album.album}
-                    class="h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                  <!-- Play Overlay -->
-                  <div
-                    class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
-                  >
-                    <button
-                      class="btn-icon btn-icon-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
-                      title="Play"
-                      on:click|stopPropagation={() => playAlbum(album)}
-                    >
-                      <svg
-                        class="h-8 w-8 ml-1"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
-                      >
-                    </button>
-                    <button
-                      class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
-                      title="Add to Queue"
-                      on:click|stopPropagation={() => addAlbumToQueue(album)}
-                    >
-                      <svg
-                        class="h-6 w-6"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
-                      >
-                    </button>
-                  </div>
-
-                  <!-- Hi-Res Badge -->
-                  {#if album.is_hires}
-                    <img
-                      src="/assets/logo-hires.png"
-                      class="absolute bottom-3 right-3 h-6 w-auto drop-shadow-lg"
-                      alt="Hi-Res"
-                    />
-                  {/if}
-                </button>
-                <div class="space-y-1">
-                  <h3
-                    class="text-base font-bold text-white leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
-                    title={album.album}
-                  >
-                    {album.album}
-                  </h3>
-                  <p class="text-sm text-white/50 font-medium">
-                    {album.artist_name}
-                    <span class="mx-1 opacity-50">•</span>
-                    {album.year ? album.year.substring(0, 4) : "Unknown"}
                   </p>
                 </div>
               </article>
