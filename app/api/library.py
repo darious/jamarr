@@ -237,7 +237,7 @@ async def get_artists(
             # Fetch similar artists
             similar_query = """
                 SELECT sa.similar_artist_name, sa.similar_artist_mbid, 
-                    a.image_url, a.artwork_id, ar.sha1 as art_sha1
+                    a.mbid as joined_mbid, a.image_url, a.artwork_id, ar.sha1 as art_sha1
                 FROM similar_artist sa
                 LEFT JOIN artist a ON sa.similar_artist_mbid = a.mbid
                 LEFT JOIN artwork ar ON a.artwork_id = ar.id
@@ -255,9 +255,24 @@ async def get_artists(
                 else {}
             )
             artist_data["similar_artists"] = []
+            mb_root = get_musicbrainz_root_url()
             for sim_row in sim_rows:
                 sim_mbid = sim_row["similar_artist_mbid"]
                 sim_art = sim_images.get(sim_mbid, {}) if sim_mbid else {}
+                
+                # Check if artist exists in our local library (joined_mbid not null)
+                in_library = sim_row["joined_mbid"] is not None
+                
+                # Construct external/fallback URLs
+                external_url = None
+                if not in_library:
+                    if sim_mbid:
+                        external_url = f"{mb_root}/artist/{sim_mbid}"
+                    else:
+                        # Fallback to Google Search if no MBID
+                        from urllib.parse import quote
+                        external_url = f"https://www.google.com/search?q={quote(sim_row['similar_artist_name'])}"
+                
                 artist_data["similar_artists"].append(
                     {
                         "name": sim_row["similar_artist_name"],
@@ -266,6 +281,8 @@ async def get_artists(
                         "artwork_id": sim_art.get("artwork_id")
                         or sim_row["artwork_id"],
                         "art_sha1": sha1_to_hex(sim_art.get("art_sha1") or sim_row["art_sha1"]),
+                        "in_library": in_library,
+                        "external_url": external_url
                     }
                 )
 

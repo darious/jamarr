@@ -13,6 +13,8 @@ export interface Artist {
         image_url?: string | null;
         art_id?: number | null;
         art_sha1?: string | null;
+        in_library?: boolean;
+        external_url?: string | null;
     }[];
     genres?: {
         name: string;

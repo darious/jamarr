@@ -50,6 +50,14 @@ We provide helper scripts to simplify development, production, and testing workf
 | `./test.sh` | Runs the API test suite inside the Docker container. |
 | `./server.sh` | (Internal) Entrypoint for the backend container. |
 
+### Deployment & Migrations (tl;dr)
+- `update.sh`: prod deploy helper. Stops the app container, `git pull --rebase`, brings DB up, builds the app image, runs DB migrations, then restarts the app. Expects `HOST_IP` set (defaults to 127.0.0.1).
+- Migrations: Versioned SQL files in `scripts/migrations/` tracked via `schema_migration` table. Runner (`scripts/apply_migrations.py`) takes an advisory lock, checks checksums, and applies pending files in order. Runs inside the app container via `docker compose run --rm jamarr python scripts/apply_migrations.py`.
+- `prod.sh`: Build + start everything in prod mode (no migrations).
+- `dev.sh`: Start dev stack with hot-reload and dev overrides.
+- Tests: `test.sh` (standard suite) and `test-slow.sh` (slow-only) run in an isolated Compose project and manage the test DB lifecycle.
+- Linting: `lint.sh [python|svelte|all]` runs Ruff and/or Svelte check.
+
 ## Deployment (Docker)
 
 The recommended way to run Jamarr in production is via `prod.sh` or Docker Compose.

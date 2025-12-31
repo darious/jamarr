@@ -32,7 +32,9 @@ export const load: PageLoad = async ({ params, fetch }) => {
       mbid: sim.mbid,
       art_id: sim.art_id,
       art_sha1: sim.art_sha1,
-      image_url: sim.image_url
+      image_url: sim.image_url,
+      in_library: sim.in_library,
+      external_url: sim.external_url
     };
   });
 
