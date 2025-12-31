@@ -34,7 +34,7 @@ async def match_track_to_library(db, artist_mbid, track_name, album_name=None, e
     Moved from metadata.py.
     """
     query = """
-        SELECT t.id, t.title, t.album, t.duration_seconds, t.track_mbid, t.release_track_mbid, t.date
+        SELECT t.id, t.title, t.album, t.duration_seconds, t.track_mbid, t.release_track_mbid, t.release_date, t.release_type
         FROM track t
         JOIN track_artist ta ON t.id = ta.track_id
         WHERE ta.artist_mbid = $1 
@@ -46,7 +46,9 @@ async def match_track_to_library(db, artist_mbid, track_name, album_name=None, e
 
     if external_mb_track_id:
         for row in candidates:
-            cid, ctitle, calbum, cseconds, cmb_track_id, cmb_release_track_id, cdate = row
+            # row is Record, access by index or name if using Record (asyncpg returns Record)
+            # unpacking:
+            cid, ctitle, calbum, cseconds, cmb_track_id, cmb_release_track_id, cdate, ctype = row
             if (cmb_track_id == external_mb_track_id or cmb_release_track_id == external_mb_track_id):
                 return cid
 
@@ -62,24 +64,44 @@ async def match_track_to_library(db, artist_mbid, track_name, album_name=None, e
     def fuzzy_score(s1, s2):
         return difflib.SequenceMatcher(None, normalize(s1), normalize(s2)).ratio()
 
-    def normalize_date(d_str):
-        if not d_str:
+    def normalize_date(d):
+        # d is likely datetime.date or None from DB, or str if legacy
+        if not d:
             return None
-        d_str = d_str.strip()
-        if len(d_str) == 4 and d_str.isdigit():
-            return f"{d_str}-01-01"
-        if len(d_str) == 7 and d_str.replace("-","").isdigit():
-            return f"{d_str}-01"
-        if len(d_str) >= 10:
-            return d_str[:10]
-        return None
+        if isinstance(d, str):
+            d_str = d.strip()
+            if len(d_str) == 4 and d_str.isdigit():
+                return f"{d_str}-01-01"
+            if len(d_str) == 7 and d_str.replace("-","").isdigit():
+                return f"{d_str}-01"
+            if len(d_str) >= 10:
+                return d_str[:10]
+            return None
+        # If it's date object, return ISO string
+        return d.isoformat()
+
+    TYPE_PRIORITY = {
+        "single": 1,
+        "ep": 2,
+        "album": 3,
+        "compilation": 4,
+        "other": 5, 
+        "live": 6
+    }
+    
+    def get_type_priority(t_str):
+        if not t_str:
+            return 5 # Treat None as 'other'
+        t_lower = t_str.lower()
+        return TYPE_PRIORITY.get(t_lower, 5) # Default to 5 (Other)
 
     best_score = 0
     best_match = None
     best_date = None
+    best_priority = 100 # Lower is better
 
     for row in candidates:
-        cid, ctitle, calbum, cseconds, cmb_track_id, cmb_release_track_id, cdate = row
+        cid, ctitle, calbum, cseconds, cmb_track_id, cmb_release_track_id, cdate, ctype = row
 
         total_weight = 0.6
         current_score = 0
@@ -96,19 +118,36 @@ async def match_track_to_library(db, artist_mbid, track_name, album_name=None, e
 
         final_score = current_score / total_weight
         norm_date = normalize_date(cdate)
+        priority = get_type_priority(ctype)
 
-        if final_score > best_score:
+        # Logic: 
+        # 1. Higher Score wins
+        # 2. Tie (< 0.001 diff):
+        #    a. Lower Priority wins (Single < Album)
+        #    b. Same Priority: Earlier Date wins
+        
+        if final_score > (best_score + 0.001):
+            # Clearly better score
             best_score = final_score
             best_match = cid
             best_date = norm_date
-        elif abs(final_score - best_score) < 0.001 and best_score > 0:
-            if norm_date and best_date:
-                if norm_date < best_date:
-                    best_match = cid
-                    best_date = norm_date
-            elif norm_date and not best_date:
+            best_priority = priority
+        elif abs(final_score - best_score) <= 0.001 and best_score > 0:
+            # Check Priority
+            if priority < best_priority:
                 best_match = cid
                 best_date = norm_date
+                best_priority = priority
+                # Keep best_score as is (they are tied)
+            elif priority == best_priority:
+                # Check Date
+                if norm_date and best_date:
+                    if norm_date < best_date:
+                        best_match = cid
+                        best_date = norm_date
+                elif norm_date and not best_date:
+                     best_match = cid
+                     best_date = norm_date
 
     if best_score > 0.75:
         return best_match
@@ -349,8 +388,7 @@ class Scanner:
                 "album_artist": tags.get("album_artist"),
                 "track_no": tags.get("track_no"),
                 "disc_no": tags.get("disc_no"),
-                "date": tags.get("date"),
-                "genre": tags.get("genre"),
+                "release_date": tags.get("release_date"),
                 "duration_seconds": tags.get("duration_seconds"),
                 "codec": tags.get("codec"),
                 "sample_rate_hz": tags.get("sample_rate_hz"),
@@ -364,8 +402,13 @@ class Scanner:
                 "release_track_mbid": tags.get("release_track_mbid"),
                 "release_mbid": tags.get("release_mbid"),
                 "release_group_mbid": rg_mbid,
-                "artwork_id": artwork_id
+                "artwork_id": artwork_id,
+                "release_type": tags.get("release_type"),
+                "release_type_raw": tags.get("release_type_raw"),
+                "release_date_raw": tags.get("release_date_raw"),
+                "release_date_tag": tags.get("release_date_tag"),
             }
+
 
             keys = list(cols.keys())
             vals = list(cols.values())
@@ -392,14 +435,19 @@ class Scanner:
                     await upsert_image_mapping(db, artwork_id, "track", track_id, "album")
 
             # Update Album and Artists
+            # Update Album and Artists
             if rg_mbid:
+                # Sync album date/type with track
                 await db.execute("""
-                    INSERT INTO album (mbid, title, release_date, secondary_types, artwork_id, updated_at)
-                    VALUES ($1, $2, $3, 'Album', $4, NOW())
+                    INSERT INTO album (mbid, title, release_date, release_type, release_type_raw, artwork_id, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, NOW())
                     ON CONFLICT(mbid) DO UPDATE SET 
                         title=COALESCE(excluded.title, album.title),
+                        release_date=excluded.release_date,
+                        release_type=excluded.release_type,
+                        release_type_raw=excluded.release_type_raw,
                         updated_at=NOW()
-                """, rg_mbid, tags.get("album"), tags.get("date"), artwork_id)
+                """, rg_mbid, tags.get("album"), tags.get("release_date"), tags.get("release_type"), tags.get("release_type_raw"), artwork_id)
                 get_api_tracker().track_processed("albums", rg_mbid)
                 
             await self._process_track_artists(db, track_id, tags, artist_mbids, rg_mbid)

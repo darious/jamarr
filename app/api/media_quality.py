@@ -89,24 +89,33 @@ async def get_media_quality_items(
                 f"{tbl}.artwork_id NOT IN (SELECT id FROM artwork WHERE source ILIKE '%fanart%' OR source ILIKE '%spotify%')"
             )
 
-    elif filter_type == "link_type":
-        if filter_value:
-            # sanitize filter_value or use parameter? Since we're building a string query part,
-            # we should be careful. But strictly speaking filter_value comes from frontend.
-            # Let's use parameters for safety.
-            idx = len(params) + 1
-            where_clauses.append(
-                f"{tbl}.mbid IN (SELECT entity_id FROM external_link WHERE type=${idx} AND entity_type=CASE WHEN '{category}'='album' THEN 'album' ELSE 'artist' END)"
-            )
-            params.append(filter_value)
-
     elif filter_type == "missing_link_type":
         if filter_value:
-            idx = len(params) + 1
-            where_clauses.append(
-                f"{tbl}.mbid NOT IN (SELECT entity_id FROM external_link WHERE type=${idx} AND entity_type=CASE WHEN '{category}'='album' THEN 'album' ELSE 'artist' END)"
-            )
-            params.append(filter_value)
+            # Handle special metadata filters that reuse the link UI
+            if filter_value == "release type":
+                where_clauses.append(f"{tbl}.release_type_raw = '<none>'")
+            elif filter_value == "release date":
+                where_clauses.append(f"{tbl}.release_date IS NULL")
+            else:
+                idx = len(params) + 1
+                where_clauses.append(
+                    f"{tbl}.mbid NOT IN (SELECT entity_id FROM external_link WHERE type=${idx} AND entity_type=CASE WHEN '{category}'='album' THEN 'album' ELSE 'artist' END)"
+                )
+                params.append(filter_value)
+    
+    elif filter_type == "link_type":
+        if filter_value:
+            if filter_value == "release type":
+                where_clauses.append(f"{tbl}.release_type_raw != '<none>'")
+            elif filter_value == "release date":
+                where_clauses.append(f"{tbl}.release_date IS NOT NULL")
+            else:
+                idx = len(params) + 1
+                where_clauses.append(
+                    f"{tbl}.mbid IN (SELECT entity_id FROM external_link WHERE type=${idx} AND entity_type=CASE WHEN '{category}'='album' THEN 'album' ELSE 'artist' END)"
+                )
+                params.append(filter_value)
+
 
     # Construct final SQL
     if where_clauses:
@@ -235,6 +244,20 @@ async def media_quality_summary(db: asyncpg.Connection = Depends(get_db)):
     """)
     for row in rows:
         stats["album_stats"]["link_stats"][row["type"]] = row["count"]
+
+    # Add Metadata Stats (Release Type, Release Date) disguised as links for UI compatibility
+    # Count PRESENT items, so the UI calculates MISSING correctly (Total - Present)
+    
+    # Release Date Present
+    stats["album_stats"]["link_stats"]["release date"] = await db.fetchval(
+        "SELECT COUNT(*) FROM album WHERE release_date IS NOT NULL"
+    )
+    
+    # Release Type Present (NOT <none> and NOT NULL)
+    stats["album_stats"]["link_stats"]["release type"] = await db.fetchval(
+        "SELECT COUNT(*) FROM album WHERE release_type_raw != '<none>'"
+    )
+
 
     return {
         "artist_stats": {"all": stats["all"], "primary": stats["primary"]},
