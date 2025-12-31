@@ -205,6 +205,7 @@ export type MetadataOptions = {
     refreshTopTracks?: boolean;
     refreshSingles?: boolean;
     fetchSimilarArtists?: boolean;
+    fetchAlbumMetadata?: boolean;
 };
 
 export async function triggerMetadataScan(opts: MetadataOptions & { path?: string } = {} as any): Promise<void> {
@@ -226,6 +227,7 @@ export async function triggerMetadataScan(opts: MetadataOptions & { path?: strin
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
             fetch_similar_artists: Boolean(opts.fetchSimilarArtists),
+            fetch_album_metadata: Boolean(opts.fetchAlbumMetadata),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger metadata scan');
@@ -256,6 +258,7 @@ export async function triggerFullScan(opts: { force?: boolean; path?: string } &
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
             fetch_similar_artists: Boolean(opts.fetchSimilarArtists),
+            fetch_album_metadata: Boolean(opts.fetchAlbumMetadata),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger full scan');

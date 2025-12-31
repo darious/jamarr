@@ -26,6 +26,7 @@ class ScanRequest(BaseModel):
     fetch_spotify_artwork: bool = False
     fetch_links: bool = False
     fetch_similar_artists: bool = False
+    fetch_album_metadata: bool = False
     prune: bool = True
 
 
@@ -58,6 +59,7 @@ async def trigger_scan(request: ScanRequest):
                 fetch_spotify_artwork=request.fetch_spotify_artwork,
                 fetch_links=request.fetch_links,
                 fetch_similar_artists=request.fetch_similar_artists,
+                fetch_album_metadata=request.fetch_album_metadata,
             )
             return {"message": "Metadata update started"}
 
@@ -78,6 +80,7 @@ async def trigger_scan(request: ScanRequest):
                 fetch_links=request.fetch_links,
                 prune=request.prune,
                 fetch_similar_artists=request.fetch_similar_artists,
+                fetch_album_metadata=request.fetch_album_metadata,
             )
             return {"message": "Full library refresh started"}
 

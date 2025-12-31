@@ -201,7 +201,7 @@ async def _save_artwork_to_disk(data: bytes) -> str:
 
 
 async def download_and_save_artwork(
-    url: str, art_type: str = "artistthumb"
+    url: str, art_type: str = "artistthumb", client: httpx.AsyncClient = None
 ) -> Optional[Dict[str, Any]]:
     """
     Download artwork from URL and save to cache.
@@ -209,17 +209,27 @@ async def download_and_save_artwork(
     Args:
         url: URL of the image to download
         art_type: semantic role (kept for compatibility; not used for path)
+        client: Optional httpx client to use (if not provided, creates a new one)
 
     Returns:
         Dict with SHA1 hash, metadata, and source URL, or None if download failed
     """
     try:
-        async with httpx.AsyncClient() as client:
+        if client:
+            # Use provided client (shared client from scanner)
             resp = await client.get(url, follow_redirects=True, timeout=30.0)
             if resp.status_code == 200:
                 data = resp.content
                 sha1, meta = await _save_artwork_to_disk(data)
                 return {"sha1": sha1, "meta": meta, "source_url": str(resp.url)}
+        else:
+            # Fallback: create temporary client (for standalone usage)
+            async with httpx.AsyncClient() as temp_client:
+                resp = await temp_client.get(url, follow_redirects=True, timeout=30.0)
+                if resp.status_code == 200:
+                    data = resp.content
+                    sha1, meta = await _save_artwork_to_disk(data)
+                    return {"sha1": sha1, "meta": meta, "source_url": str(resp.url)}
     except Exception as e:
         print(f"Failed to download artwork from {url}: {e}")
         return None
