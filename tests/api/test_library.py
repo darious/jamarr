@@ -38,11 +38,11 @@ async def library_data(db):
     # Tracks
     # Schema has 'artwork_id'
     await db.execute("""
-        INSERT INTO track (path, title, artist, album, duration_seconds, track_no, disc_no, artist_mbid, album_artist_mbid, release_group_mbid, date, artwork_id)
+        INSERT INTO track (path, title, artist, album, duration_seconds, track_no, disc_no, artist_mbid, album_artist_mbid, release_group_mbid, release_date, artwork_id)
         VALUES 
-            ('/music/test1.flac', 'Track One', 'The Testers', 'Test Album', 180, 1, 1, 'artist-1', 'artist-1', 'album-1', '2023', 201),
-            ('/music/test2.flac', 'Track Two', 'The Testers', 'Test Album', 200, 2, 1, 'artist-1', 'artist-1', 'album-1', '2023', 201),
-            ('/music/test3.flac', 'Solo Hit', 'Solo Guy', 'Single Hit', 210, 1, 1, 'artist-2', 'artist-2', 'album-2', '2023', NULL)
+            ('/music/test1.flac', 'Track One', 'The Testers', 'Test Album', 180, 1, 1, 'artist-1', 'artist-1', 'album-1', '2023-01-01', 201),
+            ('/music/test2.flac', 'Track Two', 'The Testers', 'Test Album', 200, 2, 1, 'artist-1', 'artist-1', 'album-1', '2023-01-01', 201),
+            ('/music/test3.flac', 'Solo Hit', 'Solo Guy', 'Single Hit', 210, 1, 1, 'artist-2', 'artist-2', 'album-2', '2023-01-01', NULL)
     """)
     # Track-Artist Relations
     row1 = await db.fetchrow("SELECT id FROM track WHERE title = 'Track One'")
