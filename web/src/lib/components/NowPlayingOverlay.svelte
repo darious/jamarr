@@ -53,9 +53,9 @@
   const getArt = (track: any, size: number = 0) => {
     if (!track) return "/assets/logo.png";
     if (track.art_sha1) {
-        return size > 0 
-           ? `/api/art/file/${track.art_sha1}?max_size=${size}`
-           : `/api/art/file/${track.art_sha1}`;
+      return size > 0
+        ? `/api/art/file/${track.art_sha1}?max_size=${size}`
+        : `/api/art/file/${track.art_sha1}`;
     }
     // Fallback if sha1 missing (shouldn't happen with backfill)
     if (track.art_id) return `/art/${track.art_id}`;
@@ -272,7 +272,10 @@
               </div>
               <div class="text-2xl text-white/80 truncate px-8 drop-shadow-md">
                 <a
-                  href={`/artist/${encodeURIComponent($playerState.queue[$playerState.current_index]?.artist || "")}`}
+                  href={$playerState.queue[$playerState.current_index]
+                    ?.artist_mbid
+                    ? `/artist/${$playerState.queue[$playerState.current_index]?.artist_mbid}`
+                    : `/artist/${encodeURIComponent($playerState.queue[$playerState.current_index]?.artist || "")}`}
                   class="hover:text-white hover:underline pointer-events-auto cursor-pointer"
                   on:click|stopPropagation={() => nowPlayingVisible.set(false)}
                 >
@@ -282,7 +285,10 @@
               </div>
               <div class="text-lg text-white/60 truncate px-8 drop-shadow-md">
                 <a
-                  href={`/album/${encodeURIComponent($playerState.queue[$playerState.current_index]?.artist || "")}/${encodeURIComponent($playerState.queue[$playerState.current_index]?.album || "")}`}
+                  href={$playerState.queue[$playerState.current_index]
+                    ?.album_mbid
+                    ? `/album/${$playerState.queue[$playerState.current_index]?.album_mbid}`
+                    : `/album/${encodeURIComponent($playerState.queue[$playerState.current_index]?.artist || "")}/${encodeURIComponent($playerState.queue[$playerState.current_index]?.album || "")}`}
                   class="hover:text-white hover:underline pointer-events-auto cursor-pointer"
                   on:click|stopPropagation={() => nowPlayingVisible.set(false)}
                 >
@@ -459,7 +465,9 @@
                             class="text-xs text-white/60 truncate max-w-[60%] flex gap-1 items-center"
                           >
                             <a
-                              href={`/artist/${encodeURIComponent(track.artist)}`}
+                              href={track.artist_mbid
+                                ? `/artist/${track.artist_mbid}`
+                                : `/artist/${encodeURIComponent(track.artist)}`}
                               class="hover:text-white hover:underline"
                               on:click|stopPropagation={() =>
                                 nowPlayingVisible.set(false)}
@@ -468,7 +476,9 @@
                             </a>
                             <span>•</span>
                             <a
-                              href={`/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album || "")}`}
+                              href={track.album_mbid
+                                ? `/album/${track.album_mbid}`
+                                : `/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album || "")}`}
                               class="hover:text-white hover:underline"
                               on:click|stopPropagation={() =>
                                 nowPlayingVisible.set(false)}

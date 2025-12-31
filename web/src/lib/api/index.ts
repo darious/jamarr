@@ -33,6 +33,7 @@ export interface Artist {
         duration_seconds?: number | null;
         art_id?: number | null;
         art_sha1?: string | null;
+        album_mbid?: string | null;
     }[];
     singles?: {
         mbid: string;
@@ -46,6 +47,7 @@ export interface Artist {
         art_id?: number | null;
         art_sha1?: string | null;
         album?: string;
+        album_mbid?: string | null;
         popularity?: number;
     }[];
     sort_name: string;
@@ -73,9 +75,11 @@ export interface Artist {
 export interface Album {
     album: string;
     mbid?: string;
+    album_mbid?: string;
     art_id: number | null;
     art_sha1?: string | null;
     artist_name: string;
+    artist_mbid?: string;
     is_hires: number;
     year: string | null;
     track_count: number;
@@ -84,6 +88,10 @@ export interface Album {
     mb_release_id?: string;
     musicbrainz_url?: string;
     release_type?: string;
+    description?: string;
+    peak_chart_position?: number;
+    label?: string;
+    external_links?: { type: string; url: string }[];
 }
 
 export interface Track {
@@ -105,6 +113,9 @@ export interface Track {
     bit_depth: number | null;
     mb_release_id?: string | null;
     mb_release_group_id?: string | null;
+    artist_mbid?: string | null;
+    album_artist_mbid?: string | null;
+    album_mbid?: string | null;
     popularity?: number;
 }
 
@@ -132,16 +143,25 @@ export async function fetchArtists(
     return await res.json();
 }
 
-export async function fetchAlbums(params: { artist?: string; albumMbid?: string } = {}, fetchFn: any = fetch): Promise<Album[]> {
+export async function fetchAlbums(params: { artist?: string; artistMbid?: string; albumMbid?: string } = {}, fetchFn: any = fetch): Promise<Album[]> {
     let url = '/api/albums';
+    const query = new URLSearchParams();
+
     if (params.artist) {
-        url += `?artist=${encodeURIComponent(params.artist)}`;
+        query.append('artist', params.artist);
     }
-    // Support album MBID query
-    if ((params as any).albumMbid) {
-        const q = params.artist ? '&' : '?';
-        url += `${q}album_mbid=${encodeURIComponent((params as any).albumMbid)}`;
+    if (params.artistMbid) {
+        query.append('artist_mbid', params.artistMbid);
     }
+    if (params.albumMbid) {
+        query.append('album_mbid', params.albumMbid);
+    }
+
+    const queryString = query.toString();
+    if (queryString) {
+        url += `?${queryString}`;
+    }
+
     const res = await fetchFn(url);
     if (!res.ok) throw new Error('Failed to fetch albums');
     return await res.json();
@@ -205,6 +225,7 @@ export type MetadataOptions = {
     refreshTopTracks?: boolean;
     refreshSingles?: boolean;
     fetchSimilarArtists?: boolean;
+    fetchAlbumMetadata?: boolean;
 };
 
 export async function triggerMetadataScan(opts: MetadataOptions & { path?: string } = {} as any): Promise<void> {
@@ -226,6 +247,7 @@ export async function triggerMetadataScan(opts: MetadataOptions & { path?: strin
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
             fetch_similar_artists: Boolean(opts.fetchSimilarArtists),
+            fetch_album_metadata: Boolean(opts.fetchAlbumMetadata),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger metadata scan');
@@ -256,6 +278,7 @@ export async function triggerFullScan(opts: { force?: boolean; path?: string } &
             refresh_top_tracks: Boolean(opts.refreshTopTracks),
             refresh_singles: Boolean(opts.refreshSingles),
             fetch_similar_artists: Boolean(opts.fetchSimilarArtists),
+            fetch_album_metadata: Boolean(opts.fetchAlbumMetadata),
         })
     });
     if (!res.ok) throw new Error('Failed to trigger full scan');
@@ -481,6 +504,8 @@ export interface PlaylistTrack {
     duration_seconds: number;
     art_sha1: string | null;
     art_id: number | null;
+    artist_mbid?: string | null;
+    album_mbid?: string | null;
     path: string;
     codec?: string;
     sample_rate_hz?: number;

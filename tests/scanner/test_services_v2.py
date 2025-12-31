@@ -54,7 +54,7 @@ async def test_coordinator_process_artist_basic(mock_db, mock_mb, mock_lfm, mock
         "fetch_bio": False
     }
     
-    with patch("app.scanner.services.coordinator.get_client") as mock_client:
+    with patch("app.scanner.services.coordinator.get_shared_client") as mock_client:
         mock_client.return_value.__aenter__.return_value = AsyncMock()
         
         # Don't try to mock download_and_save_artwork here unless we verified it works.
@@ -86,7 +86,7 @@ async def test_coordinator_missing_only_skip(mock_db, mock_mb, mock_art):
         "fetch_artwork": True
     }
     
-    with patch("app.scanner.services.coordinator.get_client") as mock_client:
+    with patch("app.scanner.services.coordinator.get_shared_client") as mock_client:
         mock_client.return_value.__aenter__.return_value = AsyncMock()
         
         task = coord.process_artist(artist, options, set())
@@ -138,7 +138,7 @@ async def test_coordinator_db_save(mock_db, mock_mb, mock_art):
         artists = [{"mbid": "123", "name": "A"}]
         options = {"fetch_metadata": True}
         
-        with patch("app.scanner.services.coordinator.get_client"):
+        with patch("app.scanner.services.coordinator.get_shared_client"):
             with patch("app.scanner.services.coordinator.download_and_save_artwork", new_callable=AsyncMock) as mock_dl:
                  mock_dl.return_value = None
                  await coord.update_metadata(artists, options)
@@ -168,13 +168,13 @@ async def test_coordinator_skips_mb_core_when_only_toptracks_similar_singles(moc
         "missing_only": False,
     }
 
-    with patch("app.scanner.services.coordinator.musicbrainz.fetch_core", new_callable=AsyncMock) as mock_core, \
-         patch("app.scanner.services.coordinator.musicbrainz.fetch_release_groups", new_callable=AsyncMock, return_value=[]) as mock_rg, \
-         patch("app.scanner.services.coordinator.lastfm.fetch_top_tracks", new_callable=AsyncMock, return_value=[]) as mock_top, \
-         patch("app.scanner.services.coordinator.lastfm.fetch_similar_artists", new_callable=AsyncMock, return_value=[]) as mock_sim, \
-         patch("app.scanner.services.coordinator.lastfm.fetch_artist_url", new_callable=AsyncMock, return_value=None) as mock_url, \
-         patch("app.scanner.services.coordinator.artwork.fetch_fanart_artist_images", new_callable=AsyncMock, return_value={}) as mock_fanart, \
-         patch("app.scanner.services.coordinator.get_client") as mock_client:
+    with patch("app.scanner.services.musicbrainz.fetch_core", new_callable=AsyncMock) as mock_core, \
+         patch("app.scanner.services.musicbrainz.fetch_release_groups", new_callable=AsyncMock, return_value=[]) as mock_rg, \
+         patch("app.scanner.services.lastfm.fetch_top_tracks", new_callable=AsyncMock, return_value=[]) as mock_top, \
+         patch("app.scanner.services.lastfm.fetch_similar_artists", new_callable=AsyncMock, return_value=[]) as mock_sim, \
+         patch("app.scanner.services.lastfm.fetch_artist_url", new_callable=AsyncMock, return_value=None) as mock_url, \
+         patch("app.scanner.services.artwork.fetch_fanart_artist_images", new_callable=AsyncMock, return_value={}) as mock_fanart, \
+         patch("app.scanner.services.coordinator.get_shared_client") as mock_client:
         mock_client.return_value.__aenter__.return_value = AsyncMock()
 
         coord = MetadataCoordinator(mock_db)
@@ -201,9 +201,9 @@ async def test_missing_only_skips_toptracks_when_present(mock_db):
         "refresh_top_tracks": True,
     }
 
-    with patch("app.scanner.services.coordinator.musicbrainz.fetch_core", new_callable=AsyncMock) as mock_core, \
-         patch("app.scanner.services.coordinator.lastfm.fetch_top_tracks", new_callable=AsyncMock, return_value=[]) as mock_top, \
-         patch("app.scanner.services.coordinator.get_client") as mock_client:
+    with patch("app.scanner.services.musicbrainz.fetch_core", new_callable=AsyncMock) as mock_core, \
+         patch("app.scanner.services.lastfm.fetch_top_tracks", new_callable=AsyncMock, return_value=[]) as mock_top, \
+         patch("app.scanner.services.coordinator.get_shared_client") as mock_client:
         mock_client.return_value.__aenter__.return_value = AsyncMock()
 
         coord = MetadataCoordinator()
@@ -221,9 +221,9 @@ async def test_spotify_fallback_only_when_fanart_empty(mock_db):
     artist = {"mbid": "123", "name": "Test", "spotify_url": "https://open.spotify.com/artist/sp123"}
     options = {"fetch_artwork": False, "fetch_spotify_artwork": True}
 
-    with patch("app.scanner.services.coordinator.get_client") as mock_client, \
-         patch("app.scanner.services.coordinator.artwork.fetch_fanart_artist_images", new_callable=AsyncMock, return_value={"image_url": "http://fanart"}), \
-         patch("app.scanner.services.coordinator.artwork.fetch_spotify_artist_images", new_callable=AsyncMock, return_value="http://spotify") as mock_spotify:
+    with patch("app.scanner.services.coordinator.get_shared_client") as mock_client, \
+         patch("app.scanner.services.artwork.fetch_fanart_artist_images", new_callable=AsyncMock, return_value={"image_url": "http://fanart"}), \
+         patch("app.scanner.services.artwork.fetch_spotify_artist_images", new_callable=AsyncMock, return_value="http://spotify") as mock_spotify:
         mock_client.return_value.__aenter__.return_value = AsyncMock()
 
         coord = MetadataCoordinator()
@@ -232,9 +232,9 @@ async def test_spotify_fallback_only_when_fanart_empty(mock_db):
         assert updates.get("image_url") == "http://fanart"
         mock_spotify.assert_not_awaited()
 
-    with patch("app.scanner.services.coordinator.get_client") as mock_client, \
-         patch("app.scanner.services.coordinator.artwork.fetch_fanart_artist_images", new_callable=AsyncMock, return_value={}), \
-         patch("app.scanner.services.coordinator.artwork.fetch_spotify_artist_images", new_callable=AsyncMock, return_value="http://spotify") as mock_spotify:
+    with patch("app.scanner.services.coordinator.get_shared_client") as mock_client, \
+         patch("app.scanner.services.artwork.fetch_fanart_artist_images", new_callable=AsyncMock, return_value={}), \
+         patch("app.scanner.services.artwork.fetch_spotify_artist_images", new_callable=AsyncMock, return_value="http://spotify") as mock_spotify:
         mock_client.return_value.__aenter__.return_value = AsyncMock()
 
         coord = MetadataCoordinator()
@@ -249,8 +249,8 @@ async def test_fanart_background_saved_and_mapped(mock_db):
     artist = {"mbid": "123", "name": "Test"}
     options = {"fetch_artwork": True}
 
-    with patch("app.scanner.services.coordinator.get_client") as mock_client, \
-         patch("app.scanner.services.coordinator.artwork.fetch_fanart_artist_images", new_callable=AsyncMock, return_value={"thumb": "http://thumb", "background": "http://bg"}), \
+    with patch("app.scanner.services.coordinator.get_shared_client") as mock_client, \
+         patch("app.scanner.services.artwork.fetch_fanart_artist_images", new_callable=AsyncMock, return_value={"thumb": "http://thumb", "background": "http://bg"}), \
          patch("app.scanner.services.coordinator.download_and_save_artwork", new_callable=AsyncMock, side_effect=[{"sha1": "thumbsha", "meta": {}}, {"sha1": "bgsha", "meta": {}}]), \
          patch("app.scanner.services.coordinator.upsert_artwork_record", new_callable=AsyncMock, side_effect=[11, 22]) as mock_upsert_art, \
          patch("app.scanner.services.coordinator.upsert_image_mapping", new_callable=AsyncMock) as mock_map:

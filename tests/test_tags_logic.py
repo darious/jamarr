@@ -13,7 +13,8 @@ def test_normalize_release_type():
     # New rule: live wins. So this is no longer "album" in the "Album cases" block, strictly speaking.
     # But let's leave simple album cases here.
     assert _normalize_release_type("experimental;album") == "album"
-    assert _normalize_release_type("album; compilation") == "album"
+    assert _normalize_release_type("compilation") == "compilation"
+    assert _normalize_release_type("album; compilation") == "compilation"
 
     # Live cases
     assert _normalize_release_type("live") == "live"
@@ -28,7 +29,7 @@ def test_normalize_release_type():
     assert _normalize_release_type("remix") == "compilation"
     assert _normalize_release_type("dj-mix") == "compilation"
     assert _normalize_release_type("mixtape/street") == "compilation"
-    assert _normalize_release_type("demo") == "compilation"
+    assert _normalize_release_type("demo") == "album"
 
     # EP
     assert _normalize_release_type("ep") == "ep"
@@ -38,8 +39,8 @@ def test_normalize_release_type():
     assert _normalize_release_type("single") == "single"
     
     # Other / Fallback
-    assert _normalize_release_type("bootleg") == "other"
-    assert _normalize_release_type("unknown") == "other"
+    assert _normalize_release_type("bootleg") == "album"
+    assert _normalize_release_type("unknown") == "album"
     
     # Empty / None
     assert _normalize_release_type(None) == "album"

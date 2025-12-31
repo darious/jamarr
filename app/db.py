@@ -117,17 +117,26 @@ async def init_db():
             
             -- Album table
             CREATE TABLE IF NOT EXISTS album (
-                mbid TEXT PRIMARY KEY,
+                mbid TEXT PRIMARY KEY, -- Release ID
+                release_group_mbid TEXT, -- Release Group ID
                 title TEXT,
 
                 release_date DATE,
                 release_type TEXT,
                 release_type_raw TEXT,
                 artwork_id BIGINT,
+                description TEXT,
+                peak_chart_position INTEGER,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
             
-            -- Artist-Album junction
+            -- Manual auto-migration for existing DBs
+            ALTER TABLE track ADD COLUMN IF NOT EXISTS size_bytes BIGINT;
+            ALTER TABLE track ADD COLUMN IF NOT EXISTS quick_hash BYTEA;
+            ALTER TABLE track ADD COLUMN IF NOT EXISTS mtime DOUBLE PRECISION;
+            ALTER TABLE album ADD COLUMN IF NOT EXISTS description TEXT;
+            ALTER TABLE album ADD COLUMN IF NOT EXISTS peak_chart_position INTEGER;
+            ALTER TABLE album ADD COLUMN IF NOT EXISTS release_group_mbid TEXT;
             CREATE TABLE IF NOT EXISTS artist_album (
                 artist_mbid TEXT,
                 album_mbid TEXT,

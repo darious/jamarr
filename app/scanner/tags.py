@@ -164,45 +164,54 @@ def _parse_int(val):
 
 def _normalize_release_type(raw_type):
     if not raw_type:
-        return "album" # Default fallback
-    
+        return "album"  # Default fallback
+
     # 1. Tokenization
     tokens = [t.strip().lower() for t in raw_type.split(";")]
-    tokens = [t for t in tokens if t] # Filter empty
-    
+    tokens = [t for t in tokens if t]  # Filter empty
+
     if not tokens:
         return "album"
 
-    # 2. Mapping Rules (First match wins)
-    
-    # Live (Prioritized over album as per user request)
+    # 2. Mapping Rules (Priority Order)
+
+    # Strong Compilation Indicators
+    # "album; compilation" -> compilation
+    # "album; soundtrack" -> compilation
+    compilation_tokens = {"compilation", "soundtrack", "mixtape/street", "dj-mix"}
+    for t in tokens:
+        if t in compilation_tokens:
+            return "compilation"
+
+    # Live (Prioritized over remix, album, etc)
+    # "album; live; remix" -> live
     for t in tokens:
         if t == "live":
             return "live"
-    
-    # Album: album, album+*
-    for t in tokens:
-        if t == "album" or t.startswith("album"):
-            return "album"
 
-    # Compilation
-    comp_tokens = {"compilation", "soundtrack", "remix", "dj-mix", "mixtape/street", "demo", "spokenword"}
+    # Weak Compilation Indicators (Remix)
+    # "album; remix" -> compilation
     for t in tokens:
-        if t in comp_tokens:
+        if t == "remix":
             return "compilation"
-            
-    # EP
+
+    # Other
     for t in tokens:
-        if t == "ep":
-            return "ep"
-            
+        if t == "spokenword":
+            return "other"
+
     # Single
     for t in tokens:
         if t == "single":
             return "single"
-            
-    # Other (if we have tokens but none matched above)
-    return "other"
+
+    # EP
+    for t in tokens:
+        if t == "ep":
+            return "ep"
+
+    # Fallback (includes "album", "demo", etc)
+    return "album"
 
 
 def _parse_date_strict(f, basic_tags):

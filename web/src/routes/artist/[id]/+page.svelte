@@ -28,6 +28,7 @@
     albums: Album[];
     similarArtists: {
       name: string;
+      mbid?: string | null;
       art_id?: number | null;
       art_sha1?: string | null;
       in_library?: boolean;
@@ -200,6 +201,9 @@
             // CRITICAL: Preserve artwork from EITHER source (top track API or local track)
             art_id: t.art_id || local.art_id,
             art_sha1: t.art_sha1 || local.art_sha1,
+            // Ensure API's album_mbid is preferred if available (it comes from release_group_mbid in SQL)
+            album_mbid:
+              t.album_mbid || local.album_mbid || local.mb_release_group_id,
           };
         } else {
           // Fallback if track not loaded yet - use API data
@@ -218,6 +222,7 @@
               (t.duration_ms ? Math.round(t.duration_ms / 1000) : 0),
             art_id: t.art_id || null,
             art_sha1: t.art_sha1 || null,
+            album_mbid: t.album_mbid, // Use API data directly
             codec: t.codec || null,
             bitrate: null,
             sample_rate_hz: t.sample_rate_hz || null,
@@ -302,6 +307,7 @@
           art_id,
           art_sha1,
           navAlbum,
+          album_mbid: s.album_mbid,
           ...techData,
           tracksToPlay,
         };
@@ -466,9 +472,13 @@
     if (albumTracks.length) {
       await setQueue(albumTracks, 0);
     } else {
-      goto(
-        `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-      );
+      const albumId =
+        (album as any).mbid || (album as any).album_mbid || album.mb_release_id;
+      if (albumId) {
+        goto(`/album/${albumId}`);
+      } else {
+        console.error("No album ID available for navigation", album);
+      }
     }
   }
 
@@ -684,8 +694,8 @@
               <button
                 class="group w-24 text-center space-y-2"
                 on:click|stopPropagation={() => {
-                  if (sim.in_library) {
-                    goto(`/artist/${encodeURIComponent(sim.name)}`);
+                  if (sim.in_library && sim.mbid) {
+                    goto(`/artist/${sim.mbid}`);
                   } else if (sim.external_url) {
                     window.open(sim.external_url, "_blank");
                   }
@@ -776,10 +786,11 @@
                 <article class="group flex flex-col gap-4">
                   <button
                     class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
-                    on:click={() =>
-                      goto(
-                        `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-                      )}
+                    on:click={() => {
+                      const albumId =
+                        album.mbid || album.album_mbid || album.mb_release_id;
+                      if (albumId) goto(`/album/${albumId}`);
+                    }}
                   >
                     <img
                       src={album.art_sha1
@@ -933,7 +944,15 @@
                     <div
                       class="flex items-center gap-2 text-sm text-white/60 truncate"
                     >
-                      <span class="truncate">{track.album || "—"}</span>
+                      <a
+                        href={track.album_mbid
+                          ? `/album/${track.album_mbid}`
+                          : `/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(track.album || "")}`}
+                        class="truncate hover:text-white hover:underline cursor-pointer"
+                        on:click|stopPropagation={() => {}}
+                      >
+                        {track.album || "—"}
+                      </a>
                       {#if track.popularity}
                         <span class="opacity-50">•</span>
                         <span class="text-white/50"
@@ -1107,7 +1126,15 @@
                     <div
                       class="flex items-center gap-2 text-sm text-white/60 truncate"
                     >
-                      <span class="truncate">{single.album || "—"}</span>
+                      <a
+                        href={single.album_mbid
+                          ? `/album/${single.album_mbid}`
+                          : `/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(single.album || "")}`}
+                        class="truncate hover:text-white hover:underline cursor-pointer"
+                        on:click|stopPropagation={() => {}}
+                      >
+                        {single.album || "—"}
+                      </a>
                       {#if single.popularity}
                         <span class="opacity-50">•</span>
                         <span class="text-white/50"
