@@ -81,6 +81,9 @@
                     artwork_id: t.art_id,
                     path: t.path,
                     art_sha1: t.art_sha1,
+                    codec: t.codec,
+                    bit_depth: t.bit_depth,
+                    sample_rate_hz: t.sample_rate_hz,
                 }));
                 await setQueue(
                     queueItems as unknown as import("$api").Track[],
@@ -107,6 +110,9 @@
                     artwork_id: t.art_id,
                     path: t.path,
                     art_sha1: t.art_sha1,
+                    codec: t.codec,
+                    bit_depth: t.bit_depth,
+                    sample_rate_hz: t.sample_rate_hz,
                 }));
                 await addToQueue(
                     queueItems as unknown as import("$api").Track[],
