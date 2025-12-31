@@ -270,7 +270,7 @@ class Track(BaseModel):
     album_artist: Optional[str] = None
     track_no: Optional[int] = None
     disc_no: Optional[int] = None
-    date: Optional[str] = None
+    release_date: Optional[str] = None
     bitrate: Optional[int] = None
     logged: bool = False
 
@@ -661,7 +661,7 @@ async def get_playback_history(
             SELECT 
                 h.id, h.timestamp, h.client_ip, h.client_id, h.user_id,
                 t.id, t.title, t.artist, t.album, t.artwork_id, t.duration_seconds,
-                t.codec, t.bit_depth, t.sample_rate_hz, t.date,
+                t.codec, t.bit_depth, t.sample_rate_hz, t.release_date,
                 u.username, u.display_name, u.email,
                 a.sha1 as art_sha1
             FROM playback_history h
@@ -700,7 +700,7 @@ async def get_playback_history(
                         "codec": row[11],
                         "bit_depth": row[12],
                         "sample_rate_hz": row[13],
-                        "date": row[14],
+                        "release_date": row[14],
                     },
                 }
             )

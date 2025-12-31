@@ -72,8 +72,12 @@ async def init_db():
                 album_artist TEXT,
                 track_no INTEGER,
                 disc_no INTEGER,
-                date TEXT,
-                genre TEXT,
+
+                release_date DATE,
+                release_type TEXT,
+                release_type_raw TEXT,
+                release_date_raw TEXT,
+                release_date_tag TEXT,
                 duration_seconds DOUBLE PRECISION,
                 codec TEXT,
                 sample_rate_hz INTEGER,
@@ -115,9 +119,10 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS album (
                 mbid TEXT PRIMARY KEY,
                 title TEXT,
-                release_date TEXT,
-                primary_type TEXT,
-                secondary_types TEXT,
+
+                release_date DATE,
+                release_type TEXT,
+                release_type_raw TEXT,
                 artwork_id BIGINT,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );

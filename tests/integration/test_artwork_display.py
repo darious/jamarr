@@ -26,7 +26,7 @@ async def test_homepage_new_releases_artwork(client: AsyncClient, db, auth_token
     await db.execute("""
         INSERT INTO track (
             path, title, artist, album, album_artist, 
-            track_no, disc_no, date, duration_seconds, 
+            track_no, disc_no, release_date, duration_seconds, 
             artwork_id, updated_at
         ) VALUES (
             '/music/test.mp3', 'Test Track', 'Test Artist', 'Test Album', 'Test Artist',
