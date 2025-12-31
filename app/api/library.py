@@ -341,6 +341,7 @@ async def get_albums(
             SUM(t.duration_seconds) as total_duration,
             MAX(t.release_mbid) as release_mbid,
             MAX(COALESCE(al_rg.mbid, al_title.mbid)) as album_mbid,
+            MAX(COALESCE(al_rg.release_type, al_title.release_type)) as release_type,
             MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as mb_link,
             MAX(CASE 
                 WHEN $1::text IS NOT NULL AND (t.album_artist_mbid LIKE $1 || '%' OR t.album_artist_mbid = $1) THEN 'main'

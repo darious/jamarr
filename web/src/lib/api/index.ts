@@ -81,6 +81,7 @@ export interface Album {
     type: 'main' | 'appears_on';
     mb_release_id?: string;
     musicbrainz_url?: string;
+    release_type?: string;
 }
 
 export interface Track {
