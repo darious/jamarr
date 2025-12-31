@@ -46,6 +46,7 @@ export interface Artist {
         art_id?: number | null;
         art_sha1?: string | null;
         album?: string;
+        popularity?: number;
     }[];
     sort_name: string;
     primary_album_count?: number;
