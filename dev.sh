@@ -2,10 +2,20 @@
 # Development mode startup script
 # This starts all services with hot-reload enabled
 
-set -e
+set -euo pipefail
 
-# Get server IP from docker-compose.yml
-SERVER_IP=$(grep "HOST_IP=" docker-compose.yml | cut -d'=' -f2 | cut -d'#' -f1 | tr -d ' ')
+# Derive HOST_IP via internal route to DNS server (192.168.0.11) unless provided
+if [[ -z "${HOST_IP:-}" ]]; then
+  HOST_IP="$(ip route get 192.168.0.11 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
+fi
+
+if [[ -z "${HOST_IP:-}" ]]; then
+  echo "Unable to determine HOST_IP (tried route to 192.168.0.11). Set HOST_IP manually and retry." >&2
+  exit 1
+fi
+
+export HOST_IP
+SERVER_IP="${HOST_IP}"
 
 echo "🚀 Starting Jamarr in development mode..."
 echo ""
