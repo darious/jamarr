@@ -147,6 +147,31 @@ async def test_get_albums_appears_on(client: AsyncClient, db, library_data):
     assert appears_album["type"] == "appears_on"
 
 @pytest.mark.asyncio
+async def test_get_albums_release_type(client: AsyncClient, db, library_data):
+    # Update title "Test Album" to have release_type='EP' in the album table
+    # Schema check: does album table have 'release_type'?
+    # Assuming yes based on user input.
+    # Note: album table insertion in library_data fixture didn't specify release_type, so it defaults to NULL.
+    
+    # 1. Update existing album to be an EP
+    await db.execute("UPDATE album SET release_type = 'EP' WHERE title = 'Test Album'")
+    
+    # 2. Update existing album to be a Single
+    await db.execute("UPDATE album SET release_type = 'Single' WHERE title = 'Single Hit'")
+    
+    # 3. Query albums
+    response = await client.get("/api/albums")
+    assert response.status_code == 200
+    data = response.json()
+    
+    ep = next(a for a in data if a["album"] == "Test Album")
+    single = next(a for a in data if a["album"] == "Single Hit")
+    
+    # 4. Verify release_type
+    assert ep["release_type"] == "EP"
+    assert single["release_type"] == "Single"
+
+@pytest.mark.asyncio
 async def test_get_tracks(client: AsyncClient, db, library_data):
     # 1. List by Album
     response = await client.get("/api/tracks", params={"album": "Test Album"})
