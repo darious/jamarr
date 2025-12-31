@@ -2,9 +2,15 @@ import asyncio
 import logging
 from app.scanner.stats import get_api_tracker
 from app.db import get_pool
-from app.scanner.services.utils import get_client
-from app.scanner.services import musicbrainz, lastfm, artwork, wikidata, wikipedia
+from app.scanner.services import musicbrainz, lastfm, artwork, wikidata, wikipedia, album
+from app.scanner.core import get_shared_client
 from app.scanner.artwork import download_and_save_artwork, upsert_artwork_record, upsert_image_mapping
+
+# Global semaphore to limit concurrent DNS-heavy operations
+# This prevents overwhelming the DNS resolver with too many parallel requests
+_dns_semaphore = asyncio.Semaphore(3)  # Max 3 concurrent DNS operations (conservative)
+_dns_error_count = 0
+_dns_error_lock = asyncio.Lock()
 
 
 logger = logging.getLogger("scanner.coordinator")
@@ -26,6 +32,27 @@ class MetadataCoordinator:
 
         logger.info(f"Starting metadata update for {len(artists)} artists...")
         
+        # Helper failure fallback
+        if local_release_group_ids_map is None:
+             local_release_group_ids_map = {}
+             # Optimization: Fetch all RGs for these artists in one query if fetch_album_metadata is on
+             if options.get("fetch_album_metadata", False):
+                 mbids = [a["mbid"] for a in artists if a.get("mbid")]
+                 if mbids:
+                      q = """
+                      SELECT artist_mbid, array_agg(album_mbid) as rgs
+                      FROM artist_album 
+                      WHERE artist_mbid = ANY($1::text[]) 
+                      GROUP BY artist_mbid
+                      """
+                      try:
+                          async with self.pool.acquire() as db:
+                              rows = await db.fetch(q, mbids)
+                              for r in rows:
+                                  local_release_group_ids_map[r["artist_mbid"]] = set(r["rgs"])
+                      except Exception as e:
+                          logger.error(f"Failed to fetch local RGs: {e}")
+
         # Helper to get local RGs for an artist
         def get_local_rgs(mbid):
             if local_release_group_ids_map:
@@ -91,21 +118,13 @@ class MetadataCoordinator:
         
         fetch_tasks = []
         # Create shared client for this batch
-        async with get_client() as client:
-             # Redefine fetch_artist or just pass client? 
-             # Since fetch_artist is a closure, we can just access 'client' if we define it inside?
-             # But fetch_artist is defined above.
-             # Let's redefine fetch_artist inside the context or pass client to it.
-             # Easier to just change how we call process_artist inside fetch_artist.
+        fetch_tasks = []
+        # Use shared client
+        client = get_shared_client()
              
-             # Actually, simpler: define client before fetch_artist if possible, or pass it.
-             # But fetch_artist is called by asyncio.create_task list comp.
-             
-             # Let's just wrap the gathering.
-             
-             fetch_tasks = [asyncio.create_task(fetch_artist(a, client)) for a in artists if a.get("mbid")]
-             if fetch_tasks:
-                 await asyncio.gather(*fetch_tasks)
+        fetch_tasks = [asyncio.create_task(fetch_artist(a, client)) for a in artists if a.get("mbid")]
+        if fetch_tasks:
+            await asyncio.gather(*fetch_tasks)
         
         # Always signal writers to shut down (even if no artists processed)
         for _ in writer_tasks:
@@ -147,10 +166,17 @@ class MetadataCoordinator:
         fetch_singles = options.get("fetch_singles") or options.get("refresh_singles", False)
         fetch_similar_artists = options.get("fetch_similar_artists") or options.get("refresh_similar_artists", False)
         fetch_bio = options.get("fetch_bio", False)
+        fetch_album_details = options.get("fetch_album_metadata", False) # New Flag
         missing_only = options.get("missing_only", False)
 
         # Smart Skip if missing_only: only fetch branches that are missing data
         if missing_only:
+            # Album Metadata: Check if all local albums have description/chart pos?
+            # Implementation detail: We iterate local albums later. 
+            # We can't easily skip the *whole* artist here without checking DB for each album.
+            # But we can optimize inside the loop.
+            pass
+
             # Base metadata/links: skip only if we already have core metadata AND links.
             if fetch_base_metadata:
                 have_links = any(
@@ -218,7 +244,77 @@ class MetadataCoordinator:
         # Enforce fanart-first, Spotify fallback
         fanart_requested = fetch_artwork or fetch_spotify_artwork
 
-        # If nothing to fetch, short-circuit
+        # Check if we're ONLY fetching album metadata (no artist metadata)
+        album_only = (
+            fetch_album_details and local_release_group_ids and
+            not any([
+                fetch_base_metadata,
+                effective_fetch_links,
+                fanart_requested,
+                fetch_top_tracks,
+                fetch_similar_artists,
+                fetch_singles,
+                fetch_bio,
+                fetch_spotify_artwork
+            ])
+        )
+        
+        # If album-only mode, skip to album metadata fetching
+        if album_only:
+            # Filter to only albums missing descriptions if missing_only is True
+            album_ids_to_fetch = list(local_release_group_ids)
+            
+            if missing_only and album_ids_to_fetch:
+                # Query DB to find which albums already have descriptions
+                from app.db import get_pool
+                pool = await get_pool()
+                async with pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        "SELECT mbid FROM album WHERE mbid = ANY($1) AND description IS NOT NULL",
+                        album_ids_to_fetch
+                    )
+                    albums_with_desc = {row["mbid"] for row in rows}
+                    album_ids_to_fetch = [aid for aid in album_ids_to_fetch if aid not in albums_with_desc]
+                    
+                    if not album_ids_to_fetch:
+                        logger.debug(f"[{name}] All {len(local_release_group_ids)} albums already have descriptions (missing_only=True)")
+                        return True
+                    
+                    logger.debug(f"[{name}] Album-only mode: {len(album_ids_to_fetch)}/{len(local_release_group_ids)} albums missing descriptions")
+            else:
+                logger.debug(f"[{name}] Album-only mode: Fetching metadata for {len(album_ids_to_fetch)} local albums")
+            
+            # Fetch all albums (semaphore limits concurrency globally)
+            album_tasks = [album.fetch_album_metadata(rg_id, client, _dns_semaphore) for rg_id in album_ids_to_fetch]
+            
+            if album_tasks:
+                album_results = await asyncio.gather(*album_tasks, return_exceptions=True)
+                
+                all_album_results = {}
+                for i, res in enumerate(album_results):
+                    rg_id = album_ids_to_fetch[i]
+                    if isinstance(res, dict):
+                        all_album_results[rg_id] = res
+                        found_info = []
+                        if res.get("description"):
+                            found_info.append("desc")
+                        if res.get("peak_chart_position"):
+                            found_info.append("chart")
+                        if found_info:
+                             get_api_tracker().track_detailed("Album Metadata", "found")
+                        else:
+                             get_api_tracker().track_detailed("Album Metadata", "missing")
+                    else:
+                        logger.warning(f"Album metadata fetch failed for {rg_id}: {res}")
+            
+            updates["albums_metadata"] = all_album_results
+            
+            # Return early - skip all artist metadata processing
+            if fetch_only:
+                return updates, {"thumb": None, "background": None}
+            return True
+        
+        # If nothing to fetch (not even album metadata), short-circuit
         any_fetch = any(
             [
                 fetch_base_metadata,
@@ -229,253 +325,295 @@ class MetadataCoordinator:
                 fetch_singles,
                 fetch_bio,
                 fetch_spotify_artwork and not artist.get("image_url"),
+                fetch_album_details and local_release_group_ids,
             ]
         )
         if not any_fetch:
             return True if fetch_only else True
 
-        async with get_client(client) as client:
-            
-            # --- PARALLEL BLOCK 1: Core Services ---
-            tasks = []
-            
-            # 1. MB Core (Relations, Genres, Basic Info)
-            if fetch_base_metadata or effective_fetch_links:
-                 res = musicbrainz.fetch_core(mbid, client, artist_name=name)
-                 tasks.append(res)
-                 # We can't track result here easily as it's async task. 
-                 # Wait, tasks.append appends a coroutine. 
-                 # The coordinator gathers them later. 
-                 # We need to wrap them or track inside the service?
-                 # Or track after gather?
-                 # The implementation plan said "Call track_detailed ... in process_artist".
-                 # But process_artist builds a list of tasks and gathers them.
-                 # I cannot inspect result immediately.
-                 # Ah, the architecture is: tasks.append(coro). Then await asyncio.gather(*tasks).
-                 # Wait, looking at the file...
-                 # It does: `results = await asyncio.gather(*tasks, return_exceptions=True)`
-                 # Then iterates results.
-                 # So I should track stats *after* the gather, when processing results.
-            else:
-                 tasks.append(asyncio.sleep(0, result=None))
 
-            # 2. Fanart (always before Spotify when either artwork option is requested)
-            if fanart_requested:
-                tasks.append(artwork.fetch_fanart_artist_images(mbid, client))
-            else:
-                tasks.append(asyncio.sleep(0, result={}))
+        # client is already the shared client passed from update_metadata
+        # No need to wrap it
+        
+        # --- PARALLEL BLOCK 1: Core Services ---
+        tasks = []
+        
+        # 1. MB Core (Relations, Genres, Basic Info)
+        if fetch_base_metadata or effective_fetch_links:
+             res = musicbrainz.fetch_core(mbid, client, artist_name=name)
+             tasks.append(res)
+             # We can't track result here easily as it's async task. 
+             # Wait, tasks.append appends a coroutine. 
+             # The coordinator gathers them later. 
+             # We need to wrap them or track inside the service?
+             # Or track after gather?
+             # The implementation plan said "Call track_detailed ... in process_artist".
+             # But process_artist builds a list of tasks and gathers them.
+             # I cannot inspect result immediately.
+             # Ah, the architecture is: tasks.append(coro). Then await asyncio.gather(*tasks).
+             # Wait, looking at the file...
+             # It does: `results = await asyncio.gather(*tasks, return_exceptions=True)`
+             # Then iterates results.
+             # So I should track stats *after* the gather, when processing results.
+        else:
+             tasks.append(asyncio.sleep(0, result=None))
 
-            # 3. Last.fm Top Tracks
-            if fetch_top_tracks:
-                tasks.append(lastfm.fetch_top_tracks(mbid, name, client))
-            else:
-                tasks.append(asyncio.sleep(0, result=None))
-                
-            # 4. Last.fm Similar
-            if fetch_similar_artists:
-                 tasks.append(lastfm.fetch_similar_artists(mbid, name, client))
-            else:
-                 tasks.append(asyncio.sleep(0, result=None))
+        # 2. Fanart (always before Spotify when either artwork option is requested)
+        if fanart_requested:
+            tasks.append(artwork.fetch_fanart_artist_images(mbid, client))
+        else:
+            tasks.append(asyncio.sleep(0, result={}))
+
+        # 3. Last.fm Top Tracks
+        if fetch_top_tracks:
+            tasks.append(lastfm.fetch_top_tracks(mbid, name, client))
+        else:
+            tasks.append(asyncio.sleep(0, result=None))
+            
+        # 4. Last.fm Similar
+        if fetch_similar_artists:
+             tasks.append(lastfm.fetch_similar_artists(mbid, name, client))
+        else:
+             tasks.append(asyncio.sleep(0, result=None))
+             
+        # 5. Last.fm URL (Links)
+        if effective_fetch_links:
+             tasks.append(lastfm.fetch_artist_url(mbid, client))
+        else:
+             tasks.append(asyncio.sleep(0, result=None))
+
+        # 6. Singles (MB)
+        if fetch_singles:
+            tasks.append(musicbrainz.fetch_release_groups(mbid, "single", client, artist_name=name))
+        else:
+            tasks.append(asyncio.sleep(0, result=None))
+
+        # 7. Albums/EPs (MB - for linking)
+        if fetch_base_metadata:
+             tasks.append(musicbrainz.fetch_release_groups(mbid, "album", client, artist_name=name))
+             tasks.append(musicbrainz.fetch_release_groups(mbid, "ep", client, artist_name=name))
+        else:
+             tasks.append(asyncio.sleep(0, result=None))
+             tasks.append(asyncio.sleep(0, result=None))
+
+
+        # Execute Block 1
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Log any exceptions
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"[{name}] Task {i} failed: {result}")
+        
+        # Unpack
+        mb_core_res = results[0]
+        if isinstance(mb_core_res, dict) and (fetch_base_metadata or effective_fetch_links):
+            updates.update({k: v for k, v in mb_core_res.items() if not k.startswith("_")})
+            spotify_candidates = mb_core_res.get("_spotify_candidates", [])
+            wikidata_url = mb_core_res.get("wikidata_url")
+            wikidata_url = mb_core_res.get("wikidata_url")
+            logger.info(f"[{name}] MusicBrainz: {len(mb_core_res)} fields, wikidata={'yes' if wikidata_url else 'no'}")
+            get_api_tracker().track_detailed("MusicBrainz Core", "found")
+        elif fetch_base_metadata or effective_fetch_links:
+            get_api_tracker().track_detailed("MusicBrainz Core", "missing")
+        
+        fanart_res = results[1]
+        if isinstance(fanart_res, dict):
+            thumb_url = fanart_res.get("image_url") or fanart_res.get("thumb")
+            bg_url = fanart_res.get("background")
+            if thumb_url:
+                updates["image_url"] = thumb_url
+                updates["image_source"] = "fanart"
+            if bg_url:
+                updates["background_url"] = bg_url
+            logger.info(f"[{name}] Fanart.tv: thumb={'yes' if thumb_url else 'no'}, background={'yes' if bg_url else 'no'}")
+            get_api_tracker().track_detailed("Fanart", "found" if thumb_url or bg_url else "missing")
+        elif fanart_requested:
+            get_api_tracker().track_detailed("Fanart", "missing")
+            
+        top_tracks_res = results[2]
+        if isinstance(top_tracks_res, list):
+            updates["top_tracks"] = top_tracks_res
+            logger.info(f"[{name}] Last.fm Top Tracks: {len(top_tracks_res)} tracks")
+            get_api_tracker().track_detailed("Top Tracks", "found" if top_tracks_res else "missing")
+        elif fetch_top_tracks:
+            get_api_tracker().track_detailed("Top Tracks", "missing")
+            
+        similar_res = results[3]
+        if isinstance(similar_res, list):
+            updates["similar_artists"] = similar_res
+            logger.info(f"[{name}] Last.fm Similar: {len(similar_res)} artists")
+            get_api_tracker().track_detailed("Similar Artists", "found" if similar_res else "missing")
+        elif fetch_similar_artists:
+             get_api_tracker().track_detailed("Similar Artists", "missing")
+            
+        lfm_url = results[4]
+        if lfm_url:
+            updates["lastfm_url"] = lfm_url
+            
+        singles_res = results[5]
+        if isinstance(singles_res, list):
+            updates["singles"] = singles_res
+            logger.info(f"[{name}] MusicBrainz Singles: {len(singles_res)} singles")
+            get_api_tracker().track_detailed("Singles", "found" if singles_res else "missing")
+        elif fetch_singles:
+            get_api_tracker().track_detailed("Singles", "missing")
+            
+        albums_res = results[6]
+        eps_res = results[7]
+        
+        # Combine albums and EPs and filter
+        all_albums = []
+        if isinstance(albums_res, list):
+            all_albums.extend(albums_res)
+        if isinstance(eps_res, list):
+            all_albums.extend(eps_res)
+        
+        if all_albums and local_release_group_ids:
+            updates["albums"] = [a for a in all_albums if a["mbid"] in local_release_group_ids]
+        if all_albums and local_release_group_ids:
+            updates["albums"] = [a for a in all_albums if a["mbid"] in local_release_group_ids]
+        
+        # 7b. Album Metadata (Description, Chart, Links)
+        # Parallel fetch for all local albums
+        if fetch_album_details and local_release_group_ids:
+             logger.debug(f"[{name}] Fetching metadata for {len(local_release_group_ids)} local albums")
+             album_tasks = []
+             album_ids = list(local_release_group_ids)
+             
+             for rg_id in album_ids:
+                 # If missing_only, should we check DB state? 
+                 # Yes, but 'artist' object passed in doesn't have album details.
+                 # We can optimistically fetch or rely on lower-level check?
+                 # Fetching is expensive. Ideally we'd know.
+                 # The caller could pass in 'albums_needing_update' set?
+                 # For now, just fetch all.
+                album_tasks.append(album.fetch_album_metadata(rg_id, client, _dns_semaphore))
+             
+             if album_tasks:
+                 album_results = await asyncio.gather(*album_tasks, return_exceptions=True)
                  
-            # 5. Last.fm URL (Links)
+                 updates["albums_metadata"] = {}
+                 for i, res in enumerate(album_results):
+                     rg_id = album_ids[i]
+                     if isinstance(res, dict):
+                         updates["albums_metadata"][rg_id] = res
+                         found_info = []
+                         if res.get("description"):
+                             found_info.append("desc")
+                         if res.get("peak_chart_position"):
+                             found_info.append("chart")
+                         if found_info:
+                              get_api_tracker().track_detailed("Album Metadata", "found")
+                         else:
+                              get_api_tracker().track_detailed("Album Metadata", "missing")
+                     else:
+                         logger.warning(f"Album metadata fetch failed for {rg_id}: {res}")
+
+        
+        # --- BLOCK 2: Dependent Services (Wikidata, Wikipedia, Spotify) ---
+        
+        # 8. Wikidata Links & Wiki URL (Depends on MB Core)
+        logger.debug(f"[{name}] Starting Block 2: Wikidata/Wiki/Spotify")
+        target_wiki_url = updates.get("wikipedia_url")
+        logger.debug(f"[{name}] Block 2 Vars: wikidata={wikidata_url}, wiki_url={target_wiki_url}, eff_links={effective_fetch_links}, bio={fetch_bio}, sp_art={fetch_spotify_artwork}")
+        
+        existing = {
+            "spotify_url": updates.get("spotify_url"),
+            "tidal_url": updates.get("tidal_url"),
+            "qobuz_url": updates.get("qobuz_url"),
+            "lastfm_url": updates.get("lastfm_url"),
+            "discogs_url": updates.get("discogs_url"),
+            "homepage": updates.get("homepage"),
+        }
+
+        if wikidata_url and (effective_fetch_links or need_links_for_bio):
+            logger.debug(f"[{name}] Entering Wikidata Block")
+            # Fetch missing links if needed
+            
+            # We need title for Bio if not present
+            if not target_wiki_url:
+                target_wiki_url = await wikidata.fetch_wikipedia_title(client, wikidata_url)
+                if target_wiki_url:
+                     # normalize to url
+                     target_wiki_url = f"https://en.wikipedia.org/wiki/{target_wiki_url}"
+                     updates["wikipedia_url"] = target_wiki_url
+            
             if effective_fetch_links:
-                 tasks.append(lastfm.fetch_artist_url(mbid, client))
+                logger.debug(f"[{name}] Fetching Wikidata external links for {wikidata_url}")
+                wd_links = await wikidata.fetch_external_links(client, wikidata_url, existing)
+                updates.update(wd_links)
+                get_api_tracker().track_detailed("External Links", "found" if wd_links else "missing")
+        elif effective_fetch_links and not existing.get("spotify_url"):
+            # If we intended to fetch but couldn't (no wikidata url)
+            get_api_tracker().track_detailed("External Links", "missing")
+
+        # 9. Wikipedia Bio (Depends on Wiki URL)
+        logger.debug(f"[{name}] Checking Bio Block (url={target_wiki_url})")
+        if fetch_bio and target_wiki_url:
+            logger.debug(f"[{name}] Fetching Wikipedia Bio for {target_wiki_url}")
+            bio = await wikipedia.fetch_bio(client, target_wiki_url)
+            if bio:
+                updates["bio"] = bio
+                logger.info(f"[{name}] Wikipedia Bio: {len(bio)} chars")
+                get_api_tracker().track_detailed("Bio", "found")
             else:
-                 tasks.append(asyncio.sleep(0, result=None))
-
-            # 6. Singles (MB)
-            if fetch_singles:
-                tasks.append(musicbrainz.fetch_release_groups(mbid, "single", client, artist_name=name))
-            else:
-                tasks.append(asyncio.sleep(0, result=None))
-
-            # 7. Albums/EPs (MB - for linking)
-            if fetch_base_metadata:
-                 tasks.append(musicbrainz.fetch_release_groups(mbid, "album", client, artist_name=name))
-                 tasks.append(musicbrainz.fetch_release_groups(mbid, "ep", client, artist_name=name))
-            else:
-                 tasks.append(asyncio.sleep(0, result=None))
-                 tasks.append(asyncio.sleep(0, result=None))
-
-
-            # Execute Block 1
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Log any exceptions
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    logger.error(f"[{name}] Task {i} failed: {result}")
-            
-            # Unpack
-            mb_core_res = results[0]
-            if isinstance(mb_core_res, dict) and (fetch_base_metadata or effective_fetch_links):
-                updates.update({k: v for k, v in mb_core_res.items() if not k.startswith("_")})
-                spotify_candidates = mb_core_res.get("_spotify_candidates", [])
-                wikidata_url = mb_core_res.get("wikidata_url")
-                wikidata_url = mb_core_res.get("wikidata_url")
-                logger.info(f"[{name}] MusicBrainz: {len(mb_core_res)} fields, wikidata={'yes' if wikidata_url else 'no'}")
-                get_api_tracker().track_detailed("MusicBrainz Core", "found")
-            elif fetch_base_metadata or effective_fetch_links:
-                get_api_tracker().track_detailed("MusicBrainz Core", "missing")
-            
-            fanart_res = results[1]
-            if isinstance(fanart_res, dict):
-                thumb_url = fanart_res.get("image_url") or fanart_res.get("thumb")
-                bg_url = fanart_res.get("background")
-                if thumb_url:
-                    updates["image_url"] = thumb_url
-                    updates["image_source"] = "fanart"
-                if bg_url:
-                    updates["background_url"] = bg_url
-                logger.info(f"[{name}] Fanart.tv: thumb={'yes' if thumb_url else 'no'}, background={'yes' if bg_url else 'no'}")
-                get_api_tracker().track_detailed("Fanart", "found" if thumb_url or bg_url else "missing")
-            elif fanart_requested:
-                get_api_tracker().track_detailed("Fanart", "missing")
-                
-            top_tracks_res = results[2]
-            if isinstance(top_tracks_res, list):
-                updates["top_tracks"] = top_tracks_res
-                logger.info(f"[{name}] Last.fm Top Tracks: {len(top_tracks_res)} tracks")
-                get_api_tracker().track_detailed("Top Tracks", "found" if top_tracks_res else "missing")
-            elif fetch_top_tracks:
-                get_api_tracker().track_detailed("Top Tracks", "missing")
-                
-            similar_res = results[3]
-            if isinstance(similar_res, list):
-                updates["similar_artists"] = similar_res
-                logger.info(f"[{name}] Last.fm Similar: {len(similar_res)} artists")
-                get_api_tracker().track_detailed("Similar Artists", "found" if similar_res else "missing")
-            elif fetch_similar_artists:
-                 get_api_tracker().track_detailed("Similar Artists", "missing")
-                
-            lfm_url = results[4]
-            if lfm_url:
-                updates["lastfm_url"] = lfm_url
-                
-            singles_res = results[5]
-            if isinstance(singles_res, list):
-                updates["singles"] = singles_res
-                logger.info(f"[{name}] MusicBrainz Singles: {len(singles_res)} singles")
-                get_api_tracker().track_detailed("Singles", "found" if singles_res else "missing")
-            elif fetch_singles:
-                get_api_tracker().track_detailed("Singles", "missing")
-                
-            albums_res = results[6]
-            eps_res = results[7]
-            
-            # Combine albums and EPs and filter
-            all_albums = []
-            if isinstance(albums_res, list):
-                all_albums.extend(albums_res)
-            if isinstance(eps_res, list):
-                all_albums.extend(eps_res)
-            
-            if all_albums and local_release_group_ids:
-                updates["albums"] = [a for a in all_albums if a["mbid"] in local_release_group_ids]
-            
-            
-            # --- BLOCK 2: Dependent Services (Wikidata, Wikipedia, Spotify) ---
-            
-            # 8. Wikidata Links & Wiki URL (Depends on MB Core)
-            logger.debug(f"[{name}] Starting Block 2: Wikidata/Wiki/Spotify")
-            target_wiki_url = updates.get("wikipedia_url")
-            logger.debug(f"[{name}] Block 2 Vars: wikidata={wikidata_url}, wiki_url={target_wiki_url}, eff_links={effective_fetch_links}, bio={fetch_bio}, sp_art={fetch_spotify_artwork}")
-            
-            existing = {
-                "spotify_url": updates.get("spotify_url"),
-                "tidal_url": updates.get("tidal_url"),
-                "qobuz_url": updates.get("qobuz_url"),
-                "lastfm_url": updates.get("lastfm_url"),
-                "discogs_url": updates.get("discogs_url"),
-                "homepage": updates.get("homepage"),
-            }
-
-            if wikidata_url and (effective_fetch_links or need_links_for_bio):
-                logger.debug(f"[{name}] Entering Wikidata Block")
-                # Fetch missing links if needed
-                
-                # We need title for Bio if not present
-                if not target_wiki_url:
-                    target_wiki_url = await wikidata.fetch_wikipedia_title(client, wikidata_url)
-                    if target_wiki_url:
-                         # normalize to url
-                         target_wiki_url = f"https://en.wikipedia.org/wiki/{target_wiki_url}"
-                         updates["wikipedia_url"] = target_wiki_url
-                
-                if effective_fetch_links:
-                    logger.debug(f"[{name}] Fetching Wikidata external links for {wikidata_url}")
-                    wd_links = await wikidata.fetch_external_links(client, wikidata_url, existing)
-                    updates.update(wd_links)
-                    get_api_tracker().track_detailed("External Links", "found" if wd_links else "missing")
-            elif effective_fetch_links and not existing.get("spotify_url"):
-                # If we intended to fetch but couldn't (no wikidata url)
-                get_api_tracker().track_detailed("External Links", "missing")
-
-            # 9. Wikipedia Bio (Depends on Wiki URL)
-            logger.debug(f"[{name}] Checking Bio Block (url={target_wiki_url})")
-            if fetch_bio and target_wiki_url:
-                logger.debug(f"[{name}] Fetching Wikipedia Bio for {target_wiki_url}")
-                bio = await wikipedia.fetch_bio(client, target_wiki_url)
-                if bio:
-                    updates["bio"] = bio
-                    logger.info(f"[{name}] Wikipedia Bio: {len(bio)} chars")
-                    get_api_tracker().track_detailed("Bio", "found")
-                else:
-                    logger.info(f"[{name}] Wikipedia Bio: not found")
-                    get_api_tracker().track_detailed("Bio", "missing")
-            elif fetch_bio:
+                logger.info(f"[{name}] Wikipedia Bio: not found")
                 get_api_tracker().track_detailed("Bio", "missing")
+        elif fetch_bio:
+            get_api_tracker().track_detailed("Bio", "missing")
 
-            # 10. Spotify Artwork (Dependent on candidates or resolved link). Only as fallback after Fanart.
-            logger.debug(f"[{name}] Checking Spotify Block (candidates={len(spotify_candidates) if spotify_candidates else 0})")
-            if fetch_spotify_artwork and not updates.get("image_url"):
-                # Try to resolve ID
-                sp_id = None
-                sp_url = updates.get("spotify_url") or artist.get("spotify_url")
-                
-                # Extract from URL if present
-                if sp_url:
-                     parts = sp_url.split("/")
-                     if parts: 
-                         sp_id = parts[-1].split("?")[0]
-                
-                # Or resolve from candidates
-                if not sp_id and spotify_candidates:
-                    logger.debug(f"[{name}] Resolving Spotify ID from {len(spotify_candidates)} candidates")
-                    sp_id, sp_res_url = await artwork.resolve_spotify_id(spotify_candidates, name, client)
-                    if sp_res_url:
-                        updates["spotify_url"] = sp_res_url
-                        
-                if sp_id:
-                    # Fetch Image
-                    logger.debug(f"[{name}] Fetching Spotify Image for {sp_id}")
-                    img = await artwork.fetch_spotify_artist_images(sp_id, client)
-                    if img:
-                        updates["image_url"] = img
-                        updates["image_source"] = "spotify"
-                        get_api_tracker().track_detailed("Spotify Art", "found")
-                
-            if fetch_spotify_artwork and not updates.get("image_url") and not updates.get("image_source") == "spotify":
-                 get_api_tracker().track_detailed("Spotify Art", "missing")
+        # 10. Spotify Artwork (Dependent on candidates or resolved link). Only as fallback after Fanart.
+        logger.debug(f"[{name}] Checking Spotify Block (candidates={len(spotify_candidates) if spotify_candidates else 0})")
+        if fetch_spotify_artwork and not updates.get("image_url"):
+            # Try to resolve ID
+            sp_id = None
+            sp_url = updates.get("spotify_url") or artist.get("spotify_url")
+            
+            # Extract from URL if present
+            if sp_url:
+                 parts = sp_url.split("/")
+                 if parts: 
+                     sp_id = parts[-1].split("?")[0]
+            
+            # Or resolve from candidates
+            if not sp_id and spotify_candidates:
+                logger.debug(f"[{name}] Resolving Spotify ID from {len(spotify_candidates)} candidates")
+                sp_id, sp_res_url = await artwork.resolve_spotify_id(spotify_candidates, name, client)
+                if sp_res_url:
+                    updates["spotify_url"] = sp_res_url
+                    
+            if sp_id:
+                # Fetch Image
+                logger.debug(f"[{name}] Fetching Spotify Image for {sp_id}")
+                img = await artwork.fetch_spotify_artist_images(sp_id, client)
+                if img:
+                    updates["image_url"] = img
+                    updates["image_source"] = "spotify"
+                    get_api_tracker().track_detailed("Spotify Art", "found")
+            
+        if fetch_spotify_artwork and not updates.get("image_url") and not updates.get("image_source") == "spotify":
+             get_api_tracker().track_detailed("Spotify Art", "missing")
 
-            # Download Artwork (thumb + optional background)
-            logger.debug(f"[{name}] Checking Download Block (img={updates.get('image_url')})")
-            art_res = {"thumb": None, "background": None}
-            if updates.get("image_url"):
-                try:
-                    logger.debug(f"[{name}] Downloading artwork from {updates['image_url']}")
-                    art_res["thumb"] = await download_and_save_artwork(updates["image_url"], art_type="artistthumb")
-                except Exception as e:
-                    logger.warning(f"Failed to download artist thumb for {mbid}: {e}")
+        # Download Artwork (thumb + optional background)
+        logger.debug(f"[{name}] Checking Download Block (img={updates.get('image_url')})")
+        art_res = {"thumb": None, "background": None}
+        if updates.get("image_url"):
+            try:
+                logger.debug(f"[{name}] Downloading artwork from {updates['image_url']}")
+                art_res["thumb"] = await download_and_save_artwork(updates["image_url"], art_type="artistthumb", client=client)
+            except Exception as e:
+                logger.warning(f"Failed to download artist thumb for {mbid}: {e}")
 
-            if updates.get("background_url"):
-                try:
-                    art_res["background"] = await download_and_save_artwork(updates["background_url"], art_type="artistbackground")
-                except Exception as e:
-                    logger.warning(f"Failed to download artist background for {mbid}: {e}")
+        if updates.get("background_url"):
+            try:
+                art_res["background"] = await download_and_save_artwork(updates["background_url"], art_type="artistbackground", client=client)
+            except Exception as e:
+                logger.warning(f"Failed to download artist background for {mbid}: {e}")
 
-            if fetch_only:
-                return updates, art_res
+        if fetch_only:
+            return updates, art_res
+
 
         if fetch_only:
             # If no meaningful updates/art, return True to signal skip
@@ -597,6 +735,40 @@ class MetadataCoordinator:
                                  VALUES ($1, $2, $3)
                              """, mbid, g["name"], g["count"])
                              
+
+
+                     # 7. Album Metadata
+                     if "albums_metadata" in data:
+                         for rg_id, meta in data["albums_metadata"].items():
+                             # Update Album table
+                             upd_cols = ["updated_at = NOW()"]
+                             upd_vals = []
+                             
+                             if meta.get("description"):
+                                 upd_vals.append(meta["description"])
+                                 upd_cols.append(f"description = ${len(upd_vals)}")
+                                 
+                             if meta.get("peak_chart_position"):
+                                 upd_vals.append(meta["peak_chart_position"])
+                                 upd_cols.append(f"peak_chart_position = ${len(upd_vals)}")
+                                 
+                             if upd_vals:
+                                 # We only update existing albums
+                                 upd_vals.append(rg_id)
+                                 await db.execute(
+                                     f"UPDATE album SET {', '.join(upd_cols)} WHERE mbid = ${len(upd_vals)}",
+                                     *upd_vals
+                                 )
+                                 
+                             # Update Album Links
+                             if meta.get("external_links"):
+                                 for l_type, url in meta["external_links"]:
+                                      await db.execute("""
+                                         INSERT INTO external_link (entity_type, entity_id, type, url)
+                                         VALUES ('album', $1, $2, $3)
+                                         ON CONFLICT (entity_type, entity_id, type) DO UPDATE SET url = EXCLUDED.url
+                                     """, rg_id, l_type, url)
+
         except Exception as e:
             logger.error(f"DB Save Error for {mbid}: {e}")
 
@@ -639,10 +811,12 @@ class MetadataCoordinator:
              total = len(artists)
              processed = 0
              
-             async with get_client() as client:
-                 tidal_client = TidalClient()
+             
+             # Use shared client
+             client = get_shared_client()
+             tidal_client = TidalClient()
                  
-                 for row in artists:
+             for row in artists:
                      processed += 1
                      mbid, name = row["mbid"], row["name"]
                      current_name = name or "Unknown"

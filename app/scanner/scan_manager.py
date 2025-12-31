@@ -3,7 +3,7 @@ import logging
 import time
 import os
 from typing import Optional, Dict, Any
-from app.scanner.core import Scanner
+from app.scanner.core import Scanner, close_shared_client
 from app.scanner.services.coordinator import MetadataCoordinator
 from app.config import get_music_path
 from app.scanner.stats import get_api_tracker
@@ -71,6 +71,7 @@ class ScanManager:
         await self.stop_scan()
         for queue in self._event_queues:
             queue.put_nowait(None)
+        await close_shared_client()
 
     def _broadcast(self, event: Dict[str, Any]):
         for queue in self._event_queues:

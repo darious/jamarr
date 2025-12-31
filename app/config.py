@@ -63,3 +63,7 @@ def get_lastfm_credentials():
 
 def get_max_workers():
     return load_config().get("max_workers", 4)
+
+
+def get_user_agent():
+    return "Jamarr/0.1 ( internal )"
