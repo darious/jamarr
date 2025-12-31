@@ -334,7 +334,7 @@
               role="button"
               tabindex="0"
               class={`w-full text-left rounded-xl border border-transparent bg-white/5 hover:bg-white/10 transition-all px-3 py-2.5 flex gap-3 items-center relative group cursor-pointer
-                ${idx === $playerState.current_index ? "bg-primary/10 border-primary/40" : ""}
+                ${idx === $playerState.current_index ? "bg-primary/20 border-primary-500 border-2 shadow-[0_0_20px_rgba(59,130,246,0.25)]" : ""}
                 ${isDragging && idx === dragIndex ? "opacity-30 grayscale" : ""}
                 `}
               aria-current={idx === $playerState.current_index
@@ -355,11 +355,11 @@
 
               <!-- Track Art -->
               <div
-                class="h-10 w-10 flex-shrink-0 rounded bg-white/10 overflow-hidden relative shadow-lg"
+                class="h-14 w-14 flex-shrink-0 rounded bg-white/10 overflow-hidden relative shadow-lg"
               >
                 <img
                   src={track.art_sha1
-                    ? `/api/art/file/${track.art_sha1}?max_size=120`
+                    ? `/api/art/file/${track.art_sha1}?max_size=200`
                     : track.art_id
                       ? `/api/art/${track.art_id}`
                       : "/assets/default-album-placeholder.svg"}
@@ -378,29 +378,52 @@
                     class="absolute inset-0 bg-black/40 flex items-center justify-center"
                   >
                     <div
-                      class="loading loading-bars loading-xs text-white"
+                      class="loading loading-bars loading-sm text-white"
                     ></div>
                   </div>
                 {/if}
               </div>
 
               <!-- Track Info -->
-              <div class="min-w-0 flex-1 space-y-0.5">
+              <div class="min-w-0 flex-1 space-y-1">
                 <div class="flex items-center justify-between gap-2">
                   <p
-                    class={`truncate text-sm font-medium ${idx === $playerState.current_index ? "text-primary" : "text-white"}`}
+                    class={`truncate text-base font-medium ${idx === $playerState.current_index ? "text-primary" : "text-white"}`}
                   >
                     {track.title || "Untitled"}
                   </p>
-                  <span class="text-xs text-white/50 tabular-nums font-mono">
+                  <span class="text-sm text-white/50 tabular-nums font-mono">
                     {formatTime(track.duration_seconds)}
                   </span>
                 </div>
                 <div
-                  class="flex items-center gap-1 text-xs text-white/60 truncate"
+                  class="flex items-center gap-1 text-sm text-white/60 truncate"
                 >
                   {#if track.artist}
                     <span>{track.artist}</span>
+                  {/if}
+                  {#if track.album}
+                    <span class="text-white/40">•</span>
+                    <span class="text-white/50">{track.album}</span>
+                  {/if}
+                </div>
+                <!-- Tech Details -->
+                <div
+                  class="flex items-center gap-2 text-xs text-white/30 uppercase tracking-wider font-medium"
+                >
+                  {#if track.codec}
+                    <span>{track.codec}</span>
+                  {/if}
+                  {#if track.bit_depth && track.sample_rate_hz}
+                    <span>•</span>
+                    <span
+                      >{track.bit_depth}bit / {track.sample_rate_hz /
+                        1000}kHz</span
+                    >
+                  {/if}
+                  {#if track.bitrate}
+                    <span>•</span>
+                    <span>{Math.round(track.bitrate / 1000)}kbps</span>
                   {/if}
                 </div>
               </div>

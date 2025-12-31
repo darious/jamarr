@@ -99,6 +99,10 @@
             artwork_id: t.art_id,
             path: t.path,
             art_sha1: t.art_sha1,
+            codec: t.codec,
+            bit_depth: t.bit_depth,
+            sample_rate_hz: t.sample_rate_hz,
+            // bitrate: t.bitrate, // PlaylistTrack doesn't have bitrate yet
         }));
 
         await setQueue(queueItems as unknown as import("$api").Track[], 0);
@@ -141,6 +145,10 @@
             // I will fix duration -> duration_seconds.
             // I will also fix path: "" to path: t.path in handleAddToQueue just in case, as I did in list page.
             art_sha1: t.art_sha1,
+            codec: t.codec,
+            bit_depth: t.bit_depth,
+            sample_rate_hz: t.sample_rate_hz,
+            // bitrate: t.bitrate, // PlaylistTrack doesn't have bitrate yet
         }));
         await addToQueue(queueItems as unknown as import("$api").Track[]);
     }
@@ -165,6 +173,51 @@
     let draggingIndex: number | null = null;
     let dragOverIndex: number | null = null;
 
+    // Auto-scroll logic
+    let autoScrollSpeed = 0;
+    let animationFrameId: number | null = null;
+
+    function stopAutoScroll() {
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+        autoScrollSpeed = 0;
+    }
+
+    function startAutoScroll() {
+        if (animationFrameId) return;
+        const scroll = () => {
+            if (autoScrollSpeed !== 0) {
+                window.scrollBy(0, autoScrollSpeed);
+                animationFrameId = requestAnimationFrame(scroll);
+            } else {
+                animationFrameId = null;
+            }
+        };
+        animationFrameId = requestAnimationFrame(scroll);
+    }
+
+    function checkAutoScroll(y: number) {
+        const threshold = 100;
+        const maxSpeed = 15;
+        const windowHeight = window.innerHeight;
+
+        if (y < threshold) {
+            const dist = Math.max(0, threshold - y);
+            const ratio = Math.min(1, dist / threshold);
+            autoScrollSpeed = -maxSpeed * ratio; // Scroll up
+            startAutoScroll();
+        } else if (y > windowHeight - threshold) {
+            const dist = Math.max(0, y - (windowHeight - threshold));
+            const ratio = Math.min(1, dist / threshold);
+            autoScrollSpeed = maxSpeed * ratio; // Scroll down
+            startAutoScroll();
+        } else {
+            autoScrollSpeed = 0;
+        }
+    }
+
     function handleDragStart(e: DragEvent, index: number) {
         draggingIndex = index;
         if (e.dataTransfer) {
@@ -179,6 +232,8 @@
 
     async function handleDrop(e: DragEvent, dropIndex: number) {
         e.preventDefault();
+        stopAutoScroll();
+
         if (draggingIndex === null || draggingIndex === dropIndex || !playlist)
             return;
 
@@ -204,10 +259,33 @@
         }
     }
 
+    function handleDragEnd() {
+        stopAutoScroll();
+        draggingIndex = null;
+        dragOverIndex = null;
+    }
+
+    function formatTime(seconds: number) {
+        if (!seconds || isNaN(seconds)) return "0:00";
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m}:${s.toString().padStart(2, "0")}`;
+    }
+
     function getArtUrl(sha1: string) {
         return `/api/art/file/${sha1}`;
     }
 </script>
+
+<svelte:window
+    on:dragover={(e) => {
+        if (draggingIndex !== null) {
+            e.preventDefault();
+            checkAutoScroll(e.clientY);
+        }
+    }}
+    on:dragend={handleDragEnd}
+/>
 
 <div class="min-h-screen bg-black/20 pb-20">
     <!-- Padding for player bar -->
@@ -423,102 +501,145 @@
         <!-- Track List -->
         <div class="container mx-auto px-6 py-4">
             <!-- Removed separate play bar, now actions are on cover/header -->
-            <div class="overflow-x-auto">
-                <table class="table w-full">
-                    <thead>
-                        <tr class="text-white/40 border-b border-white/5">
-                            <th class="w-10">#</th>
-                            <th>Title</th>
-                            <th>Album</th>
-                            <th>Duration</th>
-                            <th class="w-10"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {#each playlist.tracks as track, index (track.playlist_track_id)}
-                            <tr
-                                class="hover:bg-white/5 group transition-colors cursor-move {dragOverIndex ===
-                                index
-                                    ? 'border-t-2 border-primary-500'
-                                    : ''} {draggingIndex === index
-                                    ? 'opacity-50'
-                                    : ''}"
-                                draggable="true"
-                                on:dragstart={(e) => handleDragStart(e, index)}
-                                on:dragover={(e) => handleDragOver(e, index)}
-                                on:drop={(e) => handleDrop(e, index)}
-                            >
-                                <td class="text-white/40 font-mono text-sm"
-                                    >{index + 1}</td
+            <!-- Track List (Queue Style) -->
+            <div class="space-y-1">
+                {#each playlist.tracks as track, index (track.playlist_track_id)}
+                    {#if draggingIndex !== null && dragOverIndex === index}
+                        <div
+                            class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
+                        ></div>
+                    {/if}
+                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                    <div
+                        class="w-full text-left rounded-xl border border-transparent hover:bg-white/5 transition-all px-3 py-2 flex gap-3 items-center relative group cursor-move
+                        {dragOverIndex === index ? '' : ''}
+                        {draggingIndex === index ? 'opacity-30' : ''}"
+                        draggable="true"
+                        on:dragstart={(e) => handleDragStart(e, index)}
+                        on:dragover={(e) => handleDragOver(e, index)}
+                        on:drop={(e) => handleDrop(e, index)}
+                        on:dragend={handleDragEnd}
+                    >
+                        <!-- Sequence Number -->
+                        <div
+                            class="w-6 text-center text-white/40 font-mono text-xs flex-shrink-0"
+                        >
+                            {index + 1}
+                        </div>
+
+                        <!-- Artwork -->
+                        <div
+                            class="h-14 w-14 flex-shrink-0 rounded bg-white/10 overflow-hidden relative shadow-lg"
+                        >
+                            {#if track.art_sha1}
+                                <img
+                                    src={getArtUrl(track.art_sha1) +
+                                        "?max_size=200"}
+                                    alt={track.title}
+                                    class="h-full w-full object-cover"
+                                    loading="lazy"
+                                />
+                            {:else}
+                                <div
+                                    class="h-full w-full flex items-center justify-center text-white/20"
                                 >
-                                <td>
-                                    <div class="flex items-center gap-3">
-                                        {#if track.art_sha1}
-                                            <img
-                                                src={getArtUrl(track.art_sha1)}
-                                                class="w-10 h-10 rounded object-cover"
-                                                alt=""
-                                            />
-                                        {:else}
-                                            <div
-                                                class="w-10 h-10 rounded bg-white/10 flex items-center justify-center text-white/20"
-                                            >
-                                                <svg
-                                                    class="w-6 h-6"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    viewBox="0 0 24 24"
-                                                    ><path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="1.5"
-                                                        d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-                                                    ></path></svg
-                                                >
-                                            </div>
-                                        {/if}
-                                        <div>
-                                            <div class="font-medium text-white">
-                                                {track.title}
-                                            </div>
-                                            <div class="text-xs text-white/50">
-                                                {track.artist}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td class="text-white/50">{track.album}</td>
-                                <td class="font-mono text-white/40">
-                                    {Math.floor(track.duration_seconds / 60)}:{(
-                                        track.duration_seconds % 60
-                                    )
-                                        .toFixed(0)
-                                        .padStart(2, "0")}
-                                </td>
-                                <td>
-                                    <button
-                                        class="btn btn-ghost btn-xs btn-circle opacity-0 group-hover:opacity-100 text-white/40 hover:text-white"
-                                        on:click={() => removeTrack(track)}
-                                        title="Remove from playlist"
+                                    <svg
+                                        class="w-5 h-5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
                                     >
-                                        <svg
-                                            class="w-4 h-4"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                            ><path
-                                                stroke-linecap="round"
-                                                stroke-linejoin="round"
-                                                stroke-width="2"
-                                                d="M6 18L18 6M6 6l12 12"
-                                            ></path></svg
-                                        >
-                                    </button>
-                                </td>
-                            </tr>
-                        {/each}
-                    </tbody>
-                </table>
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="1.5"
+                                            d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                                        />
+                                    </svg>
+                                </div>
+                            {/if}
+                        </div>
+
+                        <!-- Track Info -->
+                        <div class="min-w-0 flex-1 space-y-0.5">
+                            <div
+                                class="flex items-center justify-between gap-2"
+                            >
+                                <p
+                                    class="truncate text-base font-medium text-white"
+                                >
+                                    {track.title}
+                                </p>
+                                <span
+                                    class="text-sm text-white/50 tabular-nums font-mono"
+                                >
+                                    {formatTime(track.duration_seconds)}
+                                </span>
+                            </div>
+                            <div
+                                class="flex items-center gap-1 text-sm text-white/60 truncate"
+                            >
+                                <span>{track.artist}</span>
+                                <span class="text-white/40">•</span>
+                                <span class="text-white/50">{track.album}</span>
+                            </div>
+                            <!-- Tech Details -->
+                            <div
+                                class="flex items-center gap-2 text-[10px] text-white/30 uppercase tracking-wider"
+                            >
+                                {#if track.codec}
+                                    <span>{track.codec}</span>
+                                {/if}
+                                {#if track.bit_depth && track.sample_rate_hz}
+                                    <span>•</span>
+                                    <span
+                                        >{track.bit_depth}bit / {track.sample_rate_hz /
+                                            1000}kHz</span
+                                    >
+                                {/if}
+                                <!-- Bitrate not yet available in PlaylistTrack -->
+                            </div>
+                        </div>
+
+                        <!-- Actions Area -->
+                        <div
+                            class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 bg-black/50 backdrop-blur-sm rounded-lg p-1"
+                        >
+                            <button
+                                class="p-1.5 hover:bg-red-500/20 rounded-md text-white/40 hover:text-red-400 transition-colors"
+                                on:click={() => removeTrack(track)}
+                                title="Remove from playlist"
+                            >
+                                <svg
+                                    class="w-4 h-4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 1h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"
+                                    />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                {/each}
+                {#if draggingIndex !== null && dragOverIndex === playlist.tracks.length}
+                    <div
+                        class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
+                    ></div>
+                    <div
+                        role="listitem"
+                        class="h-12 w-full flex items-center justify-center text-transparent"
+                        on:dragover={(e) => {
+                            e.preventDefault();
+                            dragOverIndex = playlist.tracks.length;
+                        }}
+                    ></div>
+                {/if}
             </div>
         </div>
     {:else}
