@@ -13,6 +13,8 @@ export interface Artist {
         image_url?: string | null;
         art_id?: number | null;
         art_sha1?: string | null;
+        in_library?: boolean;
+        external_url?: string | null;
     }[];
     genres?: {
         name: string;
@@ -43,6 +45,8 @@ export interface Artist {
         sample_rate_hz?: number | null;
         art_id?: number | null;
         art_sha1?: string | null;
+        album?: string;
+        popularity?: number;
     }[];
     sort_name: string;
     primary_album_count?: number;
@@ -79,6 +83,7 @@ export interface Album {
     type: 'main' | 'appears_on';
     mb_release_id?: string;
     musicbrainz_url?: string;
+    release_type?: string;
 }
 
 export interface Track {
