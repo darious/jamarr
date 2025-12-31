@@ -30,6 +30,8 @@
       name: string;
       art_id?: number | null;
       art_sha1?: string | null;
+      in_library?: boolean;
+      external_url?: string | null;
     }[];
   };
 
@@ -167,6 +169,15 @@
     return `${mins}:${secs}`;
   };
 
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+  };
+
   $: displayedTopTracks = (() => {
     const fromMeta = artist?.top_tracks || [];
     return fromMeta.map((t) => {
@@ -241,7 +252,7 @@
   })();
 
   $: displayedSimilarArtists = (() => {
-    return artist?.similar_artists || [];
+    return data.similarArtists || [];
   })();
 
   $: displayedSingles = (() => {
@@ -531,6 +542,67 @@
                   {genre.name}
                 </span>
               {/each}
+            </div>
+          {/if}
+
+          <!-- Similar Artists Row -->
+          {#if displayedSimilarArtists.length > 0}
+            <div class="pt-2 mt-4">
+              <h3
+                class="text-xs font-bold text-white/50 uppercase tracking-widest mb-3"
+              >
+                Similar Artists
+              </h3>
+              <div class="flex flex-wrap gap-3">
+                {#each displayedSimilarArtists as sim}
+                  <button
+                    class="group relative flex flex-col items-center justify-center"
+                    title={sim.name}
+                    on:click|stopPropagation={() => {
+                      if (sim.in_library) {
+                        goto(`/artist/${encodeURIComponent(sim.name)}`);
+                      } else if (sim.external_url) {
+                        window.open(sim.external_url, "_blank");
+                      }
+                    }}
+                  >
+                    {#if sim.art_sha1 || sim.art_id}
+                      <img
+                        src={sim.art_sha1
+                          ? `/art/file/${sim.art_sha1}`
+                          : `/art/${sim.art_id}`}
+                        class="w-10 h-10 rounded-full object-cover bg-surface-800 ring-2 ring-white/10 group-hover:ring-primary-500 transition-all shadow-lg"
+                        alt={sim.name}
+                      />
+                    {:else}
+                      <div
+                        class="w-10 h-10 rounded-full bg-surface-600 border border-white/20 ring-1 ring-white/5 group-hover:ring-primary-500 transition-all shadow-lg flex items-center justify-center text-[10px] font-bold text-white/90"
+                      >
+                        {getInitials(sim.name)}
+                      </div>
+                    {/if}
+                    <!-- External Link Indicator (if not in library) -->
+                    {#if !sim.in_library}
+                      <div
+                        class="absolute -top-1 -right-1 bg-surface-900 rounded-full p-0.5 border border-white/10 shadow-sm"
+                      >
+                        <svg
+                          class="w-2.5 h-2.5 text-white/60"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                          ><path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                          /></svg
+                        >
+                      </div>
+                    {/if}
+                  </button>
+                {/each}
+              </div>
             </div>
           {/if}
         </div>
@@ -1073,52 +1145,6 @@
                     </button>
                   {/if}
                 </div>
-              {/each}
-            {/if}
-          </div>
-        </section>
-
-        <!-- Similar Artists -->
-        <section
-          class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
-        >
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-xl font-bold">Similar Artists</h3>
-          </div>
-          <div
-            class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
-          >
-            {#if displayedSimilarArtists.length === 0}
-              <p class="text-white/40 text-sm p-4 text-center">
-                No similar artists found.
-              </p>
-            {:else}
-              {#each displayedSimilarArtists as sim}
-                <button
-                  class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
-                  on:click={() =>
-                    goto(`/artist/${encodeURIComponent(sim.name)}`)}
-                >
-                  {#if sim.art_sha1 || sim.art_id}
-                    <img
-                      src={sim.art_sha1
-                        ? `/art/file/${sim.art_sha1}`
-                        : `/art/${sim.art_id}`}
-                      class="w-10 h-10 rounded-full object-cover bg-surface-700"
-                      alt={sim.name}
-                    />
-                  {:else}
-                    <div
-                      class="w-10 h-10 rounded-full bg-surface-700 flex items-center justify-center text-xs font-bold text-white/50"
-                    >
-                      ?
-                    </div>
-                  {/if}
-                  <span
-                    class="text-sm font-medium text-white group-hover:text-primary-400 transition-colors"
-                    >{sim.name}</span
-                  >
-                </button>
               {/each}
             {/if}
           </div>
