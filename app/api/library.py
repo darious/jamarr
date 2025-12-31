@@ -230,6 +230,7 @@ async def get_artists(
                     "sample_rate_hz": s_row["sample_rate_hz"],
                     "art_sha1": sha1_to_hex(s_row["art_sha1"]),
                     "art_id": s_row["artwork_id"],
+                    "album": s_row["album"],
                 }
                 for s_row in s_rows
             ]

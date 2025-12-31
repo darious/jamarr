@@ -408,6 +408,25 @@
     }
   }
 
+  async function queueAllTopTracks() {
+    const playableTracks: Track[] = displayedTopTracks
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (playableTracks.length > 0) {
+      await addToQueue(playableTracks);
+    }
+  }
+
+  async function openPlaylistModalForTopTracks() {
+    const ids = displayedTopTracks
+      .map((t) => t.id)
+      .filter((id) => id && id > 0) as number[];
+    if (ids.length) openPlaylistModal(ids);
+  }
+
   async function playAllSingles() {
     const allSingleTracks: Track[] = [];
     for (const single of displayedSingles) {
@@ -418,6 +437,28 @@
     if (allSingleTracks.length > 0) {
       await setQueue(allSingleTracks, 0);
     }
+  }
+
+  async function queueAllSingles() {
+    const allSingleTracks: Track[] = [];
+    for (const single of displayedSingles) {
+      if (single.tracksToPlay && single.tracksToPlay.length > 0) {
+        allSingleTracks.push(...single.tracksToPlay);
+      }
+    }
+    if (allSingleTracks.length > 0) {
+      await addToQueue(allSingleTracks);
+    }
+  }
+
+  async function openPlaylistModalForSingles() {
+    const ids: number[] = [];
+    for (const single of displayedSingles) {
+      if (single.tracksToPlay) {
+        ids.push(...single.tracksToPlay.map((t) => t.id));
+      }
+    }
+    if (ids.length) openPlaylistModal(ids);
   }
 
   async function playAlbum(album: Album) {
@@ -461,51 +502,65 @@
   let activeTab = "album"; // Default, will update via reactive statement
 
   // Reactive tab items
-  // Reactive tab items
-  $: tabItems = [
+  // Release Tabs (Left Side)
+  $: releaseTabs = [
     {
       label: "Albums",
       value: "album",
       count: groupedAlbums.album.length,
-      title: "Albums",
     },
     {
       label: "EPs",
       value: "ep",
       count: groupedAlbums.ep.length,
-      title: "EPs",
     },
     {
       label: "Singles",
       value: "single",
-      count: groupedAlbums.single.length,
-      title: "Singles",
+      count: groupedAlbums.single.length, // Release-type singles
     },
     {
       label: "Compilations",
       value: "compilation",
       count: groupedAlbums.compilation.length,
-      title: "Compilations",
     },
     {
       label: "Live",
       value: "live",
       count: groupedAlbums.live.length,
-      title: "Live",
     },
     {
       label: "Appears On",
       value: "appears_on",
       count: groupedAlbums.appears_on.length,
-      title: "Appears On",
     },
   ]
     .filter((t) => t.count > 0)
     .map((t) => ({ ...t, label: `${t.label} (${t.count})` }));
 
+  // Track Tabs (Right Side)
+  $: trackTabs = [
+    {
+      label: "Top Tracks",
+      value: "top_tracks",
+      count: displayedTopTracks.length,
+    },
+    {
+      label: "Singles",
+      value: "singles_list", // Distinction from release-type singles
+      count: displayedSingles.length,
+    },
+  ]
+    .filter((t) => t.count > 0)
+    .map((t) => ({ ...t, label: `${t.label} (${t.count})` }));
+
+  $: allTabs = [...releaseTabs, ...trackTabs];
+
   // Ensure activeTab is valid
-  $: if (tabItems.length > 0 && !tabItems.find((t) => t.value === activeTab)) {
-    activeTab = tabItems[0].value;
+  $: if (allTabs.length > 0 && !allTabs.find((t) => t.value === activeTab)) {
+    // Default to first available release tab, or first track tab
+    if (releaseTabs.length > 0) activeTab = releaseTabs[0].value;
+    else if (trackTabs.length > 0) activeTab = trackTabs[0].value;
   }
 </script>
 
@@ -809,410 +864,571 @@
     <!-- Albums Section -->
     <section>
       <section>
-        {#if tabItems.length > 0}
-          <div class="flex items-center justify-start mb-6">
-            {#if tabItems.length > 1}
-              <Tabs items={tabItems} bind:activeValue={activeTab} />
-            {:else}
-              <h2 class="text-3xl font-bold text-white drop-shadow-md">
-                {tabItems[0].title}
-              </h2>
-            {/if}
-          </div>
-        {/if}
-        <!-- Albums Grid -->
-        {#if displayedAlbums.length > 0}
+        {#if allTabs.length > 0}
+          <!-- Tabs Header -->
           <div
-            class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+            class="flex flex-wrap items-center gap-8 border-b border-white/5 pb-0 mb-8"
           >
-            {#each displayedAlbums as album (album.album + album.artist_name)}
-              <article class="group flex flex-col gap-4">
+            <!-- Left Group: Releases -->
+            <div
+              class="flex gap-1 p-1 bg-white/5 rounded-lg border border-white/5"
+            >
+              {#each releaseTabs as tab}
                 <button
-                  class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
-                  on:click={() =>
-                    goto(
-                      `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-                    )}
+                  class={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                    activeTab === tab.value
+                      ? "bg-white/10 text-white shadow-lg"
+                      : "text-white/50 hover:text-white/80 hover:bg-white/5"
+                  }`}
+                  on:click={() => (activeTab = tab.value)}
                 >
-                  <img
-                    src={album.art_sha1
-                      ? `/art/file/${album.art_sha1}`
-                      : album.art_id
-                        ? `/art/${album.art_id}`
-                        : "/assets/default-album-placeholder.svg"}
-                    alt={album.album}
-                    class="h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                  <!-- Play Overlay -->
-                  <div
-                    class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
-                  >
-                    <button
-                      class="btn-icon btn-icon-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
-                      title="Play"
-                      on:click|stopPropagation={() => playAlbum(album)}
-                    >
-                      <svg
-                        class="h-8 w-8 ml-1"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
-                      >
-                    </button>
-                    <button
-                      class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
-                      title="Add to Queue"
-                      on:click|stopPropagation={() => addAlbumToQueue(album)}
-                    >
-                      <svg
-                        class="h-6 w-6"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
-                      >
-                    </button>
-                  </div>
-
-                  <!-- Hi-Res Badge -->
-                  {#if album.is_hires}
-                    <img
-                      src="/assets/logo-hires.png"
-                      class="absolute bottom-3 right-3 h-6 w-auto drop-shadow-lg"
-                      alt="Hi-Res"
-                    />
-                  {/if}
+                  {tab.label}
                 </button>
-                <div class="space-y-1">
-                  <h3
-                    class="text-base font-bold text-white leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
-                    title={album.album}
-                  >
-                    {album.album}
-                  </h3>
-                  <p class="text-sm text-white/50 font-medium">
-                    {#if activeTab === "appears_on"}
-                      {album.artist_name}
-                      <span class="mx-1 opacity-50">•</span>
-                    {/if}
-                    {album.year ? album.year.substring(0, 4) : "Unknown"}
-                    <span class="mx-1 opacity-50">•</span>
-                    {album.track_count} tracks
-                  </p>
-                </div>
-              </article>
-            {/each}
-          </div>
-        {/if}
-      </section>
+              {/each}
+            </div>
 
-      <!-- Bottom Grids -->
-      <div class="grid lg:grid-cols-2 xl:grid-cols-3 gap-8 items-start">
-        <!-- Top Tracks -->
-        <section
-          class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
-        >
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-xl font-bold">Top Tracks</h3>
-            <button
-              class="btn btn-sm variant-ghost-surface"
-              on:click={playAllTopTracks}>Play All</button
+            <!-- Spacer -->
+            <div class="flex-1"></div>
+
+            <!-- Right Group: Tracks -->
+            <div
+              class="flex gap-1 p-1 bg-white/5 rounded-lg border border-white/5"
             >
+              {#each trackTabs as tab}
+                <button
+                  class={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                    activeTab === tab.value
+                      ? "bg-white/10 text-white shadow-lg"
+                      : "text-white/50 hover:text-white/80 hover:bg-white/5"
+                  }`}
+                  on:click={() => (activeTab = tab.value)}
+                >
+                  {tab.label}
+                </button>
+              {/each}
+            </div>
           </div>
-          <div
-            class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
-          >
-            {#each displayedTopTracks as track, i}
+
+          <!-- Albums Grid -->
+          {#if ["album", "ep", "single", "compilation", "live", "appears_on"].includes(activeTab)}
+            {#if displayedAlbums.length > 0}
               <div
-                class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
+                class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
               >
-                <span
-                  class="w-6 text-center text-xs text-white/40 font-mono flex-shrink-0"
-                  >{i + 1}</span
-                >
-                <div class="relative w-10 h-10 flex-shrink-0">
-                  <img
-                    src={(() => {
-                      if (track.art_sha1) return `/art/file/${track.art_sha1}`;
-                      if (track.art_id) return `/art/${track.art_id}`;
-                      const alb = data.albums.find(
-                        (a) => a.album === track.album,
-                      );
-                      if (alb?.art_sha1) return `/art/file/${alb.art_sha1}`;
-                      if (alb?.art_id) return `/art/${alb.art_id}`;
-                      return "/assets/default-artist-placeholder.svg";
-                    })()}
-                    class="w-full h-full rounded object-cover bg-surface-700"
-                    alt="Art"
-                  />
-                  <button
-                    class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
-                    on:click={() => track.id > 0 && playTrackById(track.id)}
-                  >
-                    <svg
-                      class="w-5 h-5 text-white"
-                      fill="currentColor"
-                      viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                {#each displayedAlbums as album (album.album + album.artist_name)}
+                  <article class="group flex flex-col gap-4">
+                    <button
+                      class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
+                      on:click={() =>
+                        goto(
+                          `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
+                        )}
                     >
-                  </button>
-                </div>
-
-                <div class="flex-1 min-w-0">
-                  <p
-                    class={`text-sm font-medium truncate ${track.id > 0 ? "text-white" : "text-white/40 line-through"}`}
-                  >
-                    {track.title}
-                  </p>
-                  <div class="flex items-center gap-2 text-xs text-white/40">
-                    <a
-                      href={`/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(track.album)}`}
-                      class="hover:text-white hover:underline truncate max-w-[150px]"
-                      >{track.album}</a
-                    >
-                    {#if track.popularity}
-                      <span class="opacity-30">•</span>
-                      <span>{formatPlays(track.popularity)}</span>
-                    {/if}
-                    {#if track.codec}
-                      <span class="opacity-30">•</span>
-                      <span class="uppercase">{track.codec}</span>
-                    {/if}
-                    {#if track.bit_depth && track.sample_rate_hz}
-                      <span class="opacity-30">•</span>
-                      <span
-                        >{track.bit_depth}/{track.sample_rate_hz / 1000}</span
+                      <img
+                        src={album.art_sha1
+                          ? `/art/file/${album.art_sha1}`
+                          : album.art_id
+                            ? `/art/${album.art_id}`
+                            : "/assets/default-album-placeholder.svg"}
+                        alt={album.album}
+                        class="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                      <!-- Play Overlay -->
+                      <div
+                        class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
                       >
-                    {/if}
-                  </div>
-                </div>
+                        <button
+                          class="btn-icon btn-icon-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                          title="Play"
+                          on:click|stopPropagation={() => playAlbum(album)}
+                        >
+                          <svg
+                            class="h-8 w-8 ml-1"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                          >
+                        </button>
+                        <button
+                          class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                          title="Add to Queue"
+                          on:click|stopPropagation={() =>
+                            addAlbumToQueue(album)}
+                        >
+                          <svg
+                            class="h-6 w-6"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"
+                            ><path
+                              d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                            /></svg
+                          >
+                        </button>
+                      </div>
 
-                {#if track.id > 0}
-                  <button
-                    class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Add to Playlist"
-                    on:click={() => openPlaylistModal(track.id)}
-                  >
-                    <svg
-                      class="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      ><path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
-                      /></svg
-                    >
-                  </button>
-                  <button
-                    class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Add to Queue"
-                    on:click={() => addTrackToQueue(track.id)}
-                  >
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"
-                      ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
-                    >
-                  </button>
-                {/if}
-                <span
-                  class="text-xs text-white/30 font-mono w-10 text-right flex-shrink-0"
-                  >{formatDuration(track.duration_seconds)}</span
-                >
+                      <!-- Hi-Res Badge -->
+                      {#if album.is_hires}
+                        <img
+                          src="/assets/logo-hires.png"
+                          class="absolute bottom-3 right-3 h-6 w-auto drop-shadow-lg"
+                          alt="Hi-Res"
+                        />
+                      {/if}
+                    </button>
+                    <div class="space-y-1">
+                      <h3
+                        class="text-base font-bold text-white leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
+                        title={album.album}
+                      >
+                        {album.album}
+                      </h3>
+                      <p class="text-sm text-white/50 font-medium">
+                        {#if activeTab === "appears_on"}
+                          {album.artist_name}
+                          <span class="mx-1 opacity-50">•</span>
+                        {/if}
+                        {album.year ? album.year.substring(0, 4) : "Unknown"}
+                        <span class="mx-1 opacity-50">•</span>
+                        {album.track_count} tracks
+                      </p>
+                    </div>
+                  </article>
+                {/each}
               </div>
-            {/each}
-          </div>
-        </section>
+            {/if}
+          {:else if activeTab === "top_tracks"}
+            <!-- Top Tracks List View -->
+            <div class="flex items-center gap-4 mb-4">
+              <button
+                class="btn btn-sm variant-filled-primary"
+                on:click={playAllTopTracks}
+              >
+                <svg
+                  class="w-4 h-4 mr-2"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                >
+                Play All
+              </button>
+              <button
+                class="btn btn-sm variant-ghost-surface"
+                on:click={queueAllTopTracks}
+              >
+                Add All to Queue
+              </button>
+              <button
+                class="btn btn-sm variant-ghost-surface"
+                on:click={openPlaylistModalForTopTracks}
+              >
+                Add to Playlist
+              </button>
+            </div>
 
-        <!-- Singles -->
-        <section
-          class="glass-surface p-6 rounded-2xl border border-white/5 bg-surface-900/40 backdrop-blur-xl"
-        >
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-xl font-bold">Singles</h3>
-            <button
-              class="btn btn-sm variant-ghost-surface"
-              on:click={playAllSingles}>Play All</button
-            >
-          </div>
-          <div
-            class="space-y-1 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar"
-          >
-            {#if displayedSingles.length === 0}
-              <p class="text-white/40 text-sm p-4 text-center">
-                No singles found.
-              </p>
-            {:else}
+            <div class="space-y-0.5 max-w-5xl mx-auto">
+              {#each displayedTopTracks as track, i}
+                <div
+                  class="w-full grid grid-cols-[auto,auto,1fr,auto] items-center gap-4 px-3 py-2 rounded-xl hover:bg-white/5 group transition-colors text-left border border-transparent hover:border-white/5 relative"
+                >
+                  <span
+                    class="w-8 text-center text-sm text-white/40 font-mono"
+                    >{i + 1}</span
+                  >
+
+                  <!-- Artwork -->
+                  <div
+                    class="relative w-14 h-14 rounded overflow-hidden bg-surface-800 shadow-lg"
+                  >
+                    <img
+                      src={(() => {
+                        if (track.art_sha1)
+                          return `/art/file/${track.art_sha1}`;
+                        if (track.art_id) return `/art/${track.art_id}`;
+                        const alb = data.albums.find(
+                          (a) => a.album === track.album,
+                        );
+                        if (alb?.art_sha1) return `/art/file/${alb.art_sha1}`;
+                        if (alb?.art_id) return `/art/${alb.art_id}`;
+                        return "/assets/default-artist-placeholder.svg";
+                      })()}
+                      class="w-full h-full object-cover"
+                      alt="Art"
+                    />
+                    <!-- Hover Play Overlay -->
+                    <div
+                      class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                    >
+                      <button
+                        class="text-white hover:scale-110 transition-transform"
+                        on:click={() => track.id > 0 && playTrackById(track.id)}
+                      >
+                        <svg
+                          class="w-6 h-6"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                        >
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Info Block -->
+                  <div class="min-w-0 space-y-1">
+                    <!-- Row 1: Title + Album + Plays -->
+                    <div class="flex items-center gap-2 min-w-0">
+                      <p
+                        class={`truncate text-base font-medium ${track.id > 0 ? "text-white" : "text-white/40 line-through"}`}
+                      >
+                        {track.title}
+                      </p>
+                      <span class="text-white/40">·</span>
+                      <div class="flex items-center gap-2 text-sm text-white/60 truncate">
+                        <span class="truncate">{track.album || "—"}</span>
+                        {#if track.popularity}
+                          <span class="opacity-50">•</span>
+                          <span class="text-white/50">{formatPlays(track.popularity)}</span>
+                        {/if}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Timing / Tech (Right Aligned) -->
+                  <div class="flex flex-col items-end gap-1 text-right">
+                    <span class="text-sm text-white/50 tabular-nums font-mono">
+                      {formatDuration(track.duration_seconds)}
+                    </span>
+                    <div
+                      class="flex items-center gap-2 text-xs text-white/30 uppercase tracking-wider font-medium min-h-[18px]"
+                    >
+                      {#if track.codec}
+                        <span>{track.codec}</span>
+                      {/if}
+                      {#if track.bit_depth && track.sample_rate_hz}
+                        <span>•</span>
+                        <span
+                          >{track.bit_depth}bit / {Math.round(
+                            track.sample_rate_hz / 1000,
+                          )}kHz</span
+                        >
+                      {/if}
+                    </div>
+                  </div>
+
+                  <!-- Hover Actions (Floating) -->
+                  {#if track.id > 0}
+                    <div
+                      class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-2 bg-black/50 backdrop-blur-sm rounded-lg p-1"
+                    >
+                      <button
+                        class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
+                        title="Add to Playlist"
+                        on:click={(e) => {
+                          e.stopPropagation();
+                          openPlaylistModal(track.id);
+                        }}
+                      >
+                        <!-- List Plus Icon for Playlist -->
+                        <svg
+                          class="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
+                        title="Add to Queue"
+                        on:click={(e) => {
+                          e.stopPropagation();
+                          addTrackToQueue(track.id);
+                        }}
+                      >
+                        <!-- Layers/Stack Plus Icon for Queue -->
+                        <svg
+                          class="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {:else if activeTab === "singles_list"}
+            <!-- Singles List View -->
+            <div class="flex items-center gap-4 mb-4">
+              <button
+                class="btn btn-sm variant-filled-primary"
+                on:click={playAllSingles}
+              >
+                <svg
+                  class="w-4 h-4 mr-2"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                >
+                Play All
+              </button>
+              <button
+                class="btn btn-sm variant-ghost-surface"
+                on:click={queueAllSingles}
+              >
+                Add All to Queue
+              </button>
+              <button
+                class="btn btn-sm variant-ghost-surface"
+                on:click={openPlaylistModalForSingles}
+              >
+                Add to Playlist
+              </button>
+            </div>
+
+            <div class="space-y-0.5 max-w-5xl mx-auto">
               {#each displayedSingles as single}
                 <div
-                  class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 group transition-colors text-left"
+                  class="w-full grid grid-cols-[auto,auto,1fr,auto] items-center gap-4 px-3 py-2 rounded-xl hover:bg-white/5 group transition-colors text-left border border-transparent hover:border-white/5 relative"
                 >
-                  <div class="relative w-10 h-10 flex-shrink-0">
+                  <!-- Spacer for Alignment -->
+                  <span class="w-8 text-center text-sm text-white/40 font-mono"
+                    ></span
+                  >
+
+                  <!-- Artwork -->
+                  <div
+                    class="relative w-14 h-14 rounded overflow-hidden bg-surface-800 shadow-lg"
+                  >
                     <img
                       src={single.art_sha1
                         ? `/art/file/${single.art_sha1}`
                         : single.art_id
                           ? `/art/${single.art_id}`
                           : "/assets/default-artist-placeholder.svg"}
-                      class="w-full h-full rounded object-cover bg-surface-700"
+                      class="w-full h-full object-cover"
                       alt="Art"
                     />
                     {#if single.localId}
-                      <button
-                        class="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
-                        on:click={() => {
-                          if (
-                            single.tracksToPlay &&
-                            single.tracksToPlay.length > 0
-                          )
-                            setQueue(single.tracksToPlay, 0);
-                        }}
+                      <div
+                        class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
                       >
-                        <svg
-                          class="w-5 h-5 text-white"
-                          fill="currentColor"
-                          viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                        <button
+                          class="text-white hover:scale-110 transition-transform"
+                          on:click={() => {
+                            if (
+                              single.tracksToPlay &&
+                              single.tracksToPlay.length > 0
+                            )
+                              setQueue(single.tracksToPlay, 0);
+                          }}
                         >
-                      </button>
+                          <svg
+                            class="w-6 h-6"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                          >
+                        </button>
+                      </div>
                     {/if}
                   </div>
 
-                  <div class="flex-1 min-w-0">
-                    <p
-                      class={`text-sm font-medium truncate ${single.localId ? "text-white" : "text-white/40 line-through"}`}
+                  <!-- Info Block -->
+                  <div class="min-w-0 space-y-1">
+                    <!-- Row 1: Title + Album + Plays -->
+                    <div class="flex items-center gap-2 min-w-0">
+                      <p
+                        class={`truncate text-base font-medium ${single.localId ? "text-white" : "text-white/40 line-through"}`}
+                      >
+                        {single.title}
+                      </p>
+                      <span class="text-white/40">·</span>
+                      <div class="flex items-center gap-2 text-sm text-white/60 truncate">
+                        <span class="truncate">{single.album || "—"}</span>
+                        {#if single.popularity}
+                          <span class="opacity-50">•</span>
+                          <span class="text-white/50">{formatPlays(single.popularity)}</span>
+                        {/if}
+                      </div>
+                    </div>
+
+                    <!-- Secondary Row Spacer -->
+                    <div class="text-xs text-white/50 tabular-nums font-mono">
+                      {single.date?.substring(0, 4) || "Unknown"}
+                    </div>
+                  </div>
+
+                  <!-- Timing / Tech (Right Aligned) -->
+                  <div class="flex flex-col items-end gap-1 text-right">
+                    <span class="text-sm text-white/50 tabular-nums font-mono">
+                      {single.tracksToPlay?.[0]?.duration_seconds
+                        ? formatDuration(single.tracksToPlay[0].duration_seconds)
+                        : "—"}
+                    </span>
+                    <div
+                      class="flex items-center gap-2 text-xs text-white/30 uppercase tracking-wider font-medium min-h-[18px]"
                     >
-                      {single.title}
-                    </p>
-                    <div class="flex items-center gap-2 text-xs text-white/40">
-                      <span>{single.date?.substring(0, 4) || "Unknown"}</span>
                       {#if single.codec}
-                        <span class="opacity-30">•</span>
-                        <span class="uppercase">{single.codec}</span>
+                        <span>{single.codec}</span>
                       {/if}
                       {#if single.bit_depth && single.sample_rate_hz}
-                        <span class="opacity-30">•</span>
+                        <span>•</span>
                         <span
-                          >{single.bit_depth}/{single.sample_rate_hz /
-                            1000}</span
+                          >{single.bit_depth}bit / {Math.round(
+                            single.sample_rate_hz / 1000,
+                          )}kHz</span
                         >
                       {/if}
                     </div>
                   </div>
 
+                  <!-- Hover Actions (Floating) -->
                   {#if single.localId && single.tracksToPlay && single.tracksToPlay.length > 0}
-                    <button
-                      class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Add to Playlist"
-                      on:click={() =>
-                        openPlaylistModal(single.tracksToPlay.map((t) => t.id))}
+                    <div
+                      class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-2 bg-black/50 backdrop-blur-sm rounded-lg p-1"
                     >
-                      <svg
-                        class="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
-                        /></svg
+                      <button
+                        class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
+                        title="Add to Playlist"
+                        on:click={(e) => {
+                          e.stopPropagation();
+                          openPlaylistModal(
+                            single.tracksToPlay.map((t) => t.id),
+                          );
+                        }}
                       >
-                    </button>
-                    <button
-                      class="btn-icon btn-icon-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Add to Queue"
-                      on:click={() => addToQueue(single.tracksToPlay)}
-                    >
-                      <svg
-                        class="w-4 h-4"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
+                        <!-- List Plus Icon for Playlist -->
+                        <svg
+                          class="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+                          />
+                        </svg>
+                      </button>
+                      <button
+                        class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
+                        title="Add to Queue"
+                        on:click={(e) => {
+                          e.stopPropagation();
+                          addToQueue(single.tracksToPlay);
+                        }}
                       >
-                    </button>
+                        <!-- Layers/Stack Plus Icon for Queue -->
+                        <svg
+                          class="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                          />
+                        </svg>
+                      </button>
+                    </div>
                   {/if}
                 </div>
               {/each}
-            {/if}
-          </div>
-        </section>
-      </div>
-
-      {#if missingAlbums.length > 0}
-        <section class="pb-10">
-          <div class="flex items-center justify-between mb-6">
-            <h2 class="text-2xl font-bold text-white/80">Missing Albums</h2>
-          </div>
-          <div
-            class="glass-surface rounded-2xl overflow-hidden border border-white/5 bg-surface-900/40 backdrop-blur-xl"
-          >
-            <table class="w-full text-left text-sm whitespace-nowrap">
-              <thead
-                class="uppercase tracking-wider border-b border-white/10 text-white/40 text-xs bg-white/5"
-              >
-                <tr>
-                  <th class="px-6 py-4">Album</th>
-                  <th class="px-6 py-4">Released</th>
-                  <th class="px-6 py-4 text-center">Links</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-white/5">
-                {#each missingAlbums as album}
-                  <tr class="hover:bg-white/5 transition-colors">
-                    <td class="px-6 py-4 font-medium text-white/90"
-                      >{album.title}</td
-                    >
-                    <td class="px-6 py-4 text-white/50"
-                      >{album.release_date || "—"}</td
-                    >
-                    <td class="px-6 py-4">
-                      <div class="flex items-center justify-center gap-3">
-                        {#if album.musicbrainz_url}
-                          <a
-                            href={album.musicbrainz_url}
-                            target="_blank"
-                            class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
-                            ><img
-                              src="/assets/logo-musicbrainz.svg"
-                              class="w-5 h-5"
-                              alt="MB"
-                            /></a
-                          >
-                        {/if}
-                        {#if album.tidal_url}
-                          <a
-                            href={album.tidal_url}
-                            target="_blank"
-                            class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
-                            ><img
-                              src="/assets/logo-tidal.png"
-                              class="w-5 h-5"
-                              alt="Tidal"
-                            /></a
-                          >
-                        {/if}
-                        {#if album.qobuz_url}
-                          <a
-                            href={album.qobuz_url}
-                            target="_blank"
-                            class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
-                            ><img
-                              src="/assets/logo-qobuz.png"
-                              class="w-5 h-5"
-                              alt="Qobuz"
-                            /></a
-                          >
-                        {/if}
-                      </div>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      {/if}
+            </div>
+          {/if}
+        {/if}
+      </section>
     </section>
+
+    {#if missingAlbums.length > 0}
+      <section class="pb-10">
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-2xl font-bold text-white/80">Missing Albums</h2>
+        </div>
+        <div
+          class="glass-surface rounded-2xl overflow-hidden border border-white/5 bg-surface-900/40 backdrop-blur-xl"
+        >
+          <table class="w-full text-left text-sm whitespace-nowrap">
+            <thead
+              class="uppercase tracking-wider border-b border-white/10 text-white/40 text-xs bg-white/5"
+            >
+              <tr>
+                <th class="px-6 py-4">Album</th>
+                <th class="px-6 py-4">Released</th>
+                <th class="px-6 py-4 text-center">Links</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5">
+              {#each missingAlbums as album}
+                <tr class="hover:bg-white/5 transition-colors">
+                  <td class="px-6 py-4 font-medium text-white/90"
+                    >{album.title}</td
+                  >
+                  <td class="px-6 py-4 text-white/50"
+                    >{album.release_date || "—"}</td
+                  >
+                  <td class="px-6 py-4">
+                    <div class="flex items-center justify-center gap-3">
+                      {#if album.musicbrainz_url}
+                        <a
+                          href={album.musicbrainz_url}
+                          target="_blank"
+                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                          ><img
+                            src="/assets/logo-musicbrainz.svg"
+                            class="w-5 h-5"
+                            alt="MB"
+                          /></a
+                        >
+                      {/if}
+                      {#if album.tidal_url}
+                        <a
+                          href={album.tidal_url}
+                          target="_blank"
+                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                          ><img
+                            src="/assets/logo-tidal.png"
+                            class="w-5 h-5"
+                            alt="Tidal"
+                          /></a
+                        >
+                      {/if}
+                      {#if album.qobuz_url}
+                        <a
+                          href={album.qobuz_url}
+                          target="_blank"
+                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                          ><img
+                            src="/assets/logo-qobuz.png"
+                            class="w-5 h-5"
+                            alt="Qobuz"
+                          /></a
+                        >
+                      {/if}
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {/if}
   </main>
 </div>
 
