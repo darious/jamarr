@@ -63,6 +63,7 @@
     let doTopTracks = false;
     let doSingles = false;
     let doSimilarArtists = false;
+    let doAlbumMetadata = false;
 
     // doLinks removed
     let doMissingAlbums = false;
@@ -228,7 +229,8 @@
             doSpotifyArtwork ||
             doTopTracks ||
             doSingles ||
-            doSimilarArtists;
+            doSimilarArtists ||
+            doAlbumMetadata;
 
         if (runFilesystem && wantsMetadata) {
             taskQueue.push({
@@ -248,6 +250,7 @@
                         refreshTopTracks: doTopTracks,
                         refreshSingles: doSingles,
                         fetchSimilarArtists: doSimilarArtists,
+                        fetchAlbumMetadata: doAlbumMetadata,
                     }),
             });
         } else {
@@ -279,6 +282,7 @@
                             refreshTopTracks: doTopTracks,
                             refreshSingles: doSingles,
                             fetchSimilarArtists: doSimilarArtists,
+                            fetchAlbumMetadata: doAlbumMetadata,
                         }),
                 });
             }
@@ -402,6 +406,7 @@
             doTopTracks = true;
             doSingles = true;
             doSimilarArtists = true;
+            doAlbumMetadata = true;
             // doMissingAlbums remains separate as requested
         } else {
             runFilesystem = false;
@@ -412,6 +417,7 @@
             doTopTracks = false;
             doSingles = false;
             doSimilarArtists = false;
+            doAlbumMetadata = false;
         }
     }
 
@@ -424,7 +430,8 @@
             doSpotifyArtwork &&
             doTopTracks &&
             doSingles &&
-            doSimilarArtists
+            doSimilarArtists &&
+            doAlbumMetadata
         ) {
             scanAll = true;
         } else {
@@ -990,6 +997,18 @@
                                 class="checkbox checkbox-primary"
                             /><span class="label-text text-white"
                                 >Refresh similar artists (Last.fm)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3"
+                            ><input
+                                type="checkbox"
+                                bind:checked={doAlbumMetadata}
+                                on:change={updateScanAllState}
+                                class="checkbox checkbox-primary"
+                            /><span class="label-text text-white"
+                                >Scan album metadata (Desc, Charts, Links)</span
                             ></label
                         >
                     </div>

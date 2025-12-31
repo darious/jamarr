@@ -4,6 +4,7 @@ import logging
 import difflib
 import re
 import shlex
+import httpx
 from datetime import datetime, timezone
 
 try:
@@ -633,3 +634,32 @@ class Scanner:
              """)
              
         logger.info("Library Prune Complete.")
+
+
+_shared_client = None
+
+def get_shared_client() -> httpx.AsyncClient:
+    """
+    Returns a shared httpx.AsyncClient instance.
+    Created lazily and lasts for the process lifetime (or until closed).
+    """
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        # Tuning limits for scanner: 
+        # Up to 25 connections (default is 100 but let's be safe for DNS)
+        # Keepalive is good.
+        limits = httpx.Limits(max_keepalive_connections=10, max_connections=25)
+        _shared_client = httpx.AsyncClient(
+            headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"},
+            timeout=30.0,
+            limits=limits,
+            follow_redirects=True
+        )
+    return _shared_client
+
+async def close_shared_client():
+    global _shared_client
+    if _shared_client and not _shared_client.is_closed:
+        await _shared_client.aclose()
+        logger.info("Shared scanner client closed.")
+    _shared_client = None
