@@ -444,8 +444,9 @@ class ScanManager:
              # Warm DNS cache before metadata operations
              await warm_dns_cache()
              
-             coord = MetadataCoordinator()
-             await coord.scan_missing_albums(artist_filter, mbid_filter)
+             from app.scanner.missing_scanner import MissingAlbumsScanner
+             scanner = MissingAlbumsScanner()
+             await scanner.scan(artist_filter, mbid_filter)
              self._status = "Idle"
              self._broadcast({"type": "complete", "status": "success"})
         except Exception as e:
