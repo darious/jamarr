@@ -463,10 +463,17 @@
                       ?
                     </div>
                   {/if}
-                  <span
-                    class="font-medium text-white/90 group-hover:text-primary transition-colors"
-                    >{item.name}</span
-                  >
+                  <div class="flex flex-col overflow-hidden">
+                    <span
+                      class="font-medium text-white/90 group-hover:text-primary transition-colors truncate"
+                      >{item.name}</span
+                    >
+                    {#if item.artist_name && item.artist_name !== item.name}
+                      <span class="text-xs text-white/50 truncate"
+                        >{item.artist_name}</span
+                      >
+                    {/if}
+                  </div>
                 </a>
               {/each}
             </div>

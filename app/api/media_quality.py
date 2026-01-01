@@ -29,6 +29,7 @@ async def get_media_quality_items(
                     al.title as name, 
                     NULL as image_url, 
                     ar.name as artist_name, 
+                    ar.sort_name,
                     al.artwork_id,
                     EXISTS(
                         SELECT 1 FROM track t
@@ -41,13 +42,13 @@ async def get_media_quality_items(
                 WHERE al.release_group_mbid IS NOT NULL
                 ORDER BY al.release_group_mbid, al.title ASC
             )
-            SELECT mbid, name, image_url, artist_name, artwork_id, has_artwork
+            SELECT mbid, name, image_url, artist_name, artwork_id, has_artwork, sort_name
             FROM album_with_artwork
             WHERE 1=1
          """
         tbl = "album_with_artwork"
     else:
-        query = "SELECT mbid, name, image_url, artwork_id FROM artist ar"
+        query = "SELECT mbid, name, image_url, artwork_id, sort_name, name as artist_name FROM artist ar"
         tbl = "ar"
 
     # 1. Category Filter handled by table selection
@@ -191,8 +192,8 @@ async def get_media_quality_items(
             query += " WHERE " + " AND ".join(where_clauses)
 
     if category == "album":
-        # Already ordered in CTE
-        query += " LIMIT 500"
+        # Sort by Artist Sort Name (or Name), then Album Name
+        query += " ORDER BY COALESCE(sort_name, artist_name), name ASC LIMIT 500"
     else:
         query += " ORDER BY ar.sort_name ASC LIMIT 500"
 
