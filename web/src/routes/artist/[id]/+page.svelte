@@ -5,6 +5,7 @@
     fetchMissingAlbums,
     triggerMissingAlbumsScan,
     triggerMetadataScan,
+    triggerPearlarrDownload,
   } from "$lib/api";
   import { goto, invalidateAll } from "$app/navigation";
   import { addToQueue, loadQueueFromServer, setQueue } from "$stores/player";
@@ -50,6 +51,27 @@
   let missingAlbums: MissingAlbum[] = [];
   let loadingMissingAlbums = false;
   let scanningMissing = false;
+  // Pearlarr State
+  let downloadingMbids = new Set<string>();
+
+  async function downloadAlbum(mbid: string) {
+    if (downloadingMbids.has(mbid)) return;
+    downloadingMbids.add(mbid);
+    downloadingMbids = downloadingMbids; // Reactivity
+
+    try {
+      await triggerPearlarrDownload(mbid);
+      message = "Download queued in Pearlarr";
+      setTimeout(() => {
+        if (message.includes("Pearlarr")) message = "";
+      }, 3000);
+    } catch (e) {
+      console.error(e);
+      downloadingMbids.delete(mbid);
+      downloadingMbids = downloadingMbids;
+      message = "Failed to queue download";
+    }
+  }
 
   const loadMissingAlbums = async () => {
     if (!artist?.mbid) return;
@@ -565,13 +587,20 @@
     .filter((t) => t.count > 0)
     .map((t) => ({ ...t, label: `${t.label} (${t.count})` }));
 
-  $: allTabs = [...releaseTabs, ...trackTabs];
+  $: allTabs = [
+    ...releaseTabs,
+    ...(missingAlbums.length > 0
+      ? [{ value: "missing_albums", label: "Missing" }]
+      : []),
+    ...trackTabs,
+  ];
 
   // Ensure activeTab is valid
   $: if (allTabs.length > 0 && !allTabs.find((t) => t.value === activeTab)) {
     // Default to first available release tab, or first track tab
     if (releaseTabs.length > 0) activeTab = releaseTabs[0].value;
     else if (trackTabs.length > 0) activeTab = trackTabs[0].value;
+    else if (missingAlbums.length > 0) activeTab = "missing_albums";
   }
 </script>
 
@@ -756,6 +785,24 @@
 
           <!-- Spacer -->
           <div class="flex-1"></div>
+
+          <!-- Missing Albums Tab -->
+          {#if missingAlbums.length > 0}
+            <div
+              class="flex gap-1 p-1 bg-white/5 rounded-lg border border-white/5 mr-4"
+            >
+              <button
+                class={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                  activeTab === "missing_albums"
+                    ? "bg-white/10 text-white shadow-lg"
+                    : "text-white/50 hover:text-white/80 hover:bg-white/5"
+                }`}
+                on:click={() => (activeTab = "missing_albums")}
+              >
+                Missing ({missingAlbums.length})
+              </button>
+            </div>
+          {/if}
 
           <!-- Right Group: Tracks -->
           <div
@@ -1230,6 +1277,67 @@
               </div>
             {/each}
           </div>
+        {:else if activeTab === "missing_albums"}
+          <!-- Missing Albums Table -->
+          <div
+            class="glass-surface rounded-2xl overflow-hidden border border-white/5 bg-surface-900/40 backdrop-blur-xl"
+          >
+            <table class="w-full text-left text-sm whitespace-nowrap">
+              <thead
+                class="uppercase tracking-wider border-b border-white/10 text-white/40 text-xs bg-white/5"
+              >
+                <tr>
+                  <th class="px-6 py-4">Released</th>
+                  <th class="px-6 py-4">Album</th>
+                  <th class="px-6 py-4 text-center w-24">Download</th>
+                  <th class="px-6 py-4 text-center w-24">Link</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-white/5">
+                {#each missingAlbums as album}
+                  <tr class="hover:bg-white/5 transition-colors">
+                    <td class="px-6 py-4 text-white/50 font-mono tabular-nums"
+                      >{album.release_date || "—"}</td
+                    >
+                    <td class="px-6 py-4 font-medium text-white/90"
+                      >{album.title}</td
+                    >
+                    <td class="px-6 py-4 text-center">
+                      <button
+                        class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform disabled:opacity-20 disabled:cursor-not-allowed"
+                        on:click={() => downloadAlbum(album.mbid)}
+                        disabled={downloadingMbids.has(album.mbid)}
+                        title="Download with Pearlarr"
+                      >
+                        <img
+                          src="/assets/icon-pearlarr.svg"
+                          class="w-5 h-5"
+                          alt="Download"
+                        />
+                      </button>
+                    </td>
+                    <td class="px-6 py-4">
+                      <div class="flex items-center justify-center">
+                        {#if album.musicbrainz_url}
+                          <a
+                            href={album.musicbrainz_url}
+                            target="_blank"
+                            class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
+                            title="View on MusicBrainz"
+                            ><img
+                              src="/assets/logo-musicbrainz.svg"
+                              class="w-5 h-5"
+                              alt="MB"
+                            /></a
+                          >
+                        {/if}
+                      </div>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
         {/if}
       {/if}
     </div>
@@ -1450,81 +1558,6 @@
         </div>
       </div>
     </aside>
-
-    {#if missingAlbums.length > 0}
-      <section class="pb-10 col-span-full">
-        <div class="flex items-center justify-between mb-6">
-          <h2 class="text-2xl font-bold text-white/80">Missing Albums</h2>
-        </div>
-        <div
-          class="glass-surface rounded-2xl overflow-hidden border border-white/5 bg-surface-900/40 backdrop-blur-xl"
-        >
-          <table class="w-full text-left text-sm whitespace-nowrap">
-            <thead
-              class="uppercase tracking-wider border-b border-white/10 text-white/40 text-xs bg-white/5"
-            >
-              <tr>
-                <th class="px-6 py-4">Album</th>
-                <th class="px-6 py-4">Released</th>
-                <th class="px-6 py-4 text-center">Links</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-white/5">
-              {#each missingAlbums as album}
-                <tr class="hover:bg-white/5 transition-colors">
-                  <td class="px-6 py-4 font-medium text-white/90"
-                    >{album.title}</td
-                  >
-                  <td class="px-6 py-4 text-white/50"
-                    >{album.release_date || "—"}</td
-                  >
-                  <td class="px-6 py-4">
-                    <div class="flex items-center justify-center gap-3">
-                      {#if album.musicbrainz_url}
-                        <a
-                          href={album.musicbrainz_url}
-                          target="_blank"
-                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
-                          ><img
-                            src="/assets/logo-musicbrainz.svg"
-                            class="w-5 h-5"
-                            alt="MB"
-                          /></a
-                        >
-                      {/if}
-                      {#if album.tidal_url}
-                        <a
-                          href={album.tidal_url}
-                          target="_blank"
-                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
-                          ><img
-                            src="/assets/logo-tidal.png"
-                            class="w-5 h-5"
-                            alt="Tidal"
-                          /></a
-                        >
-                      {/if}
-                      {#if album.qobuz_url}
-                        <a
-                          href={album.qobuz_url}
-                          target="_blank"
-                          class="opacity-50 hover:opacity-100 transition-opacity hover:scale-110 transform"
-                          ><img
-                            src="/assets/logo-qobuz.png"
-                            class="w-5 h-5"
-                            alt="Qobuz"
-                          /></a
-                        >
-                      {/if}
-                    </div>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    {/if}
   </main>
 </div>
 

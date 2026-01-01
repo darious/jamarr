@@ -19,6 +19,10 @@ def load_config():
     return _config
 
 
+def get_pearlarr_url():
+    return load_config().get("pearlarr", {}).get("url")
+
+
 def get_music_path():
     return load_config().get("music_path", "/root/music")
 
@@ -43,6 +47,16 @@ def get_musicbrainz_rate_limit():
 
 def get_qobuz_region():
     return load_config().get("qobuz", {}).get("region", "us-en")
+
+
+def get_qobuz_credentials():
+    cfg = load_config().get("qobuz", {})
+    return (
+        cfg.get("app_id"),
+        cfg.get("secret"),
+        cfg.get("email"),
+        cfg.get("password")
+    )
 
 
 def get_tidal_credentials():

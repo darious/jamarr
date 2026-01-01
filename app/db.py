@@ -321,10 +321,7 @@ async def init_db():
                 title TEXT NOT NULL,
                 release_date TEXT,
                 primary_type TEXT,
-                image_url TEXT,
                 musicbrainz_url TEXT,
-                tidal_url TEXT,
-                qobuz_url TEXT,
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE(artist_mbid, release_group_mbid),
                 FOREIGN KEY(artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE

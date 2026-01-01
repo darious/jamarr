@@ -2,7 +2,7 @@ import asyncio
 import logging
 from app.scanner.stats import get_api_tracker
 from app.db import get_pool
-from app.scanner.services import musicbrainz, lastfm, artwork, wikidata, wikipedia, album
+from app.scanner.services import musicbrainz, lastfm, artwork, wikidata, wikipedia, album, qobuz
 from app.scanner.core import get_shared_client
 from app.scanner.artwork import download_and_save_artwork, upsert_artwork_record, upsert_image_mapping
 
@@ -158,7 +158,7 @@ class MetadataCoordinator:
         fetch_metadata = options.get("fetch_metadata", False)
         fetch_base_metadata = options.get("fetch_base_metadata", fetch_metadata) # Backwards compat
         # Links are not fetched by default; only when explicitly requested or needed for other branches
-        fetch_links = options.get("fetch_links", False)
+        fetch_links = options.get("fetch_links") or options.get("links_only", False)
         fetch_artwork = options.get("fetch_artwork", False)
         fetch_spotify_artwork = options.get("fetch_spotify_artwork", False)
         
@@ -193,7 +193,21 @@ class MetadataCoordinator:
                     ]
                 )
                 has_core = bool(artist.get("name"))
-                if has_core and have_links:
+                
+                # Check for ANY missing link type
+                # If we are missing any of these, we should re-scan MB to see if they've been added
+                link_fields = [
+                    "homepage",
+                    "spotify_url",
+                    "wikipedia_url",
+                    "qobuz_url",
+                    "tidal_url",
+                    "lastfm_url",
+                    "discogs_url",
+                ]
+                missing_any_link = any(not artist.get(f) for f in link_fields)
+                
+                if has_core and have_links and not missing_any_link:
                     fetch_base_metadata = False
 
             # Bio
@@ -240,7 +254,7 @@ class MetadataCoordinator:
         # Determine if we actually need links (for bio or spotify art) based on missing data
         need_links_for_bio = fetch_bio and not artist.get("wikipedia_url")
         need_links_for_spotify = fetch_spotify_artwork and not artist.get("spotify_url")
-        effective_fetch_links = fetch_links or need_links_for_bio or need_links_for_spotify
+        effective_fetch_links = fetch_links or need_links_for_bio or need_links_for_spotify or fetch_base_metadata
 
         # Enforce fanart-first, Spotify fallback
         fanart_requested = fetch_artwork or fetch_spotify_artwork
@@ -545,9 +559,33 @@ class MetadataCoordinator:
                 wd_links = await wikidata.fetch_external_links(client, wikidata_url, existing)
                 updates.update(wd_links)
                 get_api_tracker().track_detailed("External Links", "found" if wd_links else "missing")
-        elif effective_fetch_links and not existing.get("spotify_url"):
+        if effective_fetch_links and not existing.get("spotify_url"):
             # If we intended to fetch but couldn't (no wikidata url)
             get_api_tracker().track_detailed("External Links", "missing")
+
+        # 8b. Qobuz Fallback (Search)
+        # Trigger: Link fetch enabled AND Missing Qobuz Link AND Not found in MB/Wiki
+        # 8b. Qobuz Fallback (Search)
+        # Trigger: Link fetch enabled AND Missing Qobuz Link AND Not found in MB/Wiki
+        if effective_fetch_links and not updates.get("qobuz_url") and not artist.get("qobuz_url"):
+             logger.debug(f"[{name}] Qobuz Fallback: Missing link, searching API...")
+             try:
+                 # Initialize Qobuz Client (using shared client for HTTP if possible, but QobuzClient manages its own)
+                 # We can pass the shared client to QobuzClient if we update QobuzClient to accept it
+                 # The QobuzClient I wrote accepts 'client' in init.
+                 q_client = qobuz.QobuzClient(client=client)
+                 
+                 found_link = await q_client.search_artist(name)
+                 if found_link:
+                     updates["qobuz_url"] = found_link
+                     logger.info(f"[{name}] Qobuz Search: Found {found_link}")
+                     get_api_tracker().track_detailed("Qobuz Search", "found")
+                 else:
+                     logger.debug(f"[{name}] Qobuz Search: No match found")
+                     get_api_tracker().track_detailed("Qobuz Search", "missing")
+                     
+             except Exception as e:
+                 logger.error(f"[{name}] Qobuz Search Error: {e}")
 
         # 9. Wikipedia Bio (Depends on Wiki URL)
         logger.debug(f"[{name}] Checking Bio Block (url={target_wiki_url})")
@@ -774,102 +812,4 @@ class MetadataCoordinator:
         except Exception as e:
             logger.error(f"DB Save Error for {mbid}: {e}")
 
-    async def scan_missing_albums(self, artist_filter=None, mbid_filter=None):
-        """
-        Scans for missing albums (Release Groups) from MusicBrainz for local artists.
-        """
-        logger.info("Starting Missing Albums Scan...")
-        from app.tidal import TidalClient, year_from_date
-        
-        try:
-             # 1. Get Artists
-             query = "SELECT DISTINCT a.mbid, a.name FROM artist a"
-             params = []
-             clauses = []
-             joins = []
-             
-             if mbid_filter:
-                 if isinstance(mbid_filter, (list, set, tuple)):
-                     filtered = [m for m in mbid_filter if m]
-                     if filtered:
-                         clauses.append(f"a.mbid = ANY(${len(params) + 1}::text[])")
-                         params.append(filtered)
-                 else:
-                     clauses.append(f"a.mbid = ${len(params) + 1}")
-                     params.append(mbid_filter)
-             elif artist_filter:
-                 clauses.append(f"a.name ILIKE ${len(params) + 1}")
-                 params.append(f"%{artist_filter}%")
-             else:
-                 joins.append("JOIN artist_album aa ON a.mbid = aa.artist_mbid")
-                 
-             if joins:
-                 query += " " + " ".join(joins)
-             if clauses:
-                 query += " WHERE " + " AND ".join(clauses)
-                 
-             artists = await self.db.fetch(query, *params)
-             
-             total = len(artists)
-             processed = 0
-             
-             
-             # Use shared client
-             client = get_shared_client()
-             tidal_client = TidalClient()
-                 
-             for row in artists:
-                     processed += 1
-                     mbid, name = row["mbid"], row["name"]
-                     current_name = name or "Unknown"
-                     
-                     # Local RGs
-                     rows = await self.db.fetch("SELECT album_mbid FROM artist_album WHERE artist_mbid = $1", mbid)
-                     local_rgs = {r[0] for r in rows}
-                     
-                     await self.db.execute("DELETE FROM missing_album WHERE artist_mbid = $1", mbid)
-                     
-                     try:
-                         # Fetch MB Albums (using clean logic)
-                         mb_albums = await musicbrainz.fetch_release_groups(mbid, "album", client)
-                         
-                         for album in mb_albums:
-                             rg_id = album["mbid"]
-                             if rg_id in local_rgs:
-                                 continue
-                             
-                             # Resolve Links
-                             match = await musicbrainz.fetch_best_release_match(rg_id, client)
-                             
-                             tidal_url = None
-                             qobuz_url = None
-                             for link in match.get("links", []):
-                                 if link["type"] == "tidal":
-                                     tidal_url = link["url"]
-                                 elif link["type"] == "qobuz":
-                                     qobuz_url = link["url"]
-                                 
-                             if not tidal_url:
-                                 try:
-                                     want_year = year_from_date(album.get("date"))
-                                     found = tidal_client.find_album_match(current_name, album["title"], want_year)
-                                     if found:
-                                         tidal_url = found
-                                 except Exception:
-                                     pass
-                                 
-                             # Insert
-                             await self.db.execute("""
-                                 INSERT INTO missing_album
-                                 (artist_mbid, release_group_mbid, title, release_date, primary_type, musicbrainz_url, tidal_url, qobuz_url, updated_at)
-                                 VALUES ($1, $2, $3, $4, 'Album', $5, $6, $7, NOW())
-                                 ON CONFLICT (artist_mbid, release_group_mbid) DO NOTHING
-                             """, mbid, rg_id, album["title"], album["date"], album.get("musicbrainz_url"), tidal_url, qobuz_url)
-                                 
-                     except Exception as e:
-                         logger.warning(f"Error checking missing albums for {current_name}: {e}")
-                         
-             logger.info(f"Missing albums scan complete. Checked {processed}/{total} artists.")
-             
-        except Exception as e:
-            logger.error(f"Missing Album Scan Failed: {e}")
+

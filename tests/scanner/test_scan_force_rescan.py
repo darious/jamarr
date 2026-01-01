@@ -77,6 +77,12 @@ async def test_missing_only_short_circuits_metadata(monkeypatch):
         "image_url": "http://fanart/img.jpg",
         "image_source": "fanart",
         "spotify_url": "https://open.spotify.com/artist/sp-id",
+        "qobuz_url": "https://play.qobuz.com/artist/123", # Added to satisf y smart skip
+        "tidal_url": "https://tidal.com/artist/123",
+        "lastfm_url": "https://last.fm/artist/foo",
+        "discogs_url": "https://discogs.com/artist/123",
+        "wikipedia_url": "https://en.wikipedia.org/wiki/Foo",
+        "homepage": "https://example.com",
         "has_top_tracks": True,
         "has_similar": True,
         "has_singles": True,
