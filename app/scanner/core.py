@@ -17,6 +17,7 @@ except ImportError:
 from app.db import get_db
 from app.scanner.tags import extract_tags
 from app.scanner.stats import get_api_tracker
+# DNS resolver imported lazily in warm_dns_cache() to avoid loading aiodns in web server
 from app.scanner.artwork import (
     extract_and_save_artwork,
     upsert_artwork_record,
@@ -643,17 +644,42 @@ class Scanner:
 
 
 _shared_client = None
+_dns_cache_warmed = False
+
+async def warm_dns_cache():
+    """
+    Pre-resolve known API hostnames to warm the DNS cache.
+    This eliminates DNS lookups during scanning.
+    
+    This is optional and should only be called from the CLI scanner,
+    not from the web server context.
+    """
+    global _dns_cache_warmed
+    if _dns_cache_warmed:
+        return
+        
+    try:
+        # Lazy import to avoid loading aiodns in web server context
+        from app.scanner.dns_resolver import warm_dns_cache as _warm_dns_cache
+        
+        logger.info("Warming DNS cache for scanner...")
+        await _warm_dns_cache()
+        _dns_cache_warmed = True
+        logger.info("DNS cache warmed successfully")
+    except Exception as e:
+        # Don't fail if DNS warming fails - it's just an optimization
+        logger.warning(f"Failed to warm DNS cache (non-fatal): {e}")
 
 def get_shared_client() -> httpx.AsyncClient:
     """
-    Returns a shared httpx.AsyncClient instance.
+    Returns a shared httpx.AsyncClient instance with DNS caching.
     Created lazily and lasts for the process lifetime (or until closed).
     """
     global _shared_client
     if _shared_client is None or _shared_client.is_closed:
-        # Tuning limits for scanner: 
-        # Up to 25 connections (default is 100 but let's be safe for DNS)
-        # Keepalive is good.
+        # Create HTTP client
+        # DNS caching is handled separately via warm_dns_cache() if needed
+        
         limits = httpx.Limits(max_keepalive_connections=10, max_connections=25)
         _shared_client = httpx.AsyncClient(
             headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"},

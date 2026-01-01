@@ -3,7 +3,7 @@ import logging
 import time
 import os
 from typing import Optional, Dict, Any
-from app.scanner.core import Scanner, close_shared_client
+from app.scanner.core import Scanner, close_shared_client, warm_dns_cache
 from app.scanner.services.coordinator import MetadataCoordinator
 from app.config import get_music_path
 from app.scanner.stats import get_api_tracker
@@ -180,6 +180,9 @@ class ScanManager:
                 artists = await self._fetch_artists_for_update(db, artist_filter, mbid_filter, path_mbids)
                 self._log_message(f"Found {len(artists)} artists to process.")
 
+                # Warm DNS cache before metadata operations to prevent DNS errors
+                await warm_dns_cache()
+                
                 # Run Update
                 run_opts = options.copy()
                 run_opts["missing_only"] = missing_only
@@ -438,6 +441,9 @@ class ScanManager:
     async def _run_missing_albums(self, artist_filter=None, mbid_filter=None):
         try:
              self._broadcast({"type": "start", "mode": "missing_albums", "phase": self._phase})
+             # Warm DNS cache before metadata operations
+             await warm_dns_cache()
+             
              coord = MetadataCoordinator()
              await coord.scan_missing_albums(artist_filter, mbid_filter)
              self._status = "Idle"
