@@ -186,9 +186,12 @@ async def main():
 
 if __name__ == "__main__":
     from app.db import init_db
+    from app.scanner.core import warm_dns_cache
 
     async def run():
         await init_db()
+        # Warm DNS cache before scanning to eliminate DNS lookups
+        await warm_dns_cache()
         await main()
 
     asyncio.run(run())

@@ -20,17 +20,28 @@ async def seed_data(db: asyncpg.Connection):
         ('artist3', 'Artist Three', NULL, 'Artist Three')
     """)
 
-    # Insert Albums
+    # Insert Albums with release_group_mbid
+    # album1 and album1b are different releases of the same release group
     await db.execute("""
-        INSERT INTO album (mbid, title, artwork_id) VALUES 
-        ('album1', 'Album One', 1),
-        ('album2', 'Album Two', NULL)
+        INSERT INTO album (mbid, release_group_mbid, title, artwork_id) VALUES 
+        ('album1', 'rg1', 'Album One', 1),
+        ('album1b', 'rg1', 'Album One (Deluxe)', 1),
+        ('album2', 'rg2', 'Album Two', NULL)
+    """)
+
+    # Insert Tracks (needed for artwork detection)
+    await db.execute("""
+        INSERT INTO track (id, path, title, album, release_group_mbid, artwork_id) VALUES 
+        (1, '/music/track1.flac', 'Track 1', 'Album One', 'rg1', 1),
+        (2, '/music/track2.flac', 'Track 2', 'Album One', 'rg1', 1),
+        (3, '/music/track3.flac', 'Track 3', 'Album Two', 'rg2', NULL)
     """)
 
     # Artist-Album map (Primary)
     await db.execute("""
         INSERT INTO artist_album (artist_mbid, album_mbid, type) VALUES 
-        ('artist1', 'album1', 'primary')
+        ('artist1', 'album1', 'primary'),
+        ('artist1', 'album1b', 'primary')
     """)
 
     # Image Map (Backgrounds)
@@ -39,11 +50,11 @@ async def seed_data(db: asyncpg.Connection):
         (3, 'artist', 'artist1', 'artistbackground')
     """)
 
-    # External Links
+    # External Links (stored at release_group_mbid level for albums)
     await db.execute("""
         INSERT INTO external_link (entity_type, entity_id, type, url) VALUES 
         ('artist', 'artist1', 'spotify', 'http://spotify.com/artist1'),
-        ('album', 'album1', 'musicbrainz', 'http://mb.com/album1')
+        ('album', 'rg1', 'musicbrainz', 'http://mb.com/rg1')
     """)
 
 
@@ -71,27 +82,35 @@ async def test_media_quality_summary(client: AsyncClient, seed_data):
     assert prim_stats["link_stats"]["spotify"] == 1
 
     # Album Stats
+    # We have 3 releases but only 2 unique release groups (rg1, rg2)
     alb_stats = data["album_stats"]
-    assert alb_stats["total"] == 2
-    assert alb_stats["with_artwork"] == 1
-    assert alb_stats["link_stats"]["musicbrainz"] == 1
+    assert alb_stats["total"] == 2  # 2 unique release groups
+    assert alb_stats["with_artwork"] == 1  # rg1 has artwork (both releases have it)
+    assert alb_stats["link_stats"]["musicbrainz"] == 1  # rg1 has a link
 
 @pytest.mark.asyncio
 async def test_media_quality_items(client: AsyncClient, seed_data):
-    # Test valid query
-    response = await client.get("/api/media-quality/items?category=artist&filter_type=total")
+    # Test valid query - should return 2 release groups
+    response = await client.get("/api/media-quality/items?category=album&filter_type=total")
     assert response.status_code == 200
     items = response.json()
-    assert len(items) == 3
+    assert len(items) == 2  # 2 unique release groups
     
-    # Test missing artwork
-    response = await client.get("/api/media-quality/items?category=artist&filter_type=artwork&filter_value=missing")
+    # Test missing artwork - should return rg2
+    response = await client.get("/api/media-quality/items?category=album&filter_type=artwork&filter_value=missing")
     assert response.status_code == 200
     items = response.json()
     assert len(items) == 1
-    assert items[0]["mbid"] == "artist3"
+    assert items[0]["mbid"] == "rg2"  # release_group_mbid
+    
+    # Test with artwork - should return rg1
+    response = await client.get("/api/media-quality/items?category=album&filter_type=artwork&filter_value=present")
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == 1
+    assert items[0]["mbid"] == "rg1"  # release_group_mbid
 
-    # Test source fanart
+    # Test source fanart (for artists)
     response = await client.get("/api/media-quality/items?category=artist&filter_type=source&filter_value=Fanart")
     assert response.status_code == 200
     items = response.json()
