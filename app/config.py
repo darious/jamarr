@@ -45,6 +45,16 @@ def get_qobuz_region():
     return load_config().get("qobuz", {}).get("region", "us-en")
 
 
+def get_qobuz_credentials():
+    cfg = load_config().get("qobuz", {})
+    return (
+        cfg.get("app_id"),
+        cfg.get("secret"),
+        cfg.get("email"),
+        cfg.get("password")
+    )
+
+
 def get_tidal_credentials():
     cfg = load_config().get("tidal", {})
     return cfg.get("client_id"), cfg.get("client_secret")

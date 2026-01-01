@@ -10,6 +10,10 @@ musicbrainz:
 
 qobuz:
   region: "gb-en"
+  app_id: "798273057"
+  secret: "806331c3b0b641da923b890aed01d04a"
+  email: "chris@darious.co.uk"
+  password: "QoSLD23mxgbuZ"
 
 tidal:
   client_id: LCyOOH2KYtx0nF88
