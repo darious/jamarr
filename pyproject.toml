@@ -20,6 +20,8 @@ dependencies = [
     "email-validator",
     "pillow",
     "blake3",
+    "aiodns>=3.2.0",
+    "pycares>=4.4.0",
 ]
 
 
@@ -39,4 +41,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: long-running matrix/integration tests",
+]
+filterwarnings = [
+    # Ignore harmless pycares event loop cleanup warning
+    "ignore::pytest.PytestUnraisableExceptionWarning:_pytest.unraisableexception",
 ]
