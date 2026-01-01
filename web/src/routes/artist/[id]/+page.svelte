@@ -201,6 +201,9 @@
             // CRITICAL: Preserve artwork from EITHER source (top track API or local track)
             art_id: t.art_id || local.art_id,
             art_sha1: t.art_sha1 || local.art_sha1,
+            // Ensure API's album_mbid is preferred if available (it comes from release_group_mbid in SQL)
+            album_mbid:
+              t.album_mbid || local.album_mbid || local.mb_release_group_id,
           };
         } else {
           // Fallback if track not loaded yet - use API data
@@ -219,6 +222,7 @@
               (t.duration_ms ? Math.round(t.duration_ms / 1000) : 0),
             art_id: t.art_id || null,
             art_sha1: t.art_sha1 || null,
+            album_mbid: t.album_mbid, // Use API data directly
             codec: t.codec || null,
             bitrate: null,
             sample_rate_hz: t.sample_rate_hz || null,
@@ -303,6 +307,7 @@
           art_id,
           art_sha1,
           navAlbum,
+          album_mbid: s.album_mbid,
           ...techData,
           tracksToPlay,
         };
@@ -939,7 +944,15 @@
                     <div
                       class="flex items-center gap-2 text-sm text-white/60 truncate"
                     >
-                      <span class="truncate">{track.album || "—"}</span>
+                      <a
+                        href={track.album_mbid
+                          ? `/album/${track.album_mbid}`
+                          : `/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(track.album || "")}`}
+                        class="truncate hover:text-white hover:underline cursor-pointer"
+                        on:click|stopPropagation={() => {}}
+                      >
+                        {track.album || "—"}
+                      </a>
                       {#if track.popularity}
                         <span class="opacity-50">•</span>
                         <span class="text-white/50"
@@ -1113,7 +1126,15 @@
                     <div
                       class="flex items-center gap-2 text-sm text-white/60 truncate"
                     >
-                      <span class="truncate">{single.album || "—"}</span>
+                      <a
+                        href={single.album_mbid
+                          ? `/album/${single.album_mbid}`
+                          : `/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(single.album || "")}`}
+                        class="truncate hover:text-white hover:underline cursor-pointer"
+                        on:click|stopPropagation={() => {}}
+                      >
+                        {single.album || "—"}
+                      </a>
                       {#if single.popularity}
                         <span class="opacity-50">•</span>
                         <span class="text-white/50"

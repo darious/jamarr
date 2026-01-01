@@ -179,7 +179,7 @@ async def get_artists(
             top_tracks_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec, 
                     t.bit_depth, t.sample_rate_hz, t.duration_seconds,
-                    a.sha1 as art_sha1, t.artwork_id
+                    a.sha1 as art_sha1, t.artwork_id, t.release_group_mbid as album_mbid
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
                 LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -202,6 +202,7 @@ async def get_artists(
                     "duration_seconds": tt_row["duration_seconds"],
                     "art_sha1": sha1_to_hex(tt_row["art_sha1"]),
                     "art_id": tt_row["artwork_id"],
+                    "album_mbid": tt_row["album_mbid"],
                 }
                 for tt_row in tt_rows
             ]
@@ -210,7 +211,7 @@ async def get_artists(
             singles_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
                     t.bit_depth, t.sample_rate_hz,
-                    a.sha1 as art_sha1, t.artwork_id
+                    a.sha1 as art_sha1, t.artwork_id, t.release_group_mbid as album_mbid
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
                 LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -231,6 +232,7 @@ async def get_artists(
                     "art_sha1": sha1_to_hex(s_row["art_sha1"]),
                     "art_id": s_row["artwork_id"],
                     "album": s_row["album"],
+                    "album_mbid": s_row["album_mbid"],
                 }
                 for s_row in s_rows
             ]
