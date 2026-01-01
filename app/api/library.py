@@ -3,9 +3,14 @@ from app.db import get_db, optimize_db
 import asyncpg
 from typing import Optional
 
-from app.config import get_musicbrainz_root_url
+from app.config import get_musicbrainz_root_url, get_pearlarr_url
 from app.scanner.scan_manager import ScanManager
 from app.media.image_lookup import fetch_primary_images
+from pydantic import BaseModel
+import httpx
+import logging
+
+logger = logging.getLogger("api.library")
 
 router = APIRouter()
 
@@ -17,6 +22,8 @@ def sha1_to_hex(sha1_value):
     return sha1_value
 
 
+class PearlarrDownloadRequest(BaseModel):
+    mbid: str
 
 @router.post("/api/scan/missing")
 async def scan_missing_albums(artist: str = None, mbid: str = None):
@@ -43,20 +50,40 @@ async def trigger_optimize():
 async def get_missing_albums(mbid: str, db: asyncpg.Connection = Depends(get_db)):
     query = """
         SELECT 
-            release_group_mbid as mbid,
-            title,
-            release_date,
-            primary_type,
-            image_url,
-            musicbrainz_url,
-            tidal_url,
-            qobuz_url
-        FROM missing_album
-        WHERE artist_mbid = $1
-        ORDER BY release_date DESC
+            ma.release_group_mbid as mbid,
+            ma.title,
+            ma.release_date,
+            ma.primary_type,
+            ma.musicbrainz_url
+        FROM missing_album ma
+        LEFT JOIN album a ON ma.release_group_mbid = a.release_group_mbid
+        WHERE ma.artist_mbid = $1 AND a.mbid IS NULL
+        ORDER BY ma.release_date DESC
     """
     rows = await db.fetch(query, mbid)
     return [dict(row) for row in rows]
+
+
+@router.post("/api/download/pearlarr")
+async def download_pearlarr(req: PearlarrDownloadRequest):
+    pearlarr_url = get_pearlarr_url()
+    if not pearlarr_url:
+        raise HTTPException(status_code=500, detail="Pearlarr URL not configured")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            # Pearlarr expects {"url": "MBID"}
+            payload = {"url": req.mbid}
+            resp = await client.post(pearlarr_url, json=payload, timeout=5.0)
+            
+            if resp.status_code >= 400:
+                 logger.error(f"Pearlarr returned {resp.status_code}: {resp.text}")
+                 raise HTTPException(status_code=500, detail=f"Pearlarr error: {resp.status_code}")
+                 
+            return {"status": "queued", "message": "Download queued via Pearlarr"}
+    except Exception as e:
+        logger.error(f"Failed to trigger Pearlarr download: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/api/artists")
