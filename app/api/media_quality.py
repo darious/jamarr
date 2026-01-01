@@ -20,23 +20,20 @@ async def get_media_quality_items(
     where_clauses = []
 
     if category == "album":
+        # Select one representative release per release group
+        # Use DISTINCT ON to get the first release (by mbid) for each release group
         query = """
-            SELECT al.mbid, al.title as name, NULL as image_url, ar.name as artist_name, al.artwork_id 
+            SELECT DISTINCT ON (al.release_group_mbid)
+                al.release_group_mbid as mbid, 
+                al.title as name, 
+                NULL as image_url, 
+                ar.name as artist_name, 
+                al.artwork_id 
             FROM album al
             LEFT JOIN artist_album aa ON al.mbid = aa.album_mbid AND aa.type='primary'
             LEFT JOIN artist ar ON aa.artist_mbid = ar.mbid
+            WHERE al.release_group_mbid IS NOT NULL
          """
-        # Postgres requires grouping by all selected columns or using an aggregate
-        # But here we are selecting specific rows. We might need DISTINCT if joins cause dupes.
-        # Actually, one album can have multiple primary artists. We should probably just pick one for display or group.
-        # For simplicity let's rely on DISTINCT in the SELECT or handle it
-
-        # Retaining the logic from before, but fixing for Postgres strictness if needed.
-        # The previous code had "GROUP BY al.mbid" which implies non-aggregated columns.
-        # In Postgres, we must include them in GROUP BY.
-        # Let's verify if we need GROUP BY. If we join artist_album, we might get duplicates.
-        # Let's filter first, then join.
-
         tbl = "al"
     else:
         query = "SELECT mbid, name, image_url, artwork_id FROM artist ar"
@@ -65,10 +62,29 @@ async def get_media_quality_items(
             """)
 
     elif filter_type == "artwork":
-        if filter_value == "missing":
-            where_clauses.append(f"{tbl}.artwork_id IS NULL")
-        elif filter_value == "present":
-            where_clauses.append(f"{tbl}.artwork_id IS NOT NULL")
+        if category == "album":
+            # For albums, check if the release group has any release with artwork
+            if filter_value == "missing":
+                where_clauses.append("""
+                    al.release_group_mbid NOT IN (
+                        SELECT DISTINCT release_group_mbid 
+                        FROM album 
+                        WHERE artwork_id IS NOT NULL AND release_group_mbid IS NOT NULL
+                    )
+                """)
+            elif filter_value == "present":
+                where_clauses.append("""
+                    al.release_group_mbid IN (
+                        SELECT DISTINCT release_group_mbid 
+                        FROM album 
+                        WHERE artwork_id IS NOT NULL AND release_group_mbid IS NOT NULL
+                    )
+                """)
+        else:
+            if filter_value == "missing":
+                where_clauses.append(f"{tbl}.artwork_id IS NULL")
+            elif filter_value == "present":
+                where_clauses.append(f"{tbl}.artwork_id IS NOT NULL")
 
     elif filter_type == "source":
         # Need to join artwork table to filter by source
@@ -93,38 +109,94 @@ async def get_media_quality_items(
         if filter_value:
             # Handle special metadata filters that reuse the link UI
             if filter_value == "release type":
-                where_clauses.append(f"{tbl}.release_type_raw = '<none>'")
+                if category == "album":
+                    where_clauses.append("""
+                        al.release_group_mbid NOT IN (
+                            SELECT DISTINCT release_group_mbid 
+                            FROM album 
+                            WHERE release_type_raw != '<none>' AND release_group_mbid IS NOT NULL
+                        )
+                    """)
+                else:
+                    where_clauses.append(f"{tbl}.release_type_raw = '<none>'")
             elif filter_value == "release date":
-                where_clauses.append(f"{tbl}.release_date IS NULL")
+                if category == "album":
+                    where_clauses.append("""
+                        al.release_group_mbid NOT IN (
+                            SELECT DISTINCT release_group_mbid 
+                            FROM album 
+                            WHERE release_date IS NOT NULL AND release_group_mbid IS NOT NULL
+                        )
+                    """)
+                else:
+                    where_clauses.append(f"{tbl}.release_date IS NULL")
             else:
                 idx = len(params) + 1
-                where_clauses.append(
-                    f"{tbl}.mbid NOT IN (SELECT entity_id FROM external_link WHERE type=${idx} AND entity_type=CASE WHEN '{category}'='album' THEN 'album' ELSE 'artist' END)"
-                )
+                if category == "album":
+                    # For albums, join on release_group_mbid
+                    where_clauses.append(
+                        f"{tbl}.release_group_mbid NOT IN (SELECT DISTINCT a.release_group_mbid FROM external_link el JOIN album a ON el.entity_id = a.release_group_mbid WHERE el.type=${idx} AND el.entity_type='album' AND a.release_group_mbid IS NOT NULL)"
+                    )
+                else:
+                    where_clauses.append(
+                        f"{tbl}.mbid NOT IN (SELECT entity_id FROM external_link WHERE type=${idx} AND entity_type='artist')"
+                    )
                 params.append(filter_value)
     
     elif filter_type == "link_type":
         if filter_value:
             if filter_value == "release type":
-                where_clauses.append(f"{tbl}.release_type_raw != '<none>'")
+                if category == "album":
+                    where_clauses.append("""
+                        al.release_group_mbid IN (
+                            SELECT DISTINCT release_group_mbid 
+                            FROM album 
+                            WHERE release_type_raw != '<none>' AND release_group_mbid IS NOT NULL
+                        )
+                    """)
+                else:
+                    where_clauses.append(f"{tbl}.release_type_raw != '<none>'")
             elif filter_value == "release date":
-                where_clauses.append(f"{tbl}.release_date IS NOT NULL")
+                if category == "album":
+                    where_clauses.append("""
+                        al.release_group_mbid IN (
+                            SELECT DISTINCT release_group_mbid 
+                            FROM album 
+                            WHERE release_date IS NOT NULL AND release_group_mbid IS NOT NULL
+                        )
+                    """)
+                else:
+                    where_clauses.append(f"{tbl}.release_date IS NOT NULL")
             else:
                 idx = len(params) + 1
-                where_clauses.append(
-                    f"{tbl}.mbid IN (SELECT entity_id FROM external_link WHERE type=${idx} AND entity_type=CASE WHEN '{category}'='album' THEN 'album' ELSE 'artist' END)"
-                )
+                if category == "album":
+                    # For albums, join on release_group_mbid
+                    where_clauses.append(
+                        f"{tbl}.release_group_mbid IN (SELECT DISTINCT a.release_group_mbid FROM external_link el JOIN album a ON el.entity_id = a.release_group_mbid WHERE el.type=${idx} AND el.entity_type='album' AND a.release_group_mbid IS NOT NULL)"
+                    )
+                else:
+                    where_clauses.append(
+                        f"{tbl}.mbid IN (SELECT entity_id FROM external_link WHERE type=${idx} AND entity_type='artist')"
+                    )
                 params.append(filter_value)
+
 
 
     # Construct final SQL
     if where_clauses:
-        query += " WHERE " + " AND ".join(where_clauses)
+        # For albums, we already have a WHERE clause, so use AND
+        # For artists, we don't have a WHERE clause, so use WHERE
+        if category == "album":
+            query += " AND " + " AND ".join(where_clauses)
+        else:
+            query += " WHERE " + " AND ".join(where_clauses)
 
     if category == "album":
-        query += " ORDER BY al.title ASC LIMIT 500"
+        # Order by release_group_mbid first (for DISTINCT ON), then by title
+        query += " ORDER BY al.release_group_mbid, al.title ASC LIMIT 500"
     else:
         query += " ORDER BY ar.sort_name ASC LIMIT 500"
+
 
     rows = await db.fetch(query, *params)
 
@@ -230,33 +302,49 @@ async def media_quality_summary(db: asyncpg.Connection = Depends(get_db)):
         stats["primary"]["link_stats"][row["type"]] = row["count"]
 
     # --- ALBUMS ---
-    stats["album_stats"]["total"] = await db.fetchval("SELECT COUNT(*) FROM album")
-
-    stats["album_stats"]["with_artwork"] = await db.fetchval(
-        "SELECT COUNT(*) FROM album WHERE artwork_id IS NOT NULL"
+    # Count unique release groups instead of individual releases
+    stats["album_stats"]["total"] = await db.fetchval(
+        "SELECT COUNT(DISTINCT release_group_mbid) FROM album WHERE release_group_mbid IS NOT NULL"
     )
 
+    # Count release groups that have at least one release with artwork
+    stats["album_stats"]["with_artwork"] = await db.fetchval("""
+        SELECT COUNT(DISTINCT release_group_mbid) 
+        FROM album 
+        WHERE release_group_mbid IS NOT NULL 
+          AND artwork_id IS NOT NULL
+    """)
+
+    # Count external links by joining on release_group_mbid
+    # External links are stored with entity_id = release_group_mbid for albums
     rows = await db.fetch("""
-        SELECT type, COUNT(*) 
-        FROM external_link 
-        WHERE entity_type='album' 
-        GROUP BY type
+        SELECT el.type, COUNT(DISTINCT a.release_group_mbid) 
+        FROM external_link el
+        JOIN album a ON el.entity_id = a.release_group_mbid
+        WHERE el.entity_type='album' AND a.release_group_mbid IS NOT NULL
+        GROUP BY el.type
     """)
     for row in rows:
         stats["album_stats"]["link_stats"][row["type"]] = row["count"]
 
     # Add Metadata Stats (Release Type, Release Date) disguised as links for UI compatibility
-    # Count PRESENT items, so the UI calculates MISSING correctly (Total - Present)
+    # Count PRESENT items at the release group level
     
-    # Release Date Present
-    stats["album_stats"]["link_stats"]["release date"] = await db.fetchval(
-        "SELECT COUNT(*) FROM album WHERE release_date IS NOT NULL"
-    )
+    # Release Date Present - count release groups where at least one release has a date
+    stats["album_stats"]["link_stats"]["release date"] = await db.fetchval("""
+        SELECT COUNT(DISTINCT release_group_mbid) 
+        FROM album 
+        WHERE release_group_mbid IS NOT NULL 
+          AND release_date IS NOT NULL
+    """)
     
-    # Release Type Present (NOT <none> and NOT NULL)
-    stats["album_stats"]["link_stats"]["release type"] = await db.fetchval(
-        "SELECT COUNT(*) FROM album WHERE release_type_raw != '<none>'"
-    )
+    # Release Type Present - count release groups where at least one release has a type
+    stats["album_stats"]["link_stats"]["release type"] = await db.fetchval("""
+        SELECT COUNT(DISTINCT release_group_mbid) 
+        FROM album 
+        WHERE release_group_mbid IS NOT NULL 
+          AND release_type_raw != '<none>'
+    """)
 
 
     return {
