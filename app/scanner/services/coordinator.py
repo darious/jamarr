@@ -40,10 +40,11 @@ class MetadataCoordinator:
                  mbids = [a["mbid"] for a in artists if a.get("mbid")]
                  if mbids:
                       q = """
-                      SELECT artist_mbid, array_agg(album_mbid) as rgs
-                      FROM artist_album 
-                      WHERE artist_mbid = ANY($1::text[]) 
-                      GROUP BY artist_mbid
+                      SELECT aa.artist_mbid, array_agg(DISTINCT al.release_group_mbid) as rgs
+                      FROM artist_album aa
+                      JOIN album al ON aa.album_mbid = al.mbid
+                      WHERE aa.artist_mbid = ANY($1::text[]) 
+                      GROUP BY aa.artist_mbid
                       """
                       try:
                           async with self.pool.acquire() as db:
@@ -270,10 +271,10 @@ class MetadataCoordinator:
                 pool = await get_pool()
                 async with pool.acquire() as conn:
                     rows = await conn.fetch(
-                        "SELECT mbid FROM album WHERE mbid = ANY($1) AND description IS NOT NULL",
+                        "SELECT DISTINCT release_group_mbid FROM album WHERE release_group_mbid = ANY($1) AND description IS NOT NULL",
                         album_ids_to_fetch
                     )
-                    albums_with_desc = {row["mbid"] for row in rows}
+                    albums_with_desc = {row["release_group_mbid"] for row in rows}
                     album_ids_to_fetch = [aid for aid in album_ids_to_fetch if aid not in albums_with_desc]
                     
                     if not album_ids_to_fetch:
@@ -755,8 +756,9 @@ class MetadataCoordinator:
                              if upd_vals:
                                  # We only update existing albums
                                  upd_vals.append(rg_id)
+                                 # UPDATED: Update ALL albums in this Release Group
                                  await db.execute(
-                                     f"UPDATE album SET {', '.join(upd_cols)} WHERE mbid = ${len(upd_vals)}",
+                                     f"UPDATE album SET {', '.join(upd_cols)} WHERE release_group_mbid = ${len(upd_vals)}",
                                      *upd_vals
                                  )
                                  

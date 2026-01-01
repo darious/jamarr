@@ -28,21 +28,24 @@ async def library_data(db):
             ('artist-2', 'Solo Guy', 'Solo Guy', NULL)
     """)
     # Album
-    # Album table usually doesn't have artwork_id, it's derived from tracks or artist
+    # UPDATED: mbid is Release ID, added release_group_mbid
     await db.execute("""
-        INSERT INTO album (mbid, title, release_date)
+        INSERT INTO album (mbid, release_group_mbid, title, release_date)
         VALUES 
-            ('album-1', 'Test Album', '2023-01-01'),
-            ('album-2', 'Single Hit', '2023-02-01')
+            ('release-1', 'rg-1', 'Test Album', '2023-01-01'),
+            ('release-2', 'rg-2', 'Single Hit', '2023-02-01')
     """)
     # Tracks
+    # Updated to include release_mbid and release_group_mbid
+    # Track One/Two -> Release 1 (RG 1)
+    # Solo Hit -> Release 2 (RG 2)
     # Schema has 'artwork_id'
     await db.execute("""
-        INSERT INTO track (path, title, artist, album, duration_seconds, track_no, disc_no, artist_mbid, album_artist_mbid, release_group_mbid, release_date, artwork_id)
+        INSERT INTO track (path, title, artist, album, duration_seconds, track_no, disc_no, artist_mbid, album_artist_mbid, release_mbid, release_group_mbid, release_date, artwork_id)
         VALUES 
-            ('/music/test1.flac', 'Track One', 'The Testers', 'Test Album', 180, 1, 1, 'artist-1', 'artist-1', 'album-1', '2023-01-01', 201),
-            ('/music/test2.flac', 'Track Two', 'The Testers', 'Test Album', 200, 2, 1, 'artist-1', 'artist-1', 'album-1', '2023-01-01', 201),
-            ('/music/test3.flac', 'Solo Hit', 'Solo Guy', 'Single Hit', 210, 1, 1, 'artist-2', 'artist-2', 'album-2', '2023-01-01', NULL)
+            ('/music/test1.flac', 'Track One', 'The Testers', 'Test Album', 180, 1, 1, 'artist-1', 'artist-1', 'release-1', 'rg-1', '2023-01-01', 201),
+            ('/music/test2.flac', 'Track Two', 'The Testers', 'Test Album', 200, 2, 1, 'artist-1', 'artist-1', 'release-1', 'rg-1', '2023-01-01', 201),
+            ('/music/test3.flac', 'Solo Hit', 'Solo Guy', 'Single Hit', 210, 1, 1, 'artist-2', 'artist-2', 'release-2', 'rg-2', '2023-01-01', NULL)
     """)
     # Track-Artist Relations
     row1 = await db.fetchrow("SELECT id FROM track WHERE title = 'Track One'")

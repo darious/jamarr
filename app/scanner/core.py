@@ -439,25 +439,31 @@ class Scanner:
             # Update Album and Artists
             if rg_mbid:
                 # Sync album date/type with track
-                await db.execute("""
-                    INSERT INTO album (mbid, title, release_date, release_type, release_type_raw, artwork_id, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, NOW())
-                    ON CONFLICT(mbid) DO UPDATE SET 
-                        title=COALESCE(excluded.title, album.title),
-                        release_date=excluded.release_date,
-                        release_type=excluded.release_type,
-                        release_type_raw=excluded.release_type_raw,
-                        updated_at=NOW()
-                """, rg_mbid, tags.get("album"), tags.get("release_date"), tags.get("release_type"), tags.get("release_type_raw"), artwork_id)
-                get_api_tracker().track_processed("albums", rg_mbid)
+                # UPDATED: Use Release ID as Album PK, but keep RG ID for grouping
+                album_pk = tags.get("release_mbid")
+                rg_mbid = tags.get("release_group_mbid")
                 
-            await self._process_track_artists(db, track_id, tags, artist_mbids, rg_mbid)
+                if album_pk and rg_mbid:
+                    await db.execute("""
+                        INSERT INTO album (mbid, release_group_mbid, title, release_date, release_type, release_type_raw, artwork_id, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                        ON CONFLICT(mbid) DO UPDATE SET 
+                            title=COALESCE(excluded.title, album.title),
+                            release_group_mbid=excluded.release_group_mbid,
+                            release_date=excluded.release_date,
+                            release_type=excluded.release_type,
+                            release_type_raw=excluded.release_type_raw,
+                            updated_at=NOW()
+                    """, album_pk, rg_mbid, tags.get("album"), tags.get("release_date"), tags.get("release_type"), tags.get("release_type_raw"), artwork_id)
+                    get_api_tracker().track_processed("albums", album_pk)
+                
+            await self._process_track_artists(db, track_id, tags, artist_mbids, album_pk)
             
         except Exception as e:
             logger.error(f"Failed to process {path}: {e}")
             self.stats["errors"] += 1
 
-    async def _process_track_artists(self, db, track_id, tags, artist_mbids, mb_rg_id=None):
+    async def _process_track_artists(self, db, track_id, tags, artist_mbids, album_mbid=None):
         await db.execute("DELETE FROM track_artist WHERE track_id = $1", track_id)
         
         def extract_ids(raw):
@@ -488,9 +494,9 @@ class Scanner:
             get_api_tracker().track_processed("artists", mbid)
             
             # Link to Album
-            if mb_rg_id:
+            if album_mbid:
                 type_ = "primary" if mbid in aa_ids else "contributor"
-                await upsert_artist_album(db, mbid, mb_rg_id, type_)
+                await upsert_artist_album(db, mbid, album_mbid, type_)
 
     async def _estimate_file_count(self, root_path):
         safe_root = shlex.quote(root_path)
@@ -591,7 +597,7 @@ class Scanner:
              # But 'album' table is for local albums.
              await db.execute("""
                  DELETE FROM album WHERE mbid NOT IN (
-                     SELECT DISTINCT release_group_mbid FROM track WHERE release_group_mbid IS NOT NULL
+                     SELECT DISTINCT release_mbid FROM track WHERE release_mbid IS NOT NULL
                  )
              """)
              
@@ -614,7 +620,7 @@ class Scanner:
              await db.execute("""
                  DELETE FROM external_link WHERE 
                  (entity_type = 'artist' AND entity_id NOT IN (SELECT mbid FROM artist)) OR
-                 (entity_type = 'album' AND entity_id NOT IN (SELECT mbid FROM album))
+                 (entity_type = 'album' AND entity_id NOT IN (SELECT DISTINCT release_group_mbid FROM album WHERE release_group_mbid IS NOT NULL))
              """)
              
              # 5. Unused Images (not mapped to anything)
@@ -622,7 +628,7 @@ class Scanner:
              await db.execute("""
                  DELETE FROM image_map WHERE
                  (entity_type = 'artist' AND entity_id NOT IN (SELECT mbid FROM artist)) OR
-                 (entity_type = 'album' AND entity_id NOT IN (SELECT mbid FROM album)) OR
+                 (entity_type = 'album' AND entity_id NOT IN (SELECT DISTINCT release_group_mbid FROM album WHERE release_group_mbid IS NOT NULL)) OR
                  (entity_type = 'track' AND entity_id::bigint NOT IN (SELECT id FROM track))
              """)
              

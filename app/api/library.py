@@ -211,7 +211,7 @@ async def get_artists(
             singles_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
                     t.bit_depth, t.sample_rate_hz,
-                    a.sha1 as art_sha1, t.artwork_id, t.release_group_mbid as album_mbid
+                    a.sha1 as art_sha1, t.artwork_id, t.release_mbid as album_mbid
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
                 LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -347,10 +347,11 @@ async def get_albums(
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
             MAX(t.release_mbid) as release_mbid,
-            MAX(COALESCE(al_rg.mbid, al_title.mbid)) as album_mbid,
-            MAX(COALESCE(al_rg.release_type, al_title.release_type)) as release_type,
-            MAX(COALESCE(al_rg.description, al_title.description)) as description,
-            MAX(COALESCE(al_rg.peak_chart_position, al_title.peak_chart_position)) as peak_chart_position,
+            MAX(t.release_mbid) as mbid,
+            MAX(al.release_group_mbid) as album_mbid,
+            MAX(al.release_type) as release_type,
+            MAX(al.description) as description,
+            MAX(al.peak_chart_position) as peak_chart_position,
             MAX(t.label) as label,
             COALESCE(
                 jsonb_agg(DISTINCT jsonb_build_object('type', el.type, 'url', el.url)) FILTER (WHERE el.url IS NOT NULL AND el.type != 'wikidata'),
@@ -363,9 +364,8 @@ async def get_albums(
             END) as type
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
-        LEFT JOIN album al_rg ON al_rg.mbid = t.release_group_mbid
-        LEFT JOIN album al_title ON al_title.title = t.album
-        LEFT JOIN external_link el ON el.entity_type = 'album' AND el.entity_id = COALESCE(al_rg.mbid, al_title.mbid)
+        LEFT JOIN album al ON al.mbid = t.release_mbid
+        LEFT JOIN external_link el ON el.entity_type = 'album' AND (el.entity_id = al.release_group_mbid OR el.entity_id = t.release_group_mbid)
     """
     params = [target_mbid]
     param_num = 2
@@ -400,7 +400,8 @@ async def get_albums(
     else:
         query += " WHERE t.album IS NOT NULL"
 
-    query += " GROUP BY t.album ORDER BY year ASC"
+    # Group by Release ID (primary) and Album Name (fallback grouping)
+    query += " GROUP BY t.release_mbid, t.album ORDER BY year ASC"
 
     rows = await db.fetch(query, *params)
     mb_root = get_musicbrainz_root_url()
@@ -544,6 +545,7 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
             MAX(t.release_mbid) as release_mbid,
+            MAX(t.release_mbid) as mbid,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
             'main' as type
@@ -573,6 +575,7 @@ async def get_recently_added_albums(
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
             MAX(t.release_mbid) as release_mbid,
+            MAX(t.release_mbid) as mbid,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
             'main' as type
@@ -603,6 +606,7 @@ async def get_recently_played_albums(
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
             MAX(t.release_mbid) as release_mbid,
+            MAX(t.release_mbid) as mbid,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
             MAX(ph.timestamp) as last_played
