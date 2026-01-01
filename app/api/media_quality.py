@@ -20,21 +20,32 @@ async def get_media_quality_items(
     where_clauses = []
 
     if category == "album":
-        # Select one representative release per release group
-        # Use DISTINCT ON to get the first release (by mbid) for each release group
+        # Use CTE to calculate has_artwork, then filter on it
+        # Check if ANY track in the release group has artwork (matches album page logic)
         query = """
-            SELECT DISTINCT ON (al.release_group_mbid)
-                al.release_group_mbid as mbid, 
-                al.title as name, 
-                NULL as image_url, 
-                ar.name as artist_name, 
-                al.artwork_id 
-            FROM album al
-            LEFT JOIN artist_album aa ON al.mbid = aa.album_mbid AND aa.type='primary'
-            LEFT JOIN artist ar ON aa.artist_mbid = ar.mbid
-            WHERE al.release_group_mbid IS NOT NULL
+            WITH album_with_artwork AS (
+                SELECT DISTINCT ON (al.release_group_mbid)
+                    al.release_group_mbid as mbid, 
+                    al.title as name, 
+                    NULL as image_url, 
+                    ar.name as artist_name, 
+                    al.artwork_id,
+                    EXISTS(
+                        SELECT 1 FROM track t
+                        WHERE t.release_group_mbid = al.release_group_mbid 
+                          AND t.artwork_id IS NOT NULL
+                    ) as has_artwork
+                FROM album al
+                LEFT JOIN artist_album aa ON al.mbid = aa.album_mbid AND aa.type='primary'
+                LEFT JOIN artist ar ON aa.artist_mbid = ar.mbid
+                WHERE al.release_group_mbid IS NOT NULL
+                ORDER BY al.release_group_mbid, al.title ASC
+            )
+            SELECT mbid, name, image_url, artist_name, artwork_id, has_artwork
+            FROM album_with_artwork
+            WHERE 1=1
          """
-        tbl = "al"
+        tbl = "album_with_artwork"
     else:
         query = "SELECT mbid, name, image_url, artwork_id FROM artist ar"
         tbl = "ar"
@@ -63,23 +74,11 @@ async def get_media_quality_items(
 
     elif filter_type == "artwork":
         if category == "album":
-            # For albums, check if the release group has any release with artwork
+            # For albums, use the has_artwork flag which checks all releases in the group
             if filter_value == "missing":
-                where_clauses.append("""
-                    al.release_group_mbid NOT IN (
-                        SELECT DISTINCT release_group_mbid 
-                        FROM album 
-                        WHERE artwork_id IS NOT NULL AND release_group_mbid IS NOT NULL
-                    )
-                """)
+                where_clauses.append("has_artwork = false")
             elif filter_value == "present":
-                where_clauses.append("""
-                    al.release_group_mbid IN (
-                        SELECT DISTINCT release_group_mbid 
-                        FROM album 
-                        WHERE artwork_id IS NOT NULL AND release_group_mbid IS NOT NULL
-                    )
-                """)
+                where_clauses.append("has_artwork = true")
         else:
             if filter_value == "missing":
                 where_clauses.append(f"{tbl}.artwork_id IS NULL")
@@ -111,7 +110,7 @@ async def get_media_quality_items(
             if filter_value == "release type":
                 if category == "album":
                     where_clauses.append("""
-                        al.release_group_mbid NOT IN (
+                        mbid NOT IN (
                             SELECT DISTINCT release_group_mbid 
                             FROM album 
                             WHERE release_type_raw != '<none>' AND release_group_mbid IS NOT NULL
@@ -122,7 +121,7 @@ async def get_media_quality_items(
             elif filter_value == "release date":
                 if category == "album":
                     where_clauses.append("""
-                        al.release_group_mbid NOT IN (
+                        mbid NOT IN (
                             SELECT DISTINCT release_group_mbid 
                             FROM album 
                             WHERE release_date IS NOT NULL AND release_group_mbid IS NOT NULL
@@ -135,7 +134,7 @@ async def get_media_quality_items(
                 if category == "album":
                     # For albums, join on release_group_mbid
                     where_clauses.append(
-                        f"{tbl}.release_group_mbid NOT IN (SELECT DISTINCT a.release_group_mbid FROM external_link el JOIN album a ON el.entity_id = a.release_group_mbid WHERE el.type=${idx} AND el.entity_type='album' AND a.release_group_mbid IS NOT NULL)"
+                        f"mbid NOT IN (SELECT DISTINCT a.release_group_mbid FROM external_link el JOIN album a ON el.entity_id = a.release_group_mbid WHERE el.type=${idx} AND el.entity_type='album' AND a.release_group_mbid IS NOT NULL)"
                     )
                 else:
                     where_clauses.append(
@@ -148,7 +147,7 @@ async def get_media_quality_items(
             if filter_value == "release type":
                 if category == "album":
                     where_clauses.append("""
-                        al.release_group_mbid IN (
+                        mbid IN (
                             SELECT DISTINCT release_group_mbid 
                             FROM album 
                             WHERE release_type_raw != '<none>' AND release_group_mbid IS NOT NULL
@@ -159,7 +158,7 @@ async def get_media_quality_items(
             elif filter_value == "release date":
                 if category == "album":
                     where_clauses.append("""
-                        al.release_group_mbid IN (
+                        mbid IN (
                             SELECT DISTINCT release_group_mbid 
                             FROM album 
                             WHERE release_date IS NOT NULL AND release_group_mbid IS NOT NULL
@@ -172,7 +171,7 @@ async def get_media_quality_items(
                 if category == "album":
                     # For albums, join on release_group_mbid
                     where_clauses.append(
-                        f"{tbl}.release_group_mbid IN (SELECT DISTINCT a.release_group_mbid FROM external_link el JOIN album a ON el.entity_id = a.release_group_mbid WHERE el.type=${idx} AND el.entity_type='album' AND a.release_group_mbid IS NOT NULL)"
+                        f"mbid IN (SELECT DISTINCT a.release_group_mbid FROM external_link el JOIN album a ON el.entity_id = a.release_group_mbid WHERE el.type=${idx} AND el.entity_type='album' AND a.release_group_mbid IS NOT NULL)"
                     )
                 else:
                     where_clauses.append(
@@ -184,7 +183,7 @@ async def get_media_quality_items(
 
     # Construct final SQL
     if where_clauses:
-        # For albums, we already have a WHERE clause, so use AND
+        # For albums with CTE, we already have WHERE 1=1, so use AND
         # For artists, we don't have a WHERE clause, so use WHERE
         if category == "album":
             query += " AND " + " AND ".join(where_clauses)
@@ -192,8 +191,8 @@ async def get_media_quality_items(
             query += " WHERE " + " AND ".join(where_clauses)
 
     if category == "album":
-        # Order by release_group_mbid first (for DISTINCT ON), then by title
-        query += " ORDER BY al.release_group_mbid, al.title ASC LIMIT 500"
+        # Already ordered in CTE
+        query += " LIMIT 500"
     else:
         query += " ORDER BY ar.sort_name ASC LIMIT 500"
 
@@ -307,12 +306,12 @@ async def media_quality_summary(db: asyncpg.Connection = Depends(get_db)):
         "SELECT COUNT(DISTINCT release_group_mbid) FROM album WHERE release_group_mbid IS NOT NULL"
     )
 
-    # Count release groups that have at least one release with artwork
+    # Count release groups that have at least one track with artwork
     stats["album_stats"]["with_artwork"] = await db.fetchval("""
-        SELECT COUNT(DISTINCT release_group_mbid) 
-        FROM album 
-        WHERE release_group_mbid IS NOT NULL 
-          AND artwork_id IS NOT NULL
+        SELECT COUNT(DISTINCT t.release_group_mbid) 
+        FROM track t
+        WHERE t.release_group_mbid IS NOT NULL 
+          AND t.artwork_id IS NOT NULL
     """)
 
     # Count external links by joining on release_group_mbid
