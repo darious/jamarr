@@ -218,7 +218,7 @@ async def test_missing_only_branch_selectivity(monkeypatch):
         async def __aexit__(self, *a): return False
         async def get(self, *a, **kw): return type("R", (), {"status_code": 200, "json": lambda self: {}})()
 
-    monkeypatch.setattr(coordinator_module, "get_client", lambda client=None: _DummyClient())
+    monkeypatch.setattr(coordinator_module, "get_shared_client", lambda client=None: _DummyClient())
     monkeypatch.setattr(
         coordinator_module.musicbrainz,
         "fetch_core",
@@ -320,7 +320,7 @@ async def test_artwork_fallback_to_spotify(monkeypatch):
         async def __aenter__(self): return self
         async def __aexit__(self, *a): return False
 
-    monkeypatch.setattr(coordinator_module, "get_client", lambda client=None: _DummyClient())
+    monkeypatch.setattr(coordinator_module, "get_shared_client", lambda client=None: _DummyClient())
     monkeypatch.setattr(
         coordinator_module.artwork,
         "fetch_fanart_artist_images",

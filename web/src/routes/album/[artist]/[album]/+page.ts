@@ -1,23 +1,33 @@
-import type { Album, Track } from '$api';
-import { fetchAlbums, fetchTracks } from '$api';
+import { redirect } from '@sveltejs/kit';
+import { fetchTracks } from '$api';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ params, fetch }) => {
-  const artist = decodeURIComponent(params.artist);
-  const album = decodeURIComponent(params.album);
+    const { artist, album } = params;
 
-  const tracks = await fetchTracks({ album, artist }, fetch);
-  const albumMbid = tracks?.[0]?.mb_release_group_id || tracks?.[0]?.mb_release_id;
-  const albums = await fetchAlbums(albumMbid ? { albumMbid } : { artist }, fetch);
+    try {
+        // Legacy route: /album/[artist]/[album]
+        // Fetch tracks to find the album MBID
+        const tracks = await fetchTracks({ artist, album }, fetch);
 
-  const albumMeta: Album | undefined = albumMbid
-    ? albums.find((a) => (a as any).mbid === albumMbid || a.mb_release_id === albumMbid || a.album.toLowerCase() === album.toLowerCase())
-    : albums.find((a) => a.album.toLowerCase() === album.toLowerCase());
+        if (tracks.length > 0) {
+            // Prioritize album_mbid, then release_group_mbid from track
+            const mbid = tracks[0].album_mbid || tracks[0].mb_release_group_id || tracks[0].mb_release_id;
 
-  return {
-    artist,
-    album,
-    tracks,
-    albumMeta
-  };
+            if (mbid) {
+                throw redirect(308, `/album/${mbid}`); // 308 Permanent Redirect for SEO/Caching
+            }
+        }
+    } catch (e) {
+        // If redirect was thrown, let it propagate
+        if ((e as any)?.status === 308) throw e;
+        console.warn(`Failed to resolve legacy album route: ${artist} - ${album}`, e);
+    }
+
+    // Fallback: This might 404 naturally if not handled, but strictly we should redirect.
+    // If we can't find an MBID, we can't redirect to the new route.
+    // We could error out or show a "Not Found" message.
+    throw redirect(307, '/'); // Redirect to home if failed? Or let it 404? 
+    // Better to let it 404 if not found? SvelteKit will 404 if load returns nothing?
+    // Actually, we must return something or throw error.
 };

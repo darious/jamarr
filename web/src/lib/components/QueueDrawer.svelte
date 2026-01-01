@@ -400,11 +400,27 @@
                   class="flex items-center gap-1 text-sm text-white/60 truncate"
                 >
                   {#if track.artist}
-                    <span>{track.artist}</span>
+                    <a
+                      href={track.artist_mbid
+                        ? `/artist/${track.artist_mbid}`
+                        : `/artist/${encodeURIComponent(track.artist)}`}
+                      class="hover:text-white hover:underline truncate"
+                      on:click|stopPropagation
+                    >
+                      {track.artist}
+                    </a>
                   {/if}
                   {#if track.album}
                     <span class="text-white/40">•</span>
-                    <span class="text-white/50">{track.album}</span>
+                    <a
+                      href={track.album_mbid
+                        ? `/album/${track.album_mbid}`
+                        : `/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album)}`}
+                      class="text-white/50 hover:text-white hover:underline truncate"
+                      on:click|stopPropagation
+                    >
+                      {track.album}
+                    </a>
                   {/if}
                 </div>
                 <!-- Tech Details -->

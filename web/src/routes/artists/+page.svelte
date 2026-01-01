@@ -95,7 +95,7 @@
           {#each list as artist}
             <a
               class="grid-card block cursor-pointer overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary-400"
-              href={`/artist/${encodeURIComponent(artist.name)}`}
+              href={`/artist/${artist.mbid}`}
             >
               <div class="aspect-square overflow-hidden rounded-xl">
                 <img
