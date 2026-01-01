@@ -397,7 +397,7 @@
                   </span>
                 </div>
                 <div
-                  class="flex items-center gap-1 text-sm text-white/60 truncate"
+                  class="flex items-center gap-1 text-sm text-white/60 min-w-0 relative z-10"
                 >
                   {#if track.artist}
                     <a
@@ -411,7 +411,7 @@
                     </a>
                   {/if}
                   {#if track.album}
-                    <span class="text-white/40">•</span>
+                    <span class="text-white/40 flex-shrink-0">•</span>
                     <a
                       href={track.album_mbid
                         ? `/album/${track.album_mbid}`

@@ -33,6 +33,7 @@ export interface Artist {
         duration_seconds?: number | null;
         art_id?: number | null;
         art_sha1?: string | null;
+        album_mbid?: string | null;
     }[];
     singles?: {
         mbid: string;
@@ -46,6 +47,7 @@ export interface Artist {
         art_id?: number | null;
         art_sha1?: string | null;
         album?: string;
+        album_mbid?: string | null;
         popularity?: number;
     }[];
     sort_name: string;
@@ -502,6 +504,8 @@ export interface PlaylistTrack {
     duration_seconds: number;
     art_sha1: string | null;
     art_id: number | null;
+    artist_mbid?: string | null;
+    album_mbid?: string | null;
     path: string;
     codec?: string;
     sample_rate_hz?: number;
