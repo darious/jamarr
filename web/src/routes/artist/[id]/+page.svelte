@@ -28,6 +28,7 @@
     albums: Album[];
     similarArtists: {
       name: string;
+      mbid?: string | null;
       art_id?: number | null;
       art_sha1?: string | null;
       in_library?: boolean;
@@ -466,9 +467,13 @@
     if (albumTracks.length) {
       await setQueue(albumTracks, 0);
     } else {
-      goto(
-        `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-      );
+      const albumId =
+        (album as any).mbid || (album as any).album_mbid || album.mb_release_id;
+      if (albumId) {
+        goto(`/album/${albumId}`);
+      } else {
+        console.error("No album ID available for navigation", album);
+      }
     }
   }
 
@@ -684,8 +689,8 @@
               <button
                 class="group w-24 text-center space-y-2"
                 on:click|stopPropagation={() => {
-                  if (sim.in_library) {
-                    goto(`/artist/${encodeURIComponent(sim.name)}`);
+                  if (sim.in_library && sim.mbid) {
+                    goto(`/artist/${sim.mbid}`);
                   } else if (sim.external_url) {
                     window.open(sim.external_url, "_blank");
                   }
@@ -776,10 +781,11 @@
                 <article class="group flex flex-col gap-4">
                   <button
                     class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
-                    on:click={() =>
-                      goto(
-                        `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
-                      )}
+                    on:click={() => {
+                      const albumId =
+                        album.mbid || album.album_mbid || album.mb_release_id;
+                      if (albumId) goto(`/album/${albumId}`);
+                    }}
                   >
                     <img
                       src={album.art_sha1
