@@ -84,6 +84,10 @@ export interface Album {
     mb_release_id?: string;
     musicbrainz_url?: string;
     release_type?: string;
+    description?: string;
+    peak_chart_position?: number;
+    label?: string;
+    external_links?: { type: string; url: string }[];
 }
 
 export interface Track {
