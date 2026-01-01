@@ -172,6 +172,24 @@ async def test_get_albums_release_type(client: AsyncClient, db, library_data):
     assert single["release_type"] == "Single"
 
 @pytest.mark.asyncio
+async def test_get_albums_details(client: AsyncClient, db, library_data):
+    # Update existing album to have a description and chart position
+    await db.execute("UPDATE album SET description = 'A great album', peak_chart_position = 1 WHERE title = 'Test Album'")
+    
+    # Query albums
+    response = await client.get("/api/albums", params={"artist": "The Testers"})
+    assert response.status_code == 200
+    data = response.json()
+    
+    test_album = next(a for a in data if a["album"] == "Test Album")
+    
+    assert test_album["description"] == "A great album"
+    assert test_album["peak_chart_position"] == 1
+    assert "label" in test_album
+    assert "external_links" in test_album
+    assert isinstance(test_album["external_links"], list)
+
+@pytest.mark.asyncio
 async def test_get_tracks(client: AsyncClient, db, library_data):
     # 1. List by Album
     response = await client.get("/api/tracks", params={"album": "Test Album"})

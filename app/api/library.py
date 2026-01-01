@@ -343,6 +343,13 @@ async def get_albums(
             MAX(t.release_mbid) as release_mbid,
             MAX(COALESCE(al_rg.mbid, al_title.mbid)) as album_mbid,
             MAX(COALESCE(al_rg.release_type, al_title.release_type)) as release_type,
+            MAX(COALESCE(al_rg.description, al_title.description)) as description,
+            MAX(COALESCE(al_rg.peak_chart_position, al_title.peak_chart_position)) as peak_chart_position,
+            MAX(t.label) as label,
+            COALESCE(
+                jsonb_agg(DISTINCT jsonb_build_object('type', el.type, 'url', el.url)) FILTER (WHERE el.url IS NOT NULL AND el.type != 'wikidata'),
+                '[]'::jsonb
+            ) as external_links,
             MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as mb_link,
             MAX(CASE 
                 WHEN $1::text IS NOT NULL AND (t.album_artist_mbid LIKE $1 || '%' OR t.album_artist_mbid = $1) THEN 'main'
@@ -395,6 +402,14 @@ async def get_albums(
         # Frontend compatibility: expects art_id
         if d.get("artwork_id"):
             d["art_id"] = d["artwork_id"]
+
+        # Ensure external_links is a list (asyncpg jsonb handling)
+        if d.get("external_links") and isinstance(d["external_links"], str):
+             import json
+             try:
+                 d["external_links"] = json.loads(d["external_links"])
+             except Exception:
+                 d["external_links"] = []
 
         results.append(d)
     return results
