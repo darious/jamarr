@@ -19,6 +19,10 @@ def load_config():
     return _config
 
 
+def get_pearlarr_url():
+    return load_config().get("pearlarr", {}).get("url")
+
+
 def get_music_path():
     return load_config().get("music_path", "/root/music")
 

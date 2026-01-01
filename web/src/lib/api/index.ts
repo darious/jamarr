@@ -337,10 +337,7 @@ export interface MissingAlbum {
     title: string;
     release_date: string;
     primary_type: string;
-    image_url: string | null;
     musicbrainz_url: string | null;
-    tidal_url: string | null;
-    qobuz_url: string | null;
 }
 
 export async function fetchMissingAlbums(mbid: string, fetchFn: any = fetch): Promise<MissingAlbum[]> {
@@ -360,6 +357,16 @@ export async function triggerMissingAlbumsScan(mbid?: string, artistName?: strin
         })
     });
     if (!res.ok) throw new Error('Failed to trigger missing albums scan');
+}
+
+
+export async function triggerPearlarrDownload(mbid: string): Promise<void> {
+    const res = await fetch('/api/download/pearlarr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mbid })
+    });
+    if (!res.ok) throw new Error('Failed to trigger Pearlarr download');
 }
 
 export async function signup(
