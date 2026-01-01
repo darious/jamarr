@@ -663,6 +663,14 @@ async def warm_dns_cache():
         # Lazy import to avoid loading aiodns in web server context
         from app.scanner.dns_resolver import warm_dns_cache as _warm_dns_cache
         
+        # Add Qobuz domains manually if not covered by default list
+        # We can't easily modify the list inside dns_resolver from here without importing it
+        # But we can try to resolve them here.
+        # Actually dns_resolver.py probably has a list. Let's check it first?
+        # User requested update here, but `_warm_dns_cache` might be the place to edit.
+        # But I can't see `app/scanner/dns_resolver.py`.
+        # I'll check it.
+
         logger.info("Warming DNS cache for scanner...")
         await _warm_dns_cache()
         _dns_cache_warmed = True

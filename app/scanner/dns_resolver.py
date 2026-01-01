@@ -23,6 +23,8 @@ KNOWN_HOSTS = [
     "accounts.spotify.com",
     "en.wikipedia.org",
     "www.wikidata.org",
+    "www.qobuz.com",
+    "play.qobuz.com",
 ]
 
 class CachedDNSResolver:
