@@ -102,7 +102,8 @@
             codec: t.codec,
             bit_depth: t.bit_depth,
             sample_rate_hz: t.sample_rate_hz,
-            // bitrate: t.bitrate, // PlaylistTrack doesn't have bitrate yet
+            artist_mbid: t.artist_mbid,
+            album_mbid: t.album_mbid,
         }));
 
         await setQueue(queueItems as unknown as import("$api").Track[], 0);
@@ -121,34 +122,13 @@
             album: t.album,
             duration_seconds: t.duration_seconds,
             artwork_id: t.art_id,
-            path: t.path, // Use t.path here as well to be consistent, though originally it was ""?
-            // Actually in my previous fix I kept it as "", but I should probably use t.path if available?
-            // The previous fix for list page used t.path.
-            // In the detail page logic from Step 22 (original read), handleAddToQueue had path: ""
-            // But handlePlay had path: t.path.
-            // Wait, looking at Step 22 output:
-            // handlePlay: path: t.path
-            // handleAddToQueue: path: ""
-            // Why would add to queue have empty path? That seems like a bug too or intent to reload?
-            // I'll stick to t.path to be safe as the error was about duration_seconds.
-            // But the previous file content I'm replacing (lines 92-118) covers both?
-            // No, the Replace tool needs contiguous block.
-            // Let's check the lines in Step 22 again or my memory of recent read.
-            // Ah, I don't have the current state of [id]/+page.svelte fully cached in my head for lines.
-            // Better to rely on what I saw in previous turn's output or just assume I should fix duration.
-
-            // Re-reading Step 22 output:
-            // Line 98: duration: t.duration_seconds
-            // Line 118: duration: t.duration_seconds
-            // Line 120: path: ""
-
-            // I will fix duration -> duration_seconds.
-            // I will also fix path: "" to path: t.path in handleAddToQueue just in case, as I did in list page.
+            path: t.path,
             art_sha1: t.art_sha1,
             codec: t.codec,
             bit_depth: t.bit_depth,
             sample_rate_hz: t.sample_rate_hz,
-            // bitrate: t.bitrate, // PlaylistTrack doesn't have bitrate yet
+            artist_mbid: t.artist_mbid,
+            album_mbid: t.album_mbid,
         }));
         await addToQueue(queueItems as unknown as import("$api").Track[]);
     }
@@ -577,11 +557,33 @@
                                 </span>
                             </div>
                             <div
-                                class="flex items-center gap-1 text-sm text-white/60 truncate"
+                                class="flex items-center gap-1 text-sm text-white/60 min-w-0 relative z-10"
                             >
-                                <span>{track.artist}</span>
-                                <span class="text-white/40">•</span>
-                                <span class="text-white/50">{track.album}</span>
+                                {#if track.artist}
+                                    <a
+                                        href={track.artist_mbid
+                                            ? `/artist/${track.artist_mbid}`
+                                            : `/artist/${encodeURIComponent(track.artist)}`}
+                                        class="hover:text-white hover:underline truncate"
+                                        on:click|stopPropagation
+                                    >
+                                        {track.artist}
+                                    </a>
+                                {/if}
+                                {#if track.album}
+                                    <span class="text-white/40 flex-shrink-0"
+                                        >•</span
+                                    >
+                                    <a
+                                        href={track.album_mbid
+                                            ? `/album/${track.album_mbid}`
+                                            : `/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album)}`}
+                                        class="text-white/50 hover:text-white hover:underline truncate"
+                                        on:click|stopPropagation
+                                    >
+                                        {track.album}
+                                    </a>
+                                {/if}
                             </div>
                             <!-- Tech Details -->
                             <div

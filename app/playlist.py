@@ -56,6 +56,8 @@ class PlaylistTrack(BaseModel):
     duration_seconds: Optional[float]
     artwork_id: Optional[int]
     art_sha1: Optional[str]
+    artist_mbid: Optional[str]
+    album_mbid: Optional[str]
     # Add other track fields as needed for display
 
 # --- API ---
@@ -186,7 +188,8 @@ async def get_playlist(
             pt.id as playlist_track_id, pt.position,
             t.id as track_id, t.title, t.artist, t.album, t.duration_seconds,
             t.artwork_id as art_id, a.sha1 as art_sha1, t.path,
-            t.codec, t.sample_rate_hz, t.bit_depth
+            t.codec, t.sample_rate_hz, t.bit_depth,
+            t.artist_mbid, t.release_group_mbid as album_mbid
         FROM playlist_track pt
         JOIN track t ON pt.track_id = t.id
         LEFT JOIN artwork a ON t.artwork_id = a.id
