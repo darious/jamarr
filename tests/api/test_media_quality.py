@@ -29,6 +29,14 @@ async def seed_data(db: asyncpg.Connection):
         ('album2', 'rg2', 'Album Two', NULL)
     """)
 
+    # Insert Tracks (needed for artwork detection)
+    await db.execute("""
+        INSERT INTO track (id, path, title, album, release_group_mbid, artwork_id) VALUES 
+        (1, '/music/track1.flac', 'Track 1', 'Album One', 'rg1', 1),
+        (2, '/music/track2.flac', 'Track 2', 'Album One', 'rg1', 1),
+        (3, '/music/track3.flac', 'Track 3', 'Album Two', 'rg2', NULL)
+    """)
+
     # Artist-Album map (Primary)
     await db.execute("""
         INSERT INTO artist_album (artist_mbid, album_mbid, type) VALUES 

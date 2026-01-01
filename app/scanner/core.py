@@ -454,6 +454,7 @@ class Scanner:
                             release_date=excluded.release_date,
                             release_type=excluded.release_type,
                             release_type_raw=excluded.release_type_raw,
+                            artwork_id=COALESCE(excluded.artwork_id, album.artwork_id),
                             updated_at=NOW()
                     """, album_pk, rg_mbid, tags.get("album"), tags.get("release_date"), tags.get("release_type"), tags.get("release_type_raw"), artwork_id)
                     get_api_tracker().track_processed("albums", album_pk)
