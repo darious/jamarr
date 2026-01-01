@@ -1,4 +1,4 @@
 look in dev.sh, test.sh & lint.sh to see how things are run
-look in README.md and docs/outline.md to unsderstand the project
+look in README.md and docs/outline.md to understand the project
 make sure every change has test coverage and all tests pass and linting checks pass
 make sure and db migrations created in scripts/migrations follow the naming convention and ensure they are 
