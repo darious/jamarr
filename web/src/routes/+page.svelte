@@ -89,7 +89,9 @@
                                 loading="lazy"
                             />
                             <a
-                                href={`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mbid || album.album_mbid
+                                    ? `/album/${album.mbid || album.album_mbid}`
+                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
                                 class="absolute inset-0 z-0"
                                 aria-label="View Album"
                             ></a>
@@ -135,12 +137,16 @@
                         </div>
                         <div class="mt-3">
                             <a
-                                href={`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mbid || album.album_mbid
+                                    ? `/album/${album.mbid || album.album_mbid}`
+                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
                                 class="block font-medium leading-tight truncate hover:underline"
                                 title={album.album}>{album.album}</a
                             >
                             <a
-                                href={`/artist/${encodeURIComponent(album.artist_name)}`}
+                                href={album.artist_mbid
+                                    ? `/artist/${album.artist_mbid}`
+                                    : `/artist/${encodeURIComponent(album.artist_name)}`}
                                 class="block text-sm text-white/60 truncate hover:underline"
                                 title={album.artist_name}>{album.artist_name}</a
                             >
@@ -182,7 +188,9 @@
                                 loading="lazy"
                             />
                             <a
-                                href={`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mbid || album.album_mbid
+                                    ? `/album/${album.mbid || album.album_mbid}`
+                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
                                 class="absolute inset-0 z-0"
                                 aria-label="View Album"
                             ></a>
@@ -228,12 +236,16 @@
                         </div>
                         <div class="mt-3">
                             <a
-                                href={`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mbid || album.album_mbid
+                                    ? `/album/${album.mbid || album.album_mbid}`
+                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
                                 class="block font-medium leading-tight truncate hover:underline"
                                 title={album.album}>{album.album}</a
                             >
                             <a
-                                href={`/artist/${encodeURIComponent(album.artist_name)}`}
+                                href={album.artist_mbid
+                                    ? `/artist/${album.artist_mbid}`
+                                    : `/artist/${encodeURIComponent(album.artist_name)}`}
                                 class="block text-sm text-white/60 truncate hover:underline"
                                 title={album.artist_name}>{album.artist_name}</a
                             >
@@ -271,7 +283,9 @@
                                 loading="lazy"
                             />
                             <a
-                                href={`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mbid || album.album_mbid
+                                    ? `/album/${album.mbid || album.album_mbid}`
+                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
                                 class="absolute inset-0 z-0"
                                 aria-label="View Album"
                             ></a>
@@ -317,12 +331,16 @@
                         </div>
                         <div class="mt-3">
                             <a
-                                href={`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mbid || album.album_mbid
+                                    ? `/album/${album.mbid || album.album_mbid}`
+                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
                                 class="block font-medium leading-tight truncate hover:underline"
                                 title={album.album}>{album.album}</a
                             >
                             <a
-                                href={`/artist/${encodeURIComponent(album.artist_name)}`}
+                                href={album.artist_mbid
+                                    ? `/artist/${album.artist_mbid}`
+                                    : `/artist/${encodeURIComponent(album.artist_name)}`}
                                 class="block text-sm text-white/60 truncate hover:underline"
                                 title={album.artist_name}>{album.artist_name}</a
                             >
@@ -344,7 +362,9 @@
             >
                 {#each discoverArtists as artist}
                     <a
-                        href={`/artist/${encodeURIComponent(artist.name)}`}
+                        href={artist.mbid
+                            ? `/artist/${artist.mbid}`
+                            : `/artist/${encodeURIComponent(artist.name)}`}
                         class="group relative min-w-[200px] w-[200px] snap-start flex flex-col items-center text-center"
                     >
                         <div
@@ -386,7 +406,9 @@
             >
                 {#each recentlyPlayedArtists as artist}
                     <a
-                        href={`/artist/${encodeURIComponent(artist.name)}`}
+                        href={artist.mbid
+                            ? `/artist/${artist.mbid}`
+                            : `/artist/${encodeURIComponent(artist.name)}`}
                         class="group relative min-w-[200px] w-[200px] snap-start flex flex-col items-center text-center"
                     >
                         <div

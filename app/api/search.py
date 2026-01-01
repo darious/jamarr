@@ -19,6 +19,7 @@ class SearchResultArtist(BaseModel):
 class SearchResultAlbum(BaseModel):
     title: str
     artist: str
+    mbid: Optional[str] = None
     artwork_id: Optional[int] = None
     art_id: Optional[int] = None
     art_sha1: Optional[str] = None
@@ -29,6 +30,7 @@ class SearchResultTrack(BaseModel):
     title: str
     artist: str
     album: str
+    album_mbid: Optional[str] = None
     duration_seconds: float
     artwork_id: Optional[int] = None
     art_id: Optional[int] = None
@@ -71,7 +73,12 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
 
     # 2. Search Albums using FTS
     albums_query = """
-        SELECT t.album, t.artist, MAX(t.artwork_id) as artwork_id, MAX(a.sha1) as art_sha1
+        SELECT 
+            t.album, 
+            t.artist, 
+            MAX(COALESCE(t.release_group_mbid, t.release_mbid)) as mbid,
+            MAX(t.artwork_id) as artwork_id, 
+            MAX(a.sha1) as art_sha1
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.fts_vector @@ plainto_tsquery('english', $1)
@@ -87,6 +94,7 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
             SearchResultAlbum(
                 title=row["album"],
                 artist=row["artist"],
+                mbid=row["mbid"],
                 artwork_id=row["artwork_id"],
                 art_id=row["artwork_id"],
                 art_sha1=row["art_sha1"],
@@ -95,7 +103,15 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
 
     # 3. Search Tracks using FTS
     tracks_query = """
-        SELECT t.id, t.title, t.artist, t.album, t.duration_seconds, t.artwork_id, a.sha1 as art_sha1
+        SELECT 
+            t.id, 
+            t.title, 
+            t.artist, 
+            t.album, 
+            COALESCE(t.release_group_mbid, t.release_mbid) as album_mbid,
+            t.duration_seconds, 
+            t.artwork_id, 
+            a.sha1 as art_sha1
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.fts_vector @@ plainto_tsquery('english', $1)
@@ -111,6 +127,7 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
                 title=row["title"],
                 artist=row["artist"],
                 album=row["album"],
+                album_mbid=row["album_mbid"],
                 duration_seconds=row["duration_seconds"] or 0.0,
                 artwork_id=row["artwork_id"],
                 art_id=row["artwork_id"],

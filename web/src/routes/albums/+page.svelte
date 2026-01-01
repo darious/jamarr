@@ -57,11 +57,15 @@
           class="group relative aspect-square"
           on:click={() =>
             goto(
-              `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
+              album.mbid || album.album_mbid
+                ? `/album/${album.mbid || album.album_mbid}`
+                : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
             )}
         >
           <img
-            src={album.art_sha1 ? `/api/art/file/${album.art_sha1}?max_size=300` : "/assets/logo.png"}
+            src={album.art_sha1
+              ? `/api/art/file/${album.art_sha1}?max_size=300`
+              : "/assets/logo.png"}
             alt={album.album}
             class="h-full w-full rounded-2xl object-cover transition-transform duration-200 group-hover:scale-[1.03]"
           />
@@ -94,7 +98,9 @@
               title="Details"
               on:click|stopPropagation={() =>
                 goto(
-                  `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
+                  album.mbid || album.album_mbid
+                    ? `/album/${album.mbid || album.album_mbid}`
+                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`,
                 )}
             >
               <svg
@@ -114,13 +120,17 @@
         </button>
         <div class="space-y-1">
           <a
-            href={`/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+            href={album.mbid || album.album_mbid
+              ? `/album/${album.mbid || album.album_mbid}`
+              : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
             class="text-lg font-semibold truncate hover:underline cursor-pointer block"
           >
             {album.album}
           </a>
           <a
-            href={`/artist/${encodeURIComponent(album.artist_name)}`}
+            href={album.artist_mbid
+              ? `/artist/${album.artist_mbid}`
+              : `/artist/${encodeURIComponent(album.artist_name)}`}
             class="text-sm text-white/60 truncate hover:text-white cursor-pointer block"
           >
             {album.artist_name}

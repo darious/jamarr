@@ -145,7 +145,7 @@ async def test_metadata_branches_fire_when_requested(monkeypatch):
         "missing_only": False,
     }
 
-    monkeypatch.setattr(coordinator_module, "get_client", lambda client=None: _DummyAsyncClient())
+    monkeypatch.setattr("app.scanner.services.coordinator.get_shared_client", lambda client=None: _DummyAsyncClient())
 
     mb_core = AsyncMock(return_value={"wikidata_url": "http://wikidata/Q1", "_spotify_candidates": ["cand1"]})
     fanart_mock = AsyncMock(return_value={})

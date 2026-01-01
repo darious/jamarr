@@ -25,6 +25,7 @@
         albums: {
             title: string;
             artist: string;
+            mbid?: string;
             art_id?: number;
             art_sha1?: string;
         }[];
@@ -33,6 +34,7 @@
             title: string;
             artist: string;
             album: string;
+            album_mbid?: string;
             duration_seconds: number;
             art_id?: number;
             art_sha1?: string;
@@ -80,32 +82,23 @@
         }
     };
 
-    function navigateToArtist(name: string) {
-        goto(`/artist/${encodeURIComponent(name)}`);
+    function navigateToArtist(name: string, mbid?: string) {
+        if (mbid) {
+            goto(`/artist/${mbid}`);
+        } else {
+            goto(`/artist/${encodeURIComponent(name)}`);
+        }
         clearSearch();
     }
 
-    // Note: Album navigation depends on routes. Assuming /album/[artist]/[album] based on typical patterns or just /album/[name] if strictly name based.
-    // Looking at file list earlier: web/src/routes/album/[album_id] or similar maybe?
-    // User context implied album pages exist. "selecting anything... should take us to the artist, or album pages"
-    // I will check generic album route later. validating simply goto for now.
-    // Update: existing schema suggests albums are identified by name + artist often, but UI usually prefers IDs if available.
-    // The API returns title/artist.
-    // Let's assume a search query param or hash for now if exact route unknown, OR just /albums?filter=...
-    // ACTUALLY, looking at `web/src/routes/album` dir in `list_dir` output earlier...
-    // `web/src/routes/album` has children.
-    // `web/src/routes/albums` has children.
-    // I'll take a safe bet and just use /albums for now if I can't resolve specific album ID from search result (API only returned title/artist).
-    // Wait, I should update API to return ID matching what the frontend expects for album links?
-    // The DB `tracks` table has `album` string. There is no `albums` table with IDs.
-    // So album routes likely use query params or path encoding of name.
-    // Let's check `web/src/routes/album` content to be sure.
-
-    function navigateToAlbum(album: string, artist: string) {
-        // Encode components for URL
-        goto(
-            `/album/${encodeURIComponent(artist)}/${encodeURIComponent(album)}`,
-        );
+    function navigateToAlbum(album: string, artist: string, mbid?: string) {
+        if (mbid) {
+            goto(`/album/${mbid}`);
+        } else {
+            goto(
+                `/album/${encodeURIComponent(artist)}/${encodeURIComponent(album)}`,
+            );
+        }
         clearSearch();
     }
 </script>
@@ -171,7 +164,8 @@
                     {#each results.artists as artist}
                         <button
                             class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/10"
-                            on:click={() => navigateToArtist(artist.name)}
+                            on:click={() =>
+                                navigateToArtist(artist.name, artist.mbid)}
                         >
                             {#if artist.image_url}
                                 <img
@@ -207,7 +201,11 @@
                         <button
                             class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/10"
                             on:click={() =>
-                                navigateToAlbum(album.title, album.artist)}
+                                navigateToAlbum(
+                                    album.title,
+                                    album.artist,
+                                    album.mbid,
+                                )}
                         >
                             <div
                                 class="h-8 w-8 rounded bg-white/10 flex items-center justify-center text-xs text-white/40 overflow-hidden"
@@ -241,13 +239,13 @@
                                 >
                                     {album.title}
                                 </div>
-                                <a
-                                    href={`/artist/${encodeURIComponent(album.artist)}`}
-                                    class="truncate text-xs text-white/60 hover:text-white hover:underline block"
-                                    on:click|stopPropagation={clearSearch}
+                                <button
+                                    class="truncate text-xs text-white/60 hover:text-white hover:underline block text-left w-full"
+                                    on:click|stopPropagation={() =>
+                                        navigateToArtist(album.artist)}
                                 >
                                     {album.artist}
-                                </a>
+                                </button>
                             </div>
                         </button>
                     {/each}
@@ -267,10 +265,18 @@
                             tabindex="0"
                             class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/10 cursor-pointer group"
                             on:click={() =>
-                                navigateToAlbum(track.album, track.artist)}
+                                navigateToAlbum(
+                                    track.album,
+                                    track.artist,
+                                    track.album_mbid,
+                                )}
                             on:keydown={(e) =>
                                 e.key === "Enter" &&
-                                navigateToAlbum(track.album, track.artist)}
+                                navigateToAlbum(
+                                    track.album,
+                                    track.artist,
+                                    track.album_mbid,
+                                )}
                         >
                             <div
                                 class="h-8 w-8 rounded bg-white/10 flex items-center justify-center text-xs text-white/40 overflow-hidden"
@@ -307,21 +313,25 @@
                                 <div
                                     class="truncate text-xs text-white/60 flex items-center gap-1"
                                 >
-                                    <a
-                                        href={`/artist/${encodeURIComponent(track.artist)}`}
-                                        class="hover:text-white hover:underline"
-                                        on:click|stopPropagation={clearSearch}
+                                    <button
+                                        class="truncate text-xs text-white/60 flex items-center gap-1 hover:text-white hover:underline cursor-pointer"
+                                        on:click|stopPropagation={() =>
+                                            navigateToArtist(track.artist)}
                                     >
                                         {track.artist}
-                                    </a>
+                                    </button>
                                     <span>•</span>
-                                    <a
-                                        href={`/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album)}`}
-                                        class="hover:text-white hover:underline"
-                                        on:click|stopPropagation={clearSearch}
+                                    <button
+                                        class="truncate text-xs text-white/60 flex items-center gap-1 hover:text-white hover:underline cursor-pointer"
+                                        on:click|stopPropagation={() =>
+                                            navigateToAlbum(
+                                                track.album,
+                                                track.artist,
+                                                track.album_mbid,
+                                            )}
                                     >
                                         {track.album}
-                                    </a>
+                                    </button>
                                 </div>
                             </div>
                             <!-- Add to Playlist Action -->
