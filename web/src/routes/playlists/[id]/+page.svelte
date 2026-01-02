@@ -12,6 +12,9 @@
     } from "$lib/api";
     import { goto } from "$app/navigation";
     import { setQueue, addToQueue } from "$stores/player";
+    import IconButton from "$lib/components/IconButton.svelte";
+    import TabButton from "$lib/components/TabButton.svelte";
+    import Checkbox from "$lib/components/Checkbox.svelte";
 
     let playlist: PlaylistDetail | null = null;
     let loading = true;
@@ -321,13 +324,15 @@
                     {/if}
 
                     <!-- Hover Overlay with Buttons -->
+                    <!-- Hover Overlay with Buttons -->
                     <div
                         class="absolute inset-0 flex items-center justify-center gap-3 bg-black/60 opacity-0 group-hover:opacity-100 transition-all duration-300 backdrop-blur-[2px] z-20"
                     >
-                        <button
-                            class="btn-icon btn-icon-lg text-white hover:scale-110 transition-transform drop-shadow-lg"
-                            on:click={(e) => handlePlay(e)}
+                        <IconButton
+                            variant="ghost"
                             title="Play"
+                            onClick={(e) => handlePlay(e)}
+                            className="scale-125"
                         >
                             <svg
                                 class="h-8 w-8 ml-1"
@@ -335,11 +340,11 @@
                                 viewBox="0 0 24 24"
                                 ><path d="M8 5v14l11-7z" /></svg
                             >
-                        </button>
-                        <button
-                            class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
-                            on:click={(e) => handleAddToQueue(e)}
+                        </IconButton>
+                        <IconButton
+                            variant="outline"
                             title="Add to Queue"
+                            onClick={(e) => handleAddToQueue(e)}
                         >
                             <svg
                                 class="h-6 w-6"
@@ -349,7 +354,7 @@
                                     d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
                                 /></svg
                             >
-                        </button>
+                        </IconButton>
                     </div>
                 </div>
 
@@ -370,23 +375,20 @@
                             bind:value={editDesc}
                             placeholder="Description"
                         ></textarea>
-                        <label class="label cursor-pointer justify-start gap-3">
-                            <input
-                                type="checkbox"
-                                class="toggle"
+                        <div class="form-control">
+                            <Checkbox
                                 bind:checked={editPublic}
+                                label="Public"
                             />
-                            <span class="label-text text-white">Public</span>
-                        </label>
+                        </div>
                         <div class="flex gap-2">
-                            <button
-                                class="btn bg-white text-black hover:bg-white/90 border-none btn-sm"
-                                on:click={handleSave}>Save</button
+                            <TabButton active={false} onClick={handleSave}
+                                >Save</TabButton
                             >
-                            <button
-                                class="btn btn-ghost btn-sm"
-                                on:click={() => (editing = false)}
-                                >Cancel</button
+                            <TabButton
+                                onClick={() => {
+                                    editing = false;
+                                }}>Cancel</TabButton
                             >
                         </div>
                     {:else}
@@ -407,10 +409,13 @@
                             </div>
 
                             <!-- Action Buttons (Edit/Delete) -->
+                            <!-- Action Buttons (Edit/Delete) -->
                             <div class="flex gap-2">
-                                <button
-                                    class="btn btn-ghost hover:bg-white/10 text-white/70 hover:text-white"
-                                    on:click={() => (editing = true)}
+                                <TabButton
+                                    className="whitespace-nowrap"
+                                    onClick={() => {
+                                        editing = true;
+                                    }}
                                 >
                                     <svg
                                         class="w-5 h-5 mr-2"
@@ -425,10 +430,10 @@
                                         ></path></svg
                                     >
                                     Edit Details
-                                </button>
-                                <button
-                                    class="btn btn-ghost hover:bg-red-500/20 text-white/70 hover:text-red-400"
-                                    on:click={handleDelete}
+                                </TabButton>
+                                <TabButton
+                                    className="hover:text-red-400 hover:border-red-400 whitespace-nowrap"
+                                    onClick={handleDelete}
                                 >
                                     <svg
                                         class="w-5 h-5 mr-2"
@@ -443,7 +448,7 @@
                                         ></path></svg
                                     >
                                     Delete Playlist
-                                </button>
+                                </TabButton>
                             </div>
                         </div>
 
@@ -486,7 +491,7 @@
                 {#each playlist.tracks as track, index (track.playlist_track_id)}
                     {#if draggingIndex !== null && dragOverIndex === index}
                         <div
-                            class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
+                            class="h-[2px] w-full bg-accent drag-indicator-shadow rounded-full my-1 transition-all"
                         ></div>
                     {/if}
                     <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -607,10 +612,12 @@
                         <div
                             class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 bg-black/50 backdrop-blur-sm rounded-lg p-1"
                         >
-                            <button
-                                class="p-1.5 hover:bg-red-500/20 rounded-md text-white/40 hover:text-red-400 transition-colors"
-                                on:click={() => removeTrack(track)}
+                            <IconButton
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeTrack(track)}
                                 title="Remove from playlist"
+                                className="text-white/40 hover:text-red-400 hover:bg-red-500/10"
                             >
                                 <svg
                                     class="w-4 h-4"
@@ -625,13 +632,13 @@
                                         d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 1h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"
                                     />
                                 </svg>
-                            </button>
+                            </IconButton>
                         </div>
                     </div>
                 {/each}
                 {#if draggingIndex !== null && dragOverIndex === playlist.tracks.length}
                     <div
-                        class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
+                        class="h-[2px] w-full bg-accent drag-indicator-shadow rounded-full my-1 transition-all"
                     ></div>
                     <div
                         role="listitem"

@@ -8,6 +8,8 @@
     triggerPearlarrDownload,
   } from "$lib/api";
   import { goto, invalidateAll } from "$app/navigation";
+  import IconButton from "$components/IconButton.svelte";
+  import TrackCard from "$components/TrackCard.svelte";
   import { addToQueue, loadQueueFromServer, setQueue } from "$stores/player";
   import { browser } from "$app/environment";
   import ColorThief from "colorthief";
@@ -686,7 +688,7 @@
     class="relative z-10 w-full px-6 md:px-12 xl:px-16 mt-8 grid grid-cols-1 lg:grid-cols-[1fr_clamp(280px,22vw,360px)] gap-12 lg:gap-16 pb-20"
   >
     <!-- Left Column: Main Content -->
-    <div class="space-y-16 min-w-0">
+    <div class="space-y-8 min-w-0">
       <!-- Bio Section -->
       {#if artist?.bio}
         <section>
@@ -762,64 +764,65 @@
 
       {#if allTabs.length > 0}
         <!-- Tabs Header -->
-        <div
-          class="flex flex-wrap items-center gap-8 border-b border-white/5 pb-0 mb-8"
-        >
-          <!-- Left Group: Releases -->
+        <div class="relative" style="margin-bottom: 24px !important;">
           <div
-            class="flex gap-1 p-1 bg-white/5 rounded-lg border border-white/5"
+            class="flex flex-wrap items-center gap-8 border-b border-white/10 pb-0"
           >
-            {#each releaseTabs as tab}
-              <button
-                class={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                  activeTab === tab.value
-                    ? "bg-white/10 text-white shadow-lg"
-                    : "text-white/50 hover:text-white/80 hover:bg-white/5"
-                }`}
-                on:click={() => (activeTab = tab.value)}
-              >
-                {tab.label}
-              </button>
-            {/each}
-          </div>
-
-          <!-- Spacer -->
-          <div class="flex-1"></div>
-
-          <!-- Missing Albums Tab -->
-          {#if missingAlbums.length > 0}
-            <div
-              class="flex gap-1 p-1 bg-white/5 rounded-lg border border-white/5 mr-4"
-            >
-              <button
-                class={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                  activeTab === "missing_albums"
-                    ? "bg-white/10 text-white shadow-lg"
-                    : "text-white/50 hover:text-white/80 hover:bg-white/5"
-                }`}
-                on:click={() => (activeTab = "missing_albums")}
-              >
-                Missing ({missingAlbums.length})
-              </button>
+            <!-- Left Group: Releases -->
+            <div class="relative">
+              <div class="flex gap-4">
+                {#each releaseTabs as tab}
+                  <button
+                    class={`relative px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
+                      activeTab === tab.value
+                        ? "text-white border-accent"
+                        : "text-white/60 border-transparent hover:text-white hover:border-accent"
+                    }`}
+                    on:click={() => (activeTab = tab.value)}
+                  >
+                    {tab.label}
+                  </button>
+                {/each}
+              </div>
             </div>
-          {/if}
 
-          <!-- Right Group: Tracks -->
-          <div
-            class="flex gap-1 p-1 bg-white/5 rounded-lg border border-white/5"
-          >
-            {#each trackTabs as tab}
-              <button
-                class={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                  activeTab === tab.value
-                    ? "bg-white/10 text-white shadow-lg"
-                    : "text-white/50 hover:text-white/80 hover:bg-white/5"
-                }`}
-                on:click={() => (activeTab = tab.value)}
-              >
-                {tab.label}
-              </button>
-            {/each}
+            <!-- Spacer -->
+            <div class="flex-1"></div>
+
+            {#if missingAlbums.length > 0}
+              <div class="relative">
+                <div class="flex gap-4">
+                  <button
+                    class={`relative px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
+                      activeTab === "missing_albums"
+                        ? "text-white border-accent"
+                        : "text-white/60 border-transparent hover:text-white hover:border-accent"
+                    }`}
+                    on:click={() => (activeTab = "missing_albums")}
+                  >
+                    Missing
+                  </button>
+                </div>
+              </div>
+            {/if}
+
+            <!-- Right Group: Tracks -->
+            <div class="relative">
+              <div class="flex gap-4">
+                {#each trackTabs as tab}
+                  <button
+                    class={`relative px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
+                      activeTab === tab.value
+                        ? "text-white border-accent"
+                        : "text-white/60 border-transparent hover:text-white hover:border-accent"
+                    }`}
+                    on:click={() => (activeTab = tab.value)}
+                  >
+                    {tab.label}
+                  </button>
+                {/each}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -853,21 +856,23 @@
                     <div
                       class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
                     >
-                      <button
-                        class="btn-icon btn-icon-lg bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                      <IconButton
+                        variant="outline"
                         title="Play"
-                        on:click|stopPropagation={() => playAlbum(album)}
+                        onClick={() => playAlbum(album)}
+                        stopPropagation={true}
                       >
                         <svg
-                          class="h-8 w-8 ml-1"
+                          class="h-6 w-6"
                           fill="currentColor"
                           viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
                         >
-                      </button>
-                      <button
-                        class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl"
+                      </IconButton>
+                      <IconButton
+                        variant="outline"
                         title="Add to Queue"
-                        on:click|stopPropagation={() => addAlbumToQueue(album)}
+                        onClick={() => addAlbumToQueue(album)}
+                        stopPropagation={true}
                       >
                         <svg
                           class="h-6 w-6"
@@ -875,7 +880,7 @@
                           viewBox="0 0 24 24"
                           ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
                         >
-                      </button>
+                      </IconButton>
                     </div>
 
                     <!-- Hi-Res Badge -->
@@ -910,371 +915,76 @@
           {/if}
         {:else if activeTab === "top_tracks"}
           <!-- Top Tracks List View -->
-          <div class="flex items-center gap-4 mb-4">
-            <button
-              class="btn btn-sm variant-filled-primary"
-              on:click={playAllTopTracks}
-            >
-              <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24"
-                ><path d="M8 5v14l11-7z" /></svg
-              >
-              Play All
-            </button>
-            <button
-              class="btn btn-sm variant-ghost-surface"
-              on:click={queueAllTopTracks}
-            >
-              Add All to Queue
-            </button>
-            <button
-              class="btn btn-sm variant-ghost-surface"
-              on:click={openPlaylistModalForTopTracks}
-            >
-              Add to Playlist
-            </button>
-          </div>
-
-          <div class="space-y-0.5 max-w-5xl mx-auto">
+          <div class="space-y-1 max-w-5xl mx-auto">
             {#each displayedTopTracks as track, i}
-              <div
-                class="w-full grid grid-cols-[auto,auto,1fr,auto] items-center gap-4 px-3 py-2 rounded-xl hover:bg-white/5 group transition-colors text-left border border-transparent hover:border-white/5 relative"
-              >
-                <span class="w-8 text-center text-sm text-white/40 font-mono"
-                  >{i + 1}</span
-                >
-
-                <!-- Artwork -->
-                <div
-                  class="relative w-14 h-14 rounded overflow-hidden bg-surface-800 shadow-lg"
-                >
-                  <img
-                    src={(() => {
-                      if (track.art_sha1) return `/art/file/${track.art_sha1}`;
-                      if (track.art_id) return `/art/${track.art_id}`;
-                      const alb = data.albums.find(
-                        (a) => a.album === track.album,
-                      );
-                      if (alb?.art_sha1) return `/art/file/${alb.art_sha1}`;
-                      if (alb?.art_id) return `/art/${alb.art_id}`;
-                      return "/assets/default-artist-placeholder.svg";
-                    })()}
-                    class="w-full h-full object-cover"
-                    alt="Art"
-                  />
-                  <!-- Hover Play Overlay -->
-                  <div
-                    class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-                  >
-                    <button
-                      class="text-white hover:scale-110 transition-transform"
-                      on:click={() => track.id > 0 && playTrackById(track.id)}
-                    >
-                      <svg
-                        class="w-6 h-6"
-                        fill="currentColor"
-                        viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
-                      >
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Info Block -->
-                <div class="min-w-0 space-y-1">
-                  <!-- Row 1: Title + Album + Plays -->
-                  <div class="flex items-center gap-2 min-w-0">
-                    <p
-                      class={`truncate text-base font-medium ${track.id > 0 ? "text-white" : "text-white/40 line-through"}`}
-                    >
-                      {track.title}
-                    </p>
-                    <span class="text-white/40">·</span>
-                    <div
-                      class="flex items-center gap-2 text-sm text-white/60 truncate"
-                    >
-                      <a
-                        href={track.album_mbid
-                          ? `/album/${track.album_mbid}`
-                          : `/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(track.album || "")}`}
-                        class="truncate hover:text-white hover:underline cursor-pointer"
-                        on:click|stopPropagation={() => {}}
-                      >
-                        {track.album || "—"}
-                      </a>
-                      {#if track.popularity}
-                        <span class="opacity-50">•</span>
-                        <span class="text-white/50"
-                          >{formatPlays(track.popularity)}</span
-                        >
-                      {/if}
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Timing / Tech (Right Aligned) -->
-                <div class="flex flex-col items-end gap-1 text-right">
-                  <span class="text-sm text-white/50 tabular-nums font-mono">
-                    {formatDuration(track.duration_seconds)}
-                  </span>
-                  <div
-                    class="flex items-center gap-2 text-xs text-white/30 uppercase tracking-wider font-medium min-h-[18px]"
-                  >
-                    {#if track.codec}
-                      <span>{track.codec}</span>
-                    {/if}
-                    {#if track.bit_depth && track.sample_rate_hz}
-                      <span>•</span>
-                      <span
-                        >{track.bit_depth}bit / {Math.round(
-                          track.sample_rate_hz / 1000,
-                        )}kHz</span
-                      >
-                    {/if}
-                  </div>
-                </div>
-
-                <!-- Hover Actions (Floating) -->
-                {#if track.id > 0}
-                  <div
-                    class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-2 bg-black/50 backdrop-blur-sm rounded-lg p-1"
-                  >
-                    <button
-                      class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
-                      title="Add to Playlist"
-                      on:click={(e) => {
-                        e.stopPropagation();
-                        openPlaylistModal(track.id);
-                      }}
-                    >
-                      <!-- List Plus Icon for Playlist -->
-                      <svg
-                        class="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-                        />
-                      </svg>
-                    </button>
-                    <button
-                      class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
-                      title="Add to Queue"
-                      on:click={(e) => {
-                        e.stopPropagation();
-                        addTrackToQueue(track.id);
-                      }}
-                    >
-                      <!-- Layers/Stack Plus Icon for Queue -->
-                      <svg
-                        class="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                {/if}
-              </div>
+              <TrackCard
+                {track}
+                artist={{ name: artist?.name || "", mbid: artist?.mbid }}
+                album={{
+                  name: track.album || "",
+                  mbid: track.album_mbid,
+                }}
+                artwork={{
+                  sha1: track.art_sha1,
+                  id: track.art_id,
+                }}
+                showIndex={true}
+                index={i + 1}
+                showArtwork={true}
+                showAlbum={true}
+                showArtist={false}
+                showYear={false}
+                showTechDetails={true}
+                showPopularity={true}
+                onPlay={() => track.id > 0 && playTrackById(track.id)}
+                onQueue={() => addTrackToQueue(track.id)}
+                onAddToPlaylist={() => openPlaylistModal(track.id)}
+              />
             {/each}
           </div>
         {:else if activeTab === "singles_list"}
           <!-- Singles List View -->
-          <div class="flex items-center gap-4 mb-4">
-            <button
-              class="btn btn-sm variant-filled-primary"
-              on:click={playAllSingles}
-            >
-              <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24"
-                ><path d="M8 5v14l11-7z" /></svg
-              >
-              Play All
-            </button>
-            <button
-              class="btn btn-sm variant-ghost-surface"
-              on:click={queueAllSingles}
-            >
-              Add All to Queue
-            </button>
-            <button
-              class="btn btn-sm variant-ghost-surface"
-              on:click={openPlaylistModalForSingles}
-            >
-              Add to Playlist
-            </button>
-          </div>
-
-          <div class="space-y-0.5 max-w-5xl mx-auto">
+          <div class="space-y-1 max-w-5xl mx-auto">
             {#each displayedSingles as single}
-              <div
-                class="w-full grid grid-cols-[auto,auto,1fr,auto] items-center gap-4 px-3 py-2 rounded-xl hover:bg-white/5 group transition-colors text-left border border-transparent hover:border-white/5 relative"
-              >
-                <!-- Spacer for Alignment -->
-                <span class="w-8 text-center text-sm text-white/40 font-mono"
-                ></span>
-
-                <!-- Artwork -->
-                <div
-                  class="relative w-14 h-14 rounded overflow-hidden bg-surface-800 shadow-lg"
-                >
-                  <img
-                    src={single.art_sha1
-                      ? `/art/file/${single.art_sha1}`
-                      : single.art_id
-                        ? `/art/${single.art_id}`
-                        : "/assets/default-artist-placeholder.svg"}
-                    class="w-full h-full object-cover"
-                    alt="Art"
-                  />
-                  {#if single.localId}
-                    <div
-                      class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-                    >
-                      <button
-                        class="text-white hover:scale-110 transition-transform"
-                        on:click={() => {
-                          if (
-                            single.tracksToPlay &&
-                            single.tracksToPlay.length > 0
-                          )
-                            setQueue(single.tracksToPlay, 0);
-                        }}
-                      >
-                        <svg
-                          class="w-6 h-6"
-                          fill="currentColor"
-                          viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
-                        >
-                      </button>
-                    </div>
-                  {/if}
-                </div>
-
-                <!-- Info Block -->
-                <div class="min-w-0 space-y-1">
-                  <!-- Row 1: Title + Album + Plays -->
-                  <div class="flex items-center gap-2 min-w-0">
-                    <p
-                      class={`truncate text-base font-medium ${single.localId ? "text-white" : "text-white/40 line-through"}`}
-                    >
-                      {single.title}
-                    </p>
-                    <span class="text-white/40">·</span>
-                    <div
-                      class="flex items-center gap-2 text-sm text-white/60 truncate"
-                    >
-                      <a
-                        href={single.album_mbid
-                          ? `/album/${single.album_mbid}`
-                          : `/album/${encodeURIComponent(artist?.name || "")}/${encodeURIComponent(single.album || "")}`}
-                        class="truncate hover:text-white hover:underline cursor-pointer"
-                        on:click|stopPropagation={() => {}}
-                      >
-                        {single.album || "—"}
-                      </a>
-                      {#if single.popularity}
-                        <span class="opacity-50">•</span>
-                        <span class="text-white/50"
-                          >{formatPlays(single.popularity)}</span
-                        >
-                      {/if}
-                    </div>
-                  </div>
-
-                  <!-- Secondary Row Spacer -->
-                  <div class="text-xs text-white/50 tabular-nums font-mono">
-                    {single.date?.substring(0, 4) || "Unknown"}
-                  </div>
-                </div>
-
-                <!-- Timing / Tech (Right Aligned) -->
-                <div class="flex flex-col items-end gap-1 text-right">
-                  <span class="text-sm text-white/50 tabular-nums font-mono">
-                    {single.tracksToPlay?.[0]?.duration_seconds
-                      ? formatDuration(single.tracksToPlay[0].duration_seconds)
-                      : "—"}
-                  </span>
-                  <div
-                    class="flex items-center gap-2 text-xs text-white/30 uppercase tracking-wider font-medium min-h-[18px]"
-                  >
-                    {#if single.codec}
-                      <span>{single.codec}</span>
-                    {/if}
-                    {#if single.bit_depth && single.sample_rate_hz}
-                      <span>•</span>
-                      <span
-                        >{single.bit_depth}bit / {Math.round(
-                          single.sample_rate_hz / 1000,
-                        )}kHz</span
-                      >
-                    {/if}
-                  </div>
-                </div>
-
-                <!-- Hover Actions (Floating) -->
-                {#if single.localId && single.tracksToPlay && single.tracksToPlay.length > 0}
-                  <div
-                    class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 top-2 bg-black/50 backdrop-blur-sm rounded-lg p-1"
-                  >
-                    <button
-                      class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
-                      title="Add to Playlist"
-                      on:click={(e) => {
-                        e.stopPropagation();
-                        openPlaylistModal(single.tracksToPlay.map((t) => t.id));
-                      }}
-                    >
-                      <!-- List Plus Icon for Playlist -->
-                      <svg
-                        class="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-                        />
-                      </svg>
-                    </button>
-                    <button
-                      class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
-                      title="Add to Queue"
-                      on:click={(e) => {
-                        e.stopPropagation();
-                        addToQueue(single.tracksToPlay);
-                      }}
-                    >
-                      <!-- Layers/Stack Plus Icon for Queue -->
-                      <svg
-                        class="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                {/if}
-              </div>
+              <TrackCard
+                track={{
+                  id: single.localId || 0,
+                  title: single.title,
+                  duration_seconds: single.tracksToPlay?.[0]?.duration_seconds,
+                  codec: single.codec,
+                  bit_depth: single.bit_depth,
+                  sample_rate_hz: single.sample_rate_hz,
+                  popularity: single.popularity,
+                }}
+                artist={{ name: artist?.name || "", mbid: artist?.mbid }}
+                album={{
+                  name: single.album || "",
+                  mbid: single.album_mbid,
+                  year: single.date,
+                }}
+                artwork={{
+                  sha1: single.art_sha1,
+                  id: single.art_id,
+                }}
+                showIndex={false}
+                showArtwork={true}
+                showAlbum={true}
+                showArtist={false}
+                showYear={true}
+                showTechDetails={true}
+                showPopularity={true}
+                onPlay={() => {
+                  if (single.tracksToPlay && single.tracksToPlay.length > 0)
+                    setQueue(single.tracksToPlay, 0);
+                }}
+                onQueue={() => {
+                  if (single.tracksToPlay) addToQueue(single.tracksToPlay);
+                }}
+                onAddToPlaylist={() => {
+                  if (single.tracksToPlay)
+                    openPlaylistModal(single.tracksToPlay.map((t) => t.id));
+                }}
+              />
             {/each}
           </div>
         {:else if activeTab === "missing_albums"}
@@ -1510,9 +1220,9 @@
         <h3 class="text-xs font-bold text-white/40 uppercase tracking-widest">
           Actions
         </h3>
-        <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
           <button
-            class="flex items-center gap-3 text-white/60 hover:text-white transition-colors text-left group"
+            class="flex items-center gap-3 px-3 py-2 text-white/60 hover:text-white transition-all text-left w-full border-b border-transparent hover:border-accent group hover:bg-transparent"
             on:click={refreshMeta}
             disabled={refreshing}
           >
@@ -1528,13 +1238,12 @@
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
               /></svg
             >
-            <span
-              class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+            <span class="text-sm font-medium"
               >{refreshing ? "Refreshing..." : "Refresh Metadata"}</span
             >
           </button>
           <button
-            class="flex items-center gap-3 text-white/60 hover:text-white transition-colors text-left group"
+            class="flex items-center gap-3 px-3 py-2 text-white/60 hover:text-white transition-all text-left w-full border-b border-transparent hover:border-accent group hover:bg-transparent"
             on:click={scanMissing}
             disabled={scanningMissing}
           >
@@ -1550,11 +1259,76 @@
                 d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               /></svg
             >
-            <span
-              class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+            <span class="text-sm font-medium"
               >{scanningMissing ? "Scanning..." : "Check Missing"}</span
             >
           </button>
+
+          <!-- Track Actions (only show for track tabs) -->
+          {#if activeTab === "top_tracks" || activeTab === "singles_list"}
+            <div class="mt-6 pt-6 border-t border-white/10">
+              <h3
+                class="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3"
+              >
+                Track Actions
+              </h3>
+              <div class="flex flex-col gap-2">
+                <button
+                  class="w-full px-3 py-2 text-left text-sm text-white/80 hover:text-white transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
+                  on:click={activeTab === "top_tracks"
+                    ? playAllTopTracks
+                    : playAllSingles}
+                >
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  Play All
+                </button>
+                <button
+                  class="w-full px-3 py-2 text-left text-sm text-white/80 hover:text-white transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
+                  on:click={activeTab === "top_tracks"
+                    ? queueAllTopTracks
+                    : queueAllSingles}
+                >
+                  <svg
+                    class="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                  Add All to Queue
+                </button>
+                <button
+                  class="w-full px-3 py-2 text-left text-sm text-white/80 hover:text-white transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
+                  on:click={activeTab === "top_tracks"
+                    ? openPlaylistModalForTopTracks
+                    : openPlaylistModalForSingles}
+                >
+                  <svg
+                    class="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                    />
+                  </svg>
+                  Add to Playlist
+                </button>
+              </div>
+            </div>
+          {/if}
         </div>
       </div>
     </aside>
@@ -1571,10 +1345,19 @@
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: theme("colors.white / 10%");
     border-radius: 10px;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: theme("colors.white / 20%");
+  }
+
+  /* Tab hover effect matching button style */
+  .tab-hover:hover {
+    background: color-mix(
+      in srgb,
+      var(--accent) 25%,
+      theme("colors.black / 40%")
+    ) !important;
   }
 </style>

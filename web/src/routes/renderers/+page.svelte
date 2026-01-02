@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { triggerScan } from "$lib/api";
+    import TabButton from "$lib/components/TabButton.svelte";
 
     let renderers: any[] = [];
     let loading = false;
@@ -90,17 +91,13 @@
 <div class="container mx-auto max-w-5xl px-6 py-8">
     <div class="mb-8 flex items-center justify-between">
         <h1 class="text-3xl font-bold">Network Renderers</h1>
-        <button
-            class="btn border border-white/10 bg-white/5 hover:bg-white/10"
-            on:click={startScan}
-            disabled={loading || isScanning}
-        >
+        <TabButton onClick={startScan} disabled={loading || isScanning}>
             {#if loading || isScanning}
                 Scanning...
             {:else}
                 Refresh Discovery
             {/if}
-        </button>
+        </TabButton>
     </div>
 
     {#if isScanning || scanStatus}
@@ -248,7 +245,7 @@
                             {/if}
                             {#if r.supports_gapless}
                                 <span
-                                    class="inline-flex items-center gap-1 rounded-full bg-blue-500/20 px-3 py-1 text-xs font-medium text-blue-400"
+                                    class="inline-flex items-center gap-1 rounded-full bg-accent/20 px-3 py-1 text-xs font-medium text-accent"
                                 >
                                     <svg
                                         class="h-3 w-3"

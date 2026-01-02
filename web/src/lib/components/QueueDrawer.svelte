@@ -2,6 +2,7 @@
   import { createEventDispatcher } from "svelte";
   import { playerState, playFromQueue, reorderQueue } from "$stores/player";
   import AddToPlaylistModal from "$lib/components/AddToPlaylistModal.svelte";
+  import TrackCard from "$lib/components/TrackCard.svelte";
 
   const dispatch = createEventDispatcher();
 
@@ -226,7 +227,7 @@
   ></div>
 
   <aside
-    class="fixed right-4 z-[60] w-[440px] max-w-[92vw] rounded-2xl border border-white/10 bg-black/80 backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col"
+    class="fixed right-4 z-[60] w-[720px] max-w-[92vw] rounded-2xl border border-white/10 bg-black/80 backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col"
     style="top: 86px; bottom: 96px;"
     role="dialog"
     aria-modal="true"
@@ -248,7 +249,7 @@
       </div>
       <div class="flex items-center gap-2">
         <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/15 text-white border border-white/10"
+          class="btn btn-outline btn-sm"
           title="Save queue as playlist"
           on:click={openPlaylistModalForQueue}
         >
@@ -267,7 +268,7 @@
           </svg>
         </button>
         <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/15 text-white border border-white/10"
+          class="btn btn-outline btn-sm"
           title="Clear queue"
           on:click={clear}
         >
@@ -285,11 +286,7 @@
             />
           </svg>
         </button>
-        <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/15 text-white border border-white/10"
-          title="Close"
-          on:click={close}
-        >
+        <button class="btn btn-outline btn-sm" title="Close" on:click={close}>
           <svg
             class="h-4 w-4"
             fill="none"
@@ -325,175 +322,58 @@
           {#each $playerState.queue as track, idx}
             {#if isDragging && dropIndex === idx}
               <div
-                class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
+                class="h-[2px] w-full bg-accent drag-indicator-shadow rounded-full my-1 transition-all"
               ></div>
             {/if}
 
-            <!-- Converted from button to div for better nesting -->
-            <div
-              role="button"
-              tabindex="0"
-              class={`w-full text-left rounded-xl border border-transparent bg-white/5 hover:bg-white/10 transition-all px-3 py-2.5 flex gap-3 items-center relative group cursor-pointer
-                ${idx === $playerState.current_index ? "bg-primary/20 border-primary-500 border-2 shadow-[0_0_20px_rgba(59,130,246,0.25)]" : ""}
-                ${isDragging && idx === dragIndex ? "opacity-30 grayscale" : ""}
-                `}
-              aria-current={idx === $playerState.current_index
-                ? "true"
-                : "false"}
-              draggable="true"
-              on:dragstart={(e) => handleDragStart(e, idx)}
-              on:dragover={(e) => handleDragOver(e, idx)}
-              on:dragend={handleDragEnd}
-              on:click={() => playFromQueue(idx)}
-              on:keydown={(e) => e.key === "Enter" && playFromQueue(idx)}
-            >
-              {#if idx === $playerState.current_index}
-                <div
-                  class="absolute left-0 top-3 bottom-3 w-1 bg-primary rounded-r-md shadow-[0_0_10px_rgba(var(--color-primary),0.5)]"
-                ></div>
-              {/if}
-
-              <!-- Track Art -->
-              <div
-                class="h-14 w-14 flex-shrink-0 rounded bg-white/10 overflow-hidden relative shadow-lg"
-              >
-                <img
-                  src={track.art_sha1
-                    ? `/api/art/file/${track.art_sha1}?max_size=200`
-                    : track.art_id
-                      ? `/api/art/${track.art_id}`
-                      : "/assets/default-album-placeholder.svg"}
-                  alt={track.title || "Artwork"}
-                  class="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  loading="lazy"
-                  on:error={(e) => {
-                    const img = e.currentTarget;
-                    if (img instanceof HTMLImageElement) {
-                      img.src = "/assets/default-album-placeholder.svg";
-                    }
-                  }}
-                />
-                {#if idx === $playerState.current_index && $playerState.is_playing}
-                  <div
-                    class="absolute inset-0 bg-black/40 flex items-center justify-center"
-                  >
-                    <div
-                      class="loading loading-bars loading-sm text-white"
-                    ></div>
-                  </div>
-                {/if}
-              </div>
-
-              <!-- Track Info -->
-              <div class="min-w-0 flex-1 space-y-1">
-                <div class="flex items-center justify-between gap-2">
-                  <p
-                    class={`truncate text-base font-medium ${idx === $playerState.current_index ? "text-primary" : "text-white"}`}
-                  >
-                    {track.title || "Untitled"}
-                  </p>
-                  <span class="text-sm text-white/50 tabular-nums font-mono">
-                    {formatTime(track.duration_seconds)}
-                  </span>
-                </div>
-                <div
-                  class="flex items-center gap-1 text-sm text-white/60 min-w-0 relative z-10"
-                >
-                  {#if track.artist}
-                    <a
-                      href={track.artist_mbid
-                        ? `/artist/${track.artist_mbid}`
-                        : `/artist/${encodeURIComponent(track.artist)}`}
-                      class="hover:text-white hover:underline truncate"
-                      on:click|stopPropagation
-                    >
-                      {track.artist}
-                    </a>
-                  {/if}
-                  {#if track.album}
-                    <span class="text-white/40 flex-shrink-0">•</span>
-                    <a
-                      href={track.album_mbid
-                        ? `/album/${track.album_mbid}`
-                        : `/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album)}`}
-                      class="text-white/50 hover:text-white hover:underline truncate"
-                      on:click|stopPropagation
-                    >
-                      {track.album}
-                    </a>
-                  {/if}
-                </div>
-                <!-- Tech Details -->
-                <div
-                  class="flex items-center gap-2 text-xs text-white/30 uppercase tracking-wider font-medium"
-                >
-                  {#if track.codec}
-                    <span>{track.codec}</span>
-                  {/if}
-                  {#if track.bit_depth && track.sample_rate_hz}
-                    <span>•</span>
-                    <span
-                      >{track.bit_depth}bit / {track.sample_rate_hz /
-                        1000}kHz</span
-                    >
-                  {/if}
-                  {#if track.bitrate}
-                    <span>•</span>
-                    <span>{Math.round(track.bitrate / 1000)}kbps</span>
-                  {/if}
-                </div>
-              </div>
-
-              <!-- Actions Area (Add to Playlist + Drag Handle) -->
-              <div
-                class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute right-2 bg-black/50 backdrop-blur-sm rounded-lg p-1"
-              >
-                <!-- Add to Playlist Button -->
-                <button
-                  class="p-1.5 hover:bg-white/20 rounded-md text-white/70 hover:text-white transition-colors"
-                  title="Add to playlist"
-                  on:click={(e) => openPlaylistModal(track.id, e)}
-                >
-                  <svg
-                    class="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M12 4v16m8-8H4"
-                    />
-                  </svg>
-                </button>
-
-                <!-- Drag Handle -->
-                <div
-                  class="p-1.5 text-white/40 cursor-grab active:cursor-grabbing"
-                >
-                  <svg
-                    class="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M4 8h16M4 16h16"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
+            <TrackCard
+              track={{
+                id: track.id,
+                title: track.title || "Untitled",
+                duration_seconds: track.duration_seconds,
+                codec: track.codec,
+                bit_depth: track.bit_depth,
+                sample_rate_hz: track.sample_rate_hz,
+                bitrate: track.bitrate,
+                art_sha1: track.art_sha1,
+                art_id: track.art_id,
+              }}
+              artist={{
+                name: track.artist || "",
+                mbid: track.artist_mbid,
+              }}
+              album={{
+                name: track.album || "",
+                mbid: track.album_mbid,
+              }}
+              artwork={{
+                sha1: track.art_sha1,
+                id: track.art_id,
+              }}
+              showIndex={false}
+              showArtwork={true}
+              showAlbum={true}
+              showArtist={true}
+              showYear={false}
+              showTechDetails={true}
+              showPopularity={false}
+              showBitrate={true}
+              draggable={true}
+              onDragStart={(e) => handleDragStart(e, idx)}
+              onDragOver={(e) => handleDragOver(e, idx)}
+              onDragEnd={handleDragEnd}
+              isDragging={isDragging && idx === dragIndex}
+              isCurrentlyPlaying={idx === $playerState.current_index}
+              isPlaying={$playerState.is_playing}
+              onClick={() => playFromQueue(idx)}
+              onAddToPlaylist={() =>
+                openPlaylistModal(track.id, new MouseEvent("click"))}
+            />
           {/each}
 
           {#if isDragging && dropIndex === $playerState.queue.length}
             <div
-              class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
+              class="h-[2px] w-full bg-accent drag-indicator-shadow rounded-full my-1 transition-all"
             ></div>
           {/if}
 

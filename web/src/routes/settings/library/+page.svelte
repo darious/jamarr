@@ -10,6 +10,8 @@
         triggerMissingAlbumsScan,
         triggerOptimize,
     } from "$lib/api";
+    import TabButton from "$lib/components/TabButton.svelte";
+    import Checkbox from "$lib/components/Checkbox.svelte";
 
     interface ScanStats {
         scanned: number;
@@ -513,12 +515,12 @@
                             >{Math.round(stats.percentage)}%</span
                         >
                         {#if isRunning}
-                            <button
-                                class="btn btn-xs btn-error mt-2"
-                                on:click={handleCancel}
+                            <TabButton
+                                className="text-red-400 hover:text-red-300 !border-red-500/0 hover:!border-red-400"
+                                onClick={handleCancel}
                             >
                                 Cancel
-                            </button>
+                            </TabButton>
                         {/if}
                     </div>
                 </div>
@@ -532,15 +534,15 @@
                         class="mt-3 flex items-center justify-between text-xs text-white/70 bg-white/5 rounded-lg px-3 py-2 border border-white/10"
                     >
                         <span>Scan complete ({stats.completedStatus})</span>
-                        <button
-                            class="btn btn-ghost btn-xs text-white/80 border border-white/10 bg-white/5 hover:bg-white/10"
-                            on:click={() => {
+                        <TabButton
+                            className="text-white/60 hover:text-white"
+                            onClick={() => {
                                 stats.completed = false;
                                 stats.completedStatus = "";
                             }}
                         >
                             Dismiss
-                        </button>
+                        </TabButton>
                     </div>
                 {/if}
             </div>
@@ -771,7 +773,7 @@
             </div>
 
             <div
-                class="card bg-[#0d1117] border border-white/10 overflow-hidden flex flex-col font-mono text-sm shadow-inner"
+                class="card surface-glass-popover border border-white/10 overflow-hidden flex flex-col font-mono text-sm shadow-inner"
             >
                 <div
                     class="bg-white/5 px-4 py-2 border-b border-white/5 flex items-center justify-between"
@@ -827,28 +829,18 @@
                         />
                     </label>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3">
-                            <input
-                                type="checkbox"
-                                bind:checked={forceRescan}
-                                class="checkbox checkbox-primary"
-                            />
-                            <span class="label-text text-white"
-                                >Force rescan (re-read tags)</span
-                            >
-                        </label>
+                        <Checkbox
+                            bind:checked={forceRescan}
+                            label="Force rescan (re-read tags)"
+                            className="checkbox-primary"
+                        />
                     </div>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3">
-                            <input
-                                type="checkbox"
-                                bind:checked={missingOnly}
-                                class="checkbox checkbox-secondary"
-                            />
-                            <span class="label-text text-white"
-                                >Missing only (skip data we already have)</span
-                            >
-                        </label>
+                        <Checkbox
+                            bind:checked={missingOnly}
+                            label="Missing only (skip data we already have)"
+                            className="checkbox-secondary"
+                        />
                     </div>
                 </div>
 
@@ -889,167 +881,114 @@
             <div class="mt-6 grid md:grid-cols-2 gap-4">
                 <div class="space-y-2">
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={scanAll}
-                                on:change={toggleScanAll}
-                                class="checkbox checkbox-accent"
-                            /><span class="label-text text-white font-bold"
-                                >Scan All (Full Refresh)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={scanAll}
+                            label="Scan All (Full Refresh)"
+                            className="checkbox-accent font-bold"
+                            on:click={toggleScanAll}
+                        />
                     </div>
                     <div class="divider my-1"></div>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={runFilesystem}
-                                on:change={updateScanAllState}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Scan & add/update files</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={runFilesystem}
+                            label="Scan & add/update files"
+                            className="checkbox-primary"
+                            on:click={updateScanAllState}
+                        />
                     </div>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={doMetadata}
-                                on:change={updateScanAllState}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Pull artist metadata (MusicBrainz)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={doMetadata}
+                            label="Pull artist metadata (MusicBrainz)"
+                            className="checkbox-primary"
+                            on:click={updateScanAllState}
+                        />
                     </div>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={doBio}
-                                on:change={updateScanAllState}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Pull bios (Wikipedia)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={doBio}
+                            label="Pull bios (Wikipedia)"
+                            className="checkbox-primary"
+                            on:click={updateScanAllState}
+                        />
                     </div>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={doArtwork}
-                                on:change={updateScanAllState}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Pull artist artwork (fanart.tv)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={doArtwork}
+                            label="Pull artist artwork (fanart.tv)"
+                            className="checkbox-primary"
+                            on:click={updateScanAllState}
+                        />
                     </div>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={doSpotifyArtwork}
-                                on:change={updateScanAllState}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Pull artist artwork (Spotify fallback)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={doSpotifyArtwork}
+                            label="Pull artist artwork (Spotify fallback)"
+                            className="checkbox-primary"
+                            on:click={updateScanAllState}
+                        />
                     </div>
                 </div>
                 <div class="space-y-2 pt-[3.25rem]">
                     <!-- Align with right column offset by Scan All + Divider -->
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={doTopTracks}
-                                on:change={updateScanAllState}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Refresh top tracks (Last.fm)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={doTopTracks}
+                            label="Refresh top tracks (Last.fm)"
+                            className="checkbox-primary"
+                            on:click={updateScanAllState}
+                        />
                     </div>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={doSingles}
-                                on:change={updateScanAllState}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Refresh singles (MusicBrainz)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={doSingles}
+                            label="Refresh singles (MusicBrainz)"
+                            className="checkbox-primary"
+                            on:click={updateScanAllState}
+                        />
                     </div>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={doSimilarArtists}
-                                on:change={updateScanAllState}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Refresh similar artists (Last.fm)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={doSimilarArtists}
+                            label="Refresh similar artists (Last.fm)"
+                            className="checkbox-primary"
+                            on:click={updateScanAllState}
+                        />
                     </div>
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={doAlbumMetadata}
-                                on:change={updateScanAllState}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Scan album metadata (Desc, Charts, Links)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={doAlbumMetadata}
+                            label="Scan album metadata (Desc, Charts, Links)"
+                            className="checkbox-primary"
+                            on:click={updateScanAllState}
+                        />
                     </div>
                     <!-- Links refresh is now part of metadata/implicit, removed separate checkbox -->
                     <div class="form-control">
-                        <label class="label cursor-pointer justify-start gap-3"
-                            ><input
-                                type="checkbox"
-                                bind:checked={doMissingAlbums}
-                                class="checkbox checkbox-primary"
-                            /><span class="label-text text-white"
-                                >Scan missing albums (discovery)</span
-                            ></label
-                        >
+                        <Checkbox
+                            bind:checked={doMissingAlbums}
+                            label="Scan missing albums (discovery)"
+                            className="checkbox-primary"
+                        />
                     </div>
                 </div>
             </div>
 
             <div class="mt-6 flex flex-wrap gap-3">
-                <button
-                    class="btn border border-white/10 bg-white/10 text-white hover:bg-white/20 normal-case font-normal"
-                    on:click={startCombined}
+                <TabButton
+                    onClick={startCombined}
                     disabled={isRunning || queueActive}
                 >
                     Start
-                </button>
-                <button
-                    class="btn border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
-                    on:click={startPrune}
-                    disabled={isRunning}
-                >
+                </TabButton>
+                <TabButton onClick={startPrune} disabled={isRunning}>
                     Prune Library
-                </button>
+                </TabButton>
 
-                <button
-                    class="btn border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
-                    disabled={isRunning}
-                    on:click={startOptimize}
-                >
+                <TabButton onClick={startOptimize} disabled={isRunning}>
                     Optimize Database
-                </button>
+                </TabButton>
             </div>
         </div>
     </div>

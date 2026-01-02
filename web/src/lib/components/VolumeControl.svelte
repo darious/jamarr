@@ -4,6 +4,7 @@
     export let showIcon = true;
     export let iconClass = "h-5 w-5 text-white/60";
     export let sliderClass = "range range-xs range-primary w-24";
+    export let sliderStyle = "";
     export let containerClass = "flex items-center gap-2 group";
 
     let volume = 1.0;
@@ -56,6 +57,7 @@
         step="0.01"
         value={volume}
         on:input={handleInput}
-        class={sliderClass}
+        class="volume-slider {sliderClass}"
+        style={sliderStyle}
     />
 </div>

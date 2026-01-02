@@ -2,6 +2,7 @@
     import type { Album, Artist } from "../lib/api";
     import { fetchTracks } from "../lib/api";
     import { setQueue, addToQueue } from "../lib/stores/player";
+    import IconButton from "$components/IconButton.svelte";
 
     export let data: {
         newReleases: Album[];
@@ -73,7 +74,7 @@
             >
                 {#each newReleases as album}
                     <div
-                        class="group relative min-w-[200px] w-[200px] snap-start"
+                        class="group relative min-w-[280px] w-[280px] snap-start"
                     >
                         <div
                             class="relative aspect-square w-full overflow-hidden rounded-md bg-white/5 shadow-lg transition-transform duration-300 group-hover:-translate-y-2"
@@ -96,36 +97,36 @@
                                 aria-label="View Album"
                             ></a>
                             <div
-                                class="absolute inset-0 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-4 z-10 pointer-events-none"
+                                class="absolute inset-0 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
                             >
-                                <button
-                                    class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-lg scale-75 hover:scale-90 transition-transform pointer-events-auto"
+                                <IconButton
+                                    variant="outline"
                                     title="Play Album"
-                                    on:click|preventDefault={() =>
-                                        playAlbum(album)}
+                                    onClick={() => playAlbum(album)}
+                                    stopPropagation={true}
                                 >
                                     <svg
-                                        class="h-8 w-8"
+                                        class="h-6 w-6"
                                         fill="currentColor"
                                         viewBox="0 0 24 24"
                                         ><path d="M8 5v14l11-7z" /></svg
                                     >
-                                </button>
-                                <button
-                                    class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-lg scale-75 hover:scale-90 transition-transform pointer-events-auto"
+                                </IconButton>
+                                <IconButton
+                                    variant="outline"
                                     title="Add to Queue"
-                                    on:click|preventDefault={() =>
-                                        queueAlbum(album)}
+                                    onClick={() => queueAlbum(album)}
+                                    stopPropagation={true}
                                 >
                                     <svg
-                                        class="h-8 w-8"
+                                        class="h-6 w-6"
                                         fill="currentColor"
                                         viewBox="0 0 24 24"
                                         ><path
                                             d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
                                         /></svg
                                     >
-                                </button>
+                                </IconButton>
                             </div>
                             {#if album.is_hires}
                                 <img
@@ -172,7 +173,7 @@
             >
                 {#each recentlyAddedAlbums as album}
                     <div
-                        class="group relative min-w-[200px] w-[200px] snap-start"
+                        class="group relative min-w-[280px] w-[280px] snap-start"
                     >
                         <div
                             class="relative aspect-square w-full overflow-hidden rounded-md bg-white/5 shadow-lg transition-transform duration-300 group-hover:-translate-y-2"
@@ -195,36 +196,36 @@
                                 aria-label="View Album"
                             ></a>
                             <div
-                                class="absolute inset-0 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-4 z-10 pointer-events-none"
+                                class="absolute inset-0 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
                             >
-                                <button
-                                    class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-lg scale-75 hover:scale-90 transition-transform pointer-events-auto"
+                                <IconButton
+                                    variant="outline"
                                     title="Play Album"
-                                    on:click|preventDefault={() =>
-                                        playAlbum(album)}
+                                    onClick={() => playAlbum(album)}
+                                    stopPropagation={true}
                                 >
                                     <svg
-                                        class="h-8 w-8"
+                                        class="h-6 w-6"
                                         fill="currentColor"
                                         viewBox="0 0 24 24"
                                         ><path d="M8 5v14l11-7z" /></svg
                                     >
-                                </button>
-                                <button
-                                    class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-lg scale-75 hover:scale-90 transition-transform pointer-events-auto"
+                                </IconButton>
+                                <IconButton
+                                    variant="outline"
                                     title="Add to Queue"
-                                    on:click|preventDefault={() =>
-                                        queueAlbum(album)}
+                                    onClick={() => queueAlbum(album)}
+                                    stopPropagation={true}
                                 >
                                     <svg
-                                        class="h-8 w-8"
+                                        class="h-6 w-6"
                                         fill="currentColor"
                                         viewBox="0 0 24 24"
                                         ><path
                                             d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
                                         /></svg
                                     >
-                                </button>
+                                </IconButton>
                             </div>
                             {#if album.is_hires}
                                 <img
@@ -267,7 +268,7 @@
             >
                 {#each recentlyPlayedAlbums as album}
                     <div
-                        class="group relative min-w-[200px] w-[200px] snap-start"
+                        class="group relative min-w-[280px] w-[280px] snap-start"
                     >
                         <div
                             class="relative aspect-square w-full overflow-hidden rounded-md bg-white/5 relative shadow-lg transition-all duration-300 hover:shadow-primary-500/20 group-hover:-translate-y-2"
@@ -290,36 +291,36 @@
                                 aria-label="View Album"
                             ></a>
                             <div
-                                class="absolute inset-0 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-4 z-10 pointer-events-none"
+                                class="absolute inset-0 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
                             >
-                                <button
-                                    class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-lg scale-75 hover:scale-90 transition-transform pointer-events-auto"
+                                <IconButton
+                                    variant="outline"
                                     title="Play Album"
-                                    on:click|preventDefault={() =>
-                                        playAlbum(album)}
+                                    onClick={() => playAlbum(album)}
+                                    stopPropagation={true}
                                 >
                                     <svg
-                                        class="h-8 w-8"
+                                        class="h-6 w-6"
                                         fill="currentColor"
                                         viewBox="0 0 24 24"
                                         ><path d="M8 5v14l11-7z" /></svg
                                     >
-                                </button>
-                                <button
-                                    class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-lg scale-75 hover:scale-90 transition-transform pointer-events-auto"
+                                </IconButton>
+                                <IconButton
+                                    variant="outline"
                                     title="Add to Queue"
-                                    on:click|preventDefault={() =>
-                                        queueAlbum(album)}
+                                    onClick={() => queueAlbum(album)}
+                                    stopPropagation={true}
                                 >
                                     <svg
-                                        class="h-8 w-8"
+                                        class="h-6 w-6"
                                         fill="currentColor"
                                         viewBox="0 0 24 24"
                                         ><path
                                             d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
                                         /></svg
                                     >
-                                </button>
+                                </IconButton>
                             </div>
                             {#if album.is_hires}
                                 <img
@@ -365,7 +366,7 @@
                         href={artist.mbid
                             ? `/artist/${artist.mbid}`
                             : `/artist/${encodeURIComponent(artist.name)}`}
-                        class="group relative min-w-[200px] w-[200px] snap-start flex flex-col items-center text-center"
+                        class="group relative min-w-[280px] w-[280px] snap-start flex flex-col items-center text-center"
                     >
                         <div
                             class="aspect-square w-full overflow-hidden rounded-full bg-white/5 relative shadow-lg border border-white/5 transition-transform duration-300 group-hover:scale-105"
@@ -409,7 +410,7 @@
                         href={artist.mbid
                             ? `/artist/${artist.mbid}`
                             : `/artist/${encodeURIComponent(artist.name)}`}
-                        class="group relative min-w-[200px] w-[200px] snap-start flex flex-col items-center text-center"
+                        class="group relative min-w-[280px] w-[280px] snap-start flex flex-col items-center text-center"
                     >
                         <div
                             class="aspect-square w-full overflow-hidden rounded-full bg-white/5 relative shadow-lg border border-white/5 transition-transform duration-300 group-hover:scale-105"

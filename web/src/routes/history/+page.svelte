@@ -1,6 +1,8 @@
 <script lang="ts">
   import { setQueue } from "$stores/player";
   import { goto, invalidateAll } from "$app/navigation";
+  import IconButton from "$lib/components/IconButton.svelte";
+  import TabButton from "$lib/components/TabButton.svelte";
 
   export let data: {
     history: Array<{
@@ -132,37 +134,31 @@
     class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
   >
     <div class="space-y-2">
-      <p class="pill w-max bg-white/10 text-white/70 backdrop-blur-md">
-        Playback
-      </p>
       <h1 class="text-4xl md:text-6xl font-bold tracking-tight">History</h1>
-      <p class="text-white/60">Recently played tracks</p>
     </div>
-    <div class="flex items-center gap-2">
-      <button
-        class={`btn btn-sm normal-case border border-white/10 bg-white/5 text-white hover:bg-white/10 ${scope === "mine" ? "bg-primary text-white border-primary" : ""}`}
-        on:click={() => switchScope("mine")}
-      >
-        My History
-      </button>
-      <button
-        class={`btn btn-sm normal-case border border-white/10 bg-white/5 text-white hover:bg-white/10 ${scope === "all" ? "bg-primary text-white border-primary" : ""}`}
-        on:click={() => switchScope("all")}
-      >
-        All History
-      </button>
-      <button
-        class="btn btn-sm btn-square border border-white/10 bg-white/5 text-white hover:bg-white/10"
-        on:click={() => invalidateAll()}
-        title="Refresh History"
-      >
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <TabButton
+          active={scope === "mine"}
+          onClick={() => switchScope("mine")}
+        >
+          My History
+        </TabButton>
+        <TabButton active={scope === "all"} onClick={() => switchScope("all")}>
+          All History
+        </TabButton>
+      </div>
+
+      <div class="h-6 w-px bg-white/10 mx-2"></div>
+
+      <TabButton onClick={() => invalidateAll()} title="Refresh History">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
           stroke-width="1.5"
           stroke="currentColor"
-          class="w-4 h-4"
+          class="w-5 h-5"
         >
           <path
             stroke-linecap="round"
@@ -170,18 +166,20 @@
             d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
           />
         </svg>
-      </button>
+      </TabButton>
       <div class="flex items-center gap-2 text-sm text-white/70">
-        <label for="days" class="hidden md:inline">Days</label>
-        <input
-          id="days"
-          type="number"
-          min="1"
-          max="365"
-          class="input input-sm input-bordered w-20 bg-white/5 text-white"
-          bind:value={days}
-          on:change={updateDays}
-        />
+        <label for="days" class="hidden md:inline font-medium">Days</label>
+        <div class="relative">
+          <input
+            id="days"
+            type="number"
+            min="1"
+            max="365"
+            class="w-16 bg-transparent text-white border-b border-white/20 focus:border-accent focus:outline-none text-center pb-1 transition-colors"
+            bind:value={days}
+            on:change={updateDays}
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -371,14 +369,19 @@
             <div
               class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
             >
-              <button
-                class="text-white hover:scale-110 transition-transform"
-                on:click={() => playTrack(entry)}
-              >
-                <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
-                  ><path d="M8 5v14l11-7z" /></svg
+              <div class="opacity-0 group-hover:opacity-100 transition-opacity">
+                <IconButton
+                  variant="ghost"
+                  onClick={() => playTrack(entry)}
+                  title="Play"
                 >
-              </button>
+                  <svg
+                    class="h-6 w-6 ml-0.5 text-white"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                  >
+                </IconButton>
+              </div>
             </div>
           </div>
 

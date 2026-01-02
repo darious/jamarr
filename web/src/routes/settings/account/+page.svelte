@@ -2,6 +2,7 @@
   import { goto } from "$app/navigation";
   import { onDestroy, onMount } from "svelte";
   import { changePassword, updateProfile } from "$lib/api";
+  import TabButton from "$lib/components/TabButton.svelte";
   import {
     currentUser,
     hydrateUser,
@@ -173,13 +174,13 @@
             />
           </div>
 
-          <button
-            class="btn w-full normal-case bg-primary text-white hover:bg-primary/90"
+          <TabButton
             type="submit"
             disabled={updatingProfile}
+            className="w-full"
           >
             {#if updatingProfile}Saving...{:else}Save Changes{/if}
-          </button>
+          </TabButton>
         </form>
       </div>
 
@@ -251,13 +252,13 @@
             />
           </div>
 
-          <button
-            class="btn w-full normal-case bg-primary text-white hover:bg-primary/90"
+          <TabButton
             type="submit"
             disabled={updatingPassword}
+            className="w-full"
           >
             {#if updatingPassword}Updating...{:else}Update Password{/if}
-          </button>
+          </TabButton>
         </form>
       </div>
     </div>

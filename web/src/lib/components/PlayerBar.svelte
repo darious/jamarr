@@ -490,7 +490,7 @@
 </script>
 
 <div
-  class="fixed bottom-0 w-full bg-[#0a0a0a]/75 backdrop-blur-md border-t border-white/10 p-4 text-white z-50"
+  class="fixed bottom-0 w-full bg-surface-900/75 backdrop-blur-xl border-t border-white/10 p-4 text-white z-50"
 >
   <div class="flex items-center justify-between max-w-[1700px] mx-auto">
     <!-- Track Info -->
@@ -511,9 +511,7 @@
             class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
             on:click={toggleQueue}
           >
-            <div
-              class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
-            >
+            <div class="btn btn-outline btn-sm">
               <svg
                 class="w-5 h-5"
                 fill="none"
@@ -564,19 +562,13 @@
       <div class="flex items-center gap-4">
         <!-- Shuffle and Repeat moved to right side -->
 
-        <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
-          on:click={previous}
-        >
+        <button class="btn btn-outline btn-sm" on:click={previous}>
           <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
             ><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg
           >
         </button>
 
-        <button
-          class="btn btn-circle bg-white/10 hover:bg-white/20 text-white border-none hover:scale-105 transition-transform"
-          on:click={togglePlay}
-        >
+        <button class="btn btn-primary" on:click={togglePlay}>
           {#if isPlaying}
             <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
               ><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg
@@ -588,10 +580,7 @@
           {/if}
         </button>
 
-        <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
-          on:click={next}
-        >
+        <button class="btn btn-outline btn-sm" on:click={next}>
           <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
             ><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg
           >
@@ -637,10 +626,9 @@
     <div class="w-1/3 flex justify-end items-center gap-4">
       <div class="flex items-center gap-2 mr-4">
         <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 border-none hover:scale-110 transition-transform {$playerState.repeatMode !==
-          'off'
-            ? 'text-primary-400 bg-white/10'
-            : 'text-white/40'}"
+          class="btn btn-outline btn-sm {$playerState.repeatMode !== 'off'
+            ? 'border-accent bg-accent/10 text-accent'
+            : ''}"
           on:click={toggleRepeat}
           title="Repeat: {$playerState.repeatMode}"
         >
@@ -679,7 +667,7 @@
         </button>
 
         <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 border-none hover:scale-110 transition-transform text-white/40 hover:text-white"
+          class="btn btn-outline btn-sm"
           on:click={shuffleQueue}
           title="Shuffle Queue"
         >
@@ -697,15 +685,19 @@
           >
         </button>
       </div>
-      <div class="text-xs text-white/40">{deviceName}</div>
-      <div class="flex items-center gap-2 group">
-        <VolumeControl
-          showIcon={true}
-          sliderClass="range range-xs range-primary w-24 opacity-0 group-hover:opacity-100 transition-opacity"
-        />
+      <div class="flex flex-col items-center gap-1">
+        <div class="flex items-center gap-2 group">
+          <VolumeControl
+            showIcon={true}
+            iconClass="h-5 w-5 text-white/60"
+            sliderClass="w-24 transition-opacity"
+            sliderStyle=""
+          />
+        </div>
+        <div class="text-xs text-white/40">{deviceName}</div>
       </div>
       <button
-        class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
+        class="btn btn-outline btn-sm"
         title="Now Playing"
         on:click={toggleNowPlaying}
       >
@@ -723,7 +715,7 @@
         >
       </button>
       <button
-        class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
+        class="btn btn-outline btn-sm"
         title="Queue"
         on:click={toggleQueue}
       >
