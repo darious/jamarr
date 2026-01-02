@@ -172,9 +172,12 @@ List of artist objects.
   {
     "mbid": "...",
     "name": "Artist Name",
+    "sort_name": "Name, Artist",
     "image_url": "...",
     "primary_album_count": 5,
-    "top_tracks": [ ... ] // Only populated if fetching single artist
+    "qobuz_url": "...",
+    "musicbrainz_url": "...",
+    "top_tracks": [ ... ] 
   }
 ]
 ```
@@ -202,6 +205,9 @@ List of album objects.
     "artist_name": "Artist",
     "year": "2023",
     "track_count": 12,
+    "release_type": "Album",
+    "description": "Album description...",
+    "peak_chart_position": 1,
     "art_id": 123
   }
 ]
@@ -430,6 +436,65 @@ Listen for realtime scan updates via SSE.
 
 **GET** `/api/library/events`
 
+### Scan Missing Albums
+Trigger a scan for missing albums (gaps in discography).
+
+**POST** `/api/scan/missing`
+
+**Parameters:**
+- `artist` (str, optional): Filter by artist name.
+- `mbid` (str, optional): Filter by artist MBID.
+
+### Optimize Database
+Run database maintenance tasks (VACUUM, ANALYZE).
+
+**POST** `/api/library/optimize`
+
+## Playlists (`/api/playlists`)
+
+### List Playlists
+Get all playlists for the current user.
+
+**GET** `/api/playlists`
+
+**Response:**
+```json
+[
+  {
+    "id": 1,
+    "name": "My Playlist",
+    "track_count": 10,
+    "thumbnails": ["sha1...", "sha1..."]
+  }
+]
+```
+
+### Get Playlist
+Get detailed playlist info and tracks.
+
+**GET** `/api/playlists/{id}`
+
+### Create Playlist
+**POST** `/api/playlists`
+Body: `{ "name": "New Playlist", "description": "Optional" }`
+
+### Update Playlist
+**PUT** `/api/playlists/{id}`
+Body: `{ "name": "Updated Name", "is_public": true }`
+
+### Add Tracks
+**POST** `/api/playlists/{id}/tracks`
+Body: `{ "track_ids": [1, 2, 3] }`
+
+### Remove Track
+**DELETE** `/api/playlists/{id}/tracks/{playlist_track_id}`
+
+### Reorder Tracks
+Atomic reorder of tracks.
+**POST** `/api/playlists/{id}/reorder`
+Body: `{ "allowed_playlist_track_ids": [3, 1, 2] }`
+
+
 ## Search (`/api/search`)
 
 ### Global Search
@@ -520,10 +585,11 @@ List of item summaries.
 ```json
 [
   {
-    "name": "Artist Name",
+    "name": "Album Name",
+    "artist_name": "Artist Name",
+    "sort_name": "Artist, Name",
     "mbid": "...",
-    "image_url": "...",
-    "artist_name": null 
+    "image_url": "..."
   }
 ]
 ```
