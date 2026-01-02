@@ -3,6 +3,8 @@
   import { setQueue, addToQueue } from "$stores/player";
   import { goto } from "$app/navigation";
   import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
+  import IconButton from "$components/IconButton.svelte";
+  import TrackCard from "$components/TrackCard.svelte";
 
   let showPlaylistModal = false;
   let selectedTrackIds: number[] = [];
@@ -20,7 +22,8 @@
     albumMeta?: Album;
   };
 
-  const getAlbumArtUrl = () => {
+  // Reactive album art URL - recalculates when data changes
+  $: albumArtUrl = (() => {
     if (data.albumMeta?.art_sha1) return `/art/file/${data.albumMeta.art_sha1}`;
     if (data.albumMeta?.art_id) return `/art/${data.albumMeta.art_id}`;
     const withArt = data.tracks.find((t) => t.art_sha1 || t.art_id);
@@ -28,7 +31,7 @@
     return withArt?.art_id
       ? `/art/${withArt.art_id}`
       : "/assets/default-album-placeholder.svg";
-  };
+  })();
 
   const getMusicBrainzUrl = () => {
     if (data.albumMeta?.musicbrainz_url) return data.albumMeta.musicbrainz_url;
@@ -147,7 +150,7 @@
   <!-- Blurred Background -->
   <div
     class="absolute inset-0 bg-cover bg-center blur-3xl opacity-40 scale-105"
-    style={`background-image: url('${getAlbumArtUrl()}')`}
+    style={`background-image: url('${albumArtUrl}')`}
   ></div>
   <!-- Gradient Overlay -->
   <div
@@ -167,7 +170,7 @@
           class="w-full aspect-square rounded shadow-2xl overflow-hidden relative group"
         >
           <img
-            src={getAlbumArtUrl()}
+            src={albumArtUrl}
             alt={data.album}
             class="w-full h-full object-cover"
           />
@@ -176,24 +179,20 @@
           <div
             class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 backdrop-blur-sm"
           >
-            <button
-              class="btn btn-circle bg-white text-black hover:scale-105 transition-transform border-none btn-lg"
-              title="Play Album"
-              on:click={playAll}
-            >
-              <svg class="h-8 w-8 ml-1" fill="currentColor" viewBox="0 0 24 24"
+            <IconButton variant="outline" title="Play Album" onClick={playAll}>
+              <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
                 ><path d="M8 5v14l11-7z" /></svg
               >
-            </button>
-            <button
-              class="btn btn-circle bg-black/60 text-white hover:bg-black/80 transition-colors border-none btn-lg"
+            </IconButton>
+            <IconButton
+              variant="outline"
               title="Add to Queue"
-              on:click={addAllToQueue}
+              onClick={addAllToQueue}
             >
               <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
                 ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
               >
-            </button>
+            </IconButton>
           </div>
         </div>
 
@@ -356,104 +355,22 @@
                   </div>
                 {/if}
 
-                <div class="grid gap-1">
-                  {#each group.tracks as track}
-                    <button
-                      class="group w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-white/5 transition-all text-left relative"
-                      on:dblclick={() => playTrack(track)}
-                    >
-                      <!-- Track Number / Play Icon -->
-                      <button
-                        class="w-8 flex-shrink-0 flex justify-center text-sm font-medium text-white/40 tabular-nums cursor-default"
-                        on:click|stopPropagation={() => playTrack(track)}
-                        type="button"
-                      >
-                        <span class="group-hover:hidden">{track.track_no}</span>
-                        <div
-                          class="hidden group-hover:block text-white cursor-pointer"
-                        >
-                          <svg
-                            class="w-4 h-4"
-                            fill="currentColor"
-                            viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
-                          >
-                        </div>
-                      </button>
-
-                      <!-- Title & Artist -->
-                      <div class="flex-1 min-w-0 flex flex-col justify-center">
-                        <div
-                          class="text-[15px] font-medium text-white/90 group-hover:text-white truncate"
-                        >
-                          {track.title}
-                        </div>
-                        <div
-                          class="flex items-center gap-2 text-xs text-white/50 mt-0.5"
-                        >
-                          {#if track.artist !== data.artist}
-                            <span class="text-white/60">{track.artist}</span>
-                          {/if}
-                        </div>
-                      </div>
-
-                      <!-- Technical Details (Right Aligned) -->
-                      <div
-                        class="hidden md:flex flex-col items-end text-[10px] text-white/30 font-medium tabular-nums leading-tight pl-4 min-w-[100px]"
-                      >
-                        {#if track.duration_seconds}
-                          <div class="text-white/60 text-xs mb-0.5">
-                            {formatDuration(track.duration_seconds)}
-                          </div>
-                        {/if}
-                        <div>
-                          <span class="uppercase">{track.codec}</span>
-                          {#if track.bit_depth && track.sample_rate_hz}
-                            <span class="mx-1">•</span>{track.bit_depth}BIT / {Math.round(
-                              track.sample_rate_hz / 1000,
-                            )}KHZ
-                          {/if}
-                        </div>
-                      </div>
-
-                      <!-- Actions (Hover only) - Absolute positioned to avoid layout shift -->
-                      <div
-                        class="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity bg-surface-800/90 shadow-lg rounded-full px-1 backdrop-blur-md"
-                      >
-                        <button
-                          class="p-2 rounded-full hover:bg-white/20 text-white/70 hover:text-white"
-                          title="Add to Queue"
-                          on:click|stopPropagation={() => addToQueue([track])}
-                        >
-                          <svg
-                            class="h-4 w-4"
-                            fill="currentColor"
-                            viewBox="0 0 24 24"
-                            ><path
-                              d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
-                            /></svg
-                          >
-                        </button>
-                        <button
-                          class="p-2 rounded-full hover:bg-white/20 text-white/70 hover:text-white"
-                          title="Add to Playlist"
-                          on:click|stopPropagation={() =>
-                            openPlaylistModal(track.id)}
-                        >
-                          <svg
-                            class="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            ><path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
-                            /></svg
-                          >
-                        </button>
-                      </div>
-                    </button>
+                <div class="space-y-1">
+                  {#each group.tracks as track, idx}
+                    <TrackCard
+                      {track}
+                      artist={{ name: track.artist || data.artist }}
+                      showIndex={true}
+                      index={track.track_no}
+                      showArtwork={false}
+                      showAlbum={false}
+                      showArtist={track.artist && track.artist !== data.artist}
+                      showYear={false}
+                      showTechDetails={true}
+                      onPlay={() => playTrack(track)}
+                      onQueue={() => addToQueue([track])}
+                      onAddToPlaylist={() => openPlaylistModal(track.id)}
+                    />
                   {/each}
                 </div>
               </div>

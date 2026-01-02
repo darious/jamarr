@@ -2,7 +2,13 @@
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { login } from "$lib/api";
-  import { currentUser, hydrateUser, isAuthChecked, setUser } from "$stores/user";
+  import TabButton from "$lib/components/TabButton.svelte";
+  import {
+    currentUser,
+    hydrateUser,
+    isAuthChecked,
+    setUser,
+  } from "$stores/user";
 
   let username = "";
   let password = "";
@@ -45,8 +51,12 @@
   }
 </script>
 
-<div class="min-h-screen bg-gradient-to-br from-black via-surface-50/70 to-black">
-  <div class="mx-auto flex max-w-5xl flex-col items-center justify-center px-6 py-20 gap-8">
+<div
+  class="min-h-screen bg-gradient-to-br from-black via-surface-50/70 to-black"
+>
+  <div
+    class="mx-auto flex max-w-5xl flex-col items-center justify-center px-6 py-20 gap-8"
+  >
     <div class="flex flex-col items-center gap-4">
       <img
         src="/assets/logo.png"
@@ -55,25 +65,30 @@
       />
     </div>
 
-    <div class="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur">
+    <div
+      class="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur"
+    >
       <div class="mb-6 text-center">
         <p class="text-sm text-white/60">Welcome back to</p>
         <h1 class="text-2xl font-semibold text-white">Jamarr</h1>
-        <p class="text-sm text-white/60">Sign in with your username to continue.</p>
+        <p class="text-sm text-white/60">
+          Sign in with your username to continue.
+        </p>
       </div>
 
       {#if error}
-        <div class="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+        <div
+          class="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100"
+        >
           {error}
         </div>
       {/if}
 
-      <form
-        class="space-y-4"
-        on:submit|preventDefault={handleLogin}
-      >
+      <form class="space-y-4" on:submit|preventDefault={handleLogin}>
         <div class="space-y-2">
-          <label class="block text-sm text-white/70" for="username-input">Username</label>
+          <label class="block text-sm text-white/70" for="username-input"
+            >Username</label
+          >
           <input
             class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
             id="username-input"
@@ -85,7 +100,9 @@
         </div>
 
         <div class="space-y-2">
-          <label class="block text-sm text-white/70" for="password-input">Password</label>
+          <label class="block text-sm text-white/70" for="password-input"
+            >Password</label
+          >
           <input
             class="input input-bordered w-full bg-white/5 text-white placeholder:text-white/40"
             type="password"
@@ -98,13 +115,13 @@
           />
         </div>
 
-        <button
-        class="btn btn-primary w-full normal-case bg-primary text-white hover:bg-primary/90"
+        <TabButton
           type="submit"
           disabled={loading}
+          className="w-full justify-center"
         >
-          {#if loading}Signing in...{:else}Sign In{/if}
-        </button>
+          {loading ? "Signing in..." : "Sign In"}
+        </TabButton>
       </form>
 
       <p class="mt-4 text-center text-sm text-white/60">

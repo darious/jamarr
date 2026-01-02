@@ -7,6 +7,7 @@
         addTracksToPlaylist,
         type Playlist,
     } from "$lib/api";
+    import TabButton from "$lib/components/TabButton.svelte";
 
     export let trackIds: number[] = [];
     export let show = false;
@@ -177,16 +178,21 @@
                             on:keydown={(e) =>
                                 e.key === "Enter" && createAndAdd()}
                         />
-                        <button
-                            class="btn btn-sm bg-white text-black hover:bg-white/90 border-none"
-                            disabled={!newPlaylistName}
-                            on:click={createAndAdd}>Create</button
+                        <TabButton
+                            active={true}
+                            onClick={createAndAdd}
+                            className="disabled:opacity-50 disabled:cursor-not-allowed"
+                            {...!newPlaylistName && { disabled: true }}
                         >
-                        <button
-                            class="btn btn-sm btn-ghost"
-                            on:click={() => (creatingNew = false)}
-                            >Cancel</button
+                            Create
+                        </TabButton>
+                        <TabButton
+                            onClick={() => {
+                                creatingNew = false;
+                            }}
                         >
+                            Cancel
+                        </TabButton>
                     </div>
                 {:else}
                     <button

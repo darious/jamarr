@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import type { MediaQualitySummary, EntityItem } from "$lib/api";
   import { fetchMediaQualitySummary, fetchMediaQualityItems } from "$lib/api";
+  import TabButton from "$lib/components/TabButton.svelte";
+  import IconButton from "$lib/components/IconButton.svelte";
 
   let summary: MediaQualitySummary | null = null;
   let loading = true;
@@ -88,13 +90,9 @@
         </p>
       </div>
       <div class="flex flex-col items-start gap-3 md:flex-row md:items-center">
-        <button
-          class="btn btn-sm border border-white/10 bg-white/10 text-white hover:bg-white/20 normal-case"
-          on:click={load}
-          disabled={loading}
-        >
+        <TabButton onClick={load} disabled={loading}>
           {#if loading}Refreshing...{:else}Refresh{/if}
-        </button>
+        </TabButton>
       </div>
     </div>
 
@@ -332,12 +330,9 @@
                   Total Albums
                 </div>
               </div>
-              <button
-                class="btn btn-sm btn-ghost text-white/60 hover:text-white"
-                on:click={() => drillDown("album", "total")}
-              >
+              <TabButton onClick={() => drillDown("album", "total")}>
                 View All
-              </button>
+              </TabButton>
             </div>
 
             <div class="h-1 w-full bg-white/5 rounded-full overflow-hidden">
@@ -422,7 +417,7 @@
       <div
         role="button"
         tabindex="0"
-        class="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border border-white/10 bg-[#16161e] shadow-2xl cursor-default"
+        class="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border border-white/10 surface-glass-popover shadow-2xl cursor-default"
         on:click|stopPropagation
         on:keydown|stopPropagation
       >
@@ -430,10 +425,22 @@
           class="flex items-center justify-between p-4 border-b border-white/10"
         >
           <h3 class="text-lg font-semibold text-white">{modalTitle}</h3>
-          <button
-            class="btn btn-sm btn-circle btn-ghost text-white/60"
-            on:click={closeModal}>✕</button
-          >
+          <IconButton variant="ghost" onClick={closeModal} title="Close">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+              class="w-5 h-5"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </IconButton>
         </div>
 
         <div class="flex-1 overflow-y-auto p-2">

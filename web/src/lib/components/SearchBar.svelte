@@ -3,6 +3,7 @@
     import { onMount } from "svelte";
     import { fade, slide } from "svelte/transition";
     import AddToPlaylistModal from "$lib/components/AddToPlaylistModal.svelte";
+    import IconButton from "$lib/components/IconButton.svelte";
 
     let query = "";
     let results: any = null;
@@ -152,7 +153,8 @@
     {#if showResults && results}
         <div
             transition:fade={{ duration: 100 }}
-            class="absolute left-0 mt-2 w-full origin-top rounded-xl border border-white/10 bg-[#121212] py-2 shadow-2xl backdrop-blur-3xl ring-1 ring-black/5"
+            class="absolute left-0 mt-2 w-full origin-top rounded-xl border border-white/10 backdrop-blur-xl py-2 shadow-2xl ring-1 ring-black/5"
+            style="background-color: rgba(15, 17, 25, 0.95);"
         >
             {#if results.artists.length > 0}
                 <div class="px-2 py-1">
@@ -279,7 +281,7 @@
                                 )}
                         >
                             <div
-                                class="h-8 w-8 rounded bg-white/10 flex items-center justify-center text-xs text-white/40 overflow-hidden"
+                                class="h-8 w-8 rounded bg-white/10 flex items-center justify-center text-xs text-white/40 overflow-hidden flex-shrink-0"
                             >
                                 {#if track.art_sha1 || track.art_id}
                                     <img
@@ -304,7 +306,7 @@
                                     >
                                 {/if}
                             </div>
-                            <div class="overflow-hidden">
+                            <div class="flex-1 min-w-0 overflow-hidden">
                                 <div
                                     class="truncate text-sm font-medium text-white"
                                 >
@@ -334,26 +336,77 @@
                                     </button>
                                 </div>
                             </div>
-                            <!-- Add to Playlist Action -->
-                            <button
-                                class="p-1.5 hover:bg-white/20 rounded-md text-white/40 group-hover:text-white/70 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
-                                title="Add to playlist"
-                                on:click={(e) => openPlaylistModal(track.id, e)}
+                            <!-- Action Buttons - Right Justified -->
+                            <div
+                                class="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity"
                             >
-                                <svg
-                                    class="w-4 h-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
+                                <IconButton
+                                    variant="outline"
+                                    size="sm"
+                                    title="Play"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        // TODO: Play track functionality
+                                    }}
+                                    stopPropagation={true}
                                 >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M12 4v16m8-8H4"
-                                    />
-                                </svg>
-                            </button>
+                                    <svg
+                                        class="w-4 h-4"
+                                        fill="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                </IconButton>
+                                <IconButton
+                                    variant="outline"
+                                    size="sm"
+                                    title="Add to Queue"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        // TODO: Add to queue functionality
+                                    }}
+                                    stopPropagation={true}
+                                >
+                                    <svg
+                                        class="w-4 h-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M12 4v16m8-8H4"
+                                        />
+                                    </svg>
+                                </IconButton>
+                                <IconButton
+                                    variant="outline"
+                                    size="sm"
+                                    title="Add to Playlist"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        openPlaylistModal(track.id, e);
+                                    }}
+                                    stopPropagation={true}
+                                >
+                                    <svg
+                                        class="w-4 h-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                                        />
+                                    </svg>
+                                </IconButton>
+                            </div>
                         </div>
                     {/each}
                 </div>

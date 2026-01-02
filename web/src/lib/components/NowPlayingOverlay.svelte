@@ -9,8 +9,11 @@
     seek,
     playFromQueue,
     toggleNowPlaying,
+    reorderQueue,
   } from "$stores/player";
   import VolumeControl from "$components/VolumeControl.svelte";
+  import TrackCard from "$components/TrackCard.svelte";
+  import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
   import { onMount, onDestroy } from "svelte";
 
   onMount(() => {
@@ -152,6 +155,63 @@
     }
     wasPlaying = $playerState.is_playing;
   }
+
+  // Drag and drop state
+  let dragIndex: number | null = null;
+  let isDragging = false;
+  let dropIndex: number | null = null;
+
+  const handleDragStart = (event: DragEvent, idx: number) => {
+    dragIndex = idx;
+    isDragging = true;
+    dropIndex = idx;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      const img = new Image();
+      img.src =
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchPQAAAABJRU5ErkJggg==";
+      event.dataTransfer.setDragImage(img, 0, 0);
+    }
+  };
+
+  const handleDragOver = (event: DragEvent, idx: number) => {
+    event.preventDefault();
+    if (dragIndex === null) return;
+    const target = event.currentTarget as HTMLElement;
+    const rect = target?.getBoundingClientRect();
+    if (!rect) return;
+    const relY = event.clientY - rect.top;
+    const mid = rect.height / 2;
+    dropIndex = relY < mid ? idx : idx + 1;
+  };
+
+  const handleDragEnd = async () => {
+    if (dragIndex === null || dropIndex === null) {
+      resetDrag();
+      return;
+    }
+    if (dropIndex === dragIndex || dropIndex === dragIndex + 1) {
+      resetDrag();
+      return;
+    }
+    await reorderQueue(dragIndex, dropIndex);
+    resetDrag();
+  };
+
+  const resetDrag = () => {
+    dragIndex = null;
+    isDragging = false;
+    dropIndex = null;
+  };
+
+  // Playlist modal
+  let showPlaylistModal = false;
+  let selectedTrackIds: number[] = [];
+
+  const openPlaylistModal = (trackId: number) => {
+    selectedTrackIds = [trackId];
+    showPlaylistModal = true;
+  };
 </script>
 
 {#if $nowPlayingVisible}
@@ -182,7 +242,7 @@
           <!-- Close Button (Replaces Now Playing Toggle) -->
           <!-- Using EXACT classes from PlayerBar NowPlaying button -->
           <button
-            class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
+            class="btn btn-outline btn-sm"
             title="Close"
             on:click={toggleNowPlaying}
           >
@@ -362,16 +422,13 @@
 
               <!-- Buttons -->
               <div class="flex items-center justify-center gap-10">
-                <button
-                  class="btn btn-circle btn-lg bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform backdrop-blur-sm"
-                  on:click={previous}
-                >
+                <button class="btn btn-outline" on:click={previous}>
                   <svg class="h-8 w-8" fill="currentColor" viewBox="0 0 24 24"
                     ><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg
                   >
                 </button>
                 <button
-                  class="btn btn-circle btn-2xl bg-white text-black border-none hover:scale-105 transition-transform p-4 shadow-lg shadow-white/20 scale-125"
+                  class="btn btn-primary"
                   on:click={() =>
                     $playerState.is_playing ? pause() : resume()}
                 >
@@ -390,10 +447,7 @@
                     >
                   {/if}
                 </button>
-                <button
-                  class="btn btn-circle btn-lg bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform backdrop-blur-sm"
-                  on:click={next}
-                >
+                <button class="btn btn-outline" on:click={next}>
                   <svg class="h-8 w-8" fill="currentColor" viewBox="0 0 24 24"
                     ><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg
                   >
@@ -433,64 +487,66 @@
                   Queue is empty.
                 </div>
               {:else}
-                {#each $playerState.queue as track, idx}
-                  <button
-                    id={`queue-item-${idx}`}
-                    class={`w-full text-left px-3 py-2 hover:bg-white/5 transition border-b border-white/5 last:border-0 ${
-                      idx === $playerState.current_index ? "bg-white/10" : ""
-                    }`}
-                    on:click={() => playFromQueue(idx)}
-                  >
-                    <div class="flex items-center gap-3">
+                <div class="space-y-1 p-2">
+                  {#each $playerState.queue as track, idx}
+                    {#if isDragging && dropIndex === idx}
                       <div
-                        class="w-6 text-center text-[10px] text-white/40 font-mono"
-                      >
-                        {idx + 1}
-                      </div>
-                      <div class="min-w-0 flex-1">
-                        <div class="flex justify-between items-baseline gap-2">
-                          <div
-                            class={`text-sm truncate ${idx === $playerState.current_index ? "font-bold text-white" : "text-white/80"}`}
-                          >
-                            {track.title}
-                          </div>
-                          <div
-                            class="text-[10px] text-white/50 whitespace-nowrap"
-                          >
-                            {formatTime(track.duration_seconds)}
-                          </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                          <div
-                            class="text-xs text-white/60 truncate max-w-[60%] flex gap-1 items-center"
-                          >
-                            <a
-                              href={track.artist_mbid
-                                ? `/artist/${track.artist_mbid}`
-                                : `/artist/${encodeURIComponent(track.artist)}`}
-                              class="hover:text-white hover:underline"
-                              on:click|stopPropagation={() =>
-                                nowPlayingVisible.set(false)}
-                            >
-                              {track.artist}
-                            </a>
-                            <span>•</span>
-                            <a
-                              href={track.album_mbid
-                                ? `/album/${track.album_mbid}`
-                                : `/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album || "")}`}
-                              class="hover:text-white hover:underline"
-                              on:click|stopPropagation={() =>
-                                nowPlayingVisible.set(false)}
-                            >
-                              {track.album || "Unknown Album"}
-                            </a>
-                          </div>
-                        </div>
-                      </div>
+                        class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
+                      ></div>
+                    {/if}
+
+                    <div id={`queue-item-${idx}`}>
+                      <TrackCard
+                        track={{
+                          id: track.id,
+                          title: track.title || "Untitled",
+                          duration_seconds: track.duration_seconds,
+                          codec: track.codec,
+                          bit_depth: track.bit_depth,
+                          sample_rate_hz: track.sample_rate_hz,
+                          bitrate: track.bitrate,
+                          art_sha1: track.art_sha1,
+                          art_id: track.art_id,
+                        }}
+                        artist={{
+                          name: track.artist || "",
+                          mbid: track.artist_mbid,
+                        }}
+                        album={{
+                          name: track.album || "",
+                          mbid: track.album_mbid,
+                        }}
+                        artwork={{
+                          sha1: track.art_sha1,
+                          id: track.art_id,
+                        }}
+                        showIndex={false}
+                        showArtwork={true}
+                        showAlbum={true}
+                        showArtist={true}
+                        showYear={false}
+                        showTechDetails={true}
+                        showPopularity={false}
+                        showBitrate={true}
+                        draggable={true}
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragOver={(e) => handleDragOver(e, idx)}
+                        onDragEnd={handleDragEnd}
+                        isDragging={isDragging && idx === dragIndex}
+                        isCurrentlyPlaying={idx === $playerState.current_index}
+                        isPlaying={$playerState.is_playing}
+                        onClick={() => playFromQueue(idx)}
+                        onAddToPlaylist={() => openPlaylistModal(track.id)}
+                      />
                     </div>
-                  </button>
-                {/each}
+                  {/each}
+
+                  {#if isDragging && dropIndex === $playerState.queue.length}
+                    <div
+                      class="h-[2px] w-full bg-white/60 shadow-[0_0_8px_rgba(255,255,255,0.4)] rounded-full my-1 transition-all"
+                    ></div>
+                  {/if}
+                </div>
               {/if}
             </div>
           </div>
@@ -499,3 +555,8 @@
     </div>
   </div>
 {/if}
+
+<AddToPlaylistModal
+  bind:visible={showPlaylistModal}
+  trackIds={selectedTrackIds}
+/>

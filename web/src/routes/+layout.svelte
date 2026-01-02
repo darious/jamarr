@@ -19,6 +19,7 @@
     setUser,
   } from "$stores/user";
   import { page } from "$app/stores";
+  import { themeAccent, themeMode } from "$stores/theme";
 
   export let data;
 
@@ -156,7 +157,11 @@
 
 <svelte:window on:click={handleWindowClick} />
 
-<div class="min-h-screen text-white">
+<div
+  class="min-h-screen text-white"
+  data-accent={$themeAccent}
+  data-mode={$themeMode}
+>
   {#if !isAuthPage}
     <header
       class="sticky top-0 z-30 border-b border-white/5 bg-gradient-to-r from-black/70 via-surface-50/80 to-black/70 backdrop-blur-xl"
@@ -179,7 +184,7 @@
         <div class="flex items-center gap-3">
           <div class="relative" bind:this={renderersContainer}>
             <button
-              class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal min-w-[200px] justify-between"
+              class="px-4 py-2 text-sm font-normal text-white/80 hover:text-white transition-all border-b-2 border-transparent hover:border-accent min-w-[200px] justify-between flex items-center gap-2"
               on:click={() => {
                 showRenderers = !showRenderers;
                 if (showRenderers) {
@@ -210,14 +215,14 @@
             </button>
             {#if showRenderers}
               <div
-                class="absolute right-0 mt-2 w-72 rounded-lg border border-white/10 bg-black/75 backdrop-blur-md shadow-xl z-50 max-h-96 overflow-y-auto"
+                class="absolute right-0 mt-2 w-72 rounded-lg border border-white/10 backdrop-blur-md shadow-xl z-50 max-h-96 overflow-y-auto bg-gradient-to-b from-transparent to-black"
               >
                 <div class="p-2 space-y-1">
                   {#each rendererList as renderer}
                     <button
-                      class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10 flex items-center justify-between {activeRenderer ===
+                      class="w-full px-3 py-2 text-left text-sm text-white/80 hover:text-white transition-all border-b border-transparent hover:border-accent flex items-center justify-between {activeRenderer ===
                       renderer.udn
-                        ? 'bg-white/10'
+                        ? 'text-white border-accent'
                         : ''}"
                       on:click={() => {
                         changeRenderer(renderer.udn);
@@ -248,37 +253,59 @@
           </div>
           <nav class="flex items-center gap-2 text-sm text-white/80">
             <a
-              class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
+                $page.url.pathname.startsWith("/artists") ||
+                $page.url.pathname.startsWith("/artist/")
+                  ? "text-white border-accent"
+                  : "text-white/80 border-transparent hover:text-white hover:border-accent"
+              }`}
               href="/artists">Artists</a
             >
             <a
-              class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
+                $page.url.pathname.startsWith("/albums") ||
+                $page.url.pathname.startsWith("/album/")
+                  ? "text-white border-accent"
+                  : "text-white/80 border-transparent hover:text-white hover:border-accent"
+              }`}
               href="/albums">Albums</a
             >
             <a
-              class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
+                $page.url.pathname.startsWith("/playlists")
+                  ? "text-white border-accent"
+                  : "text-white/80 border-transparent hover:text-white hover:border-accent"
+              }`}
               href="/playlists">Playlists</a
             >
             <a
-              class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
+                $page.url.pathname.startsWith("/history")
+                  ? "text-white border-accent"
+                  : "text-white/80 border-transparent hover:text-white hover:border-accent"
+              }`}
               href="/history">History</a
             >
           </nav>
           {#if !user && authChecked}
             <div class="hidden md:flex items-center gap-2">
               <a
-                class="btn btn-sm border border-white/10 bg-primary text-white hover:bg-primary/90 normal-case font-normal"
+                class="btn btn-primary btn-sm normal-case font-normal"
                 href="/signup">Sign up</a
               >
               <a
-                class="btn btn-sm border border-white/10 bg-white/5 text-white hover:bg-white/10 normal-case font-normal"
+                class="btn btn-outline btn-sm normal-case font-normal"
                 href="/login">Log in</a
               >
             </div>
           {/if}
           <div class="relative" bind:this={settingsContainer}>
             <button
-              class="btn btn-ghost btn-sm"
+              class={`p-2 transition-all border-b-2 ${
+                $page.url.pathname.startsWith("/settings")
+                  ? "text-white border-accent"
+                  : "text-white/80 border-transparent hover:text-white hover:border-accent"
+              }`}
               on:click={() => (showSettings = !showSettings)}
               aria-label="Settings"
             >
@@ -317,7 +344,7 @@
                       <div class="text-white/60">{user.email}</div>
                     </div>
                     <a
-                      class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
+                      class="menu-item"
                       href="/settings/account"
                       on:click={() => (showSettings = false)}
                     >
@@ -325,14 +352,14 @@
                     </a>
                   {:else}
                     <a
-                      class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
+                      class="menu-item"
                       href="/signup"
                       on:click={() => (showSettings = false)}
                     >
                       Create Account
                     </a>
                     <a
-                      class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
+                      class="menu-item"
                       href="/login"
                       on:click={() => (showSettings = false)}
                     >
@@ -340,21 +367,21 @@
                     </a>
                   {/if}
                   <a
-                    class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
+                    class="menu-item"
                     href="/settings/library"
                     on:click={() => (showSettings = false)}
                   >
                     Library Management
                   </a>
                   <a
-                    class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
+                    class="menu-item"
                     href="/settings/media-quality"
                     on:click={() => (showSettings = false)}
                   >
                     Media Quality
                   </a>
                   <a
-                    class="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5"
+                    class="menu-item"
                     href="/renderers"
                     on:click={() => (showSettings = false)}
                   >
@@ -362,7 +389,7 @@
                   </a>
                   {#if user}
                     <button
-                      class="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5 text-red-200"
+                      class="menu-item text-red-200"
                       on:click={handleLogout}
                     >
                       Sign Out
