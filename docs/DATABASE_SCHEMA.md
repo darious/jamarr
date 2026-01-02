@@ -5,6 +5,72 @@ The application uses a **PostgreSQL** database (running in Docker on port 8110).
 ## Extensions
 - `citext`: Enabled for case-insensitive text matching (used for usernames, emails, artist names).
 
+## Entity Relationship Diagram
+
+```mermaid
+erDiagram
+    %% Core Entities
+    track {
+        BIGSERIAL id PK
+        TEXT title
+        TEXT artist
+        TEXT album
+        TEXT release_group_mbid FK
+        BIGINT artwork_id FK
+    }
+
+    artist {
+        TEXT mbid PK
+        TEXT name
+        BIGINT artwork_id FK
+    }
+
+    album {
+        TEXT mbid PK
+        TEXT title
+        TEXT release_group_mbid
+        BIGINT artwork_id FK
+    }
+
+    playlist {
+        BIGSERIAL id PK
+        BIGINT user_id FK
+        TEXT name
+    }
+
+    user {
+        BIGSERIAL id PK
+        CITEXT username
+    }
+
+    %% Relationships
+    track }|..|| album : "belongs to"
+    track ||--o{ track_artist : "has"
+    track ||--o| artwork : "has"
+    
+    artist ||--o{ track_artist : "performs"
+    artist ||--o{ artist_album : "releases"
+    artist ||--o| artwork : "has"
+    
+    album ||--o{ artist_album : "by"
+    album ||--o| artwork : "has"
+    
+    playlist }|..|| user : "owner"
+    playlist ||..|{ playlist_track : "contains"
+    playlist_track }|..|| track : "refers"
+
+    %% Junctions
+    track_artist {
+        BIGINT track_id FK
+        TEXT artist_mbid FK
+    }
+
+    artist_album {
+        TEXT artist_mbid FK
+        TEXT album_mbid FK
+    }
+```
+
 ## Tables
 
 ### `track`
@@ -21,8 +87,8 @@ Stores metadata for individual audio files.
 | `album_artist` | TEXT | Album artist name. |
 | `track_no` | INTEGER | Track number. |
 | `disc_no` | INTEGER | Disc number. |
-| `date` | TEXT | Release date. |
-| `genre` | TEXT | Genre. |
+| `release_date` | DATE | Release date. |
+
 | `duration_seconds` | DOUBLE PRECISION | Duration in seconds. |
 | `codec` | TEXT | Audio codec. |
 | `sample_rate_hz` | INTEGER | Sample rate in Hz. |
@@ -38,6 +104,13 @@ Stores metadata for individual audio files.
 | `release_group_mbid` | TEXT | MusicBrainz Release Group ID. |
 | `artwork_id` | BIGINT | Foreign Key referencing `artwork.id`. |
 | `fts_vector` | TSVECTOR | Full-text search vector (title, artist, album). |
+| `release_type` | TEXT | Normalized release type (e.g. Album, Single). |
+| `release_type_raw` | TEXT | Raw release type from tags. |
+| `release_date_raw` | TEXT | Raw release date string. |
+| `release_date_tag` | TEXT | Original date tag value. |
+| `size_bytes` | BIGINT | File size in bytes. |
+| `quick_hash` | BYTEA | Partial hash for quick comparison. |
+| `mtime` | DOUBLE PRECISION | Modification time. |
 
 ### `artist`
 Stores rich metadata for artists.
@@ -63,6 +136,9 @@ Stores derived album information.
 | `primary_type` | TEXT | Album type (e.g., Album, EP). |
 | `secondary_types` | TEXT | Secondary types. |
 | `artwork_id` | BIGINT | Foreign Key referencing `artwork.id`. |
+| `release_group_mbid` | TEXT | MusicBrainz Release Group ID. |
+| `description` | TEXT | Album description/wiki. |
+| `peak_chart_position` | INTEGER | Peak chart position (0 if unknown). |
 | `updated_at` | TIMESTAMPTZ | Timestamp of last update. |
 
 ### `artist_album`
@@ -260,10 +336,35 @@ Missing albums from discography.
 | `qobuz_url` | TEXT | Qobuz URL. |
 | `updated_at` | TIMESTAMPTZ | Last update. |
 
+
+
+### `playlist`
+User created playlists.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | BIGSERIAL | Primary Key. |
+| `user_id` | BIGINT | Foreign Key `user.id`. |
+| `name` | TEXT | Playlist name. |
+| `description` | TEXT | Optional description. |
+| `is_public` | BOOLEAN | Visibility flag. |
+| `updated_at` | TIMESTAMPTZ | Last update. |
+
+### `playlist_track`
+Tracks within a playlist.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | BIGSERIAL | Primary Key. |
+| `playlist_id` | BIGINT | Foreign Key `playlist.id`. |
+| `track_id` | BIGINT | Foreign Key `track.id`. |
+| `position` | INTEGER | Order position (0-indexed). |
+
 ## Indexes
 
 - **Full Text Search**: `idx_track_fts` (GIN on `track.fts_vector`).
 - **Lookups**: `idx_session_token`, `idx_session_user`, `idx_track_artwork`, `idx_track_artist_mbid`.
 - **Browsing**: `idx_track_nav` (`artist`, `album`, ...), `idx_track_album`, `idx_artist_name`.
 - **Maintenance**: `idx_track_updated`.
-- **Integrity**: Indexes on Foreign Keys and Join columns for performance.
+
+
