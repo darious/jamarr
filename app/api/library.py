@@ -86,17 +86,36 @@ async def download_pearlarr(req: PearlarrDownloadRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/api/artists/index")
+async def get_artist_index(
+    db: asyncpg.Connection = Depends(get_db),
+):
+    query = """
+        SELECT DISTINCT
+            CASE 
+                WHEN sort_name ~* '^[a-z]' THEN UPPER(SUBSTRING(sort_name FROM 1 FOR 1))
+                ELSE '#' 
+            END as letter
+        FROM artist
+        WHERE name IS NOT NULL
+        ORDER BY letter
+    """
+    rows = await db.fetch(query)
+    return [row["letter"] for row in rows]
+
+
 @router.get("/api/artists")
 async def get_artists(
     limit: int = 1000,
     offset: int = 0,
     name: Optional[str] = None,
     mbid: Optional[str] = None,
+    starts_with: Optional[str] = None,
     db: asyncpg.Connection = Depends(get_db),
 ):
     # Base query for artist info
     query = """
-        SELECT DISTINCT 
+        SELECT 
             a.mbid,
             a.name,
             a.image_url, 
@@ -142,8 +161,19 @@ async def get_artists(
         query += f" AND a.mbid = ${param_num}"
         params.append(mbid)
         param_num += 1
+    if starts_with:
+        if starts_with == "#":
+            # Filter for non-alphabetic, allowing for common punctuation/numbers
+            query += f" AND a.sort_name !~* '^[a-z]'"
+        elif len(starts_with) == 1:
+            query += f" AND a.sort_name ILIKE ${param_num} || '%'"
+            params.append(starts_with)
+            param_num += 1
 
-    query += " GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio, a.sort_name, ac.primary_album_count, ac.appears_on_album_count ORDER BY a.sort_name"
+    query += (
+        " GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio, a.sort_name, ac.primary_album_count, ac.appears_on_album_count"
+        " ORDER BY LOWER(a.sort_name), a.sort_name"
+    )
 
     # Apply limit/offset only if not filtering by specific artist (which usually returns 1)
     if not name and not mbid:

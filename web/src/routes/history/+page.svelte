@@ -1,6 +1,8 @@
 <script lang="ts">
   import { setQueue } from "$stores/player";
   import { goto, invalidateAll } from "$app/navigation";
+  import IconButton from "$lib/components/IconButton.svelte";
+  import TabButton from "$lib/components/TabButton.svelte";
 
   export let data: {
     history: Array<{
@@ -120,9 +122,7 @@
 </script>
 
 <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-  <div
-    class="absolute inset-0 bg-gradient-to-b from-surface-900/50 via-surface-900/80 to-surface-900"
-  ></div>
+  <div class="absolute inset-0 bg-surface-1"></div>
 </div>
 
 <section
@@ -132,37 +132,31 @@
     class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
   >
     <div class="space-y-2">
-      <p class="pill w-max bg-white/10 text-white/70 backdrop-blur-md">
-        Playback
-      </p>
       <h1 class="text-4xl md:text-6xl font-bold tracking-tight">History</h1>
-      <p class="text-white/60">Recently played tracks</p>
     </div>
-    <div class="flex items-center gap-2">
-      <button
-        class={`btn btn-sm normal-case border border-white/10 bg-white/5 text-white hover:bg-white/10 ${scope === "mine" ? "bg-primary text-white border-primary" : ""}`}
-        on:click={() => switchScope("mine")}
-      >
-        My History
-      </button>
-      <button
-        class={`btn btn-sm normal-case border border-white/10 bg-white/5 text-white hover:bg-white/10 ${scope === "all" ? "bg-primary text-white border-primary" : ""}`}
-        on:click={() => switchScope("all")}
-      >
-        All History
-      </button>
-      <button
-        class="btn btn-sm btn-square border border-white/10 bg-white/5 text-white hover:bg-white/10"
-        on:click={() => invalidateAll()}
-        title="Refresh History"
-      >
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <TabButton
+          active={scope === "mine"}
+          onClick={() => switchScope("mine")}
+        >
+          My History
+        </TabButton>
+        <TabButton active={scope === "all"} onClick={() => switchScope("all")}>
+          All History
+        </TabButton>
+      </div>
+
+      <div class="h-6 w-px bg-white/10 mx-2"></div>
+
+      <TabButton onClick={() => invalidateAll()} title="Refresh History">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
           stroke-width="1.5"
           stroke="currentColor"
-          class="w-4 h-4"
+          class="w-5 h-5"
         >
           <path
             stroke-linecap="round"
@@ -170,18 +164,20 @@
             d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
           />
         </svg>
-      </button>
-      <div class="flex items-center gap-2 text-sm text-white/70">
-        <label for="days" class="hidden md:inline">Days</label>
-        <input
-          id="days"
-          type="number"
-          min="1"
-          max="365"
-          class="input input-sm input-bordered w-20 bg-white/5 text-white"
-          bind:value={days}
-          on:change={updateDays}
-        />
+      </TabButton>
+      <div class="flex items-center gap-2 text-sm text-subtle">
+        <label for="days" class="hidden md:inline font-medium">Days</label>
+        <div class="relative">
+          <input
+            id="days"
+            type="number"
+            min="1"
+            max="365"
+            class="w-16 bg-transparent text-default border-b border-subtle focus:border-accent focus:outline-none text-center pb-1 transition-colors"
+            bind:value={days}
+            on:change={updateDays}
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -191,29 +187,29 @@
     <div class="flex flex-col gap-3">
       <div class="flex items-center justify-between">
         <div>
-          <p class="text-sm text-white/60">Playback trend</p>
-          <h2 class="text-xl font-semibold text-white">
+          <p class="text-sm text-subtle">Playback trend</p>
+          <h2 class="text-xl font-semibold text-default">
             Plays per day (last {days} days)
           </h2>
         </div>
       </div>
       {#if data.stats.daily.length === 0}
-        <p class="text-white/60 text-sm">No data.</p>
+        <p class="text-muted text-sm">No data.</p>
       {:else}
         {#key `${scope}-${days}-daily`}
           <div class="space-y-2">
             {#each data.stats.daily as dayStat (dayStat.day)}
-              <div class="flex items-center gap-3 text-sm text-white/80">
-                <span class="w-28 text-white/60 font-mono">{dayStat.day}</span>
+              <div class="flex items-center gap-3 text-sm text-default/80">
+                <span class="w-28 text-muted font-mono">{dayStat.day}</span>
                 <div
-                  class="flex-1 h-2.5 rounded-full bg-white/5 overflow-hidden border border-white/5"
+                  class="flex-1 h-2.5 rounded-full bg-surface-3 overflow-hidden border border-subtle"
                 >
                   <div
-                    class="h-full rounded-full bg-gradient-to-r from-primary/70 via-primary to-white/80 transition-[width] duration-500"
+                    class="h-full rounded-full bg-gradient-to-r from-primary/70 via-primary to-default/80 transition-[width] duration-500"
                     style:width="{(dayStat.plays / dailyMax) * 100}%"
                   ></div>
                 </div>
-                <span class="w-12 text-right tabular-nums text-white/70">
+                <span class="w-12 text-right tabular-nums text-muted">
                   {dayStat.plays}
                 </span>
               </div>
@@ -225,18 +221,18 @@
 
     <div class="grid md:grid-cols-3 gap-6">
       <div
-        class="rounded-2xl border border-white/5 bg-white/5 p-4 backdrop-blur"
+        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur"
       >
-        <h3 class="text-md font-semibold mb-3">Top Artists</h3>
+        <h3 class="text-md font-semibold mb-3 text-default">Top Artists</h3>
         {#if data.stats.artists.length === 0}
-          <p class="text-white/60 text-sm">No data.</p>
+          <p class="text-muted text-sm">No data.</p>
         {:else}
           <div class="space-y-2 text-sm">
             {#each data.stats.artists as artist (artist.artist)}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="h-10 w-10 rounded bg-white/5 overflow-hidden flex-shrink-0"
+                    class="h-10 w-10 rounded bg-surface-3 overflow-hidden flex-shrink-0"
                   >
                     <img
                       src={artist.art_sha1
@@ -247,31 +243,31 @@
                     />
                   </div>
                   <a
-                    class="hover:text-white hover:underline truncate"
+                    class="hover:text-default hover:underline truncate text-default"
                     href={`/artist/${encodeURIComponent(artist.artist)}`}
                   >
                     {artist.artist}
                   </a>
                 </div>
-                <span class="text-white/60 tabular-nums">{artist.plays}</span>
+                <span class="text-muted tabular-nums">{artist.plays}</span>
               </div>
             {/each}
           </div>
         {/if}
       </div>
       <div
-        class="rounded-2xl border border-white/5 bg-white/5 p-4 backdrop-blur"
+        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur"
       >
-        <h3 class="text-md font-semibold mb-3">Top Albums</h3>
+        <h3 class="text-md font-semibold mb-3 text-default">Top Albums</h3>
         {#if data.stats.albums.length === 0}
-          <p class="text-white/60 text-sm">No data.</p>
+          <p class="text-muted text-sm">No data.</p>
         {:else}
           <div class="space-y-2 text-sm">
             {#each data.stats.albums as album (album.album + album.artist)}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="h-10 w-10 rounded bg-white/5 overflow-hidden flex-shrink-0"
+                    class="h-10 w-10 rounded bg-surface-3 overflow-hidden flex-shrink-0"
                   >
                     <img
                       src={album.art_sha1
@@ -283,38 +279,38 @@
                   </div>
                   <div class="min-w-0">
                     <a
-                      class="hover:text-white hover:underline block truncate"
+                      class="hover:text-default text-default hover:underline block truncate"
                       href={`/album/${encodeURIComponent(album.artist)}/${encodeURIComponent(album.album)}`}
                     >
                       {album.album}
                     </a>
                     <a
-                      class="text-white/60 hover:text-white hover:underline text-xs"
+                      class="text-muted hover:text-default hover:underline text-xs"
                       href={`/artist/${encodeURIComponent(album.artist)}`}
                     >
                       {album.artist}
                     </a>
                   </div>
                 </div>
-                <span class="text-white/60 tabular-nums">{album.plays}</span>
+                <span class="text-muted tabular-nums">{album.plays}</span>
               </div>
             {/each}
           </div>
         {/if}
       </div>
       <div
-        class="rounded-2xl border border-white/5 bg-white/5 p-4 backdrop-blur"
+        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur"
       >
-        <h3 class="text-md font-semibold mb-3">Top Tracks</h3>
+        <h3 class="text-md font-semibold mb-3 text-default">Top Tracks</h3>
         {#if data.stats.tracks.length === 0}
-          <p class="text-white/60 text-sm">No data.</p>
+          <p class="text-muted text-sm">No data.</p>
         {:else}
           <div class="space-y-2 text-sm">
             {#each data.stats.tracks as track (track.id)}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="h-10 w-10 rounded bg-white/5 overflow-hidden flex-shrink-0"
+                    class="h-10 w-10 rounded bg-surface-3 overflow-hidden flex-shrink-0"
                   >
                     <img
                       src={track.art_sha1
@@ -326,20 +322,20 @@
                   </div>
                   <div class="min-w-0">
                     <a
-                      class="hover:text-white hover:underline block truncate"
+                      class="hover:text-default text-default hover:underline block truncate"
                       href={`/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album)}`}
                     >
                       {track.title}
                     </a>
                     <a
-                      class="text-white/60 hover:text-white hover:underline text-xs"
+                      class="text-muted hover:text-default hover:underline text-xs"
                       href={`/artist/${encodeURIComponent(track.artist)}`}
                     >
                       {track.artist}
                     </a>
                   </div>
                 </div>
-                <span class="text-white/60 tabular-nums">{track.plays}</span>
+                <span class="text-muted tabular-nums">{track.plays}</span>
               </div>
             {/each}
           </div>
@@ -348,17 +344,17 @@
     </div>
   </div>
 
-  <div class="glass-panel divide-y divide-white/5">
+  <div class="glass-panel divide-y divide-subtle">
     {#if data.history.length === 0}
-      <div class="p-6 text-white/60">No playback history yet.</div>
+      <div class="p-6 text-muted">No playback history yet.</div>
     {:else}
       {#each data.history as entry}
         <div
-          class="group flex items-center gap-4 px-4 py-3 hover:bg-white/5 transition-colors"
+          class="group flex items-center gap-4 px-4 py-3 hover:bg-surface-2 transition-colors"
         >
           <!-- Artwork -->
           <div
-            class="h-14 w-14 flex-shrink-0 rounded bg-white/10 overflow-hidden relative"
+            class="h-14 w-14 flex-shrink-0 rounded bg-surface-3 overflow-hidden relative"
           >
             <img
               src={entry.track.art_sha1
@@ -371,50 +367,55 @@
             <div
               class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
             >
-              <button
-                class="text-white hover:scale-110 transition-transform"
-                on:click={() => playTrack(entry)}
-              >
-                <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
-                  ><path d="M8 5v14l11-7z" /></svg
+              <div class="opacity-0 group-hover:opacity-100 transition-opacity">
+                <IconButton
+                  variant="ghost"
+                  onClick={() => playTrack(entry)}
+                  title="Play"
                 >
-              </button>
+                  <svg
+                    class="h-6 w-6 ml-0.5 text-white"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                  >
+                </IconButton>
+              </div>
             </div>
           </div>
 
           <!-- Track Info -->
           <div class="flex-1 min-w-0">
             <p
-              class="truncate text-sm font-semibold text-white/90 group-hover:text-white"
+              class="truncate text-sm font-semibold text-default group-hover:text-default"
             >
               {entry.track.title}
             </p>
             <div
-              class="flex items-center gap-2 text-xs text-white/50 mt-0.5 flex-wrap"
+              class="flex items-center gap-2 text-xs text-muted mt-0.5 flex-wrap"
             >
               <a
                 href={`/artist/${encodeURIComponent(entry.track.artist)}`}
-                class="hover:text-white hover:underline"
+                class="hover:text-default hover:underline"
                 on:click|stopPropagation
               >
                 {entry.track.artist}
               </a>
               {#if entry.track.album}
-                <span class="text-white/30">•</span>
+                <span class="text-subtle">•</span>
                 <a
                   href={`/album/${encodeURIComponent(entry.track.artist)}/${encodeURIComponent(entry.track.album)}`}
-                  class="hover:text-white hover:underline"
+                  class="hover:text-default hover:underline"
                   on:click|stopPropagation
                 >
                   {entry.track.album}
                 </a>
               {/if}
               {#if entry.track.codec}
-                <span class="text-white/30">•</span>
+                <span class="text-subtle">•</span>
                 <span class="uppercase">{entry.track.codec}</span>
               {/if}
               {#if entry.track.bit_depth && entry.track.sample_rate_hz}
-                <span class="text-white/30">•</span>
+                <span class="text-subtle">•</span>
                 <span>
                   {entry.track.bit_depth}bit / {(
                     entry.track.sample_rate_hz / 1000
@@ -426,17 +427,17 @@
 
           <!-- Timestamp & Client Info -->
           <div class="flex items-center gap-4">
-            <div class="flex flex-col items-end gap-1 text-xs text-white/60">
+            <div class="flex flex-col items-end gap-1 text-xs text-muted">
               <span class="font-medium">{formatTimestamp(entry.timestamp)}</span
               >
-              <div class="flex flex-col items-end text-[11px] text-white/50">
+              <div class="flex flex-col items-end text-[11px] text-subtle">
                 {#if entry.user}
                   <span>{entry.user.display_name || entry.user.username}</span>
                 {:else}
                   <span>Unknown user</span>
                 {/if}
                 <span>{entry.client_ip}</span>
-                <span class="text-[10px] text-white/30">
+                <span class="text-[10px] text-muted/60">
                   {entry.client_id || "Unknown Client"}
                 </span>
               </div>
@@ -444,7 +445,7 @@
 
             <!-- Duration -->
             <div
-              class="w-14 text-right text-xs text-white/60 font-medium tabular-nums"
+              class="w-14 text-right text-xs text-muted font-medium tabular-nums"
             >
               {formatTime(entry.track.duration_seconds)}
             </div>

@@ -7,9 +7,18 @@
         addTracksToPlaylist,
         type Playlist,
     } from "$lib/api";
+    import TabButton from "$lib/components/TabButton.svelte";
 
     export let trackIds: number[] = [];
-    export let show = false;
+    export let visible = false;
+
+    // Mapping visible to internal 'show' if needed, or just using visible
+    // The component uses 'show' internally heavily.
+    // Let's alias it or just rename all usages.
+    // Simpler: let 'show' be reactive to 'visible'
+    // But bind:visible means two way.
+
+    // Let's just rename 'show' to 'visible' everywhere in this file.
 
     const dispatch = createEventDispatcher();
 
@@ -39,7 +48,7 @@
     }
 
     function close() {
-        show = false;
+        visible = false;
         dispatch("close");
     }
 
@@ -67,7 +76,7 @@
     }
 </script>
 
-{#if show}
+{#if visible}
     <div
         class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 cursor-pointer"
         transition:fade
@@ -177,16 +186,21 @@
                             on:keydown={(e) =>
                                 e.key === "Enter" && createAndAdd()}
                         />
-                        <button
-                            class="btn btn-sm bg-white text-black hover:bg-white/90 border-none"
-                            disabled={!newPlaylistName}
-                            on:click={createAndAdd}>Create</button
+                        <TabButton
+                            active={true}
+                            onClick={createAndAdd}
+                            className="disabled:opacity-50 disabled:cursor-not-allowed"
+                            {...!newPlaylistName && { disabled: true }}
                         >
-                        <button
-                            class="btn btn-sm btn-ghost"
-                            on:click={() => (creatingNew = false)}
-                            >Cancel</button
+                            Create
+                        </TabButton>
+                        <TabButton
+                            onClick={() => {
+                                creatingNew = false;
+                            }}
                         >
+                            Cancel
+                        </TabButton>
                     </div>
                 {:else}
                     <button

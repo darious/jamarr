@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { signup } from "$lib/api";
+  import TabButton from "$lib/components/TabButton.svelte";
   import {
     currentUser,
     hydrateUser,
@@ -140,13 +141,13 @@
           />
         </div>
 
-        <button
-          class="btn w-full normal-case bg-primary text-white hover:bg-primary/90"
+        <TabButton
           type="submit"
           disabled={loading}
+          className="w-full justify-center"
         >
-          {#if loading}Creating account...{:else}Create Account{/if}
-        </button>
+          {loading ? "Creating account..." : "Create Account"}
+        </TabButton>
       </form>
 
       <p class="mt-4 text-center text-sm text-white/60">

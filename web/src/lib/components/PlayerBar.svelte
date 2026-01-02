@@ -490,14 +490,14 @@
 </script>
 
 <div
-  class="fixed bottom-0 w-full bg-[#0a0a0a]/75 backdrop-blur-md border-t border-white/10 p-4 text-white z-50"
+  class="fixed bottom-0 w-full surface-glass-panel border-t border-subtle p-4 text-default z-50"
 >
   <div class="flex items-center justify-between max-w-[1700px] mx-auto">
     <!-- Track Info -->
     <div class="flex items-center gap-4 w-1/3">
       {#if currentTrack}
         <div
-          class="relative h-14 w-14 flex-shrink-0 rounded bg-surface-800 overflow-hidden group"
+          class="relative h-14 w-14 flex-shrink-0 rounded bg-surface-3 overflow-hidden group"
         >
           <img
             src={currentTrack.art_sha1
@@ -511,8 +511,9 @@
             class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
             on:click={toggleQueue}
           >
+            <!-- Overlay remains dark on artwork -->
             <div
-              class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
+              class="btn btn-outline btn-sm border-white text-white hover:bg-white/20"
             >
               <svg
                 class="w-5 h-5"
@@ -530,11 +531,13 @@
           </button>
         </div>
         <div class="min-w-0">
-          <div class="font-medium truncate">{currentTrack.title}</div>
-          <div class="text-sm text-white/60 truncate">
+          <div class="font-medium truncate text-default">
+            {currentTrack.title}
+          </div>
+          <div class="text-sm text-muted truncate">
             {currentTrack.artist}
           </div>
-          <div class="flex items-center gap-2 text-xs text-white/40 mt-0.5">
+          <div class="flex items-center gap-2 text-xs text-subtle mt-0.5">
             {#if currentTrack.codec}
               <span class="uppercase">{currentTrack.codec}</span>
             {/if}
@@ -555,7 +558,7 @@
           </div>
         </div>
       {:else}
-        <div class="text-white/40">No track playing</div>
+        <div class="text-muted">No track playing</div>
       {/if}
     </div>
 
@@ -564,19 +567,13 @@
       <div class="flex items-center gap-4">
         <!-- Shuffle and Repeat moved to right side -->
 
-        <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
-          on:click={previous}
-        >
+        <button class="btn btn-outline btn-sm" on:click={previous}>
           <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
             ><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg
           >
         </button>
 
-        <button
-          class="btn btn-circle bg-white/10 hover:bg-white/20 text-white border-none hover:scale-105 transition-transform"
-          on:click={togglePlay}
-        >
+        <button class="btn btn-primary" on:click={togglePlay}>
           {#if isPlaying}
             <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
               ><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg
@@ -588,10 +585,7 @@
           {/if}
         </button>
 
-        <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
-          on:click={next}
-        >
+        <button class="btn btn-outline btn-sm" on:click={next}>
           <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
             ><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg
           >
@@ -599,9 +593,7 @@
       </div>
 
       <!-- Progress -->
-      <div
-        class="flex items-center gap-2 w-full max-w-md text-xs text-white/60"
-      >
+      <div class="flex items-center gap-2 w-full max-w-md text-xs text-muted">
         <span>{formatTime(progress)}</span>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <div
@@ -615,17 +607,17 @@
         >
           <!-- Background Track -->
           <div
-            class="absolute w-full h-1 bg-white/20 rounded-full overflow-hidden"
+            class="absolute w-full h-1 bg-surface-3 rounded-full overflow-hidden"
           >
             <!-- Filled Track -->
             <div
-              class="h-full bg-white transition-all duration-100 ease-linear"
+              class="h-full bg-primary-500 transition-all duration-100 ease-linear"
               style="width: {(progress / (duration || 1)) * 100}%"
             ></div>
           </div>
           <!-- Thumb (visible on hover) -->
           <div
-            class="absolute h-3 w-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+            class="absolute h-3 w-3 bg-white border border-subtle rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
             style="left: {(progress / (duration || 1)) * 100}%"
           ></div>
         </div>
@@ -637,10 +629,9 @@
     <div class="w-1/3 flex justify-end items-center gap-4">
       <div class="flex items-center gap-2 mr-4">
         <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 border-none hover:scale-110 transition-transform {$playerState.repeatMode !==
-          'off'
-            ? 'text-primary-400 bg-white/10'
-            : 'text-white/40'}"
+          class="btn btn-outline btn-sm {$playerState.repeatMode !== 'off'
+            ? 'border-accent bg-accent/10 text-accent'
+            : ''}"
           on:click={toggleRepeat}
           title="Repeat: {$playerState.repeatMode}"
         >
@@ -679,7 +670,7 @@
         </button>
 
         <button
-          class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 border-none hover:scale-110 transition-transform text-white/40 hover:text-white"
+          class="btn btn-outline btn-sm"
           on:click={shuffleQueue}
           title="Shuffle Queue"
         >
@@ -697,15 +688,19 @@
           >
         </button>
       </div>
-      <div class="text-xs text-white/40">{deviceName}</div>
-      <div class="flex items-center gap-2 group">
-        <VolumeControl
-          showIcon={true}
-          sliderClass="range range-xs range-primary w-24 opacity-0 group-hover:opacity-100 transition-opacity"
-        />
+      <div class="flex flex-col items-center gap-1">
+        <div class="flex items-center gap-2 group">
+          <VolumeControl
+            showIcon={true}
+            iconClass="h-5 w-5 text-muted"
+            sliderClass="w-24 transition-opacity"
+            sliderStyle=""
+          />
+        </div>
+        <div class="text-xs text-subtle">{deviceName}</div>
       </div>
       <button
-        class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
+        class="btn btn-outline btn-sm"
         title="Now Playing"
         on:click={toggleNowPlaying}
       >
@@ -723,12 +718,12 @@
         >
       </button>
       <button
-        class="btn btn-circle btn-sm bg-white/5 hover:bg-white/20 text-white border-none hover:scale-110 transition-transform"
+        class="btn btn-outline btn-sm"
         title="Queue"
         on:click={toggleQueue}
       >
         <svg
-          class="h-5 w-5"
+          class="h-5 w-6"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"

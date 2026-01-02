@@ -3,6 +3,7 @@
   import { goto } from "$app/navigation";
   import { setQueue } from "$stores/player";
   import { fetchTracks } from "$api";
+  import IconButton from "$lib/components/IconButton.svelte";
 
   export let data: { albums: Album[] };
   let search = "";
@@ -38,11 +39,11 @@
 <section class="mx-auto flex w-full max-w-[1700px] flex-col gap-6 px-8 py-10">
   <div class="section-head">
     <div>
-      <p class="text-sm uppercase tracking-wide text-white/60">Browse</p>
-      <h1 class="text-2xl font-semibold">Albums</h1>
+      <p class="text-sm uppercase tracking-wide text-subtle">Browse</p>
+      <h1 class="text-2xl font-semibold text-default">Albums</h1>
     </div>
     <input
-      class="input input-lg w-72 border border-white/10 bg-white/5"
+      class="input input-lg w-72 border border-subtle bg-surface-2 text-default placeholder:text-muted"
       placeholder="Search albums"
       bind:value={search}
     />
@@ -53,8 +54,11 @@
   >
     {#each filtered() as album}
       <article class="grid-card flex flex-col gap-3">
-        <button
-          class="group relative aspect-square"
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <div
+          class="group relative aspect-square cursor-pointer"
+          role="button"
+          tabindex="0"
           on:click={() =>
             goto(
               album.mbid || album.album_mbid
@@ -80,10 +84,12 @@
           <div
             class="absolute right-2 top-2 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100"
           >
-            <button
-              class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
+            <IconButton
+              variant="ghost"
+              size="sm"
               title="Play"
-              on:click|stopPropagation={() => quickPlay(album)}
+              stopPropagation={true}
+              onClick={() => quickPlay(album)}
             >
               {#if busyAlbum === `${album.artist_name}-${album.album}`}
                 <span class="loading loading-spinner loading-xs"></span>
@@ -92,11 +98,13 @@
                   ><path d="M8 5v14l11-7z" /></svg
                 >
               {/if}
-            </button>
-            <button
-              class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
+            </IconButton>
+            <IconButton
+              variant="ghost"
+              size="sm"
               title="Details"
-              on:click|stopPropagation={() =>
+              stopPropagation={true}
+              onClick={() =>
                 goto(
                   album.mbid || album.album_mbid
                     ? `/album/${album.mbid || album.album_mbid}`
@@ -115,15 +123,15 @@
                   d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 /></svg
               >
-            </button>
+            </IconButton>
           </div>
-        </button>
+        </div>
         <div class="space-y-1">
           <a
             href={album.mbid || album.album_mbid
               ? `/album/${album.mbid || album.album_mbid}`
               : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
-            class="text-lg font-semibold truncate hover:underline cursor-pointer block"
+            class="text-lg font-semibold truncate hover:underline cursor-pointer block text-default"
           >
             {album.album}
           </a>
@@ -131,11 +139,11 @@
             href={album.artist_mbid
               ? `/artist/${album.artist_mbid}`
               : `/artist/${encodeURIComponent(album.artist_name)}`}
-            class="text-sm text-white/60 truncate hover:text-white cursor-pointer block"
+            class="text-sm text-muted truncate hover:text-default cursor-pointer block"
           >
             {album.artist_name}
           </a>
-          <p class="text-xs text-white/60">
+          <p class="text-xs text-subtle">
             {album.year ? album.year.substring(0, 4) : "—"} • {album.track_count ||
               0} tracks
           </p>
