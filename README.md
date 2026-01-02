@@ -13,7 +13,8 @@ It supports **gapless playback** (via UPnP queue management), **instant search**
 - **Fast Scanning**: efficiently scans large libraries with local caching.
 - **Modern UI**: Dark-themed, responsive SvelteKit interface.
 - **Playback History**: Tracks listening history for both local and remote playback.
-- **Tidal Integration**: Links artists and albums to Tidal for external playback.
+- **Streaming Integration**: Links artists and albums to Tidal and Qobuz for external playback.
+- **Playlists**: Create and manage local playlists with drag-and-drop reordering.
 - **Top Tracks & Similar Artists**: Fetches and stores popular tracks and related artists.
 - **Queue Persistence**: Playback state and queue are saved to the database, ensuring seamless resumption.
 

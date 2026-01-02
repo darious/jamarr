@@ -2,12 +2,13 @@ import os
 import argparse
 import io
 from mutagen.flac import FLAC, Picture
-from PIL import Image
+from PIL import Image, ImageFile
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.panel import Panel
 
 console = Console()
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 def fix_large_art(file_path, max_size, apply_changes=False):
     try:
@@ -35,7 +36,11 @@ def fix_large_art(file_path, max_size, apply_changes=False):
         resized.thumbnail((max_size, max_size), Image.LANCZOS)
 
         buf = io.BytesIO()
-        resized.save(buf, format="JPEG", quality=90, optimize=True)
+        try:
+            resized.save(buf, format="JPEG", quality=90, optimize=True)
+        except OSError:
+            buf = io.BytesIO()
+            resized.save(buf, format="JPEG", quality=90)
         new_data = buf.getvalue()
 
         new_pic = Picture()
