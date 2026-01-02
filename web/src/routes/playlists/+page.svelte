@@ -9,6 +9,9 @@
     } from "$lib/api";
     import { goto } from "$app/navigation";
     import { setQueue, addToQueue } from "$stores/player";
+    import IconButton from "$lib/components/IconButton.svelte";
+    import TabButton from "$lib/components/TabButton.svelte";
+    import Checkbox from "$lib/components/Checkbox.svelte";
 
     let playlists: Playlist[] = [];
     let loading = true;
@@ -17,6 +20,7 @@
     let newDesc = "";
     let newPublic = false;
     let creating = false;
+    let showSortDropdown = false;
 
     // Sorting
     let sortBy: "updated" | "name" = "updated";
@@ -133,21 +137,72 @@
         <h1 class="text-3xl font-bold font-display">Playlists</h1>
 
         <div class="flex items-center gap-4">
-            <!-- Sort Dropdown -->
-            <select
-                class="select select-bordered bg-white/5 border-white/10 text-white"
-                bind:value={sortBy}
-            >
-                <option value="updated" class="text-black">Last Updated</option>
-                <option value="name" class="text-black">Name (A-Z)</option>
-            </select>
+            <div class="relative">
+                <TabButton
+                    onClick={() => {
+                        showSortDropdown = !showSortDropdown;
+                    }}
+                    active={showSortDropdown}
+                    className="min-w-[160px] justify-between flex items-center gap-2"
+                >
+                    <span>
+                        {sortBy === "updated" ? "Last Updated" : "Name (A-Z)"}
+                    </span>
+                    <svg
+                        class="h-4 w-4 opacity-50"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M19 9l-7 7-7-7"
+                        />
+                    </svg>
+                </TabButton>
 
-            <button
-                class="btn bg-white text-black hover:bg-white/90 border-none"
-                on:click={() => (showCreateModal = true)}
+                {#if showSortDropdown}
+                    <div
+                        class="surface-glass-popover absolute right-0 mt-2 w-48 rounded-lg z-50 overflow-hidden"
+                    >
+                        <div class="p-1 space-y-1">
+                            <TabButton
+                                className="w-full text-left justify-between"
+                                active={sortBy === "updated"}
+                                onClick={() => {
+                                    sortBy = "updated";
+                                    showSortDropdown = false;
+                                }}
+                            >
+                                Last Updated
+                            </TabButton>
+                            <TabButton
+                                className="w-full text-left justify-between"
+                                active={sortBy === "name"}
+                                onClick={() => {
+                                    sortBy = "name";
+                                    showSortDropdown = false;
+                                }}
+                            >
+                                Name (A-Z)
+                            </TabButton>
+                        </div>
+                    </div>
+                {/if}
+            </div>
+
+            <TabButton
+                onClick={() => {
+                    showCreateModal = true;
+                }}
+                active={false}
+                style="border-bottom-color: transparent;"
+                className="hover:!border-accent"
             >
                 Create Playlist
-            </button>
+            </TabButton>
         </div>
     </div>
 
@@ -160,12 +215,18 @@
             class="flex flex-col items-center justify-center p-12 text-center text-white/50"
         >
             <p class="text-lg">No playlists yet</p>
-            <button
-                class="btn btn-ghost mt-4"
-                on:click={() => (showCreateModal = true)}
-            >
-                Create your first one
-            </button>
+            <div class="mt-4">
+                <TabButton
+                    onClick={() => {
+                        showCreateModal = true;
+                    }}
+                    active={false}
+                    style="border-bottom-color: transparent;"
+                    className="hover:!border-accent"
+                >
+                    Create your first one
+                </TabButton>
+            </div>
         </div>
     {:else}
         <div
@@ -242,24 +303,26 @@
                         <!-- Hover Overlay with Buttons -->
                         <!-- Position absolute on top of the link, intercepting clicks -->
                         <div
-                            class="absolute inset-0 flex items-center justify-center gap-3 bg-black/60 opacity-0 group-hover:opacity-100 transition-all duration-300 backdrop-blur-[2px] z-20 pointer-events-none"
+                            class="absolute inset-0 flex items-center justify-center gap-3 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 backdrop-blur-[2px] z-20 pointer-events-none"
                         >
-                            <button
-                                class="btn-icon btn-icon-lg text-white hover:scale-110 transition-transform drop-shadow-lg pointer-events-auto"
-                                on:click={(e) => handlePlay(e, p.id)}
+                            <IconButton
+                                variant="outline"
                                 title="Play"
+                                className="pointer-events-auto"
+                                onClick={(e) => handlePlay(e, p.id)}
                             >
                                 <svg
-                                    class="h-8 w-8 ml-1"
+                                    class="h-6 w-6 ml-0.5"
                                     fill="currentColor"
                                     viewBox="0 0 24 24"
                                     ><path d="M8 5v14l11-7z" /></svg
                                 >
-                            </button>
-                            <button
-                                class="btn-icon btn-icon-md bg-black/60 hover:bg-black/80 text-white backdrop-blur-md border border-white/10 shadow-xl pointer-events-auto"
-                                on:click={(e) => handleAddToQueue(e, p.id)}
+                            </IconButton>
+                            <IconButton
+                                variant="outline"
                                 title="Add to Queue"
+                                className="pointer-events-auto"
+                                onClick={(e) => handleAddToQueue(e, p.id)}
                             >
                                 <svg
                                     class="h-6 w-6"
@@ -269,7 +332,7 @@
                                         d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
                                     /></svg
                                 >
-                            </button>
+                            </IconButton>
                         </div>
                     </div>
 
@@ -299,7 +362,7 @@
             class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
         >
             <div
-                class="bg-[#18181b] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl scale-100 transition-all"
+                class="surface-glass-popover rounded-2xl w-full max-w-md p-6 shadow-2xl scale-100 transition-all"
             >
                 <h2 class="text-2xl font-bold mb-6 font-display">
                     Create Playlist
@@ -331,33 +394,24 @@
                         ></textarea>
                     </div>
                     <div class="form-control">
-                        <label class="cursor-pointer label justify-start gap-4">
-                            <input
-                                type="checkbox"
-                                bind:checked={newPublic}
-                                class="checkbox checkbox-primary"
-                            />
-                            <span class="label-text">Public Playlist</span>
-                        </label>
-                        <p class="text-xs text-white/40 ml-1">
+                        <Checkbox
+                            bind:checked={newPublic}
+                            label="Public Playlist"
+                        />
+                        <p class="text-xs text-white/40 ml-7 mt-1">
                             Only visible to you.
                         </p>
                     </div>
                 </div>
-                <div class="modal-action mt-8">
-                    <button
-                        class="btn btn-ghost"
-                        on:click={() => (showCreateModal = false)}
-                        >Cancel</button
+                <div class="modal-action mt-8 flex gap-3">
+                    <TabButton
+                        onClick={() => {
+                            showCreateModal = false;
+                        }}>Cancel</TabButton
                     >
-                    <button
-                        class="btn btn-primary bg-white text-black hover:bg-white/90 border-none"
-                        class:loading={creating}
-                        disabled={!newName}
-                        on:click={handleCreate}
-                    >
-                        Create
-                    </button>
+                    <TabButton onClick={handleCreate}>
+                        {creating ? "Creating..." : "Create"}
+                    </TabButton>
                 </div>
             </div>
         </div>

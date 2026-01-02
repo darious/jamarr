@@ -2,6 +2,7 @@
   import type { Artist } from "$lib/api";
   import { goto } from "$app/navigation";
   import { onMount } from "svelte";
+  import TabButton from "$lib/components/TabButton.svelte";
 
   export let data: { artists: Artist[] };
 
@@ -55,71 +56,86 @@
         <h2 class="text-2xl font-semibold">Artists A–Z</h2>
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <button
-          class={`pill flex items-center gap-2 ${showAllArtists ? "bg-white/15 text-white" : "bg-white/5 text-white/70 hover:text-white"}`}
-          on:click={() => (showAllArtists = !showAllArtists)}
-          title="Toggle between primary artists and all artists"
-        >
-          <span
-            class={`h-2.5 w-2.5 rounded-full ${showAllArtists ? "bg-primary-300 shadow-[0_0_0_3px_rgba(255,255,255,0.12)]" : "bg-white/30"}`}
-          ></span>
-          {showAllArtists ? "Showing all artists" : "Primary only"}
-        </button>
+        <div class="flex items-center gap-2 mr-2">
+          <TabButton
+            active={!showAllArtists}
+            onClick={() => {
+              showAllArtists = false;
+            }}
+          >
+            Primary
+          </TabButton>
+          <TabButton
+            active={showAllArtists}
+            onClick={() => {
+              showAllArtists = true;
+            }}
+          >
+            All Artists
+          </TabButton>
+        </div>
         <div class="flex flex-wrap gap-2">
+          {#if groupedArtists.length === 0}
+            <div class="text-white/40 text-sm italic py-1">
+              No artists found (Check filter)
+            </div>
+          {/if}
           {#each groupedArtists as [letter]}
             <a
               href={`#group-${letter}`}
-              class="pill hover:bg-white/10 transition-colors">{letter}</a
+              class="inline-flex items-center justify-center h-8 min-w-[2rem] px-2 rounded-full border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:bg-white/10 hover:text-white transition-colors"
             >
-          {/each}
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="flex flex-col gap-10">
-    {#each groupedArtists as [letter, list]}
-      <div id={`group-${letter}`} class="space-y-4">
-        <div class="flex items-center gap-3">
-          <div
-            class="h-10 w-10 rounded-xl border border-white/10 bg-white/5 text-center text-xl font-semibold leading-10"
-          >
-            {letter}
-          </div>
-          <div class="text-sm text-white/60">{list.length} artists</div>
-        </div>
-
-        <div
-          class="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]"
-        >
-          {#each list as artist}
-            <a
-              class="grid-card block cursor-pointer overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary-400"
-              href={`/artist/${artist.mbid}`}
-            >
-              <div class="aspect-square overflow-hidden rounded-xl">
-                <img
-                  src={artist.art_sha1
-                    ? `/art/file/${artist.art_sha1}`
-                    : artist.art_id
-                      ? `/art/${artist.art_id}`
-                      : "/assets/default-artist-placeholder.svg"}
-                  alt={artist.name}
-                  class="aspect-square w-full rounded-2xl object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-                />
-              </div>
-              <div class="mt-3 space-y-1">
-                <p class="text-base font-semibold line-clamp-1">
-                  {artist.name}
-                </p>
-                <p class="text-xs text-white/60 line-clamp-2">
-                  {artist.bio || "No bio yet."}
-                </p>
-              </div>
+              {letter}
             </a>
           {/each}
         </div>
       </div>
-    {/each}
+    </div>
+
+    <div class="flex flex-col gap-10">
+      {#each groupedArtists as [letter, list]}
+        <div id={`group-${letter}`} class="space-y-4">
+          <div class="flex items-center gap-3">
+            <div
+              class="h-10 w-10 rounded-xl border border-white/10 bg-white/5 text-center text-xl font-semibold leading-10"
+            >
+              {letter}
+            </div>
+            <div class="text-sm text-white/60">{list.length} artists</div>
+          </div>
+
+          <div
+            class="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]"
+          >
+            {#each list as artist}
+              <a
+                class="grid-card block cursor-pointer overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary-400"
+                href={`/artist/${artist.mbid}`}
+              >
+                <div class="aspect-square overflow-hidden rounded-xl">
+                  <img
+                    src={artist.art_sha1
+                      ? `/art/file/${artist.art_sha1}`
+                      : artist.art_id
+                        ? `/art/${artist.art_id}`
+                        : "/assets/default-artist-placeholder.svg"}
+                    alt={artist.name}
+                    class="aspect-square w-full rounded-2xl object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                  />
+                </div>
+                <div class="mt-3 space-y-1">
+                  <p class="text-base font-semibold line-clamp-1">
+                    {artist.name}
+                  </p>
+                  <p class="text-xs text-white/60 line-clamp-2">
+                    {artist.bio || "No bio yet."}
+                  </p>
+                </div>
+              </a>
+            {/each}
+          </div>
+        </div>
+      {/each}
+    </div>
   </div>
 </section>

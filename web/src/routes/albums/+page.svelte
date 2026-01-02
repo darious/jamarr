@@ -3,6 +3,7 @@
   import { goto } from "$app/navigation";
   import { setQueue } from "$stores/player";
   import { fetchTracks } from "$api";
+  import IconButton from "$lib/components/IconButton.svelte";
 
   export let data: { albums: Album[] };
   let search = "";
@@ -53,8 +54,11 @@
   >
     {#each filtered() as album}
       <article class="grid-card flex flex-col gap-3">
-        <button
-          class="group relative aspect-square"
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <div
+          class="group relative aspect-square cursor-pointer"
+          role="button"
+          tabindex="0"
           on:click={() =>
             goto(
               album.mbid || album.album_mbid
@@ -80,10 +84,12 @@
           <div
             class="absolute right-2 top-2 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100"
           >
-            <button
-              class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
+            <IconButton
+              variant="ghost"
+              size="sm"
               title="Play"
-              on:click|stopPropagation={() => quickPlay(album)}
+              stopPropagation={true}
+              onClick={() => quickPlay(album)}
             >
               {#if busyAlbum === `${album.artist_name}-${album.album}`}
                 <span class="loading loading-spinner loading-xs"></span>
@@ -92,11 +98,13 @@
                   ><path d="M8 5v14l11-7z" /></svg
                 >
               {/if}
-            </button>
-            <button
-              class="btn btn-circle bg-black/60 hover:bg-black/80 text-white border-none btn-sm hover:scale-110 transition-transform"
+            </IconButton>
+            <IconButton
+              variant="ghost"
+              size="sm"
               title="Details"
-              on:click|stopPropagation={() =>
+              stopPropagation={true}
+              onClick={() =>
                 goto(
                   album.mbid || album.album_mbid
                     ? `/album/${album.mbid || album.album_mbid}`
@@ -115,9 +123,9 @@
                   d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 /></svg
               >
-            </button>
+            </IconButton>
           </div>
-        </button>
+        </div>
         <div class="space-y-1">
           <a
             href={album.mbid || album.album_mbid
