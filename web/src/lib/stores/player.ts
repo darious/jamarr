@@ -230,7 +230,33 @@ export async function addToQueue(tracks: Track[]) {
     }
 }
 
-export async function reorderQueue(newQueue: Track[]) {
+export async function reorderQueue(arg1: Track[] | number, arg2?: number) {
+    let newQueue: Track[] = [];
+
+    // Check if called with (newQueue: Track[])
+    if (Array.isArray(arg1)) {
+        newQueue = arg1;
+    }
+    // Check if called with (fromIndex: number, toIndex: number)
+    else if (typeof arg1 === 'number' && typeof arg2 === 'number') {
+        const current = get(playerState);
+        const q = [...current.queue];
+        const [moved] = q.splice(arg1, 1);
+        // If dropping after the original position (arg2 > arg1), the index shifts by -1 due to splice
+        // But logic depends on where dropIndex is calculated.
+        // Assuming standard DnD logic: insert at arg2.
+        // However, if arg2 > arg1, we simply insert at arg2 (handled by splice logic: splice removes, indices shift).
+        // Let's standardise: splice insert.
+        // But wait, if arg2 > arg1, usually dropIndex is "index to insert before".
+
+        // Let's assume standard array move:
+        q.splice(arg2, 0, moved);
+        newQueue = q;
+    } else {
+        console.error('[reorderQueue] Invalid arguments');
+        return;
+    }
+
     const current = get(playerState);
     const currentTrackId = current.queue[current.current_index]?.id;
     try {

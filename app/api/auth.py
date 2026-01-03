@@ -38,6 +38,10 @@ class UpdateProfileBody(BaseModel):
     display_name: Optional[str] = None
 
 
+class UpdatePreferencesBody(BaseModel):
+    accent_color: Optional[str] = None
+
+
 class ChangePasswordBody(BaseModel):
     current_password: str
     new_password: str
@@ -61,6 +65,7 @@ def _public_user_dict(row: asyncpg.Record) -> dict:
         "username": row["username"],
         "email": row["email"],
         "display_name": row["display_name"] or row["username"],
+        "accent_color": row.get("accent_color") or "#ff006e",
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "last_login": row["last_login_at"].isoformat()
         if row["last_login_at"]
@@ -256,3 +261,36 @@ async def change_password(
     )
     _set_session_cookie(response, token)
     return {"ok": True}
+
+
+@router.patch("/api/auth/preferences")
+async def update_preferences(
+    payload: UpdatePreferencesBody,
+    request: Request,
+    response: Response,
+    db: asyncpg.Connection = Depends(get_db),
+):
+    """Update user preferences (accent color, etc.)"""
+    user, token = await require_current_user(request, db)
+    
+    # Validate accent color if provided
+    if payload.accent_color:
+        import re
+        if not re.match(r'^#[0-9A-Fa-f]{6}$', payload.accent_color):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid color format. Must be hex color like #ff006e",
+            )
+        
+        await db.execute(
+            'UPDATE "user" SET accent_color = $1 WHERE id = $2',
+            payload.accent_color,
+            user["id"],
+        )
+    
+    _set_session_cookie(response, token)
+    updated_user = await db.fetchrow(
+        'SELECT * FROM "user" WHERE id = $1',
+        user["id"],
+    )
+    return _public_user_dict(updated_user or user)
