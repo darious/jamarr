@@ -154,7 +154,7 @@
   ></div>
   <!-- Gradient Overlay -->
   <div
-    class="absolute inset-0 bg-gradient-to-b from-surface-900/80 via-surface-900/95 to-surface-900"
+    class="absolute inset-0 bg-gradient-to-b from-surface-1/80 via-surface-1/95 to-surface-1"
   ></div>
 </div>
 
@@ -167,7 +167,7 @@
       <div class="flex flex-col gap-8 sticky top-20">
         <!-- Artwork -->
         <div
-          class="w-full aspect-square rounded shadow-2xl overflow-hidden relative group"
+          class="w-full aspect-square rounded shadow-2xl overflow-hidden relative group transition-transform duration-500 hover:scale-105"
         >
           <img
             src={albumArtUrl}
@@ -177,15 +177,15 @@
 
           <!-- Hover Controls -->
           <div
-            class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 backdrop-blur-sm"
+            class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4"
           >
-            <IconButton variant="outline" title="Play Album" onClick={playAll}>
+            <IconButton variant="primary" title="Play Album" onClick={playAll}>
               <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
                 ><path d="M8 5v14l11-7z" /></svg
               >
             </IconButton>
             <IconButton
-              variant="outline"
+              variant="primary"
               title="Add to Queue"
               onClick={addAllToQueue}
             >
@@ -200,13 +200,13 @@
         <div class="space-y-4">
           <div>
             <h1
-              class="text-4xl md:text-5xl font-bold tracking-tight text-white leading-tight"
+              class="text-4xl md:text-5xl font-bold tracking-tight text-default leading-tight"
             >
               {data.album}
             </h1>
-            <div class="mt-2 text-2xl font-medium text-white/80">
+            <div class="mt-2 text-2xl font-medium text-muted">
               <button
-                class="hover:underline hover:text-white transition-colors"
+                class="hover:underline hover:text-default transition-colors"
                 on:click={() =>
                   goto(`/artist/${encodeURIComponent(data.artist)}`)}
               >
@@ -218,21 +218,21 @@
           <div class="space-y-2">
             <!-- Line 1: Year • Tracks • Duration • Peak -->
             <div
-              class="flex flex-wrap items-center gap-3 text-sm text-white/60 font-medium"
+              class="flex flex-wrap items-center gap-3 text-sm text-subtle font-medium"
             >
               <span
                 >{data.albumMeta?.year
                   ? data.albumMeta.year.substring(0, 4)
                   : "—"}</span
               >
-              <span class="w-1 h-1 rounded-full bg-white/40"></span>
+              <span class="w-1 h-1 rounded-full bg-subtle"></span>
               <span>{data.tracks.length} tracks</span>
-              <span class="w-1 h-1 rounded-full bg-white/40"></span>
+              <span class="w-1 h-1 rounded-full bg-subtle"></span>
               <span>{totalDuration()} min</span>
 
               {#if data.albumMeta?.peak_chart_position}
-                <span class="w-1 h-1 rounded-full bg-white/40"></span>
-                <span class="flex items-center gap-1 text-yellow-400">
+                <span class="w-1 h-1 rounded-full bg-subtle"></span>
+                <span class="flex items-center gap-1 text-yellow-500">
                   <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"
                     ><path
                       d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6z"
@@ -246,7 +246,7 @@
             <!-- Line 2: Label (Truncated) -->
             {#if data.albumMeta?.label}
               <div
-                class="text-sm text-white/40 font-medium truncate max-w-full"
+                class="text-sm text-subtle font-medium truncate max-w-full"
                 title={data.albumMeta.label}
               >
                 {data.albumMeta.label}
@@ -256,16 +256,14 @@
 
           <!-- Description / Liner Notes -->
           {#if data.albumMeta?.description}
-            <div class="pt-4 border-t border-white/10">
-              <div
-                class="prose prose-invert prose-sm max-w-none text-white/70 leading-relaxed"
-              >
+            <div class="pt-4 border-t border-subtle">
+              <div class="prose prose-sm max-w-none text-muted leading-relaxed">
                 {#if isDescriptionExpanded}
                   <p class="whitespace-pre-line">
                     {data.albumMeta.description}
                   </p>
                   <button
-                    class="text-white underline text-xs font-bold mt-2 hover:text-white/80"
+                    class="text-default underline text-xs font-bold mt-2 hover:text-default/80"
                     on:click={() => (isDescriptionExpanded = false)}
                     >Read less</button
                   >
@@ -275,7 +273,7 @@
                   </p>
                   {#if data.albumMeta.description.length > 200}
                     <button
-                      class="text-white underline text-xs font-bold mt-1 hover:text-white/80"
+                      class="text-default underline text-xs font-bold mt-1 hover:text-default/80"
                       on:click={() => (isDescriptionExpanded = true)}
                       >Read more</button
                     >
@@ -292,7 +290,7 @@
               <a
                 href={link.url}
                 target="_blank"
-                class="px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 text-xs font-medium text-white/70 transition-colors flex items-center gap-2 capitalize"
+                class="px-3 py-1.5 rounded-full bg-surface-2 hover:bg-surface-3 text-xs font-medium text-muted transition-colors flex items-center gap-2 capitalize"
                 title={link.type.replace(/_/g, " ")}
               >
                 {#if icon}
@@ -323,7 +321,7 @@
       <div class="flex-1 pt-4 pb-20 max-w-3xl">
         {#if data.tracks.length === 0}
           <div
-            class="p-10 text-center text-white/40 bg-white/5 rounded-xl border border-white/5"
+            class="p-10 text-center text-muted bg-surface-2 rounded-xl border border-subtle"
           >
             No tracks found for this album.
           </div>
@@ -333,21 +331,20 @@
               <div class="space-y-2">
                 {#if groupedTracks.length > 1}
                   <div
-                    class="flex items-center justify-between px-4 pb-2 border-b border-white/10 mb-4 sticky top-[80px] z-20 backdrop-blur-md bg-surface-900/60 py-3 -mx-4 md:mx-0 md:rounded-t-lg"
+                    class="flex items-center justify-between px-4 pb-2 border-b border-subtle mb-4 sticky top-[80px] z-20 backdrop-blur-md bg-surface-1/60 py-3 -mx-4 md:mx-0 md:rounded-t-lg"
                   >
                     <div class="flex items-center gap-3">
                       <img
                         src="/assets/logo-disk.svg"
                         alt="Disc"
-                        class="w-4 h-4 opacity-50"
+                        class="w-4 h-4 opacity-50 filter grayscale invert dark:invert-0"
                       />
-                      <span
-                        class="font-bold text-sm tracking-wide text-white/90"
+                      <span class="font-bold text-sm tracking-wide text-default"
                         >DISC {group.disc}</span
                       >
                     </div>
                     <button
-                      class="text-xs font-medium text-white/50 hover:text-white transition-colors"
+                      class="text-xs font-medium text-muted hover:text-default transition-colors"
                       on:click={() => playDisc(group.tracks)}
                     >
                       Play Disc

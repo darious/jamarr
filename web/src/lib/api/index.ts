@@ -125,6 +125,7 @@ export interface User {
     email: string;
     display_name: string;
     accent_color?: string;
+    theme_mode?: 'dark' | 'light';
     created_at?: string | null;
     last_login?: string | null;
 }

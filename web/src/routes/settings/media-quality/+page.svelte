@@ -75,17 +75,15 @@
   onMount(load);
 </script>
 
-<div
-  class="min-h-screen bg-gradient-to-br from-black via-surface-50/70 to-black text-white relative"
->
+<div class="min-h-screen bg-surface-1 text-default relative">
   <div class="mx-auto max-w-6xl px-6 py-10 space-y-6">
     <div
       class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
     >
       <div>
-        <p class="text-sm text-white/60">Settings</p>
-        <h1 class="text-3xl font-semibold">Library Statistics</h1>
-        <p class="text-sm text-white/60">
+        <p class="text-sm text-muted">Settings</p>
+        <h1 class="text-3xl font-semibold text-default">Library Statistics</h1>
+        <p class="text-sm text-subtle">
           Overview of your library metadata and media sources.
         </p>
       </div>
@@ -108,17 +106,19 @@
       <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <!-- Artists Stats -->
         <div
-          class="md:col-span-2 lg:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur"
+          class="md:col-span-2 lg:col-span-2 rounded-2xl border border-subtle bg-surface-2 p-6 backdrop-blur"
         >
           <div class="flex items-center justify-between mb-6">
-            <h2 class="text-lg font-semibold">Artist Statistics</h2>
+            <h2 class="text-lg font-semibold text-default">
+              Artist Statistics
+            </h2>
           </div>
 
           <div class="grid md:grid-cols-2 gap-8">
             <!-- All Artists Column -->
             <div class="space-y-4">
               <h3
-                class="text-sm font-medium text-white/60 uppercase tracking-wider"
+                class="text-sm font-medium text-muted uppercase tracking-wider"
               >
                 All Artists
               </h3>
@@ -129,16 +129,16 @@
                 >
                   {summary.artist_stats.all.total}
                 </button>
-                <span class="text-sm text-white/50">total</span>
+                <span class="text-sm text-subtle">total</span>
               </div>
 
               <div class="space-y-2">
                 <div
-                  class="flex items-center justify-between text-sm text-white/70"
+                  class="flex items-center justify-between text-sm text-muted"
                 >
                   <span>With background art</span>
                   <button
-                    class="font-medium text-white hover:text-primary hover:underline"
+                    class="font-medium text-default hover:text-primary hover:underline"
                     on:click={() => drillDown("all", "background")}
                   >
                     {summary.artist_stats.all.with_background}
@@ -146,16 +146,16 @@
                 </div>
               </div>
 
-              <div class="pt-4 border-t border-white/5">
-                <p class="text-xs font-medium text-white/40 mb-3 uppercase">
+              <div class="pt-4 border-t border-subtle">
+                <p class="text-xs font-medium text-muted mb-3 uppercase">
                   Artwork Source
                 </p>
                 <div class="space-y-2">
                   {#each Object.entries(summary.artist_stats.all.sources) as [source, count]}
                     <div class="flex items-center justify-between text-sm">
-                      <span class="text-white/60 capitalize">{source}</span>
+                      <span class="text-muted capitalize">{source}</span>
                       <button
-                        class="font-medium bg-white/10 px-2 py-0.5 rounded text-white/90 hover:bg-primary/20 hover:text-primary transition-colors"
+                        class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-primary/20 hover:text-primary transition-colors"
                         on:click={() => drillDown("all", "source", source)}
                       >
                         {count}
@@ -165,17 +165,17 @@
                 </div>
               </div>
 
-              <div class="pt-4 border-t border-white/5">
-                <p class="text-xs font-medium text-white/40 mb-3 uppercase">
+              <div class="pt-4 border-t border-subtle">
+                <p class="text-xs font-medium text-muted mb-3 uppercase">
                   External Links
                 </p>
                 <div class="space-y-2">
                   {#each Object.entries(summary.artist_stats.all.link_stats) as [type, count]}
                     <div class="flex items-center justify-between text-sm">
-                      <span class="text-white/60 capitalize">{type}</span>
+                      <span class="text-muted capitalize">{type}</span>
                       <div class="flex gap-2">
                         <button
-                          class="font-medium bg-white/10 px-2 py-0.5 rounded text-white/90 hover:bg-primary/20 hover:text-primary transition-colors"
+                          class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-primary/20 hover:text-primary transition-colors"
                           on:click={() => drillDown("all", "link_type", type)}
                           title="View Artists with this link"
                         >
@@ -197,9 +197,9 @@
             </div>
 
             <!-- Primary Artists Column -->
-            <div class="space-y-4 border-l border-white/10 pl-8">
+            <div class="space-y-4 border-l border-subtle pl-8">
               <h3
-                class="text-sm font-medium text-white/60 uppercase tracking-wider"
+                class="text-sm font-medium text-muted uppercase tracking-wider"
               >
                 Primary Artists
               </h3>
@@ -211,16 +211,16 @@
                 >
                   {summary.artist_stats.primary.total}
                 </button>
-                <span class="text-sm text-white/50">total</span>
+                <span class="text-sm text-subtle">total</span>
               </div>
 
               <div class="space-y-2">
                 <div
-                  class="flex items-center justify-between text-sm text-white/70"
+                  class="flex items-center justify-between text-sm text-muted"
                 >
                   <span>With background art</span>
                   <button
-                    class="font-medium text-white hover:text-primary hover:underline"
+                    class="font-medium text-default hover:text-primary hover:underline"
                     on:click={() => drillDown("primary", "background")}
                   >
                     {summary.artist_stats.primary.with_background}
@@ -228,16 +228,16 @@
                 </div>
               </div>
 
-              <div class="pt-4 border-t border-white/5">
-                <p class="text-xs font-medium text-white/40 mb-3 uppercase">
+              <div class="pt-4 border-t border-subtle">
+                <p class="text-xs font-medium text-muted mb-3 uppercase">
                   Artwork Source
                 </p>
                 <div class="space-y-2">
                   {#each Object.entries(summary.artist_stats.primary.sources) as [source, count]}
                     <div class="flex items-center justify-between text-sm">
-                      <span class="text-white/60 capitalize">{source}</span>
+                      <span class="text-muted capitalize">{source}</span>
                       <button
-                        class="font-medium bg-white/10 px-2 py-0.5 rounded text-white/90 hover:bg-primary/20 hover:text-primary transition-colors"
+                        class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-primary/20 hover:text-primary transition-colors"
                         on:click={() => drillDown("primary", "source", source)}
                       >
                         {count}
@@ -247,17 +247,17 @@
                 </div>
               </div>
 
-              <div class="pt-4 border-t border-white/5">
-                <p class="text-xs font-medium text-white/40 mb-3 uppercase">
+              <div class="pt-4 border-t border-subtle">
+                <p class="text-xs font-medium text-muted mb-3 uppercase">
                   External Links
                 </p>
                 <div class="space-y-2">
                   {#each Object.entries(summary.artist_stats.primary.link_stats) as [type, count]}
                     <div class="flex items-center justify-between text-sm">
-                      <span class="text-white/60 capitalize">{type}</span>
+                      <span class="text-muted capitalize">{type}</span>
                       <div class="flex gap-2">
                         <button
-                          class="font-medium bg-white/10 px-2 py-0.5 rounded text-white/90 hover:bg-primary/20 hover:text-primary transition-colors"
+                          class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-primary/20 hover:text-primary transition-colors"
                           on:click={() =>
                             drillDown("primary", "link_type", type)}
                           title="View Artists with this link"
@@ -283,7 +283,7 @@
 
         <!-- Album Stats -->
         <div
-          class="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur space-y-6"
+          class="rounded-2xl border border-subtle bg-surface-2 p-6 backdrop-blur space-y-6"
         >
           <div class="flex items-center gap-3 mb-6">
             <div
@@ -315,18 +315,18 @@
               >
             </div>
             <div>
-              <h3 class="font-medium text-white">Album Statistics</h3>
-              <p class="text-sm text-white/50">Collection quality</p>
+              <h3 class="font-medium text-default">Album Statistics</h3>
+              <p class="text-sm text-muted">Collection quality</p>
             </div>
           </div>
 
           <div class="space-y-4">
             <div class="flex items-center justify-between">
               <div>
-                <div class="text-3xl font-bold text-white">
+                <div class="text-3xl font-bold text-default">
                   {summary.album_stats.total}
                 </div>
-                <div class="text-xs text-white/50 font-medium uppercase mt-1">
+                <div class="text-xs text-subtle font-medium uppercase mt-1">
                   Total Albums
                 </div>
               </div>
@@ -335,28 +335,24 @@
               </TabButton>
             </div>
 
-            <div class="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+            <div class="h-1 w-full bg-surface-3 rounded-full overflow-hidden">
               <div class="h-full bg-purple-500/50 w-full" />
             </div>
 
             <div class="space-y-2">
-              <div
-                class="flex items-center justify-between text-sm text-white/70"
-              >
+              <div class="flex items-center justify-between text-sm text-muted">
                 <span>With artwork</span>
                 <button
-                  class="font-medium text-white hover:text-purple-400 hover:underline"
+                  class="font-medium text-default hover:text-purple-400 hover:underline"
                   on:click={() => drillDown("album", "artwork", "present")}
                 >
                   {summary.album_stats.with_artwork}
                 </button>
               </div>
-              <div
-                class="flex items-center justify-between text-sm text-white/70"
-              >
+              <div class="flex items-center justify-between text-sm text-muted">
                 <span>Missing artwork</span>
                 <button
-                  class="font-medium text-red-300 hover:text-red-400 hover:underline"
+                  class="font-medium text-red-400 hover:text-red-500 hover:underline"
                   on:click={() => drillDown("album", "artwork", "missing")}
                 >
                   {summary.album_stats.total - summary.album_stats.with_artwork}
@@ -364,17 +360,17 @@
               </div>
             </div>
 
-            <div class="pt-4 border-t border-white/5">
-              <p class="text-xs font-medium text-white/40 mb-3 uppercase">
+            <div class="pt-4 border-t border-subtle">
+              <p class="text-xs font-medium text-muted mb-3 uppercase">
                 External Links
               </p>
               <div class="space-y-2">
                 {#each Object.entries(summary.album_stats.link_stats) as [type, count]}
                   <div class="flex items-center justify-between text-sm">
-                    <span class="text-white/60 capitalize">{type}</span>
+                    <span class="text-muted capitalize">{type}</span>
                     <div class="flex gap-2">
                       <button
-                        class="font-medium bg-white/10 px-2 py-0.5 rounded text-white/90 hover:bg-purple-500/20 hover:text-purple-400 transition-colors"
+                        class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-purple-500/20 hover:text-purple-400 transition-colors"
                         on:click={() => drillDown("album", "link_type", type)}
                         title="View Albums with this link"
                       >
@@ -397,7 +393,7 @@
         </div>
       </div>
     {:else if !loading}
-      <div class="py-12 text-center text-white/40">
+      <div class="py-12 text-center text-muted">
         <p>No statistics available.</p>
       </div>
     {/if}
@@ -408,7 +404,7 @@
     <div
       role="button"
       tabindex="0"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       on:click={closeModal}
       on:keydown|self={(e) => {
         if (e.key === "Escape") closeModal();
@@ -417,14 +413,14 @@
       <div
         role="button"
         tabindex="0"
-        class="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border border-white/10 surface-glass-popover shadow-2xl cursor-default"
+        class="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border border-subtle surface-glass-popover shadow-2xl cursor-default"
         on:click|stopPropagation
         on:keydown|stopPropagation
       >
         <div
-          class="flex items-center justify-between p-4 border-b border-white/10"
+          class="flex items-center justify-between p-4 border-b border-subtle text-default"
         >
-          <h3 class="text-lg font-semibold text-white">{modalTitle}</h3>
+          <h3 class="text-lg font-semibold text-default">{modalTitle}</h3>
           <IconButton variant="ghost" onClick={closeModal} title="Close">
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -445,38 +441,38 @@
 
         <div class="flex-1 overflow-y-auto p-2">
           {#if modalLoading}
-            <div class="p-8 text-center text-white/40">Loading items...</div>
+            <div class="p-8 text-center text-muted">Loading items...</div>
           {:else if modalItems.length === 0}
-            <div class="p-8 text-center text-white/40">No items found.</div>
+            <div class="p-8 text-center text-muted">No items found.</div>
           {:else}
-            <div class="divide-y divide-white/5">
+            <div class="divide-y divide-subtle">
               {#each modalItems as item}
                 <a
                   href={item.artist_name
                     ? `/album/${encodeURIComponent(item.artist_name)}/${encodeURIComponent(item.name)}`
                     : `/artist/${encodeURIComponent(item.name)}`}
-                  class="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg transition-colors group"
+                  class="flex items-center gap-3 p-2 hover:bg-surface-2 rounded-lg transition-colors group"
                 >
                   {#if item.image_url}
                     <img
                       src={item.image_url}
                       alt=""
-                      class="w-10 h-10 rounded-full object-cover bg-white/5"
+                      class="w-10 h-10 rounded-full object-cover bg-surface-3"
                     />
                   {:else}
                     <div
-                      class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-xm text-white/30"
+                      class="w-10 h-10 rounded-full bg-surface-3 flex items-center justify-center text-xm text-subtle"
                     >
                       ?
                     </div>
                   {/if}
                   <div class="flex flex-col overflow-hidden">
                     <span
-                      class="font-medium text-white/90 group-hover:text-primary transition-colors truncate"
+                      class="font-medium text-default group-hover:text-primary transition-colors truncate"
                       >{item.name}</span
                     >
                     {#if item.artist_name && item.artist_name !== item.name}
-                      <span class="text-xs text-white/50 truncate"
+                      <span class="text-xs text-muted truncate"
                         >{item.artist_name}</span
                       >
                     {/if}
@@ -486,9 +482,7 @@
             </div>
           {/if}
         </div>
-        <div
-          class="p-2 border-t border-white/10 text-center text-xs text-white/30"
-        >
+        <div class="p-2 border-t border-subtle text-center text-xs text-subtle">
           Showing {modalItems.length} items
         </div>
       </div>

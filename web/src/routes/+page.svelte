@@ -66,7 +66,9 @@
     {#if newReleases.length > 0}
         <div class="space-y-4">
             <div class="flex items-center justify-between">
-                <h2 class="text-2xl font-semibold">New Releases</h2>
+                <h2 class="text-2xl font-semibold text-default">
+                    New Releases
+                </h2>
             </div>
             <div
                 class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
@@ -77,7 +79,7 @@
                         class="group relative min-w-[280px] w-[280px] snap-start"
                     >
                         <div
-                            class="relative aspect-square w-full overflow-hidden rounded-md bg-white/5 shadow-lg transition-transform duration-300 group-hover:-translate-y-2"
+                            class="relative aspect-square w-full overflow-hidden rounded-md bg-surface-2 shadow-lg transition-transform duration-300 group-hover:scale-105"
                         >
                             <img
                                 src={album.art_sha1
@@ -97,36 +99,42 @@
                                 aria-label="View Album"
                             ></a>
                             <div
-                                class="absolute inset-0 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
+                                class="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
                             >
-                                <IconButton
-                                    variant="outline"
-                                    title="Play Album"
-                                    onClick={() => playAlbum(album)}
-                                    stopPropagation={true}
+                                <div
+                                    class="pointer-events-auto flex items-center gap-3 text-white"
                                 >
-                                    <svg
-                                        class="h-6 w-6"
-                                        fill="currentColor"
-                                        viewBox="0 0 24 24"
-                                        ><path d="M8 5v14l11-7z" /></svg
+                                    <IconButton
+                                        variant="primary"
+                                        title="Play Album"
+                                        onClick={() => playAlbum(album)}
+                                        stopPropagation={true}
+                                        className="shadow-lg transition-all"
                                     >
-                                </IconButton>
-                                <IconButton
-                                    variant="outline"
-                                    title="Add to Queue"
-                                    onClick={() => queueAlbum(album)}
-                                    stopPropagation={true}
-                                >
-                                    <svg
-                                        class="h-6 w-6"
-                                        fill="currentColor"
-                                        viewBox="0 0 24 24"
-                                        ><path
-                                            d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
-                                        /></svg
+                                        <svg
+                                            class="h-6 w-6"
+                                            fill="currentColor"
+                                            viewBox="0 0 24 24"
+                                            ><path d="M8 5v14l11-7z" /></svg
+                                        >
+                                    </IconButton>
+                                    <IconButton
+                                        variant="primary"
+                                        title="Add to Queue"
+                                        onClick={() => queueAlbum(album)}
+                                        stopPropagation={true}
+                                        className="shadow-lg transition-all"
                                     >
-                                </IconButton>
+                                        <svg
+                                            class="h-6 w-6"
+                                            fill="currentColor"
+                                            viewBox="0 0 24 24"
+                                            ><path
+                                                d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                                            /></svg
+                                        >
+                                    </IconButton>
+                                </div>
                             </div>
                             {#if album.is_hires}
                                 <img
@@ -141,17 +149,17 @@
                                 href={album.mbid || album.album_mbid
                                     ? `/album/${album.mbid || album.album_mbid}`
                                     : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
-                                class="block font-medium leading-tight truncate hover:underline"
+                                class="block font-medium leading-tight truncate hover:underline text-default"
                                 title={album.album}>{album.album}</a
                             >
                             <a
                                 href={album.artist_mbid
                                     ? `/artist/${album.artist_mbid}`
                                     : `/artist/${encodeURIComponent(album.artist_name)}`}
-                                class="block text-sm text-white/60 truncate hover:underline"
+                                class="block text-sm text-muted truncate hover:underline"
                                 title={album.artist_name}>{album.artist_name}</a
                             >
-                            <p class="text-xs text-white/40 mt-0.5">
+                            <p class="text-xs text-subtle mt-0.5">
                                 {album.year || "Unknown Year"}
                             </p>
                         </div>
@@ -166,7 +174,9 @@
     <!-- Recently Added Albums -->
     {#if recentlyAddedAlbums.length > 0}
         <div class="space-y-4">
-            <h2 class="text-2xl font-semibold">Recently Added Albums</h2>
+            <h2 class="text-2xl font-semibold text-default">
+                Recently Added Albums
+            </h2>
             <div
                 class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
                 on:wheel={handleScroll}
@@ -176,7 +186,7 @@
                         class="group relative min-w-[280px] w-[280px] snap-start"
                     >
                         <div
-                            class="relative aspect-square w-full overflow-hidden rounded-md bg-white/5 shadow-lg transition-transform duration-300 group-hover:-translate-y-2"
+                            class="relative aspect-square w-full overflow-hidden rounded-md bg-surface-2 shadow-lg transition-transform duration-300 group-hover:scale-105"
                         >
                             <img
                                 src={album.art_sha1
@@ -196,36 +206,42 @@
                                 aria-label="View Album"
                             ></a>
                             <div
-                                class="absolute inset-0 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
+                                class="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
                             >
-                                <IconButton
-                                    variant="outline"
-                                    title="Play Album"
-                                    onClick={() => playAlbum(album)}
-                                    stopPropagation={true}
+                                <div
+                                    class="pointer-events-auto flex items-center gap-3 text-white"
                                 >
-                                    <svg
-                                        class="h-6 w-6"
-                                        fill="currentColor"
-                                        viewBox="0 0 24 24"
-                                        ><path d="M8 5v14l11-7z" /></svg
+                                    <IconButton
+                                        variant="primary"
+                                        title="Play Album"
+                                        onClick={() => playAlbum(album)}
+                                        stopPropagation={true}
+                                        className="shadow-lg transition-all"
                                     >
-                                </IconButton>
-                                <IconButton
-                                    variant="outline"
-                                    title="Add to Queue"
-                                    onClick={() => queueAlbum(album)}
-                                    stopPropagation={true}
-                                >
-                                    <svg
-                                        class="h-6 w-6"
-                                        fill="currentColor"
-                                        viewBox="0 0 24 24"
-                                        ><path
-                                            d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
-                                        /></svg
+                                        <svg
+                                            class="h-6 w-6"
+                                            fill="currentColor"
+                                            viewBox="0 0 24 24"
+                                            ><path d="M8 5v14l11-7z" /></svg
+                                        >
+                                    </IconButton>
+                                    <IconButton
+                                        variant="primary"
+                                        title="Add to Queue"
+                                        onClick={() => queueAlbum(album)}
+                                        stopPropagation={true}
+                                        className="shadow-lg transition-all"
                                     >
-                                </IconButton>
+                                        <svg
+                                            class="h-6 w-6"
+                                            fill="currentColor"
+                                            viewBox="0 0 24 24"
+                                            ><path
+                                                d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                                            /></svg
+                                        >
+                                    </IconButton>
+                                </div>
                             </div>
                             {#if album.is_hires}
                                 <img
@@ -240,14 +256,14 @@
                                 href={album.mbid || album.album_mbid
                                     ? `/album/${album.mbid || album.album_mbid}`
                                     : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
-                                class="block font-medium leading-tight truncate hover:underline"
+                                class="block font-medium leading-tight truncate hover:underline text-default"
                                 title={album.album}>{album.album}</a
                             >
                             <a
                                 href={album.artist_mbid
                                     ? `/artist/${album.artist_mbid}`
                                     : `/artist/${encodeURIComponent(album.artist_name)}`}
-                                class="block text-sm text-white/60 truncate hover:underline"
+                                class="block text-sm text-muted truncate hover:underline"
                                 title={album.artist_name}>{album.artist_name}</a
                             >
                         </div>
@@ -261,7 +277,9 @@
     <!-- Recently Played Albums -->
     {#if recentlyPlayedAlbums.length > 0}
         <div class="space-y-4">
-            <h2 class="text-2xl font-semibold">Recently Played Albums</h2>
+            <h2 class="text-2xl font-semibold text-default">
+                Recently Played Albums
+            </h2>
             <div
                 class="flex gap-6 overflow-x-auto pb-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
                 on:wheel={handleScroll}
@@ -271,7 +289,7 @@
                         class="group relative min-w-[280px] w-[280px] snap-start"
                     >
                         <div
-                            class="relative aspect-square w-full overflow-hidden rounded-md bg-white/5 relative shadow-lg transition-all duration-300 hover:shadow-primary-500/20 group-hover:-translate-y-2"
+                            class="relative aspect-square w-full overflow-hidden rounded-md bg-surface-2 relative shadow-lg transition-all duration-300 hover:shadow-primary-500/20 group-hover:scale-105"
                         >
                             <img
                                 src={album.art_sha1
@@ -291,36 +309,42 @@
                                 aria-label="View Album"
                             ></a>
                             <div
-                                class="absolute inset-0 bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
+                                class="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
                             >
-                                <IconButton
-                                    variant="outline"
-                                    title="Play Album"
-                                    onClick={() => playAlbum(album)}
-                                    stopPropagation={true}
+                                <div
+                                    class="pointer-events-auto flex items-center gap-3 text-white"
                                 >
-                                    <svg
-                                        class="h-6 w-6"
-                                        fill="currentColor"
-                                        viewBox="0 0 24 24"
-                                        ><path d="M8 5v14l11-7z" /></svg
+                                    <IconButton
+                                        variant="primary"
+                                        title="Play Album"
+                                        onClick={() => playAlbum(album)}
+                                        stopPropagation={true}
+                                        className="shadow-lg transition-all"
                                     >
-                                </IconButton>
-                                <IconButton
-                                    variant="outline"
-                                    title="Add to Queue"
-                                    onClick={() => queueAlbum(album)}
-                                    stopPropagation={true}
-                                >
-                                    <svg
-                                        class="h-6 w-6"
-                                        fill="currentColor"
-                                        viewBox="0 0 24 24"
-                                        ><path
-                                            d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
-                                        /></svg
+                                        <svg
+                                            class="h-6 w-6"
+                                            fill="currentColor"
+                                            viewBox="0 0 24 24"
+                                            ><path d="M8 5v14l11-7z" /></svg
+                                        >
+                                    </IconButton>
+                                    <IconButton
+                                        variant="primary"
+                                        title="Add to Queue"
+                                        onClick={() => queueAlbum(album)}
+                                        stopPropagation={true}
+                                        className="shadow-lg transition-all"
                                     >
-                                </IconButton>
+                                        <svg
+                                            class="h-6 w-6"
+                                            fill="currentColor"
+                                            viewBox="0 0 24 24"
+                                            ><path
+                                                d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                                            /></svg
+                                        >
+                                    </IconButton>
+                                </div>
                             </div>
                             {#if album.is_hires}
                                 <img
@@ -335,14 +359,14 @@
                                 href={album.mbid || album.album_mbid
                                     ? `/album/${album.mbid || album.album_mbid}`
                                     : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
-                                class="block font-medium leading-tight truncate hover:underline"
+                                class="block font-medium leading-tight truncate hover:underline text-default"
                                 title={album.album}>{album.album}</a
                             >
                             <a
                                 href={album.artist_mbid
                                     ? `/artist/${album.artist_mbid}`
                                     : `/artist/${encodeURIComponent(album.artist_name)}`}
-                                class="block text-sm text-white/60 truncate hover:underline"
+                                class="block text-sm text-muted truncate hover:underline"
                                 title={album.artist_name}>{album.artist_name}</a
                             >
                         </div>
@@ -356,7 +380,9 @@
     <!-- Discover - Newly Added Artists -->
     {#if discoverArtists.length > 0}
         <div class="space-y-4">
-            <h2 class="text-2xl font-semibold">Newly Added Artists</h2>
+            <h2 class="text-2xl font-semibold text-default">
+                Newly Added Artists
+            </h2>
             <div
                 class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
                 on:wheel={handleScroll}
@@ -369,7 +395,7 @@
                         class="group relative min-w-[280px] w-[280px] snap-start flex flex-col items-center text-center"
                     >
                         <div
-                            class="aspect-square w-full overflow-hidden rounded-full bg-white/5 relative shadow-lg border border-white/5 transition-transform duration-300 group-hover:scale-105"
+                            class="aspect-square w-full overflow-hidden rounded-full bg-surface-2 relative shadow-lg border border-subtle transition-transform duration-300 group-hover:scale-105"
                         >
                             <img
                                 src={artist.art_sha1
@@ -384,7 +410,7 @@
                         </div>
                         <div class="mt-3">
                             <h3
-                                class="font-medium leading-tight truncate w-full"
+                                class="font-medium leading-tight truncate w-full text-default"
                                 title={artist.name}
                             >
                                 {artist.name}
@@ -400,7 +426,9 @@
     <!-- Recently Played Artists -->
     {#if recentlyPlayedArtists.length > 0}
         <div class="space-y-4">
-            <h2 class="text-2xl font-semibold">Recently Played Artists</h2>
+            <h2 class="text-2xl font-semibold text-default">
+                Recently Played Artists
+            </h2>
             <div
                 class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
                 on:wheel={handleScroll}
@@ -413,7 +441,7 @@
                         class="group relative min-w-[280px] w-[280px] snap-start flex flex-col items-center text-center"
                     >
                         <div
-                            class="aspect-square w-full overflow-hidden rounded-full bg-white/5 relative shadow-lg border border-white/5 transition-transform duration-300 group-hover:scale-105"
+                            class="aspect-square w-full overflow-hidden rounded-full bg-surface-2 relative shadow-lg border border-subtle transition-transform duration-300 group-hover:scale-105"
                         >
                             <img
                                 src={artist.art_sha1
@@ -428,7 +456,7 @@
                         </div>
                         <div class="mt-3">
                             <h3
-                                class="font-medium leading-tight truncate w-full"
+                                class="font-medium leading-tight truncate w-full text-default"
                                 title={artist.name}
                             >
                                 {artist.name}

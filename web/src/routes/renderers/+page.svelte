@@ -109,13 +109,13 @@
                 <span>{scanProgress}%</span>
             </div>
             <progress
-                class="progress progress-primary w-full h-2 bg-surface-700"
+                class="progress progress-primary w-full h-2 bg-surface-3"
                 value={scanProgress}
                 max="100"
             ></progress>
 
             <div
-                class="mt-4 p-4 rounded bg-black/30 font-mono text-xs text-white/50 h-32 overflow-y-auto space-y-1"
+                class="mt-4 p-4 rounded bg-surface-2 border border-subtle font-mono text-xs text-muted h-32 overflow-y-auto space-y-1"
             >
                 {#each scanLogs as log}
                     <div class="truncate">{log}</div>
@@ -130,14 +130,14 @@
         </div>
     {/if}
 
-    <p class="mb-6 text-white/60">
+    <p class="mb-6 text-muted">
         Discovered UPnP/DLNA media renderers on your network.
     </p>
 
     <div class="grid gap-4 grid-cols-1">
         {#each renderers as r}
             <div
-                class="rounded-xl border border-white/10 bg-surface-800 p-6 shadow-lg"
+                class="rounded-xl border border-subtle bg-surface-2 p-6 shadow-lg"
             >
                 <div class="mb-4 flex items-center gap-4">
                     <div
@@ -159,10 +159,12 @@
                         </svg>
                     </div>
                     <div class="flex-1">
-                        <h3 class="font-bold text-lg leading-tight">
+                        <h3
+                            class="font-bold text-lg leading-tight text-default"
+                        >
                             {r.name}
                         </h3>
-                        <span class="text-xs text-white/40 font-mono"
+                        <span class="text-xs text-subtle font-mono"
                             >{r.ip || "Local"}</span
                         >
                     </div>
@@ -171,50 +173,44 @@
                 {#if r.udn && !r.udn.startsWith("local:")}
                     <!-- Device Info -->
                     {#if r.manufacturer || r.model_name}
-                        <div
-                            class="mb-4 space-y-1 border-t border-white/5 pt-4"
-                        >
+                        <div class="mb-4 space-y-1 border-t border-subtle pt-4">
                             {#if r.manufacturer}
                                 <div class="flex justify-between text-sm">
-                                    <span class="text-white/40"
-                                        >Manufacturer</span
+                                    <span class="text-subtle">Manufacturer</span
                                     >
-                                    <span class="text-white/80"
+                                    <span class="text-muted"
                                         >{r.manufacturer}</span
                                     >
                                 </div>
                             {/if}
                             {#if r.model_name}
                                 <div class="flex justify-between text-sm">
-                                    <span class="text-white/40">Model</span>
-                                    <span class="text-white/80"
+                                    <span class="text-subtle">Model</span>
+                                    <span class="text-muted"
                                         >{r.model_name}</span
                                     >
                                 </div>
                             {/if}
                             {#if r.model_number}
                                 <div class="flex justify-between text-sm">
-                                    <span class="text-white/40">Model #</span>
-                                    <span
-                                        class="text-white/60 font-mono text-xs"
+                                    <span class="text-subtle">Model #</span>
+                                    <span class="text-muted font-mono text-xs"
                                         >{r.model_number}</span
                                     >
                                 </div>
                             {/if}
                             {#if r.serial_number}
                                 <div class="flex justify-between text-sm">
-                                    <span class="text-white/40">Serial</span>
-                                    <span
-                                        class="text-white/60 font-mono text-xs"
+                                    <span class="text-subtle">Serial</span>
+                                    <span class="text-muted font-mono text-xs"
                                         >{r.serial_number}</span
                                     >
                                 </div>
                             {/if}
                             {#if r.firmware_version}
                                 <div class="flex justify-between text-sm">
-                                    <span class="text-white/40">Firmware</span>
-                                    <span
-                                        class="text-white/60 font-mono text-xs"
+                                    <span class="text-subtle">Firmware</span>
+                                    <span class="text-muted font-mono text-xs"
                                         >{r.firmware_version}</span
                                     >
                                 </div>
@@ -227,7 +223,7 @@
                         <div class="mb-4 flex flex-wrap gap-2">
                             {#if r.supports_events}
                                 <span
-                                    class="inline-flex items-center gap-1 rounded-full bg-green-500/20 px-3 py-1 text-xs font-medium text-green-400"
+                                    class="inline-flex items-center gap-1 rounded-full bg-green-500/20 px-3 py-1 text-xs font-medium text-green-600 dark:text-green-400"
                                 >
                                     <svg
                                         class="h-3 w-3"
@@ -265,7 +261,7 @@
                     {/if}
 
                     <!-- Technical Details (collapsible) -->
-                    <details class="text-sm text-white/60">
+                    <details class="text-sm text-muted">
                         <summary
                             class="cursor-pointer text-xs uppercase tracking-wider opacity-50 hover:opacity-100"
                             >Technical Details</summary
@@ -324,7 +320,7 @@
 
                     <!-- Supported Formats (collapsible) -->
                     {#if r.supported_mime_types}
-                        <details class="text-sm text-white/60 mt-2">
+                        <details class="text-sm text-muted mt-2">
                             <summary
                                 class="cursor-pointer text-xs uppercase tracking-wider opacity-50 hover:opacity-100"
                                 >Supported Formats</summary
@@ -333,7 +329,7 @@
                                 {#each r.supported_mime_types.split(",") as mime}
                                     {#if mime.startsWith("audio/")}
                                         <span
-                                            class="inline-block rounded bg-white/5 px-2 py-0.5 font-mono text-xs text-white/70"
+                                            class="inline-block rounded bg-surface-3 px-2 py-0.5 font-mono text-xs text-muted"
                                             >{mime}</span
                                         >
                                     {/if}
@@ -342,7 +338,7 @@
                         </details>
                     {/if}
                 {:else}
-                    <p class="italic text-sm text-white/60">
+                    <p class="italic text-sm text-muted">
                         This is your current browser session.
                     </p>
                 {/if}
@@ -350,7 +346,7 @@
         {/each}
     </div>
     {#if renderers.length === 0 && !loading}
-        <div class="text-center text-white/40 py-12">
+        <div class="text-center text-subtle py-12">
             No renderers found. Make sure devices are on the same network
             subnet.
         </div>

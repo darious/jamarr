@@ -443,7 +443,7 @@
 </script>
 
 <div
-    class="container mx-auto p-6 max-w-6xl text-white min-h-[calc(100vh-80px)]"
+    class="container mx-auto p-6 max-w-6xl text-default min-h-[calc(100vh-80px)]"
 >
     <div class="flex items-center justify-between mb-8">
         <h1 class="text-3xl font-bold font-display tracking-tight">
@@ -460,22 +460,20 @@
         <!-- Status + Logs -->
         <div class="space-y-4">
             <div
-                class="card bg-black/40 border border-white/10 p-6 backdrop-blur-sm"
+                class="card bg-surface-2 border border-subtle p-6 backdrop-blur-sm"
             >
                 <div class="flex justify-between items-start gap-4">
                     <div class="flex flex-col gap-1">
                         <span
-                            class="text-xs uppercase tracking-wide text-primary-300"
+                            class="text-xs uppercase tracking-wide text-primary"
                         >
                             {stats.phase || (isRunning ? "running" : "idle")}
                         </span>
-                        <span class="text-base font-semibold text-white">
+                        <span class="text-base font-semibold text-default">
                             {stats.message ||
                                 (stats.completed ? "Done" : "Ready")}
                         </span>
-                        <div
-                            class="text-xs text-white/60 flex items-center gap-3"
-                        >
+                        <div class="text-xs text-muted flex items-center gap-3">
                             <span
                                 >Progress: {stats.scanned}/{stats.total ||
                                     "?"}</span
@@ -511,7 +509,7 @@
                         </div>
                     </div>
                     <div class="flex flex-col items-end text-right">
-                        <span class="text-xs font-mono text-primary-400"
+                        <span class="text-xs font-mono text-primary"
                             >{Math.round(stats.percentage)}%</span
                         >
                         {#if isRunning}
@@ -531,11 +529,11 @@
                 ></progress>
                 {#if stats.completed}
                     <div
-                        class="mt-3 flex items-center justify-between text-xs text-white/70 bg-white/5 rounded-lg px-3 py-2 border border-white/10"
+                        class="mt-3 flex items-center justify-between text-xs text-muted bg-surface-3 rounded-lg px-3 py-2 border border-subtle"
                     >
                         <span>Scan complete ({stats.completedStatus})</span>
                         <TabButton
-                            className="text-white/60 hover:text-white"
+                            className="text-muted hover:text-default"
                             onClick={() => {
                                 stats.completed = false;
                                 stats.completedStatus = "";
@@ -551,42 +549,42 @@
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <!-- Processed Counts -->
                 <div
-                    class="card bg-white/5 border border-white/10 p-4 md:col-span-1"
+                    class="card bg-surface-2 border border-subtle p-4 md:col-span-1"
                 >
                     <h3
-                        class="text-xs uppercase tracking-wide text-white/40 mb-3"
+                        class="text-xs uppercase tracking-wide text-subtle mb-3"
                     >
                         Processed Items
                     </h3>
                     <div class="flex gap-6">
                         <div class="flex flex-col">
                             <span
-                                class="text-2xl font-bold font-display text-white"
+                                class="text-2xl font-bold font-display text-default"
                                 >{stats.processed_stats?.tracks || 0}</span
                             >
-                            <span class="text-xs text-white/50">Tracks</span>
+                            <span class="text-xs text-subtle">Tracks</span>
                         </div>
                         <div class="flex flex-col">
                             <span
-                                class="text-2xl font-bold font-display text-white"
+                                class="text-2xl font-bold font-display text-default"
                                 >{stats.processed_stats?.albums || 0}</span
                             >
-                            <span class="text-xs text-white/50">Albums</span>
+                            <span class="text-xs text-subtle">Albums</span>
                         </div>
                         <div class="flex flex-col">
                             <span
-                                class="text-2xl font-bold font-display text-white"
+                                class="text-2xl font-bold font-display text-default"
                                 >{stats.processed_stats?.artists || 0}</span
                             >
-                            <span class="text-xs text-white/50">Artists</span>
+                            <span class="text-xs text-subtle">Artists</span>
                         </div>
                         <div class="flex flex-col">
                             <span
-                                class="text-2xl font-bold font-display text-white"
+                                class="text-2xl font-bold font-display text-default"
                                 >{stats.processed_stats?.artists_metadata ||
                                     0}</span
                             >
-                            <span class="text-xs text-white/50"
+                            <span class="text-xs text-subtle"
                                 >Artist Metadata</span
                             >
                         </div>
@@ -595,17 +593,17 @@
 
                 <!-- API Hits -->
                 <div
-                    class="card bg-white/5 border border-white/10 p-4 md:col-span-2"
+                    class="card bg-surface-2 border border-subtle p-4 md:col-span-2"
                 >
                     <h3
-                        class="text-xs uppercase tracking-wide text-white/40 mb-3"
+                        class="text-xs uppercase tracking-wide text-subtle mb-3"
                     >
                         API Requests
                     </h3>
                     <div class="flex flex-wrap gap-4">
                         <!-- MusicBrainz -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            class="flex items-center gap-2 bg-surface-3 rounded-full px-3 py-1 border border-subtle cursor-help"
                             title="MusicBrainz"
                         >
                             <img
@@ -614,14 +612,14 @@
                                 class="w-5 h-5 opacity-90"
                             />
                             <span
-                                class="font-mono text-sm font-bold text-white/90"
+                                class="font-mono text-sm font-bold text-default"
                                 >{stats.api_stats?.musicbrainz || 0}</span
                             >
                         </div>
 
                         <!-- Fanart.tv -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            class="flex items-center gap-2 bg-surface-3 rounded-full px-3 py-1 border border-subtle cursor-help"
                             title="Fanart.tv"
                         >
                             <img
@@ -630,14 +628,14 @@
                                 class="w-5 h-5 opacity-90"
                             />
                             <span
-                                class="font-mono text-sm font-bold text-white/90"
+                                class="font-mono text-sm font-bold text-default"
                                 >{stats.api_stats?.fanart || 0}</span
                             >
                         </div>
 
                         <!-- Last.fm -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            class="flex items-center gap-2 bg-surface-3 rounded-full px-3 py-1 border border-subtle cursor-help"
                             title="Last.fm"
                         >
                             <img
@@ -646,14 +644,14 @@
                                 class="w-5 h-5 opacity-90"
                             />
                             <span
-                                class="font-mono text-sm font-bold text-white/90"
+                                class="font-mono text-sm font-bold text-default"
                                 >{stats.api_stats?.lastfm || 0}</span
                             >
                         </div>
 
                         <!-- Wikidata -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            class="flex items-center gap-2 bg-surface-3 rounded-full px-3 py-1 border border-subtle cursor-help"
                             title="Wikidata"
                         >
                             <img
@@ -662,14 +660,14 @@
                                 class="w-6 h-6 opacity-90"
                             />
                             <span
-                                class="font-mono text-sm font-bold text-white/90"
+                                class="font-mono text-sm font-bold text-default"
                                 >{stats.api_stats?.wikidata || 0}</span
                             >
                         </div>
 
                         <!-- Wikipedia -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            class="flex items-center gap-2 bg-surface-3 rounded-full px-3 py-1 border border-subtle cursor-help"
                             title="Wikipedia"
                         >
                             <img
@@ -678,14 +676,14 @@
                                 class="w-6 h-6 opacity-90"
                             />
                             <span
-                                class="font-mono text-sm font-bold text-white/90"
+                                class="font-mono text-sm font-bold text-default"
                                 >{stats.api_stats?.wikipedia || 0}</span
                             >
                         </div>
 
                         <!-- Spotify -->
                         <div
-                            class="flex items-center gap-2 bg-white/5 rounded-full px-3 py-1 border border-white/5 cursor-help"
+                            class="flex items-center gap-2 bg-surface-3 rounded-full px-3 py-1 border border-subtle cursor-help"
                             title="Spotify"
                         >
                             <img
@@ -694,7 +692,7 @@
                                 class="w-5 h-5 opacity-90"
                             />
                             <span
-                                class="font-mono text-sm font-bold text-white/90"
+                                class="font-mono text-sm font-bold text-default"
                                 >{stats.api_stats?.spotify || 0}</span
                             >
                         </div>
@@ -704,17 +702,15 @@
 
             <!-- Detailed Stats Table -->
             <!-- Detailed Stats Table -->
-            <div class="card bg-white/5 border border-white/10 p-4 mb-4">
-                <h3 class="text-xs uppercase tracking-wide text-white/40 mb-3">
+            <div class="card bg-surface-2 border border-subtle p-4 mb-4">
+                <h3 class="text-xs uppercase tracking-wide text-subtle mb-3">
                     Detailed Statistics
                 </h3>
                 {#if stats.detailed_stats && Object.keys(stats.detailed_stats).length > 0}
                     <div class="overflow-x-auto">
                         <table class="table table-xs w-full text-left">
                             <thead>
-                                <tr
-                                    class="text-white/40 border-b border-white/10"
-                                >
+                                <tr class="text-subtle border-b border-subtle">
                                     <th class="pb-2 font-normal">Category</th>
                                     <th class="pb-2 font-normal text-right"
                                         >Searched</th
@@ -733,13 +729,13 @@
                             <tbody class="text-sm">
                                 {#each Object.entries(stats.detailed_stats).sort( (a, b) => a[0].localeCompare(b[0]), ) as [category, data]}
                                     <tr
-                                        class="border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors"
+                                        class="border-b border-subtle last:border-0 hover:bg-surface-3 transition-colors"
                                     >
-                                        <td class="py-2 text-white font-medium"
+                                        <td
+                                            class="py-2 text-default font-medium"
                                             >{category}</td
                                         >
-                                        <td
-                                            class="py-2 text-right text-white/70"
+                                        <td class="py-2 text-right text-muted"
                                             >{data.searched}</td
                                         >
                                         <td
@@ -749,9 +745,7 @@
                                         <td class="py-2 text-right text-red-400"
                                             >{data.missing}</td
                                         >
-                                        <td
-                                            class="py-2 text-right text-white/50"
-                                        >
+                                        <td class="py-2 text-right text-subtle">
                                             {data.searched > 0
                                                 ? Math.round(
                                                       (data.found /
@@ -766,19 +760,19 @@
                         </table>
                     </div>
                 {:else}
-                    <div class="text-white/20 text-sm italic">
+                    <div class="text-subtle text-sm italic">
                         Run a scan to view detailed statistics...
                     </div>
                 {/if}
             </div>
 
             <div
-                class="card surface-glass-popover border border-white/10 overflow-hidden flex flex-col font-mono text-sm shadow-inner"
+                class="card surface-glass-popover border border-subtle overflow-hidden flex flex-col font-mono text-sm shadow-inner"
             >
                 <div
-                    class="bg-white/5 px-4 py-2 border-b border-white/5 flex items-center justify-between"
+                    class="bg-surface-3 px-4 py-2 border-b border-subtle flex items-center justify-between"
                 >
-                    <span class="text-xs uppercase tracking-wider text-white/40"
+                    <span class="text-xs uppercase tracking-wider text-muted"
                         >Log Output</span
                     >
                     <span class="flex gap-2">
@@ -799,11 +793,11 @@
                     on:scroll={handleScroll}
                 >
                     {#if logs.length === 0}
-                        <div class="text-white/20 italic">No logs...</div>
+                        <div class="text-subtle italic">No logs...</div>
                     {/if}
                     {#each logs as log}
                         <div class="break-all">
-                            <span class="text-white/30 mr-2 select-none"
+                            <span class="text-muted mr-2 select-none"
                                 >[{new Date(
                                     log.timestamp,
                                 ).toLocaleTimeString()}]</span
@@ -816,16 +810,17 @@
         </div>
 
         <!-- Controls -->
-        <div class="card bg-white/5 border border-white/10 p-6 text-white">
+        <div class="card bg-surface-2 border border-subtle p-6 text-default">
             <div class="grid gap-4 md:grid-cols-2">
                 <div class="space-y-4">
                     <label class="label">
-                        <span class="label-text text-white">Library Path</span>
+                        <span class="label-text text-default">Library Path</span
+                        >
                         <input
                             type="text"
                             bind:value={scanPath}
                             placeholder="Defaults to library root"
-                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
+                            class="input input-bordered bg-surface border-subtle text-default placeholder:text-subtle mt-2 w-full"
                         />
                     </label>
                     <div class="form-control">
@@ -846,7 +841,7 @@
 
                 <div class="space-y-3">
                     <label class="label">
-                        <span class="label-text text-white"
+                        <span class="label-text text-default"
                             >Artist filter (optional)</span
                         >
                         <input
@@ -856,7 +851,7 @@
                             placeholder={artistsLoaded
                                 ? "Type to filter (blank = all)"
                                 : "Loading artists..."}
-                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
+                            class="input input-bordered bg-surface border-subtle text-default placeholder:text-subtle mt-2 w-full"
                         />
                         <datalist id="artist-list">
                             {#each artistOptions as artistName}
@@ -865,14 +860,14 @@
                         </datalist>
                     </label>
                     <label class="label">
-                        <span class="label-text text-white"
+                        <span class="label-text text-default"
                             >MusicBrainz ID (optional)</span
                         >
                         <input
                             type="text"
                             bind:value={mbidFilter}
                             placeholder="e.g. ef5aab86-887d-4fc2-a883-431ef017175a"
-                            class="input input-bordered bg-white/10 border-white/10 text-white placeholder:text-white/40 mt-2 w-full"
+                            class="input input-bordered bg-surface border-subtle text-default placeholder:text-subtle mt-2 w-full"
                         />
                     </label>
                 </div>

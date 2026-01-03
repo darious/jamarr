@@ -694,7 +694,7 @@
         <section>
           <div class="relative group">
             <p
-              class={`text-lg md:text-xl leading-relaxed text-white/90 font-medium max-w-4xl transition-all duration-500 ${
+              class={`text-lg md:text-xl leading-relaxed text-default/90 font-medium max-w-4xl transition-all duration-500 ${
                 isBioExpanded ? "" : "line-clamp-3"
               }`}
             >
@@ -703,7 +703,7 @@
             {#if artist.bio.length > 300}
               <button
                 on:click={() => (isBioExpanded = !isBioExpanded)}
-                class="mt-3 text-sm font-bold text-white/50 uppercase tracking-widest hover:text-white transition-colors"
+                class="mt-3 text-sm font-bold text-muted uppercase tracking-widest hover:text-default transition-colors"
               >
                 {isBioExpanded ? "Read less" : "Read more"}
               </button>
@@ -716,7 +716,7 @@
       {#if displayedSimilarArtists.length > 0}
         <section>
           <h3
-            class="text-xs font-bold text-white/40 uppercase tracking-widest mb-6"
+            class="text-xs font-bold text-muted uppercase tracking-widest mb-6"
           >
             Similar Artists
           </h3>
@@ -733,26 +733,26 @@
                 }}
               >
                 <div
-                  class="relative aspect-square rounded-full overflow-hidden bg-surface-800 ring-1 ring-white/10 group-hover:ring-primary-500 transition-all shadow-lg"
+                  class="relative aspect-square rounded-full overflow-hidden bg-surface-2 ring-1 ring-subtle group-hover:ring-primary-500 transition-all shadow-lg"
                 >
                   {#if sim.art_sha1 || sim.art_id}
                     <img
                       src={sim.art_sha1
                         ? `/art/file/${sim.art_sha1}`
                         : `/art/${sim.art_id}`}
-                      class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                      class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
                       alt={sim.name}
                     />
                   {:else}
                     <div
-                      class="w-full h-full flex items-center justify-center text-xs font-bold text-white/40 bg-surface-700"
+                      class="w-full h-full flex items-center justify-center text-xs font-bold text-muted bg-surface-3"
                     >
                       {getInitials(sim.name)}
                     </div>
                   {/if}
                 </div>
                 <p
-                  class="text-xs font-medium text-white/70 group-hover:text-white truncate"
+                  class="text-xs font-medium text-muted group-hover:text-default truncate"
                 >
                   {sim.name}
                 </p>
@@ -766,7 +766,7 @@
         <!-- Tabs Header -->
         <div class="relative" style="margin-bottom: 24px !important;">
           <div
-            class="flex flex-wrap items-center gap-8 border-b border-white/10 pb-0"
+            class="flex flex-wrap items-center gap-8 border-b border-subtle pb-0"
           >
             <!-- Left Group: Releases -->
             <div class="relative">
@@ -775,8 +775,8 @@
                   <button
                     class={`relative px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
                       activeTab === tab.value
-                        ? "text-white border-accent"
-                        : "text-white/60 border-transparent hover:text-white hover:border-accent"
+                        ? "text-default border-accent"
+                        : "text-muted border-transparent hover:text-default hover:border-accent"
                     }`}
                     on:click={() => (activeTab = tab.value)}
                   >
@@ -795,8 +795,8 @@
                   <button
                     class={`relative px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
                       activeTab === "missing_albums"
-                        ? "text-white border-accent"
-                        : "text-white/60 border-transparent hover:text-white hover:border-accent"
+                        ? "text-default border-accent"
+                        : "text-muted border-transparent hover:text-default hover:border-accent"
                     }`}
                     on:click={() => (activeTab = "missing_albums")}
                   >
@@ -813,8 +813,8 @@
                   <button
                     class={`relative px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
                       activeTab === tab.value
-                        ? "text-white border-accent"
-                        : "text-white/60 border-transparent hover:text-white hover:border-accent"
+                        ? "text-default border-accent"
+                        : "text-muted border-transparent hover:text-default hover:border-accent"
                     }`}
                     on:click={() => (activeTab = tab.value)}
                   >
@@ -835,7 +835,7 @@
               {#each displayedAlbums as album (album.album + album.artist_name)}
                 <article class="group flex flex-col gap-4">
                   <button
-                    class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-[1.02]"
+                    class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-105"
                     on:click={() => {
                       const albumId =
                         album.mbid || album.album_mbid || album.mb_release_id;
@@ -854,10 +854,10 @@
                     />
                     <!-- Play Overlay -->
                     <div
-                      class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
+                      class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3"
                     >
                       <IconButton
-                        variant="outline"
+                        variant="primary"
                         title="Play"
                         onClick={() => playAlbum(album)}
                         stopPropagation={true}
@@ -869,7 +869,7 @@
                         >
                       </IconButton>
                       <IconButton
-                        variant="outline"
+                        variant="primary"
                         title="Add to Queue"
                         onClick={() => addAlbumToQueue(album)}
                         stopPropagation={true}
@@ -894,12 +894,12 @@
                   </button>
                   <div class="space-y-1">
                     <h3
-                      class="text-base font-bold text-white leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
+                      class="text-base font-bold text-default leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
                       title={album.album}
                     >
                       {album.album}
                     </h3>
-                    <p class="text-sm text-white/50 font-medium">
+                    <p class="text-sm text-muted font-medium">
                       {#if activeTab === "appears_on"}
                         {album.artist_name}
                         <span class="mx-1 opacity-50">•</span>
@@ -990,11 +990,11 @@
         {:else if activeTab === "missing_albums"}
           <!-- Missing Albums Table -->
           <div
-            class="glass-surface rounded-2xl overflow-hidden border border-white/5 bg-surface-900/40 backdrop-blur-xl"
+            class="glass-surface rounded-2xl overflow-hidden border border-subtle bg-surface-2 backdrop-blur-xl"
           >
             <table class="w-full text-left text-sm whitespace-nowrap">
               <thead
-                class="uppercase tracking-wider border-b border-white/10 text-white/40 text-xs bg-white/5"
+                class="uppercase tracking-wider border-b border-subtle text-muted text-xs bg-surface-3"
               >
                 <tr>
                   <th class="px-6 py-4">Released</th>
@@ -1003,13 +1003,13 @@
                   <th class="px-6 py-4 text-center w-24">Link</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-white/5">
+              <tbody class="divide-y divide-subtle">
                 {#each missingAlbums as album}
-                  <tr class="hover:bg-white/5 transition-colors">
-                    <td class="px-6 py-4 text-white/50 font-mono tabular-nums"
+                  <tr class="hover:bg-surface-3 transition-colors">
+                    <td class="px-6 py-4 text-default font-mono tabular-nums"
                       >{album.release_date || "—"}</td
                     >
-                    <td class="px-6 py-4 font-medium text-white/90"
+                    <td class="px-6 py-4 font-medium text-default"
                       >{album.title}</td
                     >
                     <td class="px-6 py-4 text-center">
@@ -1056,14 +1056,14 @@
     <aside class="space-y-10 h-fit lg:sticky lg:top-8">
       <!-- Library Status -->
       <div class="space-y-4">
-        <h3 class="text-xs font-bold text-white/40 uppercase tracking-widest">
+        <h3 class="text-xs font-bold text-subtle uppercase tracking-widest">
           Library
         </h3>
         <div class="space-y-1">
-          <p class="text-3xl font-medium text-white">
+          <p class="text-3xl font-medium text-default">
             {data.albums.length} releases
           </p>
-          <p class="text-xl font-medium text-white/50">
+          <p class="text-xl font-medium text-default">
             {tracks.length} tracks
           </p>
         </div>
@@ -1071,7 +1071,7 @@
 
       <!-- External Links -->
       <div class="space-y-4">
-        <h3 class="text-xs font-bold text-white/40 uppercase tracking-widest">
+        <h3 class="text-xs font-bold text-muted uppercase tracking-widest">
           Links
         </h3>
         <div class="flex flex-col gap-4 items-start">
@@ -1079,7 +1079,7 @@
             <a
               href={artist.homepage}
               target="_blank"
-              class="flex items-center gap-3 text-white/60 hover:text-white transition-colors group"
+              class="flex items-center gap-3 text-default hover:text-primary transition-colors group"
             >
               <svg
                 class="h-5 w-5 opacity-70 group-hover:opacity-100"
@@ -1088,7 +1088,7 @@
                 ><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" /></svg
               >
               <span
-                class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+                class="text-sm font-medium border-b border-transparent group-hover:border-subtle"
                 >Homepage</span
               >
             </a>
@@ -1097,7 +1097,7 @@
             <a
               href={artist.spotify_url}
               target="_blank"
-              class="flex items-center gap-3 text-white/60 hover:text-white transition-colors group"
+              class="flex items-center gap-3 text-default hover:text-primary transition-colors group"
             >
               <img
                 src="/assets/logo-spotify.svg"
@@ -1105,7 +1105,7 @@
                 alt="Spotify"
               />
               <span
-                class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+                class="text-sm font-medium border-b border-transparent group-hover:border-subtle"
                 >Spotify</span
               >
             </a>
@@ -1114,7 +1114,7 @@
             <a
               href={artist.musicbrainz_url}
               target="_blank"
-              class="flex items-center gap-3 text-white/60 hover:text-white transition-colors group"
+              class="flex items-center gap-3 text-default hover:text-primary transition-colors group"
             >
               <img
                 src="/assets/logo-musicbrainz.svg"
@@ -1122,7 +1122,7 @@
                 alt="MB"
               />
               <span
-                class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+                class="text-sm font-medium border-b border-transparent group-hover:border-subtle"
                 >MusicBrainz</span
               >
             </a>
@@ -1131,7 +1131,7 @@
             <a
               href={artist.wikipedia_url}
               target="_blank"
-              class="flex items-center gap-3 text-white/60 hover:text-white transition-colors group"
+              class="flex items-center gap-3 text-default hover:text-primary transition-colors group"
             >
               <img
                 src="/assets/logo-wikipedia.svg"
@@ -1139,7 +1139,7 @@
                 alt="Wiki"
               />
               <span
-                class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+                class="text-sm font-medium border-b border-transparent group-hover:border-subtle"
                 >Wikipedia</span
               >
             </a>
@@ -1148,7 +1148,7 @@
             <a
               href={artist.tidal_url}
               target="_blank"
-              class="flex items-center gap-3 text-white/60 hover:text-white transition-colors group"
+              class="flex items-center gap-3 text-default hover:text-primary transition-colors group"
             >
               <img
                 src="/assets/logo-tidal.png"
@@ -1156,7 +1156,7 @@
                 alt="Tidal"
               />
               <span
-                class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+                class="text-sm font-medium border-b border-transparent group-hover:border-subtle"
                 >Tidal</span
               >
             </a>
@@ -1165,7 +1165,7 @@
             <a
               href={artist.qobuz_url}
               target="_blank"
-              class="flex items-center gap-3 text-white/60 hover:text-white transition-colors group"
+              class="flex items-center gap-3 text-default hover:text-primary transition-colors group"
             >
               <img
                 src="/assets/logo-qobuz.png"
@@ -1173,7 +1173,7 @@
                 alt="Qobuz"
               />
               <span
-                class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+                class="text-sm font-medium border-b border-transparent group-hover:border-subtle"
                 >Qobuz</span
               >
             </a>
@@ -1182,7 +1182,7 @@
             <a
               href={artist.lastfm_url}
               target="_blank"
-              class="flex items-center gap-3 text-white/60 hover:text-white transition-colors group"
+              class="flex items-center gap-3 text-default hover:text-primary transition-colors group"
             >
               <img
                 src="/assets/logo-lastfm.png"
@@ -1190,7 +1190,7 @@
                 alt="Last.fm"
               />
               <span
-                class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+                class="text-sm font-medium border-b border-transparent group-hover:border-subtle"
                 >Last.fm</span
               >
             </a>
@@ -1199,7 +1199,7 @@
             <a
               href={artist.discogs_url}
               target="_blank"
-              class="flex items-center gap-3 text-white/60 hover:text-white transition-colors group"
+              class="flex items-center gap-3 text-default hover:text-primary transition-colors group"
             >
               <img
                 src="/assets/logo-discogs.svg"
@@ -1207,7 +1207,7 @@
                 alt="Discogs"
               />
               <span
-                class="text-sm font-medium border-b border-transparent group-hover:border-white/20"
+                class="text-sm font-medium border-b border-transparent group-hover:border-subtle"
                 >Discogs</span
               >
             </a>
@@ -1217,12 +1217,12 @@
 
       <!-- Actions -->
       <div class="space-y-4">
-        <h3 class="text-xs font-bold text-white/40 uppercase tracking-widest">
+        <h3 class="text-xs font-bold text-muted uppercase tracking-widest">
           Actions
         </h3>
         <div class="flex flex-col gap-2">
           <button
-            class="flex items-center gap-3 px-3 py-2 text-white/60 hover:text-white transition-all text-left w-full border-b border-transparent hover:border-accent group hover:bg-transparent"
+            class="flex items-center gap-3 px-3 py-2 text-default hover:text-primary transition-all text-left w-full border-b border-transparent hover:border-accent group hover:bg-transparent"
             on:click={refreshMeta}
             disabled={refreshing}
           >
@@ -1243,7 +1243,7 @@
             >
           </button>
           <button
-            class="flex items-center gap-3 px-3 py-2 text-white/60 hover:text-white transition-all text-left w-full border-b border-transparent hover:border-accent group hover:bg-transparent"
+            class="flex items-center gap-3 px-3 py-2 text-default hover:text-primary transition-all text-left w-full border-b border-transparent hover:border-accent group hover:bg-transparent"
             on:click={scanMissing}
             disabled={scanningMissing}
           >
@@ -1266,15 +1266,15 @@
 
           <!-- Track Actions (only show for track tabs) -->
           {#if activeTab === "top_tracks" || activeTab === "singles_list"}
-            <div class="mt-6 pt-6 border-t border-white/10">
+            <div class="mt-6 pt-6 border-t border-subtle">
               <h3
-                class="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3"
+                class="text-xs font-semibold text-muted uppercase tracking-wider mb-3"
               >
                 Track Actions
               </h3>
               <div class="flex flex-col gap-2">
                 <button
-                  class="w-full px-3 py-2 text-left text-sm text-white/80 hover:text-white transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
+                  class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
                   on:click={activeTab === "top_tracks"
                     ? playAllTopTracks
                     : playAllSingles}
@@ -1285,7 +1285,7 @@
                   Play All
                 </button>
                 <button
-                  class="w-full px-3 py-2 text-left text-sm text-white/80 hover:text-white transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
+                  class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
                   on:click={activeTab === "top_tracks"
                     ? queueAllTopTracks
                     : queueAllSingles}
@@ -1306,7 +1306,7 @@
                   Add All to Queue
                 </button>
                 <button
-                  class="w-full px-3 py-2 text-left text-sm text-white/80 hover:text-white transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
+                  class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
                   on:click={activeTab === "top_tracks"
                     ? openPlaylistModalForTopTracks
                     : openPlaylistModalForSingles}

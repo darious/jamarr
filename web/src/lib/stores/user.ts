@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store';
 import type { User } from '$lib/api';
 import { fetchCurrentUser } from '$lib/api';
-import { setThemeAccent, type AccentColor } from './theme';
+import { setThemeAccent, setThemeMode, type AccentColor } from './theme';
 
 export const currentUser = writable<User | null>(null);
 export const isAuthChecked = writable(false);
@@ -30,6 +30,9 @@ export async function hydrateUser(fetchFn: any = fetch): Promise<User | null> {
 
         // Apply user's accent color preference if set
         applyUserAccentColor(user);
+        if (user?.theme_mode) {
+            setThemeMode(user.theme_mode === 'light' || user.theme_mode === 'dark' ? user.theme_mode : 'dark');
+        }
 
         return user;
     } catch (e) {
