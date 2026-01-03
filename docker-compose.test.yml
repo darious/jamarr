@@ -3,9 +3,11 @@ services:
     image: postgres:18.1-alpine
     network_mode: "host"
     command: postgres -p 8109
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: jamarr_test
-      POSTGRES_PASSWORD: jamarr_test
+      POSTGRES_USER: ${TEST_DB_USER}
+      POSTGRES_PASSWORD: ${TEST_DB_PASSWORD}
       POSTGRES_DB: jamarr_test
     # No persistent volume needed - we want it fresh every time, 
     # but kept alive if tests fail for debugging.
@@ -16,11 +18,13 @@ services:
     network_mode: "host"
     depends_on:
       - jamarr_test_db
+    env_file:
+      - .env
     environment:
       DB_HOST: 127.0.0.1
       DB_PORT: 8109
-      DB_USER: jamarr_test
-      DB_PASS: jamarr_test
+      DB_USER: ${TEST_DB_USER}
+      DB_PASS: ${TEST_DB_PASSWORD}
       DB_NAME: jamarr_test
     working_dir: /app
     volumes:

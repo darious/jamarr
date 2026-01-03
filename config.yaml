@@ -1,30 +1,11 @@
 music_path: "/app/music/"
 
-spotify:
-  client_id: "46650a3fe727435b89284c4362af8294"
-  client_secret: "6871707a1bba4cc397531c268dfbce0c"
-
 musicbrainz:
-  root_url: "http://192.168.1.105:5000"
+  root_url: "https://musicbrainz.org"
   rate_limit: "none"
 
 qobuz:
   region: "gb-en"
-  app_id: "798273057"
-  secret: "806331c3b0b641da923b890aed01d04a"
-  email: "chris@darious.co.uk"
-  password: "QoSLD23mxgbuZ"
-
-tidal:
-  client_id: LCyOOH2KYtx0nF88
-  client_secret: AsIV7PFmMWOb1q4m3hCYSOnpYXXOrIOCmV2BEuL3A2c=
-
-lastfm:
-  apikey: a30695b94c48d8427a12ff777cfefc52
-  sharedsecret: 5a3d96df725dc290826cff852813199b
-
-fanarttv:
-  apikey: d0cf65020112c5f449efe5f7b0e71e90
 
 logging:
   level: "INFO"
@@ -35,5 +16,4 @@ logging:
 # Scanner concurrency
 max_workers: 16
 
-pearlarr:
-  url: "http://192.168.1.103:8112/download"
+pearlarr: {}
