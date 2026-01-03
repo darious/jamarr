@@ -1,14 +1,36 @@
 import { writable } from 'svelte/store';
 import type { User } from '$lib/api';
 import { fetchCurrentUser } from '$lib/api';
+import { setThemeAccent, type AccentColor } from './theme';
 
 export const currentUser = writable<User | null>(null);
 export const isAuthChecked = writable(false);
+
+// Map hex colors to accent names
+const hexToAccent: Record<string, AccentColor> = {
+    '#ff006e': 'pink',
+    '#00d9ff': 'cyan',
+    '#3b82f6': 'blue',
+    '#a855f7': 'purple',
+    '#f97316': 'orange',
+    '#eab308': 'yellow',
+};
+
+// Helper function to apply accent color from user data
+export function applyUserAccentColor(user: User | null) {
+    if (user?.accent_color && hexToAccent[user.accent_color]) {
+        setThemeAccent(hexToAccent[user.accent_color]);
+    }
+}
 
 export async function hydrateUser(fetchFn: any = fetch): Promise<User | null> {
     try {
         const user = await fetchCurrentUser(fetchFn);
         currentUser.set(user);
+
+        // Apply user's accent color preference if set
+        applyUserAccentColor(user);
+
         return user;
     } catch (e) {
         // If server is restarting (network error/502), do not log out immediately.
@@ -32,6 +54,7 @@ export async function hydrateUser(fetchFn: any = fetch): Promise<User | null> {
 
 export function setUser(user: User | null) {
     currentUser.set(user);
+    applyUserAccentColor(user);
 }
 
 export function clearUser() {

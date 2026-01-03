@@ -185,3 +185,53 @@ async def test_password_change(client: AsyncClient, db, auth_token):
         "current_password": new_pass,
         "new_password": "password123"
     })
+
+
+@pytest.mark.asyncio
+async def test_accent_color_preferences(client: AsyncClient, db, auth_token):
+    """Test accent color preferences endpoint"""
+    
+    # 1. Get current user - should have default accent color
+    response = await client.get("/api/auth/me")
+    assert response.status_code == 200
+    user_data = response.json()
+    assert "accent_color" in user_data
+    assert user_data["accent_color"] == "#ff006e"  # Default pink
+    
+    # 2. Update accent color to cyan
+    response = await client.patch("/api/auth/preferences", json={
+        "accent_color": "#00d9ff"
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["accent_color"] == "#00d9ff"
+    
+    # 3. Verify persistence
+    response = await client.get("/api/auth/me")
+    assert response.status_code == 200
+    assert response.json()["accent_color"] == "#00d9ff"
+    
+    # 4. Test invalid color format
+    response = await client.patch("/api/auth/preferences", json={
+        "accent_color": "invalid"
+    })
+    assert response.status_code == 400
+    assert "Invalid color format" in response.json()["detail"]
+    
+    # 5. Test invalid hex (wrong length)
+    response = await client.patch("/api/auth/preferences", json={
+        "accent_color": "#fff"
+    })
+    assert response.status_code == 400
+    
+    # 6. Update to another valid color (purple)
+    response = await client.patch("/api/auth/preferences", json={
+        "accent_color": "#a855f7"
+    })
+    assert response.status_code == 200
+    assert response.json()["accent_color"] == "#a855f7"
+    
+    # 7. Reset to default pink for other tests
+    await client.patch("/api/auth/preferences", json={
+        "accent_color": "#ff006e"
+    })

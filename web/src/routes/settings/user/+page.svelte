@@ -1,19 +1,27 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { onDestroy, onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
+  import { fade, scale } from "svelte/transition";
   import { changePassword, updateProfile } from "$lib/api";
   import TabButton from "$lib/components/TabButton.svelte";
+  import { themeAccent, type AccentColor } from "$lib/stores/theme";
   import {
     currentUser,
     hydrateUser,
     isAuthChecked,
     setUser,
-  } from "$stores/user";
+  } from "$lib/stores/user";
 
   let user = null;
   let authReady = false;
   let unsubUser: (() => void) | undefined;
   let unsubAuth: (() => void) | undefined;
+
+  // Subscribe to themeAccent to ensure UI stays in sync
+  let selectedAccent: AccentColor;
+  $: selectedAccent = $themeAccent;
+
+  let saveStatus: "idle" | "success" | "error" = "idle";
 
   let email = "";
   let displayName = "";
@@ -28,6 +36,21 @@
   let passwordMessage = "";
   let passwordError = "";
   let updatingPassword = false;
+
+  // Accent color state
+  // selectedAccent is declared above and reactive to store
+  let accentMessage = "";
+  let accentError = "";
+  let updatingAccent = false;
+
+  const accentColors: { name: AccentColor; label: string; color: string }[] = [
+    { name: "pink", label: "Pink", color: "#ff006e" },
+    { name: "cyan", label: "Cyan", color: "#00d9ff" },
+    { name: "blue", label: "Blue", color: "#3b82f6" },
+    { name: "purple", label: "Purple", color: "#a855f7" },
+    { name: "orange", label: "Orange", color: "#f97316" },
+    { name: "yellow", label: "Yellow", color: "#eab308" },
+  ];
 
   onMount(() => {
     unsubUser = currentUser.subscribe((value) => {
@@ -100,6 +123,36 @@
       updatingPassword = false;
     }
   }
+
+  async function saveAccentColor(accent: AccentColor) {
+    if (!user) return;
+    updatingAccent = true;
+    accentMessage = "";
+    accentError = "";
+    try {
+      const response = await fetch("/api/auth/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          accent_color: accentColors.find((c) => c.name === accent)?.color,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update accent color");
+      }
+
+      themeAccent.set(accent);
+      selectedAccent = accent;
+      accentMessage = "Accent color updated.";
+      setTimeout(() => (accentMessage = ""), 3000);
+    } catch (e: any) {
+      accentError = e?.message || "Failed to update accent color.";
+    } finally {
+      updatingAccent = false;
+    }
+  }
 </script>
 
 <div
@@ -108,10 +161,83 @@
   <div class="mx-auto max-w-5xl px-6 py-10">
     <div class="mb-8 flex flex-col gap-2">
       <p class="text-sm text-white/60">Settings</p>
-      <h1 class="text-3xl font-semibold">Account</h1>
+      <h1 class="text-3xl font-semibold">User Settings</h1>
       <p class="text-sm text-white/60">
-        Manage your email and password. Sessions stay signed in by default.
+        Manage your profile, appearance, and security settings.
       </p>
+    </div>
+
+    <!-- Appearance Section -->
+    <div
+      class="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur"
+    >
+      <div class="mb-4">
+        <h2 class="text-lg font-semibold">Appearance</h2>
+        <p class="text-sm text-white/60">
+          Customize the look and feel of your interface.
+        </p>
+      </div>
+
+      {#if accentMessage}
+        <div
+          class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100"
+        >
+          {accentMessage}
+        </div>
+      {/if}
+      {#if accentError}
+        <div
+          class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100"
+        >
+          {accentError}
+        </div>
+      {/if}
+
+      <div class="space-y-3">
+        <div class="block text-sm text-white/70">Accent Color</div>
+        <p class="text-xs text-white/50">
+          Choose your preferred accent color for buttons, highlights, and
+          interactive elements.
+        </p>
+        <div class="grid grid-cols-3 gap-3 sm:grid-cols-6">
+          {#each accentColors as { name, label, color }}
+            <button
+              type="button"
+              class="group relative flex flex-col items-center gap-2 rounded-xl border-2 p-3 transition-all hover:scale-105 {selectedAccent ===
+              name
+                ? 'border-accent bg-accent/10'
+                : 'border-white/10 bg-white/5 hover:border-white/20'}"
+              on:click={() => saveAccentColor(name)}
+              disabled={updatingAccent}
+            >
+              <div
+                class="h-8 w-8 rounded-full border-2 border-white/20 shadow-lg"
+                style="background-color: {color}"
+              />
+              <span
+                class="text-xs font-medium {selectedAccent === name
+                  ? 'text-accent'
+                  : 'text-white/70'}"
+              >
+                {label}
+              </span>
+              {#if selectedAccent === name}
+                <div
+                  class="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white"
+                >
+                  <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fill-rule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </div>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
     </div>
 
     <div class="grid gap-6 lg:grid-cols-2">

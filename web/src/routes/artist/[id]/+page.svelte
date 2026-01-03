@@ -1335,7 +1335,10 @@
   </main>
 </div>
 
-<AddToPlaylistModal bind:show={showPlaylistModal} trackIds={selectedTrackIds} />
+<AddToPlaylistModal
+  bind:visible={showPlaylistModal}
+  trackIds={selectedTrackIds}
+/>
 
 <style>
   .custom-scrollbar::-webkit-scrollbar {

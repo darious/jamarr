@@ -65,7 +65,6 @@
     // Queue-specific
     export let isCurrentlyPlaying: boolean = false;
     export let isPlaying: boolean = false;
-    export let showDragHandle: boolean = false;
 
     // Helper functions
     function formatDuration(seconds?: number): string {
