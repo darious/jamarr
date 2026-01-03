@@ -132,16 +132,23 @@ export interface User {
 
 export async function fetchArtists(
     fetchFn: any = fetch,
-    options: { limit?: number; offset?: number; name?: string; mbid?: string } = {}
+    options: { limit?: number; offset?: number; name?: string; mbid?: string, startsWith?: string } = {}
 ): Promise<Artist[]> {
     const params = new URLSearchParams();
     if (options.limit !== undefined) params.append('limit', options.limit.toString());
     if (options.offset !== undefined) params.append('offset', options.offset.toString());
     if (options.name !== undefined) params.append('name', options.name);
     if (options.mbid !== undefined) params.append('mbid', options.mbid);
+    if (options.startsWith !== undefined) params.append('starts_with', options.startsWith);
 
     const res = await fetchFn(`/api/artists?${params.toString()}`);
     if (!res.ok) throw new Error('Failed to fetch artists');
+    return await res.json();
+}
+
+export async function fetchArtistIndex(fetchFn: any = fetch): Promise<string[]> {
+    const res = await fetchFn('/api/artists/index');
+    if (!res.ok) throw new Error('Failed to fetch artist index');
     return await res.json();
 }
 
