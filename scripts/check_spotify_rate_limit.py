@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Check Spotify API rate limit status using credentials from config.yaml.
+Check Spotify API rate limit status using Spotify credentials from environment variables.
 """
 from __future__ import annotations
 
@@ -10,23 +10,15 @@ from datetime import timedelta
 from pathlib import Path
 
 import httpx
-import yaml
 
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+from app.config import get_spotify_credentials  # type: ignore
 
 
 def load_credentials() -> tuple[str, str]:
-    if not CONFIG_PATH.exists():
-        raise FileNotFoundError(f"Config file not found at {CONFIG_PATH}")
-    with CONFIG_PATH.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
-    spotify = data.get("spotify") or {}
-    client_id = spotify.get("client_id")
-    client_secret = spotify.get("client_secret")
-    if not client_id or not client_secret:
-        raise ValueError("spotify.client_id and spotify.client_secret must be set in config.yaml")
-    return str(client_id), str(client_secret)
+    return get_spotify_credentials()
 
 
 def fetch_access_token(client_id: str, client_secret: str) -> str:
