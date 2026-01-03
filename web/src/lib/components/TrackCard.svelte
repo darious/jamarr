@@ -53,6 +53,7 @@
     export let onPlay: (() => void) | undefined = undefined;
     export let onQueue: (() => void) | undefined = undefined;
     export let onAddToPlaylist: (() => void) | undefined = undefined;
+    export let onRemove: (() => void) | undefined = undefined;
     export let onClick: (() => void) | undefined = undefined;
 
     // Drag and drop support
@@ -108,8 +109,8 @@
         ? "grid-cols-[auto,auto,1fr,auto]"
         : "grid-cols-[auto,1fr,auto]";
 
-    $: containerClass = `w-full grid ${gridCols} items-center gap-4 px-3 py-2 rounded-xl hover:bg-white/5 group transition-colors text-left border relative cursor-pointer
-        ${isCurrentlyPlaying ? "bg-accent/10 border-accent border-2 shadow-[0_0_20px_var(--accent-glow)]" : "border-transparent hover:border-white/5"}
+    $: containerClass = `w-full grid ${gridCols} items-center gap-4 px-3 py-2 rounded-xl hover:bg-surface-2 group transition-colors text-left border relative cursor-pointer
+        ${isCurrentlyPlaying ? "bg-accent/10 border-accent border-2 shadow-[0_0_20px_var(--accent-glow)]" : "border-transparent hover:border-subtle"}
         ${isDragging ? "opacity-30 grayscale" : ""}`;
 
     function handleClick() {
@@ -144,7 +145,7 @@
     {/if}
     <!-- Index -->
     {#if showIndex && index !== undefined}
-        <span class="w-8 text-center text-sm text-white/40 font-mono"
+        <span class="w-8 text-center text-sm text-subtle font-mono"
             >{index}</span
         >
     {/if}
@@ -176,19 +177,17 @@
     <div class="min-w-0 space-y-0">
         <!-- Row 1: Track Title -->
         <p
-            class={`truncate text-base font-semibold ${isDisabled ? "text-white/40 line-through" : "text-white"}`}
+            class={`truncate text-base font-semibold ${isDisabled ? "text-subtle line-through" : "text-default"}`}
         >
             {track.title}
         </p>
 
         <!-- Row 2: Artist · Album · Year -->
-        <div
-            class="flex items-center gap-1.5 text-sm text-white/60 leading-tight"
-        >
+        <div class="flex items-center gap-1.5 text-sm text-muted leading-tight">
             {#if showArtist && artist}
                 <a
                     href={getArtistUrl()}
-                    class="hover:text-white hover:underline cursor-pointer truncate"
+                    class="hover:text-default hover:underline cursor-pointer truncate"
                     on:click|stopPropagation={() => {}}
                 >
                     {artist.name}
@@ -196,13 +195,13 @@
             {/if}
 
             {#if showArtist && artist && showAlbum && album}
-                <span class="text-white/40">·</span>
+                <span class="text-subtle">·</span>
             {/if}
 
             {#if showAlbum && album}
                 <a
                     href={getAlbumUrl()}
-                    class="hover:text-white hover:underline cursor-pointer truncate"
+                    class="hover:text-default hover:underline cursor-pointer truncate"
                     on:click|stopPropagation={() => {}}
                 >
                     {album.name}
@@ -210,15 +209,13 @@
             {/if}
 
             {#if showYear && album?.year}
-                <span class="text-white/40">·</span>
-                <span class="text-white/50">{album.year.substring(0, 4)}</span>
+                <span class="text-subtle">·</span>
+                <span class="text-muted">{album.year.substring(0, 4)}</span>
             {/if}
 
             {#if showPopularity && track.popularity}
-                <span class="text-white/40">·</span>
-                <span class="text-white/50"
-                    >{formatPlays(track.popularity)}</span
-                >
+                <span class="text-subtle">·</span>
+                <span class="text-muted">{formatPlays(track.popularity)}</span>
             {/if}
         </div>
     </div>
@@ -227,12 +224,12 @@
     <div class="flex items-center gap-6 ml-auto">
         <!-- Duration & Tech Details -->
         <div class="flex flex-col items-end gap-0.5 text-right">
-            <span class="text-sm text-white/50 tabular-nums font-mono">
+            <span class="text-sm text-subtle tabular-nums font-mono">
                 {formatDuration(track.duration_seconds)}
             </span>
             {#if showTechDetails}
                 <div
-                    class="flex items-center gap-2 text-xs text-white/30 uppercase tracking-wider font-medium min-h-[16px]"
+                    class="flex items-center gap-2 text-xs text-subtle uppercase tracking-wider font-medium min-h-[16px]"
                 >
                     {#if track.codec}
                         <span>{track.codec}</span>
@@ -312,6 +309,31 @@
                                 stroke-linejoin="round"
                                 stroke-width="2"
                                 d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
+                            />
+                        </svg>
+                    </IconButton>
+                {/if}
+
+                {#if onRemove}
+                    <IconButton
+                        variant="outline"
+                        size="sm"
+                        title="Remove from Playlist"
+                        onClick={onRemove}
+                        stopPropagation={true}
+                        className="hover:text-red-400 hover:border-red-400"
+                    >
+                        <svg
+                            class="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
                             />
                         </svg>
                     </IconButton>

@@ -39,11 +39,11 @@
 <section class="mx-auto flex w-full max-w-[1700px] flex-col gap-6 px-8 py-10">
   <div class="section-head">
     <div>
-      <p class="text-sm uppercase tracking-wide text-white/60">Browse</p>
-      <h1 class="text-2xl font-semibold">Albums</h1>
+      <p class="text-sm uppercase tracking-wide text-subtle">Browse</p>
+      <h1 class="text-2xl font-semibold text-default">Albums</h1>
     </div>
     <input
-      class="input input-lg w-72 border border-white/10 bg-white/5"
+      class="input input-lg w-72 border border-subtle bg-surface-2 text-default placeholder:text-muted"
       placeholder="Search albums"
       bind:value={search}
     />
@@ -131,7 +131,7 @@
             href={album.mbid || album.album_mbid
               ? `/album/${album.mbid || album.album_mbid}`
               : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
-            class="text-lg font-semibold truncate hover:underline cursor-pointer block"
+            class="text-lg font-semibold truncate hover:underline cursor-pointer block text-default"
           >
             {album.album}
           </a>
@@ -139,11 +139,11 @@
             href={album.artist_mbid
               ? `/artist/${album.artist_mbid}`
               : `/artist/${encodeURIComponent(album.artist_name)}`}
-            class="text-sm text-white/60 truncate hover:text-white cursor-pointer block"
+            class="text-sm text-muted truncate hover:text-default cursor-pointer block"
           >
             {album.artist_name}
           </a>
-          <p class="text-xs text-white/60">
+          <p class="text-xs text-subtle">
             {album.year ? album.year.substring(0, 4) : "—"} • {album.track_count ||
               0} tracks
           </p>

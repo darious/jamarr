@@ -18,7 +18,7 @@
 
 <button
     type="button"
-    class="group flex items-center gap-3 text-left w-full hover:bg-white/5 p-2 -ml-2 rounded-lg transition-colors {className} {disabled
+    class="group flex items-center gap-3 text-left w-full hover:bg-surface-2 p-2 -ml-2 rounded-lg transition-colors {className} {disabled
         ? 'opacity-50 cursor-not-allowed'
         : 'cursor-pointer'}"
     on:click={toggle}
@@ -27,8 +27,8 @@
     <div
         class={`relative flex items-center justify-center w-5 h-5 rounded border transition-all duration-200 ${
             checked
-                ? "bg-accent border-accent text-black"
-                : "bg-transparent border-white/30 group-hover:border-accent/50"
+                ? "bg-accent border-accent text-white"
+                : "bg-transparent border-subtle group-hover:border-accent/50"
         }`}
     >
         {#if checked}
@@ -47,7 +47,7 @@
         {/if}
     </div>
     <span
-        class="text-sm text-white/80 group-hover:text-white select-none pt-0.5"
+        class="text-sm text-muted group-hover:text-default select-none pt-0.5"
     >
         {label}
     </span>
