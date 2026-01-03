@@ -421,7 +421,7 @@
     {/if}
 
     <AddToPlaylistModal
-        bind:show={showPlaylistModal}
+        bind:visible={showPlaylistModal}
         trackIds={selectedTrackIds}
     />
 </div>

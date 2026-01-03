@@ -2,7 +2,7 @@ import { writable, derived, type Writable, type Readable } from 'svelte/store';
 import { browser } from '$app/environment';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
-export type AccentColor = 'pink' | 'cyan' | 'blue' | 'purple' | 'orange';
+export type AccentColor = 'pink' | 'cyan' | 'blue' | 'purple' | 'orange' | 'yellow';
 
 const STORAGE_KEY_MODE = 'jamarr-theme-mode';
 const STORAGE_KEY_ACCENT = 'jamarr-theme-accent';
@@ -20,7 +20,7 @@ function getInitialMode(): ThemeMode {
 function getInitialAccent(): AccentColor {
     if (!browser) return 'pink';
     const stored = localStorage.getItem(STORAGE_KEY_ACCENT);
-    if (stored === 'pink' || stored === 'cyan' || stored === 'blue' || stored === 'purple' || stored === 'orange') {
+    if (stored === 'pink' || stored === 'cyan' || stored === 'blue' || stored === 'purple' || stored === 'orange' || stored === 'yellow') {
         return stored;
     }
     return 'pink';
@@ -74,7 +74,7 @@ export function setThemeAccent(accent: AccentColor): void {
 
 export function cycleAccent(): void {
     themeAccent.update(current => {
-        const accents: AccentColor[] = ['pink', 'cyan', 'blue', 'purple', 'orange'];
+        const accents: AccentColor[] = ['pink', 'cyan', 'blue', 'purple', 'orange', 'yellow'];
         const currentIndex = accents.indexOf(current);
         const nextIndex = (currentIndex + 1) % accents.length;
         return accents[nextIndex];

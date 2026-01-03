@@ -345,10 +345,10 @@
                     </div>
                     <a
                       class="menu-item"
-                      href="/settings/account"
+                      href="/settings/user"
                       on:click={() => (showSettings = false)}
                     >
-                      Account Settings
+                      User Settings
                     </a>
                   {:else}
                     <a

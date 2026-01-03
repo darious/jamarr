@@ -124,6 +124,7 @@ export interface User {
     username: string;
     email: string;
     display_name: string;
+    accent_color?: string;
     created_at?: string | null;
     last_login?: string | null;
 }

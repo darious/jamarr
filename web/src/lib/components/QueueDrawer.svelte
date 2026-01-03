@@ -393,7 +393,7 @@
   </aside>
 
   <AddToPlaylistModal
-    bind:show={showPlaylistModal}
+    bind:visible={showPlaylistModal}
     trackIds={selectedTrackIds}
   />
 {/if}

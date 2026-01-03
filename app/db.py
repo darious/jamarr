@@ -256,7 +256,8 @@ async def init_db():
                 display_name TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 last_login_at TIMESTAMPTZ,
-                is_active BOOLEAN DEFAULT TRUE
+                is_active BOOLEAN DEFAULT TRUE,
+                accent_color TEXT DEFAULT '#ff006e'
             );
             
             -- Sessions
