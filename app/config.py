@@ -1,9 +1,16 @@
-import yaml
 import os
+import yaml
 
 CONFIG_PATH = "config.yaml"
 
 _config = None
+
+
+def _require_env(var_name: str) -> str:
+    value = os.environ.get(var_name)
+    if value is None or value == "":
+        raise ValueError(f"{var_name} must be set in the environment")
+    return value
 
 
 def load_config():
@@ -20,22 +27,24 @@ def load_config():
 
 
 def get_pearlarr_url():
-    return load_config().get("pearlarr", {}).get("url")
+    url = os.environ.get("PEARLARR_URL") or load_config().get("pearlarr", {}).get("url")
+    if not url:
+        raise ValueError("PEARLARR_URL must be set in the environment")
+    return url
 
 
 def get_music_path():
-    return load_config().get("music_path", "/root/music")
+    return os.environ.get("MUSIC_PATH") or load_config().get("music_path", "/root/music")
 
 
 def get_spotify_credentials():
-    cfg = load_config().get("spotify", {})
-    return cfg.get("client_id"), cfg.get("client_secret")
+    return _require_env("SPOTIFY_CLIENT_ID"), _require_env("SPOTIFY_CLIENT_SECRET")
 
 
 def get_musicbrainz_root_url():
-    return (
-        load_config().get("musicbrainz", {}).get("root_url", "https://musicbrainz.org")
-    )
+    return os.environ.get("MUSICBRAINZ_ROOT_URL") or load_config().get(
+        "musicbrainz", {}
+    ).get("root_url", "https://musicbrainz.org")
 
 
 def get_musicbrainz_rate_limit():
@@ -50,29 +59,25 @@ def get_qobuz_region():
 
 
 def get_qobuz_credentials():
-    cfg = load_config().get("qobuz", {})
     return (
-        cfg.get("app_id"),
-        cfg.get("secret"),
-        cfg.get("email"),
-        cfg.get("password")
+        _require_env("QOBUZ_APP_ID"),
+        _require_env("QOBUZ_SECRET"),
+        _require_env("QOBUZ_EMAIL"),
+        _require_env("QOBUZ_PASSWORD"),
     )
 
 
 def get_tidal_credentials():
-    cfg = load_config().get("tidal", {})
-    return cfg.get("client_id"), cfg.get("client_secret")
+    return _require_env("TIDAL_CLIENT_ID"), _require_env("TIDAL_CLIENT_SECRET")
 
 
 def get_fanarttv_api_key():
-    """Return the configured Fanart.tv API key, if provided."""
-    return load_config().get("fanarttv", {}).get("apikey")
+    """Return the configured Fanart.tv API key."""
+    return _require_env("FANARTTV_API_KEY")
 
 
 def get_lastfm_credentials():
-    config = load_config()
-    lastfm = config.get("lastfm", {})
-    return lastfm.get("apikey"), lastfm.get("sharedsecret")
+    return _require_env("LASTFM_API_KEY"), _require_env("LASTFM_SHARED_SECRET")
 
 
 def get_max_workers():

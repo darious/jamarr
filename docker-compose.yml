@@ -5,9 +5,11 @@ services:
     network_mode: "host"
     command: postgres -p 8110
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: jamarr
-      POSTGRES_PASSWORD: jamarr
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: jamarr
     volumes:
       - /mnt/config/q-docker/jamarr/postgres:/var/lib/postgresql/data
@@ -19,6 +21,8 @@ services:
     network_mode: "host"
     depends_on:
       - jamarr_db
+    env_file:
+      - .env
     volumes:
       - type: volume
         source: music
@@ -33,11 +37,10 @@ services:
       - HOST=0.0.0.0
       - HOST_IP=${HOST_IP:-127.0.0.1}
       - HOST_PORT=8111
-      # Database connection info (Hardcoded for now as requested)
       - DB_HOST=127.0.0.1
       - DB_PORT=8110
-      - DB_USER=jamarr
-      - DB_PASS=jamarr
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
       - DB_NAME=jamarr
 
 
