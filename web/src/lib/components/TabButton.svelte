@@ -20,10 +20,10 @@
     {disabled}
     class={`px-4 py-2 text-sm font-normal transition-all border-b-2 flex items-center ${
         active
-            ? "text-white border-accent"
+            ? "text-default border-accent"
             : disabled
-              ? "text-white/30 border-transparent cursor-not-allowed"
-              : "text-white/60 border-transparent hover:text-white hover:border-accent"
+              ? "text-subtle border-transparent cursor-not-allowed"
+              : "text-muted border-transparent hover:text-default hover:border-accent"
     } ${className}`}
     on:click={handleClick}
     {title}

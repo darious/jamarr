@@ -48,17 +48,27 @@ export const effectiveMode: Readable<'light' | 'dark'> = derived(
 if (browser) {
     themeMode.subscribe((mode) => {
         localStorage.setItem(STORAGE_KEY_MODE, mode);
+        document.documentElement.setAttribute('data-theme', mode); // Apply theme mode to DOM
     });
 
     themeAccent.subscribe((accent) => {
         localStorage.setItem(STORAGE_KEY_ACCENT, accent);
+        document.documentElement.setAttribute('data-accent', accent); // Apply accent to DOM immediately
     });
 
     // Listen for system theme changes
     if (window.matchMedia) {
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-            // Trigger a re-evaluation of effectiveMode
-            themeMode.update(m => m);
+            // Trigger a re-evaluation of effectiveMode if needed, but currently effectiveMode is derived based on themeMode='system'.
+            // If themeMode is already 'system', derived store updates automatically if we used window listener there?
+            // Actually derived store is only evaluated primarily when dependency changes.
+            // If the dependency (themeMode) doesn't change, we need another signal.
+            // But lets keep it simple: manual explicit toggle for now is what we want.
+            const current = getInitialMode();
+            if (current === 'system') {
+                // Force update
+                themeMode.update(n => n);
+            }
         });
     }
 }

@@ -40,6 +40,7 @@ class UpdateProfileBody(BaseModel):
 
 class UpdatePreferencesBody(BaseModel):
     accent_color: Optional[str] = None
+    theme_mode: Optional[str] = None  # 'light' or 'dark'
 
 
 class ChangePasswordBody(BaseModel):
@@ -66,6 +67,7 @@ def _public_user_dict(row: asyncpg.Record) -> dict:
         "email": row["email"],
         "display_name": row["display_name"] or row["username"],
         "accent_color": row.get("accent_color") or "#ff006e",
+        "theme_mode": row.get("theme_mode") or "dark",
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "last_login": row["last_login_at"].isoformat()
         if row["last_login_at"]
@@ -105,6 +107,7 @@ async def signup(
     password_hash = hash_password(payload.password)
 
     # Insert new user
+    # Note: theme_mode defaults to dark in DB schema, so we don't need to explicit insert it unless user could choose at signup
     user = await db.fetchrow(
         """
         INSERT INTO "user" (username, email, password_hash, display_name, created_at, last_login_at)
@@ -270,8 +273,11 @@ async def update_preferences(
     response: Response,
     db: asyncpg.Connection = Depends(get_db),
 ):
-    """Update user preferences (accent color, etc.)"""
+    """Update user preferences (accent color, theme mode)"""
     user, token = await require_current_user(request, db)
+    
+    updates = []
+    values = []
     
     # Validate accent color if provided
     if payload.accent_color:
@@ -281,11 +287,23 @@ async def update_preferences(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid color format. Must be hex color like #ff006e",
             )
+        updates.append(f"accent_color = ${len(values) + 1}")
+        values.append(payload.accent_color)
         
+    if payload.theme_mode:
+        if payload.theme_mode not in ['dark', 'light']:
+             raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid theme mode. Must be 'dark' or 'light'",
+            )
+        updates.append(f"theme_mode = ${len(values) + 1}")
+        values.append(payload.theme_mode)
+        
+    if updates:
+        values.append(user["id"])
         await db.execute(
-            'UPDATE "user" SET accent_color = $1 WHERE id = $2',
-            payload.accent_color,
-            user["id"],
+            f'UPDATE "user" SET {", ".join(updates)} WHERE id = ${len(values)}',
+            *values
         )
     
     _set_session_cookie(response, token)

@@ -235,3 +235,41 @@ async def test_accent_color_preferences(client: AsyncClient, db, auth_token):
     await client.patch("/api/auth/preferences", json={
         "accent_color": "#ff006e"
     })
+
+
+@pytest.mark.asyncio
+async def test_theme_mode_preferences(client: AsyncClient, db, auth_token):
+    """Test theme mode preferences endpoint"""
+    
+    # 1. Get current user - should have default theme mode
+    response = await client.get("/api/auth/me")
+    assert response.status_code == 200
+    user_data = response.json()
+    assert "theme_mode" in user_data
+    assert user_data["theme_mode"] == "dark"  # Default
+    
+    # 2. Update theme mode to light
+    response = await client.patch("/api/auth/preferences", json={
+        "theme_mode": "light"
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["theme_mode"] == "light"
+    
+    # 3. Verify persistence
+    response = await client.get("/api/auth/me")
+    assert response.status_code == 200
+    assert response.json()["theme_mode"] == "light"
+    
+    # 4. Test invalid theme mode
+    response = await client.patch("/api/auth/preferences", json={
+        "theme_mode": "invalid"
+    })
+    assert response.status_code == 400
+    assert "Invalid theme mode" in response.json()["detail"]
+    
+    # 5. Reset to default dark
+    await client.patch("/api/auth/preferences", json={
+        "theme_mode": "dark"
+    })
+

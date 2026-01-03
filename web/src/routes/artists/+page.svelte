@@ -46,14 +46,14 @@
 
 <section class="mx-auto flex w-full max-w-[1700px] flex-col gap-10 px-8 py-10">
   <div
-    class="section-head sticky top-0 z-20 bg-surface-50/80 backdrop-blur-xl py-4 -mx-4 px-4 rounded-b-2xl transition-all border-b border-white/5 shadow-lg"
+    class="section-head sticky top-0 z-20 bg-surface-50/80 backdrop-blur-xl py-4 -mx-4 px-4 rounded-b-2xl transition-all border-b border-subtle shadow-lg"
   >
     <div
       class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
     >
       <div>
-        <p class="text-sm uppercase tracking-wide text-white/60">Browse</p>
-        <h2 class="text-2xl font-semibold">Artists A–Z</h2>
+        <p class="text-sm uppercase tracking-wide text-muted">Browse</p>
+        <h2 class="text-2xl font-semibold text-default">Artists A–Z</h2>
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <div class="flex items-center gap-2 mr-2">
@@ -76,14 +76,14 @@
         </div>
         <div class="flex flex-wrap gap-2">
           {#if groupedArtists.length === 0}
-            <div class="text-white/40 text-sm italic py-1">
+            <div class="text-muted text-sm italic py-1">
               No artists found (Check filter)
             </div>
           {/if}
           {#each groupedArtists as [letter]}
             <a
               href={`#group-${letter}`}
-              class="inline-flex items-center justify-center h-8 min-w-[2rem] px-2 rounded-full border border-white/10 bg-white/5 text-xs font-semibold text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+              class="inline-flex items-center justify-center h-8 min-w-[2rem] px-2 rounded-full border border-subtle bg-surface-2 text-xs font-semibold text-muted hover:bg-surface-3 hover:text-default transition-colors"
             >
               {letter}
             </a>
@@ -97,11 +97,11 @@
         <div id={`group-${letter}`} class="space-y-4">
           <div class="flex items-center gap-3">
             <div
-              class="h-10 w-10 rounded-xl border border-white/10 bg-white/5 text-center text-xl font-semibold leading-10"
+              class="h-10 w-10 rounded-xl border border-subtle bg-surface-2 text-center text-xl font-semibold leading-10 text-default"
             >
               {letter}
             </div>
-            <div class="text-sm text-white/60">{list.length} artists</div>
+            <div class="text-sm text-muted">{list.length} artists</div>
           </div>
 
           <div
@@ -112,7 +112,9 @@
                 class="grid-card block cursor-pointer overflow-hidden focus:outline-none focus:ring-2 focus:ring-primary-400"
                 href={`/artist/${artist.mbid}`}
               >
-                <div class="aspect-square overflow-hidden rounded-xl">
+                <div
+                  class="aspect-square overflow-hidden rounded-xl bg-surface-2"
+                >
                   <img
                     src={artist.art_sha1
                       ? `/art/file/${artist.art_sha1}`
@@ -124,10 +126,10 @@
                   />
                 </div>
                 <div class="mt-3 space-y-1">
-                  <p class="text-base font-semibold line-clamp-1">
+                  <p class="text-base font-semibold line-clamp-1 text-default">
                     {artist.name}
                   </p>
-                  <p class="text-xs text-white/60 line-clamp-2">
+                  <p class="text-xs text-muted line-clamp-2">
                     {artist.bio || "No bio yet."}
                   </p>
                 </div>

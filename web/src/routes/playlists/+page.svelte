@@ -212,7 +212,7 @@
         </div>
     {:else if playlists.length === 0}
         <div
-            class="flex flex-col items-center justify-center p-12 text-center text-white/50"
+            class="flex flex-col items-center justify-center p-12 text-center text-muted"
         >
             <p class="text-lg">No playlists yet</p>
             <div class="mt-4">
@@ -234,11 +234,13 @@
         >
             {#each sortedPlaylists as p (p.id)}
                 <div
-                    class="group relative block bg-white/5 rounded-xl overflow-hidden hover:bg-white/10 transition-colors duration-200"
+                    class="group relative block surface-glass-panel rounded-xl overflow-hidden hover:bg-surface-2 transition-all duration-300 hover:scale-105 hover:z-10 hover:shadow-xl"
                     in:fade
                 >
                     <!-- Artwork Grid -->
-                    <div class="aspect-square w-full bg-black/50 relative">
+                    <div
+                        class="aspect-square w-full bg-surface-3 relative transition-transform duration-300"
+                    >
                         <!-- Link for the image itself -->
                         <a href="/playlists/{p.id}" class="block w-full h-full">
                             {#if p.thumbnails && p.thumbnails.length > 0}
@@ -261,7 +263,7 @@
                                 {/if}
                             {:else}
                                 <div
-                                    class="flex items-center justify-center w-full h-full text-white/20"
+                                    class="flex items-center justify-center w-full h-full text-subtle bg-surface-2"
                                 >
                                     <svg
                                         class="w-12 h-12"
@@ -282,10 +284,10 @@
                             <!-- Private Indicator -->
                             {#if !p.is_public}
                                 <div
-                                    class="absolute top-2 right-2 bg-black/60 p-1 rounded-full backdrop-blur-sm z-10"
+                                    class="absolute top-2 right-2 bg-surface-3 p-1 rounded-full backdrop-blur-sm z-10"
                                 >
                                     <svg
-                                        class="w-3 h-3 text-white/70"
+                                        class="w-3 h-3 text-muted"
                                         fill="none"
                                         stroke="currentColor"
                                         viewBox="0 0 24 24"
@@ -303,10 +305,10 @@
                         <!-- Hover Overlay with Buttons -->
                         <!-- Position absolute on top of the link, intercepting clicks -->
                         <div
-                            class="absolute inset-0 flex items-center justify-center gap-3 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 backdrop-blur-[2px] z-20 pointer-events-none"
+                            class="absolute inset-0 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20 pointer-events-none"
                         >
                             <IconButton
-                                variant="outline"
+                                variant="primary"
                                 title="Play"
                                 className="pointer-events-auto"
                                 onClick={(e) => handlePlay(e, p.id)}
@@ -319,7 +321,7 @@
                                 >
                             </IconButton>
                             <IconButton
-                                variant="outline"
+                                variant="primary"
                                 title="Add to Queue"
                                 className="pointer-events-auto"
                                 onClick={(e) => handleAddToQueue(e, p.id)}
@@ -340,12 +342,12 @@
                         <!-- Heading link -->
                         <a href="/playlists/{p.id}" class="block">
                             <div
-                                class="font-bold text-white truncate text-lg hover:underline decoration-white/50 underline-offset-4"
+                                class="font-bold text-default truncate text-lg hover:underline decoration-subtle underline-offset-4"
                             >
                                 {p.name}
                             </div>
                         </a>
-                        <div class="text-white/50 text-xs mt-1">
+                        <div class="text-muted text-xs mt-1">
                             {p.track_count} tracks • {p.is_public
                                 ? "Shared"
                                 : "Private"}
@@ -364,25 +366,25 @@
             <div
                 class="surface-glass-popover rounded-2xl w-full max-w-md p-6 shadow-2xl scale-100 transition-all"
             >
-                <h2 class="text-2xl font-bold mb-6 font-display">
+                <h2 class="text-2xl font-bold mb-6 font-display text-default">
                     Create Playlist
                 </h2>
                 <div class="space-y-4">
                     <div class="form-control">
                         <label class="label" for="playlist-name">
-                            <span class="label-text">Name</span>
+                            <span class="label-text text-default">Name</span>
                         </label>
                         <input
                             id="playlist-name"
                             type="text"
                             bind:value={newName}
                             placeholder="My Awesome Playlist"
-                            class="input input-bordered bg-white/5 border-white/10 focus:border-primary-500 w-full"
+                            class="input bg-surface-2 border-subtle focus:border-accent w-full text-default"
                         />
                     </div>
                     <div class="form-control">
                         <label class="label" for="playlist-desc">
-                            <span class="label-text"
+                            <span class="label-text text-default"
                                 >Description (Optional)</span
                             >
                         </label>
@@ -390,7 +392,7 @@
                             id="playlist-desc"
                             bind:value={newDesc}
                             placeholder="Songs for coding..."
-                            class="textarea textarea-bordered bg-white/5 border-white/10 focus:border-primary-500 w-full"
+                            class="textarea textarea-bordered bg-surface-2 border-subtle focus:border-accent w-full text-default"
                         ></textarea>
                     </div>
                     <div class="form-control">
@@ -398,7 +400,7 @@
                             bind:checked={newPublic}
                             label="Public Playlist"
                         />
-                        <p class="text-xs text-white/40 ml-7 mt-1">
+                        <p class="text-xs text-subtle ml-7 mt-1">
                             Only visible to you.
                         </p>
                     </div>

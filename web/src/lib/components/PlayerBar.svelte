@@ -490,14 +490,14 @@
 </script>
 
 <div
-  class="fixed bottom-0 w-full bg-surface-900/75 backdrop-blur-xl border-t border-white/10 p-4 text-white z-50"
+  class="fixed bottom-0 w-full surface-glass-panel border-t border-subtle p-4 text-default z-50"
 >
   <div class="flex items-center justify-between max-w-[1700px] mx-auto">
     <!-- Track Info -->
     <div class="flex items-center gap-4 w-1/3">
       {#if currentTrack}
         <div
-          class="relative h-14 w-14 flex-shrink-0 rounded bg-surface-800 overflow-hidden group"
+          class="relative h-14 w-14 flex-shrink-0 rounded bg-surface-3 overflow-hidden group"
         >
           <img
             src={currentTrack.art_sha1
@@ -511,7 +511,10 @@
             class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
             on:click={toggleQueue}
           >
-            <div class="btn btn-outline btn-sm">
+            <!-- Overlay remains dark on artwork -->
+            <div
+              class="btn btn-outline btn-sm border-white text-white hover:bg-white/20"
+            >
               <svg
                 class="w-5 h-5"
                 fill="none"
@@ -528,11 +531,13 @@
           </button>
         </div>
         <div class="min-w-0">
-          <div class="font-medium truncate">{currentTrack.title}</div>
-          <div class="text-sm text-white/60 truncate">
+          <div class="font-medium truncate text-default">
+            {currentTrack.title}
+          </div>
+          <div class="text-sm text-muted truncate">
             {currentTrack.artist}
           </div>
-          <div class="flex items-center gap-2 text-xs text-white/40 mt-0.5">
+          <div class="flex items-center gap-2 text-xs text-subtle mt-0.5">
             {#if currentTrack.codec}
               <span class="uppercase">{currentTrack.codec}</span>
             {/if}
@@ -553,7 +558,7 @@
           </div>
         </div>
       {:else}
-        <div class="text-white/40">No track playing</div>
+        <div class="text-muted">No track playing</div>
       {/if}
     </div>
 
@@ -588,9 +593,7 @@
       </div>
 
       <!-- Progress -->
-      <div
-        class="flex items-center gap-2 w-full max-w-md text-xs text-white/60"
-      >
+      <div class="flex items-center gap-2 w-full max-w-md text-xs text-muted">
         <span>{formatTime(progress)}</span>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <div
@@ -604,17 +607,17 @@
         >
           <!-- Background Track -->
           <div
-            class="absolute w-full h-1 bg-white/20 rounded-full overflow-hidden"
+            class="absolute w-full h-1 bg-surface-3 rounded-full overflow-hidden"
           >
             <!-- Filled Track -->
             <div
-              class="h-full bg-white transition-all duration-100 ease-linear"
+              class="h-full bg-primary-500 transition-all duration-100 ease-linear"
               style="width: {(progress / (duration || 1)) * 100}%"
             ></div>
           </div>
           <!-- Thumb (visible on hover) -->
           <div
-            class="absolute h-3 w-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+            class="absolute h-3 w-3 bg-white border border-subtle rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
             style="left: {(progress / (duration || 1)) * 100}%"
           ></div>
         </div>
@@ -689,12 +692,12 @@
         <div class="flex items-center gap-2 group">
           <VolumeControl
             showIcon={true}
-            iconClass="h-5 w-5 text-white/60"
+            iconClass="h-5 w-5 text-muted"
             sliderClass="w-24 transition-opacity"
             sliderStyle=""
           />
         </div>
-        <div class="text-xs text-white/40">{deviceName}</div>
+        <div class="text-xs text-subtle">{deviceName}</div>
       </div>
       <button
         class="btn btn-outline btn-sm"
@@ -720,7 +723,7 @@
         on:click={toggleQueue}
       >
         <svg
-          class="h-5 w-5"
+          class="h-5 w-6"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
