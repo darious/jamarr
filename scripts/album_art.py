@@ -17,11 +17,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageFile
 
 
 MAX_DIM = 2800
 DPI = (72, 72)
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 def build_output_path(input_path: Path) -> Path:
@@ -66,8 +67,8 @@ def save_jpeg_atomic(im: Image.Image, out_path: Path) -> None:
     os.close(fd)
     tmp_path = Path(tmp_name)
 
-    try:
-        im.save(
+    def _save_standard(img: Image.Image) -> None:
+        img.save(
             tmp_path,
             format="JPEG",
             quality=100,           # screenshot: Quality 100
@@ -76,6 +77,20 @@ def save_jpeg_atomic(im: Image.Image, out_path: Path) -> None:
             subsampling=0,         # 4:4:4 (best quality)
             dpi=DPI,               # 72dpi
         )
+
+    def _save_plain(img: Image.Image) -> None:
+        img.save(tmp_path, format="JPEG", quality=95)
+
+    try:
+        try:
+            _save_standard(im)
+        except OSError:
+            # Rebuild buffer and retry, then fall back to plain save.
+            rebuilt = Image.frombytes(im.mode, im.size, im.tobytes())
+            try:
+                _save_standard(rebuilt)
+            except OSError:
+                _save_plain(rebuilt)
         tmp_path.replace(out_path)
     finally:
         if tmp_path.exists():
