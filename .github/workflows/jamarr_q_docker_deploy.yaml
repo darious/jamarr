@@ -1,0 +1,132 @@
+name: Deploy jamarr to q-docker
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      TARGET_HOST: REDACTED_IP
+      TARGET_USER: root
+      TARGET_DIR: /root/jamarr
+
+    steps:
+    - name: Install OpenVPN
+      run: sudo apt-get update && sudo apt-get install -y openvpn traceroute
+
+    - name: Set up VPN configuration
+      run: echo "${{ secrets.VPN_CONFIG }}" > vpn-config.ovpn
+
+    - name: Connect to VPN
+      run: |
+        sudo openvpn --config vpn-config.ovpn \
+          --daemon \
+          --writepid /tmp/openvpn.pid \
+          --log /tmp/openvpn.log \
+          --verb 4 \
+          --data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-128-CBC \
+          --data-ciphers-fallback AES-128-CBC
+        sudo chmod 644 /tmp/openvpn.log
+
+    - name: Wait for VPN (don’t fail yet)
+      id: vpnwait
+      shell: bash
+      run: |
+        set +e
+        timeout 60 bash -lc 'until sudo grep -q "Initialization Sequence Completed" /tmp/openvpn.log; do sleep 1; done'
+        echo "wait_exit=$?" >> "$GITHUB_OUTPUT"
+
+    - name: Dump OpenVPN log on failure
+      if: ${{ steps.vpnwait.outputs.wait_exit != '0' }}
+      run: |
+        echo "=== openvpn log (tail) ==="
+        sudo tail -n 400 /tmp/openvpn.log || true
+        echo "=== ip route ==="
+        ip route || true
+        echo "=== resolv.conf ==="
+        cat /etc/resolv.conf || true
+
+    - name: Fail if VPN not up
+      run: |
+        if [ "${{ steps.vpnwait.outputs.wait_exit }}" != "0" ]; then
+          echo "VPN did not come up"
+          exit 1
+        fi
+
+    - name: Debug routing table
+      run: ip route
+
+    - name: Debug DNS
+      run: cat /etc/resolv.conf
+
+    - name: Verify VPN connection
+      run: curl ifconfig.me
+
+    - name: Test VPN connection by pinging target
+      run: ping -c 3 "$TARGET_HOST"
+
+    - name: Traceroute to target
+      run: traceroute "$TARGET_HOST"
+
+    - name: Create secret files
+      run: |
+        umask 077
+        printf '%s' "${{ secrets.JAMARR_ENV }}" > jamarr_env
+
+    - name: Run deployment on server
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      run: |
+        set -euo pipefail
+
+        mkdir -p ~/.ssh
+        umask 077
+        echo "${SSH_PRIVATE_KEY}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+
+        ssh-keyscan -H "$TARGET_HOST" >> ~/.ssh/known_hosts
+
+        SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10"
+
+        # Sanity check SSH (after key + known_hosts are in place)
+        ssh $SSH_OPTS "$TARGET_USER@$TARGET_HOST" 'echo "SSH OK: $(hostname) $(date -Is)"'
+
+        ssh $SSH_OPTS "$TARGET_USER@$TARGET_HOST" "export TARGET_DIR=$TARGET_DIR; bash -s" <<'EOF'
+        set -euo pipefail
+
+        # Check the CORRECT directory for the .git folder
+        if [ -d "$TARGET_DIR/.git" ]; then
+            echo "Existing repo found. Pulling updates..."
+            cd "$TARGET_DIR"
+            git pull --rebase
+        else
+            echo "Repo not found or corrupt. Cleaning and cloning..."
+            rm -rf "$TARGET_DIR"
+            git clone git@github.com:darious/jamarr.git "$TARGET_DIR"
+        fi
+        EOF
+
+        # copy over the env file with all the secrets
+        scp $SSH_OPTS jamarr_env "$TARGET_USER@$TARGET_HOST:$TARGET_DIR/.env"
+
+        # now update and deploy
+        ssh $SSH_OPTS "$TARGET_USER@$TARGET_HOST" "export TARGET_DIR=$TARGET_DIR; bash -s" <<'EOF'
+        set -euo pipefail
+        cd "$TARGET_DIR"
+        ./update.sh
+        EOF
+
+    - name: Cleanup secrets
+      if: always()
+      run: |
+        rm -f vpn-config.ovpn jamarr_env || true
+
+    - name: Disconnect VPN
+      if: always()
+      run: |
+        if [ -f /tmp/openvpn.pid ]; then
+          sudo kill "$(cat /tmp/openvpn.pid)" || true
+        fi
