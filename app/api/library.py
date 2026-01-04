@@ -164,7 +164,7 @@ async def get_artists(
     if starts_with:
         if starts_with == "#":
             # Filter for non-alphabetic, allowing for common punctuation/numbers
-            query += f" AND a.sort_name !~* '^[a-z]'"
+            query += " AND a.sort_name !~* '^[a-z]'"
         elif len(starts_with) == 1:
             query += f" AND a.sort_name ILIKE ${param_num} || '%'"
             params.append(starts_with)
