@@ -74,17 +74,21 @@
         <div class="flex bg-surface-2 rounded-lg p-1 gap-1">
           <TabButton
             active={!showAllArtists}
-            onClick={() => (showAllArtists = false)}
+            onClick={() => {
+              showAllArtists = false;
+            }}
             size="sm"
           >
-            Primary
+            Top 20
           </TabButton>
           <TabButton
             active={showAllArtists}
-            onClick={() => (showAllArtists = true)}
+            onClick={() => {
+              showAllArtists = true;
+            }}
             size="sm"
           >
-            All
+            All Artists
           </TabButton>
         </div>
       </div>

@@ -640,7 +640,12 @@ async def get_client_ip_endpoint(request: Request):
 
 @router.get("/api/player/history")
 async def get_playback_history(
-    response: Response, scope: str = "all", request: Request = None
+    response: Response,
+    scope: str = "all",
+    days: int = 7,
+    page: int = 1,
+    limit: int = 20,
+    request: Request = None,
 ):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
@@ -651,11 +656,37 @@ async def get_playback_history(
             if request
             else (None, None)
         )
-        filter_clause = ""
-        params = ()
+        # Date filter
+        from datetime import timedelta
+
+        # Ensure days is valid
+        days = max(1, min(days, 365))
+        
+        where_clauses = ["DATE(h.timestamp) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
+        params_list = [timedelta(days=-(days - 1))]
+        
         if scope == "mine" and user_row:
-            filter_clause = "WHERE h.user_id = $1"
-            params = (user_row["id"],)
+            where_clauses.append("h.user_id = $2")
+            params_list.append(user_row["id"])
+            
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+        
+        # Pagination
+        page = max(1, page)
+        limit = max(1, min(limit, 100))
+        offset = (page - 1) * limit
+        
+        # Add offset/limit to params (adjusting indices)
+        # params_list currently has 1 or 2 items
+        params_list.append(limit)
+        params_list.append(offset)
+        
+        # Calculate indices for SQL placeholders
+        # $1 is duration
+        # $2 is user_id (optional)
+        # Limit is next, Offset is last
+        limit_idx = len(params_list) - 1
+        offset_idx = len(params_list)
 
         query = f"""
             SELECT 
@@ -668,10 +699,11 @@ async def get_playback_history(
             JOIN track t ON h.track_id = t.id
             LEFT JOIN artwork a ON t.artwork_id = a.id
             LEFT JOIN "user" u ON u.id = h.user_id
-            {filter_clause}
+            {where_sql}
             ORDER BY h.timestamp DESC
+            LIMIT ${limit_idx} OFFSET ${offset_idx}
         """
-        rows = await db.fetch(query, *params)
+        rows = await db.fetch(query, *params_list)
         history = []
         for row in rows:
             history.append(

@@ -14,7 +14,7 @@ import httpx
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.config import get_spotify_credentials  # type: ignore
+from app.config import get_spotify_credentials  # type: ignore # noqa: E402
 
 
 def load_credentials() -> tuple[str, str]:

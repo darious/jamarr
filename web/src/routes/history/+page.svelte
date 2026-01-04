@@ -32,6 +32,7 @@
     }>;
     scope: string;
     days: number;
+    page: number;
     stats: {
       daily: { day: string; plays: number }[];
       artists: {
@@ -61,6 +62,8 @@
 
   let scope = data.scope || "all";
   let days = data.days || 7;
+  $: page = data.page || 1;
+  $: hasNextPage = data.history.length === 20; // Assuming limit is 20
   $: dailyMax = Math.max(
     ...(data.stats.daily?.map((d) => Number(d.plays) || 0) || [1]),
     1,
@@ -110,14 +113,24 @@
   function switchScope(nextScope: string) {
     if (scope === nextScope) return;
     scope = nextScope;
-    goto(`/history?scope=${scope}&days=${days}`, { replaceState: true });
+    goto(`/history?scope=${scope}&days=${days}&page=1`, { replaceState: true }); // Reset to page 1
   }
 
   function updateDays(event: Event) {
     const val = parseInt((event.currentTarget as HTMLInputElement).value, 10);
     if (!Number.isFinite(val)) return;
     days = Math.max(1, Math.min(val, 365));
-    goto(`/history?scope=${scope}&days=${days}`, { replaceState: true });
+    goto(`/history?scope=${scope}&days=${days}&page=1`, { replaceState: true }); // Reset to page 1
+  }
+
+  function nextPage() {
+    if (!hasNextPage) return;
+    goto(`/history?scope=${scope}&days=${days}&page=${page + 1}`);
+  }
+
+  function prevPage() {
+    if (page <= 1) return;
+    goto(`/history?scope=${scope}&days=${days}&page=${page - 1}`);
   }
 </script>
 
@@ -453,5 +466,24 @@
         </div>
       {/each}
     {/if}
+  </div>
+
+  <!-- Pagination -->
+  <div class="flex items-center justify-between p-4 glass-panel">
+    <button
+      class="px-4 py-2 text-sm font-medium rounded-lg hover:bg-surface-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      disabled={page <= 1}
+      on:click={prevPage}
+    >
+      Previous
+    </button>
+    <span class="text-sm text-subtle">Page {page}</span>
+    <button
+      class="px-4 py-2 text-sm font-medium rounded-lg hover:bg-surface-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      disabled={!hasNextPage}
+      on:click={nextPage}
+    >
+      Next
+    </button>
   </div>
 </section>
