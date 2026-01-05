@@ -505,9 +505,11 @@ class Scanner:
             for mbid in aa_ids:
                  # Ensure artist exists
                  await db.execute("""
-                    INSERT INTO artist (mbid, name, updated_at) VALUES ($1, $2, NOW()) 
-                    ON CONFLICT (mbid) DO NOTHING
-                 """, mbid, tags.get("album_artist") or "Various Artists") # Fallback name
+                    INSERT INTO artist (mbid, name, sort_name, updated_at) VALUES ($1, $2, $3, NOW()) 
+                    ON CONFLICT (mbid) DO UPDATE SET
+                        sort_name = COALESCE(artist.sort_name, EXCLUDED.sort_name),
+                        updated_at = NOW()
+                 """, mbid, tags.get("album_artist") or "Various Artists", tags.get("album_artist_sort") or tags.get("album_artist") or "Various Artists")
                  
                  # Link as Primary
                  await upsert_artist_album(db, mbid, album_mbid, "primary")

@@ -134,20 +134,20 @@ async def get_artists(
             COALESCE(ac.primary_album_count, 0) as primary_album_count,
             COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
         FROM artist a
-        JOIN track_artist ta ON a.mbid = ta.artist_mbid
+        LEFT JOIN track_artist ta ON a.mbid = ta.artist_mbid
+        LEFT JOIN artist_album aa ON a.mbid = aa.artist_mbid
         LEFT JOIN artwork ar ON a.artwork_id = ar.id
         LEFT JOIN external_link el ON a.mbid = el.entity_id AND el.entity_type = 'artist'
         LEFT JOIN (
             SELECT 
-                ta.artist_mbid,
-                COUNT(DISTINCT CASE WHEN t.album_artist_mbid LIKE ta.artist_mbid || '%' OR t.album_artist_mbid = ta.artist_mbid THEN t.album END) as primary_album_count,
-                COUNT(DISTINCT CASE WHEN NOT (t.album_artist_mbid LIKE ta.artist_mbid || '%' OR t.album_artist_mbid = ta.artist_mbid) THEN t.album END) as appears_on_album_count
-            FROM track t
-            JOIN track_artist ta ON t.id = ta.track_id
-            WHERE t.album IS NOT NULL
-            GROUP BY ta.artist_mbid
+                artist_mbid,
+                COUNT(DISTINCT CASE WHEN type = 'primary' THEN album_mbid END) as primary_album_count,
+                COUNT(DISTINCT CASE WHEN type = 'contributor' THEN album_mbid END) as appears_on_album_count
+            FROM artist_album
+            GROUP BY artist_mbid
         ) ac ON ac.artist_mbid = a.mbid
         WHERE a.name IS NOT NULL 
+          AND (ta.artist_mbid IS NOT NULL OR aa.artist_mbid IS NOT NULL)
     """
 
     params = []
