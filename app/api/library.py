@@ -378,113 +378,96 @@ async def get_albums(
     db: asyncpg.Connection = Depends(get_db),
 ):
     # 1. If artist is provided, find their MBID to classify 'main' vs 'appears_on'
+    # Resolve Artist Name to MBID if needed
     target_mbid = artist_mbid
     if artist and not target_mbid:
-        row = await db.fetchrow(
-            """
-            SELECT mbid 
-            FROM artist 
-            WHERE REPLACE(name, '‐', '-') = REPLACE($1, '‐', '-')
-            LIMIT 1
-            """,
-            artist,
-        )
-        if row:
-            target_mbid = row["mbid"]
+        # Try to resolve artist name to MBID via simple lookup
+        rows = await db.fetch("SELECT mbid FROM artist WHERE name ILIKE $1 LIMIT 1", artist)
+        if rows:
+            target_mbid = rows[0]['mbid']
 
+    # Unified Query rooted in artist_album
     query = """
-        SELECT 
-            t.album, 
-            MAX(t.artwork_id) as artwork_id,
-            MAX(a.sha1) as art_sha1,
-            COALESCE(MAX(t.album_artist), MAX(t.artist)) as artist_name,
-            MAX(t.album_artist_mbid) as artist_mbid,
-            MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
-            MIN(t.release_date) as year,
-            COUNT(DISTINCT t.id) as track_count,
-            SUM(t.duration_seconds) as total_duration,
-            MAX(t.release_mbid) as release_mbid,
-            MAX(t.release_mbid) as mbid,
-            MAX(al.release_group_mbid) as album_mbid,
-            MAX(al.release_type) as release_type,
-            MAX(al.description) as description,
-            MAX(al.peak_chart_position) as peak_chart_position,
-            MAX(t.label) as label,
-            COALESCE(
-                jsonb_agg(DISTINCT jsonb_build_object('type', el.type, 'url', el.url)) FILTER (WHERE el.url IS NOT NULL AND el.type != 'wikidata'),
-                '[]'::jsonb
-            ) as external_links,
-            MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as mb_link,
+        SELECT
+            al.title as album,
+            al.release_date,
+            al.release_date as year, -- Alias for frontend compatibility
+            al.release_type,
+            al.description,
+            al.peak_chart_position,
+            aa.album_mbid as album_mbid,
+            
+            -- Dynamic Type Logic
             MAX(CASE 
-                WHEN $1::text IS NOT NULL AND (t.album_artist_mbid LIKE $1 || '%' OR t.album_artist_mbid = $1) THEN 'main'
-                ELSE 'appears_on' 
-            END) as type
-        FROM track t
-        LEFT JOIN artwork a ON t.artwork_id = a.id
-        LEFT JOIN album al ON al.mbid = t.release_mbid
+                WHEN $1::text IS NOT NULL THEN
+                    CASE WHEN aa.type = 'contributor' THEN 'appears_on' ELSE 'main' END
+                ELSE 'main'
+            END) as type,
+            
+            -- Track Aggregates (from track table)
+            COUNT(t.id) as track_count,
+            SUM(t.duration_seconds) as total_duration,
+            MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
+            MAX(t.label) as label,
+            
+            -- Display Artist Name (from track tags)
+            COALESCE(MAX(t.album_artist), MAX(t.artist)) as artist_name,
+
+            -- Multi-Artist Links (Subquery)
+            (
+                SELECT jsonb_agg(jsonb_build_object('name', a2.name, 'mbid', a2.mbid) ORDER BY a2.name)
+                FROM artist_album aa2
+                JOIN artist a2 ON aa2.artist_mbid = a2.mbid
+                WHERE aa2.album_mbid = aa.album_mbid AND aa2.type = 'primary'
+            ) as artists,
+
+            -- Art
+            COALESCE(MAX(al.artwork_id), MAX(t.artwork_id)) as art_id,
+            MAX(art.sha1) as art_sha1,
+
+            -- Links
+            COALESCE(
+                jsonb_agg(DISTINCT jsonb_build_object('type', el.type, 'url', el.url)) FILTER (WHERE el.url IS NOT NULL),
+                '[]'::jsonb
+            ) as external_links
+
+        FROM artist_album aa
+        JOIN album al ON aa.album_mbid = al.mbid
+        LEFT JOIN track t ON t.release_mbid = aa.album_mbid
+        LEFT JOIN artwork art ON al.artwork_id = art.id
         LEFT JOIN external_link el ON el.entity_type = 'album' AND (el.entity_id = al.release_group_mbid OR el.entity_id = t.release_group_mbid)
+
+        WHERE 
+            ($1::text IS NULL OR aa.artist_mbid = $1)
+            AND ($2::text IS NULL OR aa.album_mbid = $2)
+
+        GROUP BY aa.album_mbid, aa.type, al.mbid
+        ORDER BY al.release_date DESC
     """
-    params = [target_mbid]
-    param_num = 2
-
-    filters = []
-    if target_mbid:
-        # Filter by specific artist MBID
-        query += """
-            JOIN track_artist ta ON t.id = ta.track_id
-            JOIN artist ar ON ta.artist_mbid = ar.mbid
-        """
-        filters.append(f"ta.artist_mbid = ${param_num}")
-        params.append(target_mbid)
-        param_num += 1
-    elif artist:
-        # Filter by artist name (fallback)
-        query += """
-            JOIN track_artist ta ON t.id = ta.track_id
-            JOIN artist ar ON ta.artist_mbid = ar.mbid
-        """
-        filters.append(f"REPLACE(ar.name, '‐', '-') = REPLACE(${param_num}, '‐', '-')")
-        params.append(artist)
-        param_num += 1
-    if album_mbid:
-        filters.append(
-            f"(t.release_group_mbid = ${param_num} OR t.release_mbid = ${param_num + 1})"
-        )
-        params.extend([album_mbid, album_mbid])
-        param_num += 2
-    if filters:
-        query += " WHERE " + " AND ".join(filters)
-    else:
-        query += " WHERE t.album IS NOT NULL"
-
-    # Group by Release ID (primary) and Album Name (fallback grouping)
-    query += " GROUP BY t.release_mbid, t.album ORDER BY year ASC"
-
-    rows = await db.fetch(query, *params)
-    mb_root = get_musicbrainz_root_url()
+    
+    # Execute
+    rows = await db.fetch(query, target_mbid, album_mbid)
+    
     results = []
     for row in rows:
         d = dict(row)
-        if d.get("release_mbid"):
-            d["musicbrainz_url"] = f"{mb_root}/release/{d['release_mbid']}"
-        elif d.get("mb_link"):
-            d["musicbrainz_url"] = d["mb_link"]
-        elif d.get("album_mbid"):
-            d["musicbrainz_url"] = f"{mb_root}/release-group/{d['album_mbid']}"
-
-        # Frontend compatibility: expects art_id
-        if d.get("artwork_id"):
-            d["art_id"] = d["artwork_id"]
-
-        # Ensure external_links is a list (asyncpg jsonb handling)
+        # Ensure jsonb fields are handled if asyncpg returns string (usually returns loaded json for jsonb)
+        if d.get("artists") and isinstance(d["artists"], str):
+             import json
+             try:
+                 d["artists"] = json.loads(d["artists"])
+             except Exception:
+                 d["artists"] = []
+                 
         if d.get("external_links") and isinstance(d["external_links"], str):
              import json
              try:
                  d["external_links"] = json.loads(d["external_links"])
              except Exception:
                  d["external_links"] = []
-
+                 
         results.append(d)
+
     return results
 
 

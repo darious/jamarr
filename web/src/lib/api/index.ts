@@ -92,6 +92,7 @@ export interface Album {
     peak_chart_position?: number;
     label?: string;
     external_links?: { type: string; url: string }[];
+    artists?: { name: string; mbid?: string }[];
 }
 
 export interface Track {
