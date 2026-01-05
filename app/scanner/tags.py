@@ -66,6 +66,9 @@ def extract_tags(path: str) -> dict:
             album_artist = get_first(
                 t, ["ALBUMARTIST", "TPE2", "albumartist", "album_artist"]
             )
+            album_artist_sort = get_first(
+                t, ["ALBUMARTISTSORT", "TSO2", "albumartistsort", "album_artist_sort"]
+            )
             track_no = get_first(t, ["TRACKNUMBER", "TRCK", "tracknumber"])
             disc_no = get_first(t, ["DISCNUMBER", "TPOS", "discnumber"])
             label = get_first(t, ["ORGANIZATION", "TPUB", "label", "publisher"])
@@ -126,6 +129,7 @@ def extract_tags(path: str) -> dict:
                 "artist": artist,
                 "album": album,
                 "album_artist": album_artist,
+                "album_artist_sort": album_artist_sort,
                 "track_no": _parse_int(track_no),
                 "disc_no": _parse_int(disc_no),
                 "release_date": norm_date, # Now a date object or None

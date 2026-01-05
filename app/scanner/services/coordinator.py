@@ -404,13 +404,9 @@ class MetadataCoordinator:
             tasks.append(asyncio.sleep(0, result=None))
 
         # 7. Albums/EPs (MB - for linking)
-        if fetch_base_metadata:
-             tasks.append(musicbrainz.fetch_release_groups(mbid, "album", client, artist_name=name))
-             tasks.append(musicbrainz.fetch_release_groups(mbid, "ep", client, artist_name=name))
-        else:
-             tasks.append(asyncio.sleep(0, result=None))
-             tasks.append(asyncio.sleep(0, result=None))
-
+        # REMOVED: This data was not being used by save_artist_metadata.
+        # Linking happens during filesystem scan or separate missing album scan.
+        pass
 
         # Execute Block 1
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -473,21 +469,6 @@ class MetadataCoordinator:
             get_api_tracker().track_detailed("Singles", "found" if singles_res else "missing")
         elif fetch_singles:
             get_api_tracker().track_detailed("Singles", "missing")
-            
-        albums_res = results[6]
-        eps_res = results[7]
-        
-        # Combine albums and EPs and filter
-        all_albums = []
-        if isinstance(albums_res, list):
-            all_albums.extend(albums_res)
-        if isinstance(eps_res, list):
-            all_albums.extend(eps_res)
-        
-        if all_albums and local_release_group_ids:
-            updates["albums"] = [a for a in all_albums if a["mbid"] in local_release_group_ids]
-        if all_albums and local_release_group_ids:
-            updates["albums"] = [a for a in all_albums if a["mbid"] in local_release_group_ids]
         
         # 7b. Album Metadata (Description, Chart, Links)
         # Parallel fetch for all local albums
@@ -495,14 +476,8 @@ class MetadataCoordinator:
              logger.debug(f"[{name}] Fetching metadata for {len(local_release_group_ids)} local albums")
              album_tasks = []
              album_ids = list(local_release_group_ids)
-             
+
              for rg_id in album_ids:
-                 # If missing_only, should we check DB state? 
-                 # Yes, but 'artist' object passed in doesn't have album details.
-                 # We can optimistically fetch or rely on lower-level check?
-                 # Fetching is expensive. Ideally we'd know.
-                 # The caller could pass in 'albums_needing_update' set?
-                 # For now, just fetch all.
                 album_tasks.append(album.fetch_album_metadata(rg_id, client, _dns_semaphore))
              
              if album_tasks:
@@ -730,6 +705,17 @@ class MetadataCoordinator:
                              links.append((l_type, data[k]))
                              
                      for l_type, url in links:
+                         # Normalize Qobuz URLs
+                         if l_type == "qobuz" and "play.qobuz.com" not in url:
+                             import re
+                             # Extract ID from end of URL
+                             match = re.search(r'(\d+)$', url)
+                             if match:
+                                 url = f"https://play.qobuz.com/artist/{match.group(1)}"
+                             else:
+                                 # Skip saving malformed Qobuz link
+                                 continue
+
                          await db.execute("""
                              INSERT INTO external_link (entity_type, entity_id, type, url)
                              VALUES ('artist', $1, $2, $3)

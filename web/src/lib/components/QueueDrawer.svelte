@@ -338,6 +338,7 @@
                 art_sha1: track.art_sha1,
                 art_id: track.art_id,
               }}
+              artists={track.artists}
               artist={{
                 name: track.artist || "",
                 mbid: track.artist_mbid,
@@ -357,7 +358,7 @@
               showYear={false}
               showTechDetails={true}
               showPopularity={false}
-              showBitrate={true}
+              showBitrate={false}
               draggable={true}
               onDragStart={(e) => handleDragStart(e, idx)}
               onDragOver={(e) => handleDragOver(e, idx)}

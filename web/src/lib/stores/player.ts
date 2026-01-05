@@ -511,6 +511,14 @@ export function showNowPlaying(force: boolean) {
 }
 
 export async function pause() {
+    const s = get(playerState);
+    if (s.renderer.startsWith('local')) {
+        console.log('[playerStore] Local pause, dispatching jamarr:pause');
+        window.dispatchEvent(new CustomEvent('jamarr:pause'));
+        playerState.update(s => ({ ...s, is_playing: false }));
+        return;
+    }
+
     try {
         await fetch('/api/player/pause', {
             method: 'POST',
@@ -523,6 +531,14 @@ export async function pause() {
 }
 
 export async function resume() {
+    const s = get(playerState);
+    if (s.renderer.startsWith('local')) {
+        console.log('[playerStore] Local resume, dispatching jamarr:resume');
+        window.dispatchEvent(new CustomEvent('jamarr:resume'));
+        playerState.update(s => ({ ...s, is_playing: true }));
+        return;
+    }
+
     try {
         await fetch('/api/player/resume', {
             method: 'POST',

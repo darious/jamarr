@@ -205,13 +205,27 @@
               {data.album}
             </h1>
             <div class="mt-2 text-2xl font-medium text-muted">
-              <button
-                class="hover:underline hover:text-default transition-colors"
-                on:click={() =>
-                  goto(`/artist/${encodeURIComponent(data.artist)}`)}
-              >
-                {data.artist}
-              </button>
+              {#if data.albumMeta?.artists && data.albumMeta.artists.length > 0}
+                {#each data.albumMeta.artists as artist, i}
+                  <button
+                    class="hover:underline hover:text-default transition-colors"
+                    on:click={() => goto(`/artist/${artist.mbid}`)}
+                  >
+                    {artist.name}
+                  </button>
+                  {#if i < data.albumMeta.artists.length - 1}
+                    <span class="text-subtle"> & </span>
+                  {/if}
+                {/each}
+              {:else}
+                <button
+                  class="hover:underline hover:text-default transition-colors"
+                  on:click={() =>
+                    goto(`/artist/${encodeURIComponent(data.artist)}`)}
+                >
+                  {data.artist}
+                </button>
+              {/if}
             </div>
           </div>
 
@@ -356,6 +370,7 @@
                   {#each group.tracks as track, idx}
                     <TrackCard
                       {track}
+                      artists={track.artists}
                       artist={{ name: track.artist || data.artist }}
                       showIndex={true}
                       index={track.track_no}

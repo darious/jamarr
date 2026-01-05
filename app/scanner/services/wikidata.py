@@ -38,7 +38,7 @@ async def fetch_external_links(
         property_map = {
             "P1902": ("spotify_url", "https://open.spotify.com/artist/{}"),
             "P5749": ("tidal_url", "https://tidal.com/browse/artist/{}"),
-            "P6573": ("qobuz_url", "https://www.qobuz.com/us-en/interpreter/{}"),
+            "P6573": ("qobuz_url", "https://play.qobuz.com/artist/{}"),
             "P3192": ("lastfm_url", "https://www.last.fm/music/{}"),
             "P1953": ("discogs_url", "https://www.discogs.com/artist/{}"),
             "P856": ("homepage", None), 

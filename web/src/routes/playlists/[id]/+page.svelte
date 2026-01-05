@@ -527,6 +527,7 @@
                                 bit_depth: track.bit_depth,
                                 sample_rate_hz: track.sample_rate_hz,
                             }}
+                            artists={track.artists}
                             artist={{
                                 name: track.artist,
                                 mbid: track.artist_mbid,
