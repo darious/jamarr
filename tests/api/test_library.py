@@ -56,6 +56,12 @@ async def library_data(db):
     await db.execute("INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, 'artist-1')", row2['id'])
     await db.execute("INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, 'artist-2')", row3['id'])
 
+    # Artist-Album Relations (Simulate Scanner)
+    # The Testers -> Test Album (Primary)
+    await db.execute("INSERT INTO artist_album (artist_mbid, album_mbid, type) VALUES ('artist-1', 'release-1', 'primary')")
+    # Solo Guy -> Single Hit (Primary)
+    await db.execute("INSERT INTO artist_album (artist_mbid, album_mbid, type) VALUES ('artist-2', 'release-2', 'primary')")
+
 @pytest.mark.asyncio
 async def test_get_artists(client: AsyncClient, db, library_data):
     # 1. List all
@@ -115,6 +121,7 @@ async def test_get_albums(client: AsyncClient, db, library_data):
     # 2. Filter by Artist
     response = await client.get("/api/albums", params={"artist": "The Testers"})
     data = response.json()
+    # Should find 'Test Album' because we linked it via artist_album 'primary'
     assert len(data) == 1
     assert data[0]["album"] == "Test Album"
 
@@ -131,7 +138,10 @@ async def test_get_albums_appears_on(client: AsyncClient, db, library_data):
     # 2. Add 'The Testers' as a secondary artist
     await db.execute("INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, 'artist-1') ON CONFLICT DO NOTHING", track_id)
     
-    # 3. Query albums for "The Testers"
+    # 3. Add 'The Testers' as contributor on the album (simulate scanner)
+    await db.execute("INSERT INTO artist_album (artist_mbid, album_mbid, type) VALUES ('artist-1', 'release-2', 'contributor')")
+
+    # 4. Query albums for "The Testers"
     response = await client.get("/api/albums", params={"artist": "The Testers"})
     assert response.status_code == 200
     data = response.json()
