@@ -415,7 +415,7 @@ async def get_albums(
 
             -- Multi-Artist Links (Subquery)
             (
-                SELECT jsonb_agg(jsonb_build_object('name', a2.name, 'mbid', a2.mbid) ORDER BY a2.name)
+                SELECT jsonb_agg(DISTINCT jsonb_build_object('name', a2.name, 'mbid', a2.mbid))
                 FROM artist_album aa2
                 JOIN artist a2 ON aa2.artist_mbid = a2.mbid
                 WHERE aa2.album_mbid = aa.album_mbid AND aa2.type = 'primary'

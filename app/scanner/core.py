@@ -500,6 +500,18 @@ class Scanner:
                 type_ = "primary" if mbid in aa_ids else "contributor"
                 await upsert_artist_album(db, mbid, album_mbid, type_)
 
+        # Ensure Album Artist is linked as Primary (even if not on track)
+        if album_mbid:
+            for mbid in aa_ids:
+                 # Ensure artist exists
+                 await db.execute("""
+                    INSERT INTO artist (mbid, name, updated_at) VALUES ($1, $2, NOW()) 
+                    ON CONFLICT (mbid) DO NOTHING
+                 """, mbid, tags.get("album_artist") or "Various Artists") # Fallback name
+                 
+                 # Link as Primary
+                 await upsert_artist_album(db, mbid, album_mbid, "primary")
+
     async def _estimate_file_count(self, root_path):
         safe_root = shlex.quote(root_path)
         clauses = [f"-iname '*{ext}'" for ext in SUPPORTED_EXTENSIONS]
