@@ -4,7 +4,7 @@ import time
 import os
 from typing import Optional, Dict, Any
 from app.scanner.core import Scanner, close_shared_client, warm_dns_cache
-from app.scanner.services.coordinator import MetadataCoordinator
+from app.scanner.pipeline import PipelineAdapter
 from app.config import get_music_path
 from app.scanner.stats import get_api_tracker
 from app.db import get_db
@@ -164,7 +164,7 @@ class ScanManager:
             self._log_message(f"Starting metadata update. Filter: {artist_filter or mbid_filter or 'All'}")
             
             async for db in get_db():
-                coordinator = MetadataCoordinator(progress_cb=self._update_progress)
+                coordinator = PipelineAdapter(progress_cb=self._update_progress)
 
                 # Scope to path if provided
                 path_mbids = None
@@ -214,10 +214,12 @@ class ScanManager:
         query = """
             SELECT 
                 a.mbid, 
-                a.name, 
+                a.name,
+                a.sort_name,
                 a.bio, 
                 a.image_url, 
                 a.image_source,
+                a.artwork_id,
                 -- Presence flags for missing-only logic
                 EXISTS(SELECT 1 FROM top_track tt WHERE tt.artist_mbid = a.mbid AND tt.type = 'top') AS has_top_tracks,
                 EXISTS(SELECT 1 FROM top_track tt WHERE tt.artist_mbid = a.mbid AND tt.type = 'single') AS has_singles,
@@ -252,7 +254,7 @@ class ScanManager:
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         
-        query += " GROUP BY a.mbid"
+        query += " GROUP BY a.mbid, a.name, a.sort_name, a.bio, a.image_url, a.image_source, a.artwork_id"
             
         rows = await db.fetch(query, *params)
         artists = []
@@ -354,7 +356,7 @@ class ScanManager:
                  self._log_message("No artists to update.")
             else:
                  async for db in get_db():
-                     coordinator = MetadataCoordinator(progress_cb=self._update_progress)
+                     coordinator = PipelineAdapter(progress_cb=self._update_progress)
                      artists = await self._fetch_artists_for_update(db, None, filter_mbids, scanned_mbids if is_partial or path else None)
                      # Apply missing_only default logic
                      # Use passed options, default valid for full scan

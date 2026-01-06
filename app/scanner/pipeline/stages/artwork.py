@@ -39,10 +39,20 @@ class ArtworkStage(EnrichmentStage):
         
         artist = context.artist
         
+        # Debug logging
+        logger.info(
+            f"[{artist.mbid}] Artwork skip check: has_artwork={artist.has_artwork}, "
+            f"image_source={artist.image_source}, needs_upgrade={artist.needs_artwork_upgrade}"
+        )
+        
         # Skip if we have artwork and it's not from Spotify
         # (Spotify artwork can be upgraded to Fanart)
         if artist.has_artwork and not artist.needs_artwork_upgrade:
+            logger.info(f"[{artist.mbid}] Skipping artwork - already have {artist.image_source} artwork")
             return True, "Artist has high-quality artwork"
+        
+        if artist.needs_artwork_upgrade:
+            logger.info(f"[{artist.mbid}] Artwork needs upgrade from Spotify to Fanart")
         
         return False, ""
     
