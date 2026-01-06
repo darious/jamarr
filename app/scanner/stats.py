@@ -20,26 +20,25 @@ class ApiTracker:
                         "artists": set(),
                         "artists_metadata": set(),
                     }
-                    # Detailed stats: category -> {searched: int, found: int, missing: int}
-                    cls._instance._detailed_stats = defaultdict(lambda: {"searched": 0, "found": 0, "missing": 0})
+                    # New stage metrics: stage -> {missing, searched, hits, misses}
+                    cls._instance._stage_metrics = defaultdict(lambda: {
+                        "missing": 0,
+                        "searched": 0,
+                        "hits": 0,
+                        "misses": 0
+                    })
         return cls._instance
 
     def increment(self, service: str):
+        """Increment API call counter for a service (musicbrainz, lastfm, wikidata, fanart, spotify, qobuz)."""
         with self._stats_lock:
             self._stats[service] += 1
-
-    def increment_processed(self, entity_type: str):
-        """
-        Legacy simple increment. Use track_processed for distinct counting.
-        """
-        # Fallback for simple counting if needed, but we prefer distinct
-        pass
 
     def track_processed(self, entity_type: str, unique_id: str):
         """
         Track a unique item as processed.
-        entity_type: 'tracks', 'albums', 'artists'
-        unique_id: The limits of the uniqueness (e.g. MBID or path)
+        entity_type: 'tracks', 'albums', 'artists', 'artists_metadata'
+        unique_id: The unique identifier (e.g. MBID or path)
         """
         if not unique_id:
             return
@@ -48,37 +47,46 @@ class ApiTracker:
                 self._processed_sets[entity_type] = set()
             self._processed_sets[entity_type].add(unique_id)
 
-    def track_detailed(self, category: str, status: str):
+    def track_stage_metrics(self, stage: str, missing: int, searched: int, hits: int):
         """
-        Track detailed stats for a category.
-        status: 'found', 'missing'
+        Track comprehensive stage metrics.
+        
+        Args:
+            stage: Stage name (e.g., "Bio", "Fanart", "MusicBrainz Core")
+            missing: Artists missing this data before scan
+            searched: Artists we searched for
+            hits: Artists where we found data
+        
+        Misses are calculated as: searched - hits (artists we searched but didn't find)
         """
         with self._stats_lock:
-            self._detailed_stats[category]["searched"] += 1
-            if status == "found":
-                self._detailed_stats[category]["found"] += 1
-            elif status == "missing":
-                self._detailed_stats[category]["missing"] += 1
+            self._stage_metrics[stage]["missing"] = missing
+            self._stage_metrics[stage]["searched"] = searched
+            self._stage_metrics[stage]["hits"] = hits
+            self._stage_metrics[stage]["misses"] = searched - hits
 
     def get_stats(self):
+        """Get API call counters."""
         with self._stats_lock:
             return dict(self._stats)
 
     def get_processed_stats(self):
+        """Get processed entity counts."""
         with self._stats_lock:
             return {k: len(v) for k, v in self._processed_sets.items()}
             
-    def get_detailed_stats(self):
+    def get_stage_metrics(self):
+        """Get stage metrics (missing, searched, hits, misses)."""
         with self._stats_lock:
-            # excessive defaultdict causes issues with serialization if not converted
-            return {k: dict(v) for k, v in self._detailed_stats.items()}
+            return {k: dict(v) for k, v in self._stage_metrics.items()}
 
     def reset(self):
+        """Reset all statistics."""
         with self._stats_lock:
             self._stats.clear()
             for s in self._processed_sets.values():
                 s.clear()
-            self._detailed_stats.clear()
+            self._stage_metrics.clear()
 
 
 def get_api_tracker():

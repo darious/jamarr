@@ -90,6 +90,10 @@ class QobuzClient:
             resp = await self.client.get(url, headers=headers, params=params)
             resp.raise_for_status()
             results = resp.json().get("artists", {}).get("items", [])
+            
+            # Track API call
+            from app.scanner.stats import get_api_tracker
+            get_api_tracker().increment("qobuz")
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
                 # 2. Fallback to Login + Auth Token
@@ -100,6 +104,10 @@ class QobuzClient:
                         resp = await self.client.get(url, headers=headers, params=params)
                         resp.raise_for_status()
                         results = resp.json().get("artists", {}).get("items", [])
+                        
+                        # Track API call
+                        from app.scanner.stats import get_api_tracker
+                        get_api_tracker().increment("qobuz")
                     except Exception as ex:
                         logger.error(f"Qobuz Search Failed (Auth): {ex}")
             else:

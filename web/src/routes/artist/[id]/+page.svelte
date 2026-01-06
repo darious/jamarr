@@ -641,7 +641,7 @@
     <!-- Mask Wrapper (Static - Keeps the fade fixed) -->
     <div
       class="absolute inset-0"
-      style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);"
+      style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%);"
     >
       <!-- Sharp Top Layer (Fades into Global Background) -->
       <div
@@ -1349,15 +1349,18 @@
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
   }
+
   .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
   }
+
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: theme("colors.white / 10%");
+    background: rgb(255 255 255 / 10%);
     border-radius: 10px;
   }
+
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: theme("colors.white / 20%");
+    background: rgb(255 255 255 / 20%);
   }
 
   /* Tab hover effect matching button style */
@@ -1365,7 +1368,7 @@
     background: color-mix(
       in srgb,
       var(--accent) 25%,
-      theme("colors.black / 40%")
+      rgb(0 0 0 / 40%)
     ) !important;
   }
 </style>

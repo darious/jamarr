@@ -4,7 +4,7 @@ import time
 import os
 from typing import Optional, Dict, Any
 from app.scanner.core import Scanner, close_shared_client, warm_dns_cache
-from app.scanner.services.coordinator import MetadataCoordinator
+from app.scanner.pipeline import PipelineAdapter
 from app.config import get_music_path
 from app.scanner.stats import get_api_tracker
 from app.db import get_db
@@ -94,7 +94,7 @@ class ScanManager:
             "phase": self._phase,
             "api_stats": get_api_tracker().get_stats(),
             "processed_stats": get_api_tracker().get_processed_stats(),
-            "detailed_stats": get_api_tracker().get_detailed_stats(),
+            "stage_metrics": get_api_tracker().get_stage_metrics(),
         }
         self._broadcast({
             "type": "progress",
@@ -103,9 +103,9 @@ class ScanManager:
             "percentage": percentage,
             "message": message,
             "phase": self._phase,
-            "api_stats": self._stats["api_stats"],
-            "processed_stats": self._stats["processed_stats"],
-            "detailed_stats": self._stats["detailed_stats"],
+            "api_stats": self._stats.get("api_stats", {}),
+            "processed_stats": self._stats.get("processed_stats", {}),
+            "stage_metrics": self._stats.get("stage_metrics", {}),
         })
 
     def _log_message(self, message):
@@ -164,7 +164,7 @@ class ScanManager:
             self._log_message(f"Starting metadata update. Filter: {artist_filter or mbid_filter or 'All'}")
             
             async for db in get_db():
-                coordinator = MetadataCoordinator(progress_cb=self._update_progress)
+                coordinator = PipelineAdapter(progress_cb=self._update_progress)
 
                 # Scope to path if provided
                 path_mbids = None
@@ -214,10 +214,12 @@ class ScanManager:
         query = """
             SELECT 
                 a.mbid, 
-                a.name, 
+                a.name,
+                a.sort_name,
                 a.bio, 
                 a.image_url, 
                 a.image_source,
+                a.artwork_id,
                 -- Presence flags for missing-only logic
                 EXISTS(SELECT 1 FROM top_track tt WHERE tt.artist_mbid = a.mbid AND tt.type = 'top') AS has_top_tracks,
                 EXISTS(SELECT 1 FROM top_track tt WHERE tt.artist_mbid = a.mbid AND tt.type = 'single') AS has_singles,
@@ -252,7 +254,7 @@ class ScanManager:
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         
-        query += " GROUP BY a.mbid"
+        query += " GROUP BY a.mbid, a.name, a.sort_name, a.bio, a.image_url, a.image_source, a.artwork_id"
             
         rows = await db.fetch(query, *params)
         artists = []
@@ -354,7 +356,7 @@ class ScanManager:
                  self._log_message("No artists to update.")
             else:
                  async for db in get_db():
-                     coordinator = MetadataCoordinator(progress_cb=self._update_progress)
+                     coordinator = PipelineAdapter(progress_cb=self._update_progress)
                      artists = await self._fetch_artists_for_update(db, None, filter_mbids, scanned_mbids if is_partial or path else None)
                      # Apply missing_only default logic
                      # Use passed options, default valid for full scan
@@ -447,15 +449,15 @@ class ScanManager:
             self._current_task = asyncio.create_task(self._run_missing_albums(**kwargs))
             return self._current_task
 
-    async def _run_missing_albums(self, artist_filter=None, mbid_filter=None):
+    async def _run_missing_albums(self, artist_filter=None, mbid_filter=None, path=None):
         try:
              self._broadcast({"type": "start", "mode": "missing_albums", "phase": self._phase})
              # Warm DNS cache before metadata operations
              await warm_dns_cache()
              
              from app.scanner.missing_scanner import MissingAlbumsScanner
-             scanner = MissingAlbumsScanner()
-             await scanner.scan(artist_filter, mbid_filter)
+             scanner = MissingAlbumsScanner(progress_callback=self._update_progress)
+             await scanner.scan(artist_filter, mbid_filter, path_filter=path)
              self._status = "Idle"
              self._broadcast({"type": "complete", "status": "success"})
         except Exception as e:

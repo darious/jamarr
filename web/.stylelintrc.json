@@ -1,0 +1,41 @@
+{
+    "extends": [
+        "stylelint-config-standard",
+        "stylelint-config-html"
+    ],
+    "rules": {
+        "at-rule-no-unknown": [
+            true,
+            {
+                "ignoreAtRules": [
+                    "tailwind",
+                    "apply",
+                    "variants",
+                    "responsive",
+                    "screen",
+                    "layer",
+                    "reference"
+                ]
+            }
+        ],
+        "at-rule-empty-line-before": null,
+        "no-descending-specificity": null,
+        "selector-pseudo-class-no-unknown": [
+            true,
+            {
+                "ignorePseudoClasses": [
+                    "global"
+                ]
+            }
+        ],
+        "function-no-unknown": [
+            true,
+            {
+                "ignoreFunctions": [
+                    "theme"
+                ]
+            }
+        ],
+        "declaration-property-value-no-unknown": null
+    }
+}

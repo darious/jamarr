@@ -1,0 +1,15 @@
+services:
+  jamarr_web_ci:
+    build:
+      context: .
+      dockerfile: Dockerfile.node-ci
+    image: jamarr-node-ci
+    pull_policy: build
+    working_dir: /app/web
+    volumes:
+      - ./web:/app/web
+      # Persist node_modules between runs for faster lint/build.
+      - jamarr_web_ci_node_modules:/app/web/node_modules
+
+volumes:
+  jamarr_web_ci_node_modules:

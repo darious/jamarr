@@ -1,0 +1,34 @@
+name: Build
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: false
+
+      - name: Create dummy .env
+        run: |
+          cat <<EOF > .env
+          POSTGRES_USER=jamarr
+          POSTGRES_PASSWORD=jamarr_secret
+          DB_USER=jamarr
+          DB_PASS=jamarr_secret
+          TEST_DB_USER=jamarr_test
+          TEST_DB_PASSWORD=jamarr_test_secret
+          EOF
+
+      - name: Make scripts executable
+        run: chmod +x test-build.sh
+
+      - name: Run Production Build
+        run: ./test-build.sh

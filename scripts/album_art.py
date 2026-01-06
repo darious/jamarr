@@ -3,7 +3,8 @@
 export_jpg_scaled.py
 
 Usage:
-  python3 export_jpg_scaled.py /path/to/image.png
+  python3 export_jpg_scaled.py /path/to/folder
+  python3 export_jpg_scaled.py /path/to/image.jpg
 
 Requires:
   pip install pillow
@@ -16,6 +17,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from typing import Iterable
 
 from PIL import Image, ImageFile
 
@@ -100,20 +102,21 @@ def save_jpeg_atomic(im: Image.Image, out_path: Path) -> None:
                 pass
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Export image to JPEG (max 2800px, 72dpi) and delete original.")
-    parser.add_argument("image", type=Path, help="Path to the input image")
-    args = parser.parse_args()
+def is_supported_image(path: Path) -> bool:
+    return path.suffix.lower() in {".jpg", ".jpeg", ".png"}
 
-    in_path: Path = args.image
 
-    if not in_path.exists():
-        print(f"Error: file not found: {in_path}", file=sys.stderr)
-        return 2
-    if not in_path.is_file():
-        print(f"Error: not a file: {in_path}", file=sys.stderr)
-        return 2
+def iter_images(root: Path) -> Iterable[Path]:
+    if root.is_file():
+        return [root] if is_supported_image(root) else []
+    return (
+        p
+        for p in root.rglob("*")
+        if p.is_file() and is_supported_image(p) and not p.stem.endswith("_scaled")
+    )
 
+
+def process_image(in_path: Path) -> bool:
     out_path = build_output_path(in_path)
 
     try:
@@ -129,12 +132,43 @@ def main() -> int:
         action = "Resized and exported" if resized else "Exported (no resize needed)"
         print(f"{action}: {out_path}")
         print(f"Deleted original: {in_path}")
-        return 0
+        return True
 
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        print(f"Error processing {in_path}: {e}", file=sys.stderr)
         print("Original file NOT deleted.", file=sys.stderr)
+        return False
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Export all JPG/JPEG/PNG images under a path to JPEG (max 2800px, 72dpi) and delete originals."
+    )
+    parser.add_argument("path", type=Path, help="Path to an image file or directory to search")
+    args = parser.parse_args()
+
+    root: Path = args.path
+
+    if not root.exists():
+        print(f"Error: path not found: {root}", file=sys.stderr)
+        return 2
+
+    images = list(iter_images(root))
+    if not images:
+        print(f"No JPG/JPEG/PNG images found under {root}")
+        return 0
+
+    failures = 0
+    for img_path in images:
+        if not process_image(img_path):
+            failures += 1
+
+    if failures:
+        print(f"Completed with {failures} failure(s). See errors above.", file=sys.stderr)
         return 1
+
+    print(f"Processed {len(images)} image(s).")
+    return 0
 
 
 if __name__ == "__main__":

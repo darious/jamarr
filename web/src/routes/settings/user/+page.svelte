@@ -344,7 +344,7 @@
               <div
                 class="h-8 w-8 rounded-full border-2 border-white/20 shadow-lg"
                 style="background-color: {color}"
-              />
+              ></div>
               <span
                 class="text-xs font-medium {selectedAccent === name
                   ? 'text-accent'

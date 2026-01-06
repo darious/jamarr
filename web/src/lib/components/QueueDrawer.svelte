@@ -226,7 +226,7 @@
     }}
   ></div>
 
-  <aside
+  <div
     class="fixed right-4 z-[60] w-[720px] max-w-[92vw] rounded-2xl border border-white/10 bg-black/80 backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col"
     style="top: 86px; bottom: 96px;"
     role="dialog"
@@ -391,7 +391,7 @@
         </div>
       </div>
     {/if}
-  </aside>
+  </div>
 
   <AddToPlaylistModal
     bind:visible={showPlaylistModal}

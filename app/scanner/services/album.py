@@ -61,6 +61,7 @@ async def fetch_album_metadata(mbid: str, client: httpx.AsyncClient, dns_semapho
     # 2. Parse Relations
     relations = data.get("relations", [])
     wikidata_url = None
+    wikipedia_url = None  # Try to get Wikipedia directly from MB
     
     for rel in relations:
         target = rel.get("url", {}).get("resource")
@@ -72,6 +73,10 @@ async def fetch_album_metadata(mbid: str, client: httpx.AsyncClient, dns_semapho
         if type_ == "wikidata":
             wikidata_url = target
             result["external_links"].append(("wikidata", target))
+        elif type_ == "wikipedia":
+            # MusicBrainz sometimes has Wikipedia link directly!
+            wikipedia_url = target
+            result["external_links"].append(("wikipedia", target))
         elif "discogs.com" in target:
              result["external_links"].append(("discogs", target))
     
@@ -82,9 +87,8 @@ async def fetch_album_metadata(mbid: str, client: httpx.AsyncClient, dns_semapho
     result["external_links"].append(("musicbrainz", mb_link))
     
     
-    # 3. Resolve Wikipedia URL via Wikidata
-    wikipedia_url = None
-    if wikidata_url:
+    # 3. Resolve Wikipedia URL via Wikidata (only if not already found)
+    if not wikipedia_url and wikidata_url:
         try:
             # Use semaphore to limit concurrent DNS requests
             if dns_semaphore:
@@ -98,14 +102,6 @@ async def fetch_album_metadata(mbid: str, client: httpx.AsyncClient, dns_semapho
                 wikipedia_url = f"https://en.wikipedia.org/wiki/{wiki_title.replace(' ', '_')}"
                 result["external_links"].append(("wikipedia", wikipedia_url))
         except Exception as e:
-            # Track DNS errors
-            if "Temporary failure in name resolution" in str(e):
-                from app.scanner.services.coordinator import _dns_error_count, _dns_error_lock
-                async with _dns_error_lock:
-                    _dns_error_count += 1
-                    if _dns_error_count > 50:
-                        logger.error(f"Too many DNS failures ({_dns_error_count}), stopping scan")
-                        raise RuntimeError(f"DNS resolver overloaded: {_dns_error_count} failures") from e
             logger.warning(f"Wikidata resolution failed for {mbid}: {e}")
             
     # 4. Scrape Wikipedia if URL found

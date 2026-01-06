@@ -1,8 +1,12 @@
 import httpx
 import logging
 from app.scanner.stats import get_api_tracker
+from app.config import get_user_agent
 
 logger = logging.getLogger("scanner.services.wikidata")
+
+# Rate limit tracking
+_rate_limited = False
 
 async def fetch_external_links(
     client: httpx.AsyncClient,
@@ -14,6 +18,13 @@ async def fetch_external_links(
     Fetch external service IDs from Wikidata.
     only returns links that are missing from existing_links.
     """
+    global _rate_limited
+    
+    # Skip if we've been rate limited
+    if _rate_limited:
+        logger.warning("Skipping Wikidata fetch - previously rate limited (403)")
+        return {}
+    
     missing_links = {}
 
     try:
@@ -24,7 +35,13 @@ async def fetch_external_links(
         else:
             wd_api = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
             get_api_tracker().increment("wikidata")
-            resp = await client.get(wd_api)
+            # Wikidata requires User-Agent header
+            headers = {"User-Agent": get_user_agent()}
+            resp = await client.get(wd_api, headers=headers)
+            if resp.status_code == 403:
+                logger.error("Wikidata rate limit detected (403) - stopping further requests")
+                _rate_limited = True
+                return missing_links
             if resp.status_code != 200:
                 logger.warning(f"Wikidata fetch failed: {resp.status_code}")
                 return missing_links
@@ -69,6 +86,18 @@ async def fetch_external_links(
             except Exception as e:
                 logger.warning(f"Failed to extract {service_name} from Wikidata: {e}")
                 continue
+        
+        # Also extract Wikipedia URL from sitelinks if not already present
+        if not existing_links.get("wikipedia_url"):
+            try:
+                sitelinks = entity.get("sitelinks", {})
+                enwiki = sitelinks.get("enwiki", {})
+                wiki_title = enwiki.get("title")
+                if wiki_title:
+                    wiki_url = f"https://en.wikipedia.org/wiki/{wiki_title.replace(' ', '_')}"
+                    missing_links["wikipedia_url"] = wiki_url
+            except Exception as e:
+                logger.warning(f"Failed to extract Wikipedia URL from Wikidata: {e}")
 
     except Exception as e:
         logger.warning(f"Wikidata external links fetch failed: {e}")
@@ -80,12 +109,25 @@ async def fetch_wikipedia_title(client: httpx.AsyncClient, wikidata_url: str) ->
     Fetch Wikipedia title (English) from Wikidata URL.
     Returns: title string or None.
     """
+    global _rate_limited
+    
+    # Skip if we've been rate limited
+    if _rate_limited:
+        logger.warning("Skipping Wikipedia title fetch - Wikidata previously rate limited (403)")
+        return None
+    
     try:
         qid = wikidata_url.split("/")[-1]
         wd_api = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
         get_api_tracker().increment("wikidata")
         
-        resp = await client.get(wd_api)
+        # Wikidata requires User-Agent header
+        headers = {"User-Agent": get_user_agent()}
+        resp = await client.get(wd_api, headers=headers)
+        if resp.status_code == 403:
+            logger.error("Wikidata rate limit detected (403) in Wikipedia title fetch - stopping further requests")
+            _rate_limited = True
+            return None
         if resp.status_code == 200:
             wd_data = resp.json()
             entities = wd_data.get("entities", {})

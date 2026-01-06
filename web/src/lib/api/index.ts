@@ -357,7 +357,7 @@ export async function fetchMissingAlbums(mbid: string, fetchFn: any = fetch): Pr
     return await res.json();
 }
 
-export async function triggerMissingAlbumsScan(mbid?: string, artistName?: string): Promise<void> {
+export async function triggerMissingAlbumsScan(mbid?: string, artistName?: string, path?: string): Promise<void> {
     const res = await fetch('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -365,6 +365,7 @@ export async function triggerMissingAlbumsScan(mbid?: string, artistName?: strin
             type: 'missing_albums',
             artist_filter: artistName || null,
             mbid_filter: mbid || null,
+            path: path || null,
         })
     });
     if (!res.ok) throw new Error('Failed to trigger missing albums scan');

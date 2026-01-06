@@ -95,6 +95,7 @@
                 <h2 class="text-lg font-bold">Add to Playlist</h2>
                 <button
                     class="btn btn-ghost btn-sm btn-circle"
+                    aria-label="Close"
                     on:click={close}
                 >
                     <svg
