@@ -6,7 +6,6 @@ from typing import List
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult
 from app.scanner.services import musicbrainz
-from app.scanner.stats import get_api_tracker
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,20 +47,19 @@ class SinglesStage(EnrichmentStage):
         )
         
         if not singles:
-            get_api_tracker().track_detailed("Singles", "missing")
             return StageResult(
                 stage_name=self.name,
                 success=False,
-                metrics={"api_calls": 1}
+                metrics={"api_calls": 1, "searched": 1, "found": False}
             )
-        
-        get_api_tracker().track_detailed("Singles", "found")
         
         return StageResult.success(
             stage_name=self.name,
             data={"singles": singles},
             metrics={
                 "api_calls": 1,
+                "searched": 1,
+                "found": True,
                 "singles_found": len(singles),
             }
         )

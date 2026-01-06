@@ -8,7 +8,6 @@ from typing import List
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult
 from app.scanner.services import wikipedia
-from app.scanner.stats import get_api_tracker
 import logging
 
 logger = logging.getLogger(__name__)
@@ -56,21 +55,20 @@ class WikipediaBioStage(EnrichmentStage):
         bio = await wikipedia.fetch_bio(context.client, wiki_url)
         
         if not bio:
-            get_api_tracker().track_detailed("Bio", "missing")
             # Return success with empty data - no bio found is not an error
             return StageResult.success(
                 stage_name=self.name,
                 data={},
-                metrics={"api_calls": 1, "bio_length": 0}
+                metrics={"api_calls": 1, "searched": 1, "found": False, "bio_length": 0}
             )
-        
-        get_api_tracker().track_detailed("Bio", "found")
         
         return StageResult.success(
             stage_name=self.name,
             data={"bio": bio},
             metrics={
                 "api_calls": 1,
+                "searched": 1,
+                "found": True,
                 "bio_length": len(bio),
             }
         )

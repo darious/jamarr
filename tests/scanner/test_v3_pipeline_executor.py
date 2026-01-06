@@ -14,7 +14,7 @@ from app.scanner.pipeline.models import (
     StageResult,
 )
 from app.scanner.pipeline.base import EnrichmentStage
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 import httpx
 
 
@@ -197,7 +197,7 @@ class TestPipelineExecutor:
         plan.add_stage(stage1)
         plan.add_stage(stage2)
         
-        result = await executor.execute(plan, mock_context)
+        await executor.execute(plan, mock_context)
         
         # Context should have both results
         assert mock_context.has_result("stage1")

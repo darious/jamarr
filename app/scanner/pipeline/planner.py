@@ -6,7 +6,6 @@ scattered throughout the coordinator. The planner analyzes the artist
 state and scan options to generate an execution plan.
 """
 
-from typing import List
 from app.scanner.pipeline.models import ArtistState, ScanOptions, EnrichmentPlan
 from app.scanner.pipeline.stages import (
     CoreMetadataStage,

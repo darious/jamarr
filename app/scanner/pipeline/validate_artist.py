@@ -32,7 +32,7 @@ from app.scanner.pipeline import (
     EnrichmentPlanner,
     PipelineExecutor,
 )
-from app.db import init_db, close_db, get_pool
+from app.db import init_db, close_db
 
 
 async def load_artist_from_db(mbid: str) -> Dict[str, Any]:
@@ -64,7 +64,7 @@ async def load_artist_from_db(mbid: str) -> Dict[str, Any]:
         # If artist not in DB, create minimal state from scratch
         if not row:
             print(f"⚠️  Artist {mbid} not found in database")
-            print(f"   Creating minimal state (no existing data)")
+            print("   Creating minimal state (no existing data)")
             return {
                 'mbid': mbid,
                 'name': None,
@@ -154,7 +154,7 @@ async def validate_artist(mbid: str, options: ScanOptions) -> None:
         print(f"   Local Albums: {len(local_release_groups)}")
         
         # Create HTTP client
-        print(f"\n🔄 Creating enrichment plan...")
+        print("\n🔄 Creating enrichment plan...")
         async with httpx.AsyncClient(timeout=30.0) as client:
             
             # Create context
@@ -180,13 +180,13 @@ async def validate_artist(mbid: str, options: ScanOptions) -> None:
                 return
             
             # Execute plan
-            print(f"\n🚀 Executing pipeline...")
+            print("\n🚀 Executing pipeline...")
             executor = PipelineExecutor()
             result = await executor.execute(plan, context)
             
             # Show results
             print(f"\n{'='*80}")
-            print(f"Execution Results")
+            print("Execution Results")
             print(f"{'='*80}\n")
             
             print(f"✅ Success: {result.success_count}")
@@ -195,7 +195,7 @@ async def validate_artist(mbid: str, options: ScanOptions) -> None:
             print(f"📞 Total API Calls: {result.total_api_calls}")
             
             # Show individual stage results
-            print(f"\n📊 Stage Results:")
+            print("\n📊 Stage Results:")
             for stage_name, stage_result in result.results.items():
                 if stage_result.success:
                     icon = "✅"
@@ -218,7 +218,7 @@ async def validate_artist(mbid: str, options: ScanOptions) -> None:
             
             if merged:
                 print(f"\n{'='*80}")
-                print(f"Data to Save (would be written to database)")
+                print("Data to Save (would be written to database)")
                 print(f"{'='*80}\n")
                 
                 for key, value in sorted(merged.items()):
@@ -241,7 +241,7 @@ async def validate_artist(mbid: str, options: ScanOptions) -> None:
                     else:
                         print(f"   {key}: {value}")
             else:
-                print(f"\n⚠️  No data to save")
+                print("\n⚠️  No data to save")
     
     finally:
         await close_db()

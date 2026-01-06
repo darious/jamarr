@@ -4,7 +4,6 @@ Tests for EnrichmentPlanner.
 Test naming convention: test_v3_planner_* for new pipeline tests.
 """
 
-import pytest
 from app.scanner.pipeline.planner import EnrichmentPlanner
 from app.scanner.pipeline.models import ArtistState, ScanOptions
 from app.scanner.pipeline.stages import (

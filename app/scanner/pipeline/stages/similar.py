@@ -6,7 +6,6 @@ from typing import List
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult
 from app.scanner.services import lastfm
-from app.scanner.stats import get_api_tracker
 import logging
 
 logger = logging.getLogger(__name__)
@@ -43,20 +42,19 @@ class SimilarArtistsStage(EnrichmentStage):
         similar = await lastfm.fetch_similar_artists(mbid, name, context.client)
         
         if not similar:
-            get_api_tracker().track_detailed("Similar Artists", "missing")
             return StageResult(
                 stage_name=self.name,
                 success=False,
-                metrics={"api_calls": 1}
+                metrics={"api_calls": 1, "searched": 1, "found": False}
             )
-        
-        get_api_tracker().track_detailed("Similar Artists", "found")
         
         return StageResult.success(
             stage_name=self.name,
             data={"similar_artists": similar},
             metrics={
                 "api_calls": 1,
+                "searched": 1,
+                "found": True,
                 "artists_found": len(similar),
             }
         )

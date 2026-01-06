@@ -5,8 +5,11 @@ All models are immutable (frozen dataclasses) to prevent bugs from mutation.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, TYPE_CHECKING
 import httpx
+
+if TYPE_CHECKING:
+    from app.scanner.pipeline.base import EnrichmentStage
 
 
 @dataclass(frozen=True)

@@ -5,11 +5,10 @@ This stage fetches descriptions and chart positions for albums
 from MusicBrainz and Wikipedia.
 """
 
-from typing import List, Set
+from typing import List
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult
 from app.scanner.services import album
-from app.scanner.stats import get_api_tracker
 import asyncio
 import logging
 
@@ -82,12 +81,6 @@ class AlbumMetadataStage(EnrichmentStage):
             if isinstance(result, dict):
                 albums_metadata[rg_id] = result
                 success_count += 1
-                
-                # Track detailed stats
-                if result.get("description") or result.get("peak_chart_position"):
-                    get_api_tracker().track_detailed("Album Metadata", "found")
-                else:
-                    get_api_tracker().track_detailed("Album Metadata", "missing")
         
         if not albums_metadata:
             return StageResult(
@@ -95,6 +88,8 @@ class AlbumMetadataStage(EnrichmentStage):
                 success=False,
                 metrics={
                     "api_calls": len(tasks),
+                    "searched": len(tasks),
+                    "found": False,
                     "albums_processed": 0,
                     "errors": error_count,
                 }
@@ -105,6 +100,8 @@ class AlbumMetadataStage(EnrichmentStage):
             data={"albums_metadata": albums_metadata},
             metrics={
                 "api_calls": len(tasks),
+                "searched": len(tasks),
+                "found": bool(albums_metadata),
                 "albums_processed": success_count,
                 "albums_with_data": sum(
                     1 for a in albums_metadata.values()

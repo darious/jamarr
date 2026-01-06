@@ -76,7 +76,7 @@ async def enrich_artist_example():
         result = await executor.execute(plan, context)
         
         # 7. Review results
-        print(f"\nExecution complete:")
+        print("\nExecution complete:")
         print(f"  Success: {result.success_count}")
         print(f"  Errors: {result.error_count}")
         print(f"  Skipped: {result.skip_count}")
@@ -84,7 +84,7 @@ async def enrich_artist_example():
         
         # 8. Merge data for database update
         update_data = result.merge_data()
-        print(f"\nData to save:")
+        print("\nData to save:")
         for key, value in update_data.items():
             if isinstance(value, str) and len(value) > 50:
                 print(f"  {key}: {value[:50]}...")
@@ -118,8 +118,8 @@ async def compare_with_old_coordinator():
         executor = PipelineExecutor()
         
         plan = planner.create_plan(artist, options)
-        new_result = await executor.execute(plan, context)
-        new_data = new_result.merge_data()
+        await executor.execute(plan, context)
+        # result = new_result.merge_data()  # Unused for now
         
         # Run old coordinator (commented out - would call existing code)
         # old_data = await old_coordinator.process_artist(artist_row, options)
