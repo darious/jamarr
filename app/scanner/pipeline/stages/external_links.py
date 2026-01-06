@@ -9,7 +9,6 @@ from typing import List
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult
 from app.scanner.services import wikidata
-from app.scanner.stats import get_api_tracker
 import logging
 
 logger = logging.getLogger(__name__)
@@ -97,21 +96,20 @@ class ExternalLinksStage(EnrichmentStage):
         )
         
         if not links:
-            get_api_tracker().track_detailed("External Links", "missing")
             # Return success with empty data - no links found is not an error
             return StageResult.success(
                 stage_name=self.name,
                 data={},
-                metrics={"api_calls": 1, "links_found": 0}
+                metrics={"api_calls": 1, "searched": 1, "found": False, "links_found": 0}
             )
-        
-        get_api_tracker().track_detailed("External Links", "found")
         
         return StageResult.success(
             stage_name=self.name,
             data=links,
             metrics={
                 "api_calls": 1,
+                "searched": 1,
+                "found": True,
                 "links_found": len(links),
             }
         )

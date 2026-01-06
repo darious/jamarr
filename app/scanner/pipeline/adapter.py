@@ -38,6 +38,7 @@ class PipelineAdapter:
         """
         self.progress_cb = progress_cb
         self.pool = get_pool()
+        self.pipeline_results = []  # Store PipelineResult objects for metric aggregation
     
     async def update_metadata(
         self,
@@ -84,6 +85,7 @@ class PipelineAdapter:
         total_artists = len(artists)
         processed_count = 0
         results = []
+        self.pipeline_results = []  # Reset for this batch
         
         # Process artists with concurrency control
         fetch_workers = min(total_artists, 5) or 1
@@ -193,9 +195,117 @@ class PipelineAdapter:
         # Wait for writers to finish
         await asyncio.gather(*writer_tasks)
         
+        # Aggregate and report metrics
+        self._report_stage_metrics(artists, results)
+        
         # Log results
         success_count = sum(1 for res in results if res is True)
         logger.info(f"V3 pipeline complete. Updated {success_count}/{len(artists)} artists.")
+    
+    def _report_stage_metrics(self, artists: list, results: list):
+        """
+        Analyze missing data and aggregate stage metrics to report to stats tracker.
+        
+        Args:
+            artists: List of artist dicts that were processed
+            results: List of results from processing (True, Exception, or None)
+        """
+        # Stage name mapping (stage key -> display name)
+        stage_names = {
+            "core_metadata": "MusicBrainz Core",
+            "external_links": "External Links",
+            "artwork": "Fanart",
+            "wikipedia_bio": "Bio",
+            "top_tracks": "Top Tracks",
+            "similar_artists": "Similar Artists",
+            "singles": "Singles",
+            "album_metadata": "Album Metadata",
+        }
+        
+        # Pre-scan: Count how many artists are missing each type of data
+        missing_counts = {
+            "MusicBrainz Core": 0,
+            "External Links": 0,
+            "Fanart": 0,
+            "Bio": 0,
+            "Top Tracks": 0,
+            "Similar Artists": 0,
+            "Singles": 0,
+            "Album Metadata": 0,
+        }
+        
+        for artist in artists:
+            # Core metadata: missing if no name
+            if not artist.get("name"):
+                missing_counts["MusicBrainz Core"] += 1
+            
+            # External links: missing if not all link types present
+            all_links = artist.get("all_links", {})
+            required_links = ["homepage", "spotify", "wikipedia", "qobuz", "tidal", "lastfm", "discogs"]
+            if not all(all_links.get(link) for link in required_links):
+                missing_counts["External Links"] += 1
+            
+            # Artwork: missing if no image_url
+            if not artist.get("image_url"):
+                missing_counts["Fanart"] += 1
+            
+            # Bio: missing if no bio
+            if not artist.get("bio"):
+                missing_counts["Bio"] += 1
+            
+            # Top tracks: missing if flag says so
+            if not artist.get("has_top_tracks"):
+                missing_counts["Top Tracks"] += 1
+            
+            # Similar artists: missing if flag says so
+            if not artist.get("has_similar"):
+                missing_counts["Similar Artists"] += 1
+            
+            # Singles: missing if flag says so
+            if not artist.get("has_singles"):
+                missing_counts["Singles"] += 1
+            
+            # Album metadata: always consider as potentially missing
+            # (we don't have a good pre-check for this)
+            if artist.get("has_primary_album"):
+                missing_counts["Album Metadata"] += 1
+        
+        # Post-execution: Aggregate metrics from stage results
+        stage_metrics = {
+            "MusicBrainz Core": {"searched": 0, "hits": 0},
+            "External Links": {"searched": 0, "hits": 0},
+            "Fanart": {"searched": 0, "hits": 0},
+            "Bio": {"searched": 0, "hits": 0},
+            "Top Tracks": {"searched": 0, "hits": 0},
+            "Similar Artists": {"searched": 0, "hits": 0},
+            "Singles": {"searched": 0, "hits": 0},
+            "Album Metadata": {"searched": 0, "hits": 0},
+        }
+        
+        # Aggregate from all pipeline results
+        for pipeline_result in self.pipeline_results:
+            for stage_key, stage_result in pipeline_result.results.items():
+                display_name = stage_names.get(stage_key)
+                if not display_name or display_name not in stage_metrics:
+                    continue
+                
+                metrics = stage_result.metrics or {}
+                stage_metrics[display_name]["searched"] += metrics.get("searched", 0)
+                if metrics.get("found"):
+                    stage_metrics[display_name]["hits"] += 1
+        
+        # Report to stats tracker
+        for display_name in stage_metrics.keys():
+            missing = missing_counts.get(display_name, 0)
+            searched = stage_metrics[display_name]["searched"]
+            hits = stage_metrics[display_name]["hits"]
+            
+            get_api_tracker().track_stage_metrics(
+                stage=display_name,
+                missing=missing,
+                searched=searched,
+                hits=hits
+            )
     
     async def process_artist(
         self,
@@ -267,6 +377,9 @@ class PipelineAdapter:
             f"[{mbid}] Complete - Success: {success_count}, Skipped: {skip_count}, Errors: {error_count}, "
             f"API calls: {result.total_api_calls}"
         )
+        
+        # Store result for metric aggregation
+        self.pipeline_results.append(result)
         
         # Convert pipeline result to old format
         updates = self._convert_result_to_updates(result)

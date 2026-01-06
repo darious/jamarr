@@ -94,7 +94,7 @@ class ScanManager:
             "phase": self._phase,
             "api_stats": get_api_tracker().get_stats(),
             "processed_stats": get_api_tracker().get_processed_stats(),
-            "detailed_stats": get_api_tracker().get_detailed_stats(),
+            "stage_metrics": get_api_tracker().get_stage_metrics(),
         }
         self._broadcast({
             "type": "progress",
@@ -103,9 +103,9 @@ class ScanManager:
             "percentage": percentage,
             "message": message,
             "phase": self._phase,
-            "api_stats": self._stats["api_stats"],
-            "processed_stats": self._stats["processed_stats"],
-            "detailed_stats": self._stats["detailed_stats"],
+            "api_stats": self._stats.get("api_stats", {}),
+            "processed_stats": self._stats.get("processed_stats", {}),
+            "stage_metrics": self._stats.get("stage_metrics", {}),
         })
 
     def _log_message(self, message):

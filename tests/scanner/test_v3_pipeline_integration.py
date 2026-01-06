@@ -15,7 +15,7 @@ from app.scanner.pipeline import (
     EnrichmentPlanner,
     PipelineExecutor,
 )
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, patch
 import httpx
 
 

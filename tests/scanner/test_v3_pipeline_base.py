@@ -7,7 +7,7 @@ Test naming convention: test_v3_pipeline_* for new pipeline tests.
 import pytest
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult, ArtistState, ScanOptions
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock
 import httpx
 
 

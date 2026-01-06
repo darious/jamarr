@@ -8,7 +8,6 @@ from typing import List
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult
 from app.scanner.services import artwork
-from app.scanner.stats import get_api_tracker
 import logging
 
 logger = logging.getLogger(__name__)
@@ -80,10 +79,6 @@ class ArtworkStage(EnrichmentStage):
                 source = "fanart"
             if bg_url:
                 data["background_url"] = bg_url
-            
-            get_api_tracker().track_detailed("Fanart", "found" if thumb_url or bg_url else "missing")
-        else:
-            get_api_tracker().track_detailed("Fanart", "missing")
         
         # If no Fanart thumb, try Spotify
         if not thumb_url and context.options.fetch_spotify_artwork:
@@ -120,17 +115,12 @@ class ArtworkStage(EnrichmentStage):
                         data["image_url"] = img
                         data["image_source"] = "spotify"
                         source = "spotify"
-                        get_api_tracker().track_detailed("Spotify Art", "found")
-                    else:
-                        get_api_tracker().track_detailed("Spotify Art", "missing")
-            else:
-                get_api_tracker().track_detailed("Spotify Art", "missing")
         
         if not data:
             return StageResult(
                 stage_name=self.name,
                 success=False,
-                metrics={"api_calls": api_calls}
+                metrics={"api_calls": api_calls, "searched": 1, "found": False}
             )
         
         return StageResult.success(
@@ -138,6 +128,8 @@ class ArtworkStage(EnrichmentStage):
             data=data,
             metrics={
                 "api_calls": api_calls,
+                "searched": 1,
+                "found": True,
                 "source": source,
                 "has_thumb": bool(data.get("image_url")),
                 "has_background": bool(data.get("background_url")),

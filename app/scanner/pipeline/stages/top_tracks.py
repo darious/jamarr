@@ -6,7 +6,6 @@ from typing import List
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult
 from app.scanner.services import lastfm
-from app.scanner.stats import get_api_tracker
 import logging
 
 logger = logging.getLogger(__name__)
@@ -43,20 +42,19 @@ class TopTracksStage(EnrichmentStage):
         tracks = await lastfm.fetch_top_tracks(mbid, name, context.client)
         
         if not tracks:
-            get_api_tracker().track_detailed("Top Tracks", "missing")
             return StageResult(
                 stage_name=self.name,
                 success=False,
-                metrics={"api_calls": 1}
+                metrics={"api_calls": 1, "searched": 1, "found": False}
             )
-        
-        get_api_tracker().track_detailed("Top Tracks", "found")
         
         return StageResult.success(
             stage_name=self.name,
             data={"top_tracks": tracks},
             metrics={
                 "api_calls": 1,
+                "searched": 1,
+                "found": True,
                 "tracks_found": len(tracks),
             }
         )

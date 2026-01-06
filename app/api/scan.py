@@ -110,12 +110,51 @@ async def cancel_scan():
 
 @router.get("/api/library/status")
 async def get_scan_status():
+    from app.scanner.stats import get_api_tracker
+    
     manager = ScanManager.get_instance()
+    tracker = get_api_tracker()
+    
+    # Get stage metrics
+    stage_metrics = tracker.get_stage_metrics()
+    categories = []
+    for stage_name, metrics in stage_metrics.items():
+        missing = metrics.get("missing", 0)
+        searched = metrics.get("searched", 0)
+        hits = metrics.get("hits", 0)
+        misses = metrics.get("misses", 0)
+        success_rate = f"{int(hits / missing * 100)}%" if missing > 0 else "N/A"
+        
+        categories.append({
+            "name": stage_name,
+            "missing": missing,
+            "searched": searched,
+            "hits": hits,
+            "misses": misses,
+            "success_rate": success_rate
+        })
+    
+    # Get API request counts
+    api_stats = tracker.get_stats()
+    api_requests = {
+        "musicbrainz": api_stats.get("musicbrainz", 0),
+        "lastfm": api_stats.get("lastfm", 0),
+        "wikidata": api_stats.get("wikidata", 0),
+        "fanart": api_stats.get("fanart", 0),
+        "spotify": api_stats.get("spotify", 0),
+        "qobuz": api_stats.get("qobuz", 0),
+    }
+    
+    # Get processed counts
+    processed = tracker.get_processed_stats()
+    
     return {
         "status": manager._status,
         "stats": manager._stats,
-        "is_running": manager._current_task is not None
-        and not manager._current_task.done(),
+        "processed": processed,
+        "categories": categories,
+        "api_requests": api_requests,
+        "is_running": manager._current_task is not None and not manager._current_task.done(),
         "music_path": manager.get_music_path(),
     }
 
