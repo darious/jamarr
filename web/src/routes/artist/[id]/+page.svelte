@@ -294,6 +294,7 @@
         let navAlbum = null;
         let art_id = null;
         let art_sha1 = null;
+        let artists: { name: string; mbid?: string }[] | undefined;
 
         if (s.local_track_id) {
           // Single is in library - find the track
@@ -302,6 +303,7 @@
             localId = s.title; // Use title as ID
             navAlbum = localTrack.album;
             tracksToPlay = [localTrack];
+            artists = localTrack.artists;
             techData = {
               codec: s.codec || localTrack.codec,
               bit_depth: s.bit_depth || localTrack.bit_depth,
@@ -334,6 +336,7 @@
           album_mbid: s.album_mbid,
           ...techData,
           tracksToPlay,
+          artists,
         };
       })
       .sort((a, b) => {
@@ -919,6 +922,7 @@
             {#each displayedTopTracks as track, i}
               <TrackCard
                 {track}
+                artists={track.artists}
                 artist={{ name: artist?.name || "", mbid: artist?.mbid }}
                 album={{
                   name: track.album || "",
@@ -956,6 +960,7 @@
                   sample_rate_hz: single.sample_rate_hz,
                   popularity: single.popularity,
                 }}
+                artists={single.artists}
                 artist={{ name: artist?.name || "", mbid: artist?.mbid }}
                 album={{
                   name: single.album || "",

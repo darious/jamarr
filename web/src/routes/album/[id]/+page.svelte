@@ -370,6 +370,7 @@
                   {#each group.tracks as track, idx}
                     <TrackCard
                       {track}
+                      artists={track.artists}
                       artist={{ name: track.artist || data.artist }}
                       showIndex={true}
                       index={track.track_no}

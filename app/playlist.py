@@ -183,13 +183,18 @@ async def get_playlist(
          raise HTTPException(status_code=403, detail="Access denied")
 
     # Get tracks
+    # Get tracks
     t_query = """
         SELECT 
             pt.id as playlist_track_id, pt.position,
             t.id as track_id, t.title, t.artist, t.album, t.duration_seconds,
             t.artwork_id as art_id, a.sha1 as art_sha1, t.path,
             t.codec, t.sample_rate_hz, t.bit_depth,
-            t.artist_mbid, t.release_group_mbid as album_mbid
+            t.artist_mbid, t.release_group_mbid as album_mbid,
+            (SELECT jsonb_agg(jsonb_build_object('name', a2.name, 'mbid', a2.mbid) ORDER BY a2.name) 
+             FROM track_artist ta2 
+             JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
+             WHERE ta2.track_id = t.id) as aggregated_artists_json
         FROM playlist_track pt
         JOIN track t ON pt.track_id = t.id
         LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -204,6 +209,22 @@ async def get_playlist(
     for r in t_rows:
         d = dict(r)
         d['art_sha1'] = sha1_to_hex(d['art_sha1'])
+        
+        # Parse aggregated artists JSON
+        if d.get("aggregated_artists_json"):
+            import json
+            val = d["aggregated_artists_json"]
+            if isinstance(val, str):
+                try:
+                    d["artists"] = json.loads(val)
+                except Exception:
+                    d["artists"] = []
+            else:
+                d["artists"] = val
+        else:
+             d["artists"] = [{"name": d["artist"]}] if d.get("artist") else []
+        d.pop("aggregated_artists_json", None)
+
         tracks.append(d)
         if d['duration_seconds']:
             total_duration += d['duration_seconds']

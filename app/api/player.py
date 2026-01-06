@@ -273,6 +273,7 @@ class Track(BaseModel):
     release_date: Optional[str] = None
     bitrate: Optional[int] = None
     logged: bool = False
+    artists: Optional[List[Dict[str, Optional[str]]]] = None
 
 
 class PlayerState(BaseModel):
@@ -349,17 +350,29 @@ async def _enrich_track_metadata(
 ) -> Dict[str, Any]:
     """Ensure track dict has path, mime, and artwork; fallback to DB lookup."""
     enriched = dict(track)
-    # Always try to fetch missing critical fields
+    # Always fetch missing critical fields including artists
     if (
         not enriched.get("path")
         or not enriched.get("mime")
         or not enriched.get("art_sha1")
+        or enriched.get("artists") is None
     ):
         row = await db.fetchrow(
             """
-            SELECT t.path, t.codec, t.artwork_id, a.sha1 as art_sha1 
+            WITH track_artists AS (
+                SELECT 
+                    ta.track_id, 
+                    jsonb_agg(jsonb_build_object('name', a.name, 'mbid', a.mbid)) as artists
+                FROM track_artist ta
+                JOIN artist a ON ta.artist_mbid = a.mbid
+                WHERE ta.track_id = $1
+                GROUP BY ta.track_id
+            )
+            SELECT t.path, t.codec, t.artwork_id, a.sha1 as art_sha1,
+                   COALESCE(ta.artists, '[]'::jsonb) as artists
             FROM track t
             LEFT JOIN artwork a ON t.artwork_id = a.id
+            LEFT JOIN track_artists ta ON t.id = ta.track_id
             WHERE t.id = $1 LIMIT 1
             """,
             enriched.get("id"),
@@ -388,6 +401,13 @@ async def _enrich_track_metadata(
                         else:
                             mime = "audio/flac"
                     enriched["mime"] = mime
+            
+            if enriched.get("artists") is None:
+                artists_val = row[4]
+                if isinstance(artists_val, str):
+                    import json
+                    artists_val = json.loads(artists_val)
+                enriched["artists"] = artists_val
 
     # Frontend compat
     if enriched.get("artwork_id") and not enriched.get("art_id"):
@@ -1322,13 +1342,39 @@ async def play_track(
     udn = await get_active_renderer(db, client_id)
 
     # Fetch track metadata
+    # Fetch track metadata
     row = await db.fetchrow(
-        "SELECT id, title, artist, album, artwork_id, path, duration_seconds FROM track WHERE id = $1",
+        """
+        WITH track_artists AS (
+            SELECT 
+                ta.track_id, 
+                jsonb_agg(
+                    jsonb_build_object(
+                        'name', a.name, 
+                        'mbid', a.mbid
+                    )
+                ) as artists
+            FROM track_artist ta
+            JOIN artist a ON ta.artist_mbid = a.mbid
+            WHERE ta.track_id = $1
+            GROUP BY ta.track_id
+        )
+        SELECT 
+            t.id, t.title, t.artist, t.album, t.artwork_id, t.path, t.duration_seconds,
+            COALESCE(ta.artists, '[]'::jsonb) as artists
+        FROM track t
+        LEFT JOIN track_artists ta ON t.id = ta.track_id
+        WHERE t.id = $1
+        """,
         track_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Track not found")
     track = dict(row)
+    # Parse jsonb string if needed (asyncpg usually returns python objects for jsonb)
+    if isinstance(track.get("artists"), str):
+        import json
+        track["artists"] = json.loads(track["artists"])
     user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
 
     # Mime logic
@@ -1401,6 +1447,7 @@ async def play_track(
             current_index = next(
                 i for i, t in enumerate(existing_queue) if t.get("id") == track["id"]
             )
+            existing_queue[current_index] = track
         except StopIteration:
             existing_queue = [track]
             current_index = 0
@@ -1437,6 +1484,7 @@ async def play_track(
             current_index = next(
                 i for i, t in enumerate(existing_queue) if t.get("id") == track["id"]
             )
+            existing_queue[current_index] = track
         except StopIteration:
             existing_queue = [track]
             current_index = 0

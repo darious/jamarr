@@ -1,5 +1,6 @@
 <script lang="ts">
     import IconButton from "$components/IconButton.svelte";
+    import ArtistLinks from "$components/ArtistLinks.svelte";
 
     // Core track data
     export let track: {
@@ -16,6 +17,14 @@
     };
 
     // Optional metadata
+    // Optional metadata
+    export let artists:
+        | {
+              name: string;
+              mbid?: string;
+          }[]
+        | undefined = undefined;
+
     export let artist:
         | {
               name: string;
@@ -98,9 +107,9 @@
         return "#";
     }
 
-    function getArtistUrl(): string {
-        if (artist?.mbid) return `/artist/${artist.mbid}`;
-        if (artist?.name) return `/artist/${encodeURIComponent(artist.name)}`;
+    function getArtistUrl(a: { name: string; mbid?: string }): string {
+        if (a.mbid) return `/artist/${a.mbid}`;
+        if (a.name) return `/artist/${encodeURIComponent(a.name)}`;
         return "#";
     }
 
@@ -182,42 +191,48 @@
             {track.title}
         </p>
 
-        <!-- Row 2: Artist · Album · Year -->
-        <div class="flex items-center gap-1.5 text-sm text-muted leading-tight">
-            {#if showArtist && artist}
-                <a
-                    href={getArtistUrl()}
-                    class="hover:text-default hover:underline cursor-pointer truncate"
-                    on:click|stopPropagation={() => {}}
-                >
-                    {artist.name}
-                </a>
-            {/if}
+        <!-- Row 2: Artist -->
+        {#if showArtist}
+            <div class="text-sm text-muted leading-tight truncate">
+                <ArtistLinks
+                    {artists}
+                    {artist}
+                    linkClass="hover:text-default hover:underline cursor-pointer"
+                    separatorClass="text-subtle"
+                />
+            </div>
+        {/if}
 
-            {#if showArtist && artist && showAlbum && album}
-                <span class="text-subtle">·</span>
-            {/if}
+        <!-- Row 3: Album · Year -->
+        {#if (showAlbum && album) || (showPopularity && track.popularity)}
+            <div
+                class="flex items-center gap-1.5 text-sm text-subtle leading-tight truncate"
+            >
+                {#if showAlbum && album}
+                    <a
+                        href={getAlbumUrl()}
+                        class="hover:text-default hover:underline cursor-pointer truncate"
+                        on:click|stopPropagation={() => {}}
+                    >
+                        {album.name}
+                    </a>
+                {/if}
 
-            {#if showAlbum && album}
-                <a
-                    href={getAlbumUrl()}
-                    class="hover:text-default hover:underline cursor-pointer truncate"
-                    on:click|stopPropagation={() => {}}
-                >
-                    {album.name}
-                </a>
-            {/if}
+                {#if showAlbum && album && showYear && album?.year}
+                    <span class="text-subtle">·</span>
+                    <span class="text-muted">{album.year.substring(0, 4)}</span>
+                {/if}
 
-            {#if showYear && album?.year}
-                <span class="text-subtle">·</span>
-                <span class="text-muted">{album.year.substring(0, 4)}</span>
-            {/if}
-
-            {#if showPopularity && track.popularity}
-                <span class="text-subtle">·</span>
-                <span class="text-muted">{formatPlays(track.popularity)}</span>
-            {/if}
-        </div>
+                {#if showPopularity && track.popularity}
+                    {#if showAlbum && album}
+                        <span class="text-subtle">·</span>
+                    {/if}
+                    <span class="text-muted"
+                        >{formatPlays(track.popularity)}</span
+                    >
+                {/if}
+            </div>
+        {/if}
     </div>
 
     <!-- Right Column: Duration, Tech Details, Actions -->
