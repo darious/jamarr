@@ -507,7 +507,11 @@ async def get_tracks(
             (SELECT STRING_AGG(a2.name, ', ' ORDER BY a2.name) 
              FROM track_artist ta2 
              JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
-             WHERE ta2.track_id = t.id) as aggregated_artists
+             WHERE ta2.track_id = t.id) as aggregated_artists,
+            (SELECT jsonb_agg(jsonb_build_object('name', a2.name, 'mbid', a2.mbid) ORDER BY a2.name) 
+             FROM track_artist ta2 
+             JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
+             WHERE ta2.track_id = t.id) as aggregated_artists_json
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
     """
@@ -548,6 +552,24 @@ async def get_tracks(
         # Override artist tag with aggregated list if available
         if d.get("aggregated_artists"):
             d["artist"] = d["aggregated_artists"]
+
+        # Parse aggregated artists JSON
+        if d.get("aggregated_artists_json"):
+            import json
+            val = d["aggregated_artists_json"]
+            if isinstance(val, str):
+                try:
+                    d["artists"] = json.loads(val)
+                except Exception:
+                    d["artists"] = []
+            else:
+                d["artists"] = val
+        else:
+             # Fallback if no specific artists linked
+             d["artists"] = [{"name": d["artist"]}] if d.get("artist") else []
+        
+        # Remove internal helper field
+        d.pop("aggregated_artists_json", None)
 
         # Frontend compatibility: expects art_id
         if d.get("artwork_id"):

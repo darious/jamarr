@@ -13,6 +13,7 @@
   } from "$stores/player";
   import VolumeControl from "$components/VolumeControl.svelte";
   import TrackCard from "$components/TrackCard.svelte";
+  import ArtistLinks from "$components/ArtistLinks.svelte";
   import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
   import { onMount, onDestroy } from "svelte";
 
@@ -331,17 +332,20 @@
                   "No track playing"}
               </div>
               <div class="text-2xl text-white/80 truncate px-8 drop-shadow-md">
-                <a
-                  href={$playerState.queue[$playerState.current_index]
-                    ?.artist_mbid
-                    ? `/artist/${$playerState.queue[$playerState.current_index]?.artist_mbid}`
-                    : `/artist/${encodeURIComponent($playerState.queue[$playerState.current_index]?.artist || "")}`}
-                  class="hover:text-white hover:underline pointer-events-auto cursor-pointer"
-                  on:click|stopPropagation={() => nowPlayingVisible.set(false)}
-                >
-                  {$playerState.queue[$playerState.current_index]?.artist ||
-                    "—"}
-                </a>
+                <ArtistLinks
+                  artists={$playerState.queue[$playerState.current_index]
+                    ?.artists}
+                  artist={{
+                    name:
+                      $playerState.queue[$playerState.current_index]?.artist ||
+                      "—",
+                    mbid: $playerState.queue[$playerState.current_index]
+                      ?.artist_mbid,
+                  }}
+                  linkClass="hover:text-white hover:underline pointer-events-auto cursor-pointer"
+                  separatorClass="text-white/80"
+                  stopPropagation={true}
+                />
               </div>
               <div class="text-lg text-white/60 truncate px-8 drop-shadow-md">
                 <a
@@ -508,6 +512,7 @@
                           art_sha1: track.art_sha1,
                           art_id: track.art_id,
                         }}
+                        artists={track.artists}
                         artist={{
                           name: track.artist || "",
                           mbid: track.artist_mbid,
@@ -527,7 +532,7 @@
                         showYear={false}
                         showTechDetails={true}
                         showPopularity={false}
-                        showBitrate={true}
+                        showBitrate={false}
                         draggable={true}
                         onDragStart={(e) => handleDragStart(e, idx)}
                         onDragOver={(e) => handleDragOver(e, idx)}

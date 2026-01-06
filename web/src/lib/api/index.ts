@@ -118,6 +118,7 @@ export interface Track {
     album_artist_mbid?: string | null;
     album_mbid?: string | null;
     popularity?: number;
+    artists?: { name: string; mbid?: string }[];
 }
 
 export interface User {
@@ -527,6 +528,7 @@ export interface PlaylistTrack {
     codec?: string;
     sample_rate_hz?: number;
     bit_depth?: number;
+    artists?: { name: string; mbid?: string }[];
 }
 
 export interface PlaylistDetail extends Playlist {

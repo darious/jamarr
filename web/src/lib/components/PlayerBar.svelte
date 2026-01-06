@@ -18,6 +18,7 @@
   import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
   import VolumeControl from "$components/VolumeControl.svelte";
   import QueueDrawer from "$components/QueueDrawer.svelte";
+  import ArtistLinks from "$components/ArtistLinks.svelte";
   import { onMount } from "svelte";
 
   let audio: HTMLAudioElement;
@@ -535,7 +536,15 @@
             {currentTrack.title}
           </div>
           <div class="text-sm text-muted truncate">
-            {currentTrack.artist}
+            <ArtistLinks
+              artists={currentTrack.artists}
+              artist={{
+                name: currentTrack.artist,
+                mbid: currentTrack.artist_mbid,
+              }}
+              linkClass="hover:text-default hover:underline cursor-pointer"
+              separatorClass="text-muted"
+            />
           </div>
           <div class="flex items-center gap-2 text-xs text-subtle mt-0.5">
             {#if currentTrack.codec}
