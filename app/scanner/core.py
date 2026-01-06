@@ -672,38 +672,30 @@ async def warm_dns_cache():
     global _dns_cache_warmed
     if _dns_cache_warmed:
         return
-        
-    try:
-        # Lazy import to avoid loading aiodns in web server context
-        from app.scanner.dns_resolver import warm_dns_cache as _warm_dns_cache
-        
-        # Add Qobuz domains manually if not covered by default list
-        # We can't easily modify the list inside dns_resolver from here without importing it
-        # But we can try to resolve them here.
-        # Actually dns_resolver.py probably has a list. Let's check it first?
-        # User requested update here, but `_warm_dns_cache` might be the place to edit.
-        # But I can't see `app/scanner/dns_resolver.py`.
-        # I'll check it.
+    
+    # Lazy import to avoid loading aiodns in web server context
+    from app.scanner.dns_resolver import warm_dns_cache as _warm_dns_cache
 
-        logger.info("Warming DNS cache for scanner...")
-        await _warm_dns_cache()
-        _dns_cache_warmed = True
-        logger.info("DNS cache warmed successfully")
-    except Exception as e:
-        # Don't fail if DNS warming fails - it's just an optimization
-        logger.warning(f"Failed to warm DNS cache (non-fatal): {e}")
+    logger.info("Warming DNS cache for scanner...")
+    await _warm_dns_cache()
+    _dns_cache_warmed = True
+    logger.info("DNS cache warmed and verified successfully")
 
 def get_shared_client() -> httpx.AsyncClient:
     """
     Returns a shared httpx.AsyncClient instance with DNS caching.
     Created lazily and lasts for the process lifetime (or until closed).
+    
+    Uses the CachedDNSResolver to eliminate DNS lookups during scanning.
     """
     global _shared_client
     if _shared_client is None or _shared_client.is_closed:
-        # Create HTTP client
-        # DNS caching is handled separately via warm_dns_cache() if needed
-        
         limits = httpx.Limits(max_keepalive_connections=10, max_connections=25)
+        
+        # NOTE: DNS caching is handled via socket monkey-patching in dns_resolver.warm_dns_cache()
+        # This ensures ALL clients (including those created by libraries) use the cache.
+        pass
+        
         _shared_client = httpx.AsyncClient(
             headers={"User-Agent": "Jamarr/0.1 ( jamarr@example.com )"},
             timeout=30.0,
@@ -711,6 +703,7 @@ def get_shared_client() -> httpx.AsyncClient:
             follow_redirects=True
         )
     return _shared_client
+
 
 async def close_shared_client():
     global _shared_client

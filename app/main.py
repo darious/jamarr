@@ -8,6 +8,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     from app.upnp import UPnPManager
     from app.scanner.scan_manager import ScanManager
+    from app.scanner.dns_resolver import warm_dns_cache
+
+    # Critical: Warm DNS cache and install monkey-patch BEFORE any clients are created
+    await warm_dns_cache()
 
     UPnPManager.get_instance().start_background_scan()
     # ScanManager is lazy initialized but good to have it ready

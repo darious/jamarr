@@ -152,6 +152,33 @@ async def test_dns_warm_cache_idempotent():
 
 
 @pytest.mark.asyncio
+async def test_dns_warm_cache_verifies_hits(monkeypatch):
+    """Warm/verify should populate cache and produce hits before scanning."""
+    resolver = get_resolver()
+    resolver.clear_cache()
+    resolver._stats = {"hits": 0, "misses": 0, "errors": 0}
+
+    test_hosts = ["example.org", "example.com"]
+
+    async def fake_resolve(host):
+        # Simulate cache hits on second pass without real DNS
+        if host in resolver._cache:
+            resolver._stats["hits"] += 1
+            return resolver._cache[host]
+        resolver._stats["misses"] += 1
+        resolver._cache[host] = ["127.0.0.1"]
+        return resolver._cache[host]
+
+    monkeypatch.setattr(resolver, "resolve", fake_resolve)
+    monkeypatch.setattr("app.scanner.dns_resolver.KNOWN_HOSTS", test_hosts, raising=False)
+
+    await warm_dns_cache()
+
+    stats = resolver.get_stats()
+    assert stats["hits"] >= len(test_hosts)
+    assert all(h in resolver._cache for h in test_hosts)
+
+@pytest.mark.asyncio
 async def test_dns_concurrent_resolution():
     """Test concurrent DNS resolutions."""
     resolver = CachedDNSResolver()
