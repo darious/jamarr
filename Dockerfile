@@ -35,4 +35,4 @@ COPY --from=frontend-builder /app/web/build ./web/build
 EXPOSE 8111
 
 # Command to run (host 0.0.0.0 is crucial for docker)
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8111"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8111", "--loop", "asyncio"]

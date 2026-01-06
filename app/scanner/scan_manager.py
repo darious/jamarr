@@ -317,6 +317,10 @@ class ScanManager:
             # Phase 2: Metadata
             self._phase = "metadata"
             self._broadcast({"type": "start", "mode": "metadata", "phase": self._phase})
+
+            # CRITICAL: Warm DNS cache before metadata operations
+            # This handles cases where startup warming failed or cache is cold
+            await warm_dns_cache()
             
             scanned_mbids = {m[0] for m in artist_mbids if m[0]}
             if path and not scanned_mbids:
