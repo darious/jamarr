@@ -48,6 +48,8 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
     if not q or len(q) < 2:
         return SearchResponse(artists=[], albums=[], tracks=[])
 
+    limit = 20
+
     # 1. Search Artists (case-insensitive via citext)
     artists_query = """
         SELECT a.name, a.mbid, a.image_url, a.artwork_id, ar.sha1 as art_sha1
@@ -55,10 +57,10 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
         LEFT JOIN artwork ar ON a.artwork_id = ar.id
         WHERE a.name ILIKE $1
         ORDER BY LENGTH(a.name) ASC, a.name ASC 
-        LIMIT 5
+        LIMIT $2
     """
     artists = []
-    rows = await db.fetch(artists_query, f"%{q}%")
+    rows = await db.fetch(artists_query, f"%{q}%", limit)
     for row in rows:
         artists.append(
             SearchResultArtist(
@@ -71,29 +73,42 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
             )
         )
 
-    # 2. Search Albums using FTS
+    # 2. Search Albums from `album` table (using title FTS)
+    # We join artist_album to get a "primary" artist. 
+    # Prioritize correct album title matches first.
     albums_query = """
         SELECT 
-            t.album, 
-            t.artist, 
-            MAX(COALESCE(t.release_group_mbid, t.release_mbid)) as mbid,
-            MAX(t.artwork_id) as artwork_id, 
-            MAX(a.sha1) as art_sha1
-        FROM track t
-        LEFT JOIN artwork a ON t.artwork_id = a.id
-        WHERE t.fts_vector @@ plainto_tsquery('english', $1)
-          AND t.album IS NOT NULL
-        GROUP BY t.album, t.artist
-        ORDER BY MAX(ts_rank(t.fts_vector, plainto_tsquery('english', $1))) DESC
-        LIMIT 5
+            al.title, 
+            al.mbid, 
+            al.artwork_id, 
+            ar.sha1 as art_sha1,
+            -- Get the first artist (prioritizing primary)
+            (
+                SELECT art.name 
+                FROM artist_album aa
+                JOIN artist art ON aa.artist_mbid = art.mbid
+                WHERE aa.album_mbid = al.mbid
+                ORDER BY (CASE WHEN aa.type = 'primary' THEN 1 ELSE 2 END), art.name
+                LIMIT 1
+            ) as artist
+        FROM album al
+        LEFT JOIN artwork ar ON al.artwork_id = ar.id
+        WHERE to_tsvector('english', al.title) @@ plainto_tsquery('english', $1)
+        ORDER BY 
+            -- Primary Sort: Does it match using 'simple' dictionary (stopwords included)?
+            (to_tsvector('simple', al.title) @@ plainto_tsquery('simple', $1)) DESC,
+            -- Secondary Sort: FTS Rank
+            ts_rank(to_tsvector('english', al.title), plainto_tsquery('english', $1)) DESC, 
+            al.title
+        LIMIT $2
     """
     albums = []
-    rows = await db.fetch(albums_query, q)
+    rows = await db.fetch(albums_query, q, limit)
     for row in rows:
         albums.append(
             SearchResultAlbum(
-                title=row["album"],
-                artist=row["artist"],
+                title=row["title"],
+                artist=row["artist"] or "Unknown Artist",
                 mbid=row["mbid"],
                 artwork_id=row["artwork_id"],
                 art_id=row["artwork_id"],
@@ -101,7 +116,7 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
             )
         )
 
-    # 3. Search Tracks using FTS
+    # 3. Search Tracks using FTS (existing logic but new limit)
     tracks_query = """
         SELECT 
             t.id, 
@@ -116,10 +131,10 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.fts_vector @@ plainto_tsquery('english', $1)
         ORDER BY ts_rank(t.fts_vector, plainto_tsquery('english', $1)) DESC
-        LIMIT 20
+        LIMIT $2
     """
     tracks = []
-    rows = await db.fetch(tracks_query, q)
+    rows = await db.fetch(tracks_query, q, limit)
     for row in rows:
         tracks.append(
             SearchResultTrack(
