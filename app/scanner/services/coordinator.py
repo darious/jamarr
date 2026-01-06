@@ -495,7 +495,24 @@ class MetadataCoordinator:
              logger.debug(f"[{name}] Fetching metadata for {len(local_release_group_ids)} local albums")
              album_tasks = []
              album_ids = list(local_release_group_ids)
-             
+
+             if missing_only and album_ids:
+                 # Check DB for existing descriptions
+                 from app.db import get_pool
+                 pool = await get_pool()
+                 async with pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        "SELECT DISTINCT release_group_mbid FROM album WHERE release_group_mbid = ANY($1) AND description IS NOT NULL",
+                        album_ids
+                    )
+                    albums_with_desc = {row["release_group_mbid"] for row in rows}
+                    album_ids = [aid for aid in album_ids if aid not in albums_with_desc]
+                    
+                    if not album_ids:
+                        logger.debug(f"[{name}] All {len(local_release_group_ids)} albums already have descriptions (missing_only=True)")
+                    else:
+                        logger.debug(f"[{name}] Missing-only mode: Fetching metadata for {len(album_ids)}/{len(local_release_group_ids)} local albums")
+
              for rg_id in album_ids:
                  # If missing_only, should we check DB state? 
                  # Yes, but 'artist' object passed in doesn't have album details.
