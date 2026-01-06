@@ -730,6 +730,17 @@ class MetadataCoordinator:
                              links.append((l_type, data[k]))
                              
                      for l_type, url in links:
+                         # Normalize Qobuz URLs
+                         if l_type == "qobuz" and "play.qobuz.com" not in url:
+                             import re
+                             # Extract ID from end of URL
+                             match = re.search(r'(\d+)$', url)
+                             if match:
+                                 url = f"https://play.qobuz.com/artist/{match.group(1)}"
+                             else:
+                                 # Skip saving malformed Qobuz link
+                                 continue
+
                          await db.execute("""
                              INSERT INTO external_link (entity_type, entity_id, type, url)
                              VALUES ('artist', $1, $2, $3)
