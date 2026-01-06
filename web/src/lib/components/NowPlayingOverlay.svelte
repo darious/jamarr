@@ -406,7 +406,7 @@
                   >
                     <!-- Filled Track -->
                     <div
-                      class="h-full bg-white transition-all duration-100 ease-linear shadow-[0_0_10px_rgba(255,255,255,0.5)]"
+                      class="h-full bg-accent transition-all duration-100 ease-linear shadow-[0_0_10px_rgba(255,255,255,0.5)]"
                       style="width: {(progress / (duration || 1)) * 100}%"
                     ></div>
                   </div>

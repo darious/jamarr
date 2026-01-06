@@ -252,6 +252,22 @@
       }
     });
 
+    window.addEventListener("jamarr:pause", () => {
+      console.log("[PlayerBar] jamarr:pause event received");
+      if (!$playerState.renderer.startsWith("local") || !audio) return;
+      audio.pause();
+      isPlaying = false;
+      updateProgress(audio.currentTime, false);
+    });
+
+    window.addEventListener("jamarr:resume", () => {
+      console.log("[PlayerBar] jamarr:resume event received");
+      if (!$playerState.renderer.startsWith("local") || !audio) return;
+      audio.play().catch((e) => console.error("[PlayerBar] Resume failed:", e));
+      isPlaying = true;
+      updateProgress(audio.currentTime, true);
+    });
+
     if (audio) {
       console.log(
         "[PlayerBar] Audio element found, adding timeupdate and ended listeners",
@@ -620,7 +636,7 @@
           >
             <!-- Filled Track -->
             <div
-              class="h-full bg-primary-500 transition-all duration-100 ease-linear"
+              class="h-full bg-accent transition-all duration-100 ease-linear"
               style="width: {(progress / (duration || 1)) * 100}%"
             ></div>
           </div>
