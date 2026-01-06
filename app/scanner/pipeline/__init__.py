@@ -15,6 +15,8 @@ from app.scanner.pipeline.models import (
     PipelineResult,
 )
 from app.scanner.pipeline.base import EnrichmentStage
+from app.scanner.pipeline.planner import EnrichmentPlanner
+from app.scanner.pipeline.executor import PipelineExecutor
 
 __all__ = [
     "ArtistState",
@@ -24,4 +26,6 @@ __all__ = [
     "EnrichmentPlan",
     "PipelineResult",
     "EnrichmentStage",
+    "EnrichmentPlanner",
+    "PipelineExecutor",
 ]

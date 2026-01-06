@@ -45,15 +45,23 @@ class WikipediaBioStage(EnrichmentStage):
         """Fetch biography from Wikipedia."""
         wiki_url = self._get_wikipedia_url(context)
         
+        # If no Wikipedia URL, skip (don't report as success with empty bio)
+        if not wiki_url:
+            return StageResult.skip(
+                self.name,
+                "No Wikipedia URL available (may be rate limited)"
+            )
+        
         # Fetch bio
         bio = await wikipedia.fetch_bio(context.client, wiki_url)
         
         if not bio:
             get_api_tracker().track_detailed("Bio", "missing")
-            return StageResult(
+            # Return success with empty data - no bio found is not an error
+            return StageResult.success(
                 stage_name=self.name,
-                success=False,
-                metrics={"api_calls": 1}
+                data={},
+                metrics={"api_calls": 1, "bio_length": 0}
             )
         
         get_api_tracker().track_detailed("Bio", "found")
