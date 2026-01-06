@@ -404,13 +404,9 @@ class MetadataCoordinator:
             tasks.append(asyncio.sleep(0, result=None))
 
         # 7. Albums/EPs (MB - for linking)
-        if fetch_base_metadata:
-             tasks.append(musicbrainz.fetch_release_groups(mbid, "album", client, artist_name=name))
-             tasks.append(musicbrainz.fetch_release_groups(mbid, "ep", client, artist_name=name))
-        else:
-             tasks.append(asyncio.sleep(0, result=None))
-             tasks.append(asyncio.sleep(0, result=None))
-
+        # REMOVED: This data was not being used by save_artist_metadata.
+        # Linking happens during filesystem scan or separate missing album scan.
+        pass
 
         # Execute Block 1
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -473,21 +469,6 @@ class MetadataCoordinator:
             get_api_tracker().track_detailed("Singles", "found" if singles_res else "missing")
         elif fetch_singles:
             get_api_tracker().track_detailed("Singles", "missing")
-            
-        albums_res = results[6]
-        eps_res = results[7]
-        
-        # Combine albums and EPs and filter
-        all_albums = []
-        if isinstance(albums_res, list):
-            all_albums.extend(albums_res)
-        if isinstance(eps_res, list):
-            all_albums.extend(eps_res)
-        
-        if all_albums and local_release_group_ids:
-            updates["albums"] = [a for a in all_albums if a["mbid"] in local_release_group_ids]
-        if all_albums and local_release_group_ids:
-            updates["albums"] = [a for a in all_albums if a["mbid"] in local_release_group_ids]
         
         # 7b. Album Metadata (Description, Chart, Links)
         # Parallel fetch for all local albums
@@ -496,30 +477,7 @@ class MetadataCoordinator:
              album_tasks = []
              album_ids = list(local_release_group_ids)
 
-             if missing_only and album_ids:
-                 # Check DB for existing descriptions
-                 from app.db import get_pool
-                 pool = await get_pool()
-                 async with pool.acquire() as conn:
-                    rows = await conn.fetch(
-                        "SELECT DISTINCT release_group_mbid FROM album WHERE release_group_mbid = ANY($1) AND description IS NOT NULL",
-                        album_ids
-                    )
-                    albums_with_desc = {row["release_group_mbid"] for row in rows}
-                    album_ids = [aid for aid in album_ids if aid not in albums_with_desc]
-                    
-                    if not album_ids:
-                        logger.debug(f"[{name}] All {len(local_release_group_ids)} albums already have descriptions (missing_only=True)")
-                    else:
-                        logger.debug(f"[{name}] Missing-only mode: Fetching metadata for {len(album_ids)}/{len(local_release_group_ids)} local albums")
-
              for rg_id in album_ids:
-                 # If missing_only, should we check DB state? 
-                 # Yes, but 'artist' object passed in doesn't have album details.
-                 # We can optimistically fetch or rely on lower-level check?
-                 # Fetching is expensive. Ideally we'd know.
-                 # The caller could pass in 'albums_needing_update' set?
-                 # For now, just fetch all.
                 album_tasks.append(album.fetch_album_metadata(rg_id, client, _dns_semaphore))
              
              if album_tasks:

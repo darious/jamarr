@@ -264,11 +264,16 @@ class ScanManager:
                 try:
                      import json
                      links_dict = json.loads(links) if isinstance(links, str) else links
+                     # Map external_links JSON to flat keys for coordinator
                      d["spotify_url"] = links_dict.get("spotify")
                      d["homepage"] = links_dict.get("homepage")
-                     d["wiki_url"] = links_dict.get("wikipedia")
+                     d["wikipedia_url"] = links_dict.get("wikipedia")
                      d["wikidata_url"] = links_dict.get("wikidata")
-                     # Also pass others if needed by coordinator
+                     d["qobuz_url"] = links_dict.get("qobuz")
+                     d["tidal_url"] = links_dict.get("tidal")
+                     d["lastfm_url"] = links_dict.get("lastfm")
+                     d["discogs_url"] = links_dict.get("discogs")
+                     
                      d["all_links"] = links_dict
                 except Exception:
                      pass
