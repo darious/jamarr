@@ -57,6 +57,11 @@ class MissingAlbumsScanner:
                      mbid, name = row["mbid"], row["name"]
                      current_name = name or "Unknown"
                      
+                     # Skip Various Artists to avoid performance issues
+                     if mbid == "89ad4ac3-39f7-470e-963a-56509c546377" or current_name == "Various Artists":
+                         logger.info(f"Skipping scanning for {current_name} (Various Artists) - too many releases.")
+                         continue
+
                      # Local RGs
                      async with self.db.acquire() as conn:
                          rows = await conn.fetch("""
