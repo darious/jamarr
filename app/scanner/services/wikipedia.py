@@ -2,6 +2,7 @@ import httpx
 import logging
 from urllib.parse import quote, unquote
 from app.scanner.stats import get_api_tracker
+from app.config import get_user_agent
 
 logger = logging.getLogger("scanner.services.wikipedia")
 
@@ -25,7 +26,9 @@ async def fetch_bio(client: httpx.AsyncClient, wikipedia_url: str):
         wiki_summary_url = f"{WIKI_API_ROOT}/{quote(safe_title)}"
         get_api_tracker().increment("wikipedia")
         
-        resp = await client.get(wiki_summary_url)
+        # Wikipedia requires User-Agent header
+        headers = {"User-Agent": get_user_agent()}
+        resp = await client.get(wiki_summary_url, headers=headers)
         if resp.status_code == 200:
             wiki_data = resp.json()
             return wiki_data.get("extract")
