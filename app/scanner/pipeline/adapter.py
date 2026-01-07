@@ -165,6 +165,9 @@ class PipelineAdapter:
                         get_api_tracker().track_processed("artists_metadata", mbid)
                     results.append(True)
                     logger.info(f"[{mbid}] Save successful")
+                    
+                    # Report metrics incrementally
+                    self._report_stage_metrics(artists, results)
                 except Exception as e:
                     logger.error(f"[{mbid}] DB Save Error: {e}", exc_info=True)
                     results.append(e)

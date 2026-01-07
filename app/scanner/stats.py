@@ -57,13 +57,13 @@ class ApiTracker:
             searched: Artists we searched for
             hits: Artists where we found data
         
-        Misses are calculated as: missing - hits
+        Misses are calculated as: searched - hits (artists we searched but didn't find)
         """
         with self._stats_lock:
             self._stage_metrics[stage]["missing"] = missing
             self._stage_metrics[stage]["searched"] = searched
             self._stage_metrics[stage]["hits"] = hits
-            self._stage_metrics[stage]["misses"] = missing - hits
+            self._stage_metrics[stage]["misses"] = searched - hits
 
     def get_stats(self):
         """Get API call counters."""
