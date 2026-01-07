@@ -26,12 +26,25 @@
             tracks?: number;
             albums?: number;
             artists?: number;
-
             artists_metadata?: number;
         };
-        detailed_stats?: Record<
+        categories?: Array<{
+            name: string;
+            missing: number;
+            searched: number;
+            hits: number;
+            misses: number;
+            success_rate: string;
+        }>;
+        // Legacy support
+        stage_metrics?: Record<
             string,
-            { searched: number; found: number; missing: number }
+            {
+                missing: number;
+                searched: number;
+                hits: number;
+                misses: number;
+            }
         >;
     }
 
@@ -47,7 +60,7 @@
         completedStatus: "",
 
         processed_stats: {},
-        detailed_stats: {},
+        categories: [],
     };
     let logs: { timestamp: number; message: string }[] = [];
     let logContainer: HTMLElement;
@@ -109,9 +122,24 @@
                 const data = await res.json();
                 status = data.status;
                 isRunning = data.is_running;
-                if (data.stats && Object.keys(data.stats).length > 0) {
-                    stats = data.stats;
+
+                // Load stats from API response
+                if (data.processed) {
+                    stats.processed_stats = data.processed;
                 }
+                if (data.api_requests) {
+                    stats.api_stats = data.api_requests;
+                }
+
+                // Convert categories or stage_metrics to categories format
+                if (data.categories && data.categories.length > 0) {
+                    stats.categories = data.categories;
+                } else if (data.stage_metrics) {
+                    stats.categories = convertStageMetricsToCategories(
+                        data.stage_metrics,
+                    );
+                }
+
                 if (data.music_path && !scanPath) {
                     scanPath = data.music_path;
                     if (scanPath && !scanPath.endsWith("/")) {
@@ -155,6 +183,24 @@
         isUserScrolled = logContainer.scrollTop > 10;
     }
 
+    // Convert stage_metrics to categories format
+    function convertStageMetricsToCategories(
+        stage_metrics: Record<string, any>,
+    ): Array<any> {
+        if (!stage_metrics) return [];
+        return Object.entries(stage_metrics).map(([name, metrics]) => ({
+            name,
+            missing: metrics.missing || 0,
+            searched: metrics.searched || 0,
+            hits: metrics.hits || 0,
+            misses: metrics.misses || 0,
+            success_rate:
+                metrics.missing > 0
+                    ? `${Math.round((metrics.hits / metrics.missing) * 100)}%`
+                    : "N/A",
+        }));
+    }
+
     function handleEvent(data: any) {
         if (data.type === "status") {
             status = data.status;
@@ -176,8 +222,13 @@
                 api_stats: data.api_stats || stats.api_stats || {},
                 processed_stats:
                     data.processed_stats || stats.processed_stats || {},
-                detailed_stats:
-                    data.detailed_stats || stats.detailed_stats || {},
+                categories:
+                    data.categories ||
+                    (data.stage_metrics
+                        ? convertStageMetricsToCategories(data.stage_metrics)
+                        : stats.categories) ||
+                    [],
+                stage_metrics: data.stage_metrics || stats.stage_metrics || {},
             };
         } else if (data.type === "log") {
             addLog(data.message);
@@ -696,30 +747,48 @@
                                 >{stats.api_stats?.spotify || 0}</span
                             >
                         </div>
+
+                        <!-- Qobuz -->
+                        <div
+                            class="flex items-center gap-2 bg-surface-3 rounded-full px-3 py-1 border border-subtle cursor-help"
+                            title="Qobuz"
+                        >
+                            <img
+                                src="/assets/logo-qobuz.png"
+                                alt="Qobuz"
+                                class="w-5 h-5 opacity-90"
+                            />
+                            <span
+                                class="font-mono text-sm font-bold text-default"
+                                >{stats.api_stats?.qobuz || 0}</span
+                            >
+                        </div>
                     </div>
                 </div>
             </div>
 
             <!-- Detailed Stats Table -->
-            <!-- Detailed Stats Table -->
             <div class="card bg-surface-2 border border-subtle p-4 mb-4">
                 <h3 class="text-xs uppercase tracking-wide text-subtle mb-3">
-                    Detailed Statistics
+                    Scan Statistics
                 </h3>
-                {#if stats.detailed_stats && Object.keys(stats.detailed_stats).length > 0}
+                {#if stats.categories && stats.categories.length > 0}
                     <div class="overflow-x-auto">
                         <table class="table table-xs w-full text-left">
                             <thead>
                                 <tr class="text-subtle border-b border-subtle">
                                     <th class="pb-2 font-normal">Category</th>
                                     <th class="pb-2 font-normal text-right"
+                                        >Missing</th
+                                    >
+                                    <th class="pb-2 font-normal text-right"
                                         >Searched</th
                                     >
                                     <th class="pb-2 font-normal text-right"
-                                        >Found</th
+                                        >Hits</th
                                     >
                                     <th class="pb-2 font-normal text-right"
-                                        >Missing</th
+                                        >Misses</th
                                     >
                                     <th class="pb-2 font-normal text-right"
                                         >Success Rate</th
@@ -727,32 +796,29 @@
                                 </tr>
                             </thead>
                             <tbody class="text-sm">
-                                {#each Object.entries(stats.detailed_stats).sort( (a, b) => a[0].localeCompare(b[0]), ) as [category, data]}
+                                {#each stats.categories.sort( (a, b) => a.name.localeCompare(b.name), ) as category}
                                     <tr
                                         class="border-b border-subtle last:border-0 hover:bg-surface-3 transition-colors"
                                     >
                                         <td
                                             class="py-2 text-default font-medium"
-                                            >{category}</td
+                                            >{category.name}</td
                                         >
                                         <td class="py-2 text-right text-muted"
-                                            >{data.searched}</td
+                                            >{category.missing}</td
+                                        >
+                                        <td class="py-2 text-right text-muted"
+                                            >{category.searched}</td
                                         >
                                         <td
                                             class="py-2 text-right text-green-400"
-                                            >{data.found}</td
+                                            >{category.hits}</td
                                         >
                                         <td class="py-2 text-right text-red-400"
-                                            >{data.missing}</td
+                                            >{category.misses}</td
                                         >
                                         <td class="py-2 text-right text-subtle">
-                                            {data.searched > 0
-                                                ? Math.round(
-                                                      (data.found /
-                                                          data.searched) *
-                                                          100,
-                                                  )
-                                                : 0}%
+                                            {category.success_rate}
                                         </td>
                                     </tr>
                                 {/each}

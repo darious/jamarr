@@ -154,6 +154,7 @@ async def get_scan_status():
         "processed": processed,
         "categories": categories,
         "api_requests": api_requests,
+        "stage_metrics": stage_metrics,  # Also return raw stage_metrics
         "is_running": manager._current_task is not None and not manager._current_task.done(),
         "music_path": manager.get_music_path(),
     }
