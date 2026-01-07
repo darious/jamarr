@@ -1355,12 +1355,12 @@
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: theme("colors.white / 10%");
+    background: rgb(255 255 255 / 10%);
     border-radius: 10px;
   }
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: theme("colors.white / 20%");
+    background: rgb(255 255 255 / 20%);
   }
 
   /* Tab hover effect matching button style */
@@ -1368,7 +1368,7 @@
     background: color-mix(
       in srgb,
       var(--accent) 25%,
-      theme("colors.black / 40%")
+      rgb(0 0 0 / 40%)
     ) !important;
   }
 </style>

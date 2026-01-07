@@ -336,7 +336,7 @@
             </div>
 
             <div class="h-1 w-full bg-surface-3 rounded-full overflow-hidden">
-              <div class="h-full bg-purple-500/50 w-full" />
+              <div class="h-full bg-purple-500/50 w-full"></div>
             </div>
 
             <div class="space-y-2">

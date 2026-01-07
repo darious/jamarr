@@ -138,6 +138,11 @@
       showSettings = false;
     }
   }
+
+  $: if (typeof document !== "undefined") {
+    document.body.dataset.theme = $themeMode;
+    document.body.dataset.accent = $themeAccent;
+  }
 </script>
 
 <svelte:head>
@@ -156,7 +161,6 @@
 </svelte:head>
 
 <svelte:window on:click={handleWindowClick} />
-<svelte:body data-theme={$themeMode} data-accent={$themeAccent} />
 
 <div class="min-h-screen text-default">
   {#if !isAuthPage}

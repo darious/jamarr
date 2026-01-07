@@ -1,8 +1,8 @@
 services:
   jamarr_test_db:
     image: postgres:18.1-alpine
-    network_mode: "host"
-    command: postgres -p 8109
+    ports:
+      - "8109:5432"
     env_file:
       - .env
     environment:
@@ -15,14 +15,13 @@ services:
 
   jamarr_test_runner:
     build: .
-    network_mode: "host"
     depends_on:
       - jamarr_test_db
     env_file:
       - .env
     environment:
-      DB_HOST: 127.0.0.1
-      DB_PORT: 8109
+      DB_HOST: jamarr_test_db
+      DB_PORT: 5432
       DB_USER: ${TEST_DB_USER}
       DB_PASS: ${TEST_DB_PASSWORD}
       DB_NAME: jamarr_test
@@ -35,7 +34,15 @@ services:
       - ./uv.lock:/app/uv.lock
 
   jamarr_test_web:
-    image: node:20-slim
+    build:
+      context: .
+      dockerfile: Dockerfile.node-ci
+    image: jamarr-node-ci
+    pull_policy: build
     working_dir: /app/web
     volumes:
       - ./web:/app/web
+      - jamarr_test_web_node_modules:/app/web/node_modules
+
+volumes:
+  jamarr_test_web_node_modules:

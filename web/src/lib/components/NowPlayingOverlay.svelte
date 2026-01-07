@@ -264,8 +264,9 @@
 
           <!-- Spacer for Queue Button (Invisible EXACT Clone) -->
           <!-- Using EXACT classes from PlayerBar Queue button + invisible -->
-          <button
+          <div
             class="btn btn-circle btn-sm bg-white/5 text-white border-none invisible pointer-events-none"
+            aria-hidden="true"
           >
             <svg
               class="h-5 w-5"
@@ -279,7 +280,7 @@
                 d="M4 6h16M4 12h16M4 18h16"
               ></path></svg
             >
-          </button>
+          </div>
         </div>
       </div>
     </div>
@@ -426,7 +427,11 @@
 
               <!-- Buttons -->
               <div class="flex items-center justify-center gap-10">
-                <button class="btn btn-outline" on:click={previous}>
+                <button
+                  class="btn btn-outline"
+                  aria-label="Previous track"
+                  on:click={previous}
+                >
                   <svg class="h-8 w-8" fill="currentColor" viewBox="0 0 24 24"
                     ><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg
                   >
@@ -451,7 +456,11 @@
                     >
                   {/if}
                 </button>
-                <button class="btn btn-outline" on:click={next}>
+                <button
+                  class="btn btn-outline"
+                  aria-label="Next track"
+                  on:click={next}
+                >
                   <svg class="h-8 w-8" fill="currentColor" viewBox="0 0 24 24"
                     ><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg
                   >

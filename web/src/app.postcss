@@ -10,7 +10,7 @@
   color-scheme: dark;
   
   /* Background Tokens */
-  --bg: theme('colors.surface.50');
+  --bg: rgb(var(--color-surface-50) / 100%);
   --surface: rgb(255 255 255 / 5%);
   --surface-2: rgb(255 255 255 / 8%);
   --surface-3: rgb(255 255 255 / 12%);
@@ -261,47 +261,53 @@ body[data-theme="dark"] .hero-gradient {
 @media (prefers-reduced-transparency: reduce) {
   .surface-glass-panel,
   .surface-glass-popover {
-    background: theme('colors.surface.200');
+    background: rgb(var(--color-surface-200) / 100%);
     backdrop-filter: none;
   }
-}
-
-/* Legacy class for backwards compatibility - will be removed */
-.glass-panel {
-  @apply surface-glass-panel rounded-2xl;
 }
 
 /* ============================================
    COMPONENT UTILITIES
    ============================================ */
 
-.pill {
-  @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold;
-
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-}
-
-.section-head {
-  @apply flex items-center justify-between gap-4 mb-4;
-}
-
-.grid-card {
-  @apply surface-glass-panel rounded-2xl p-4 transition-transform hover:-translate-y-1;
-
-  box-shadow: var(--glass-shadow);
-}
-
-.grid-card:hover {
-  box-shadow: 0 24px 80px rgb(0 0 0 / 50%);
-}
-
-/* ============================================
-   BUTTON COMPONENTS
-   ============================================ */
-
 @layer components {
+  /* Legacy class for backwards compatibility - will be removed */
+  .glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    @apply rounded-2xl;
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold;
+
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+
+  .section-head {
+    @apply flex items-center justify-between gap-4 mb-4;
+  }
+
+  .grid-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    @apply rounded-2xl p-4 transition-transform hover:-translate-y-1;
+  }
+
+  .grid-card:hover {
+    box-shadow: 0 24px 80px rgb(0 0 0 / 50%);
+  }
+
+  /* ============================================
+     BUTTON COMPONENTS
+     ============================================ */
+
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all;
   }
@@ -528,4 +534,3 @@ body[data-theme="dark"] .hero-gradient {
     transform: scale(1.1);
   }
 }
-

@@ -592,7 +592,11 @@
       <div class="flex items-center gap-4">
         <!-- Shuffle and Repeat moved to right side -->
 
-        <button class="btn btn-outline btn-sm" on:click={previous}>
+        <button
+          class="btn btn-outline btn-sm"
+          aria-label="Previous track"
+          on:click={previous}
+        >
           <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
             ><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg
           >
@@ -610,7 +614,11 @@
           {/if}
         </button>
 
-        <button class="btn btn-outline btn-sm" on:click={next}>
+        <button
+          class="btn btn-outline btn-sm"
+          aria-label="Next track"
+          on:click={next}
+        >
           <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"
             ><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg
           >
@@ -763,7 +771,7 @@
     </div>
   </div>
 
-  <audio bind:this={audio} bind:volume />
+  <audio bind:this={audio} bind:volume></audio>
 </div>
 
 <QueueDrawer
