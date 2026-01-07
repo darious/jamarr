@@ -161,6 +161,24 @@ The scanner uses a two-phase approach:
 
 This separation ensures fast initial scans while allowing rich metadata to be fetched on-demand.
 
+## Scanner V3 Architecture
+
+The metadata scanner uses a modern **v3 pipeline architecture** that provides:
+
+- **Clean separation of concerns**: Each enrichment stage is independent and focused
+- **Real-time statistics**: Live updates showing missing/searched/hits/misses for each stage
+- **Automatic parallelization**: Independent stages run concurrently
+- **Qobuz integration**: Automatic search fallback when links aren't in MusicBrainz/Wikidata
+- **Testability**: 201 tests covering all components
+
+**Key Components:**
+1. **Enrichment Planner**: Analyzes artist state and determines which stages to run
+2. **Pipeline Executor**: Executes stages in dependency order with parallelization
+3. **8 Enrichment Stages**: Core Metadata, External Links, Artwork, Bio, Top Tracks, Similar Artists, Singles, Album Metadata
+4. **Statistics Tracker**: Real-time metrics for each stage
+
+For detailed architecture documentation, see [Scanner V3 Documentation](docs/scanner_v3.md).
+
 **Commands:**
 
 1.  **`scan`**: Scans the filesystem for music files and adds them to the library.
