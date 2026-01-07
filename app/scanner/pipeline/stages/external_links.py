@@ -95,6 +95,24 @@ class ExternalLinksStage(EnrichmentStage):
             existing
         )
         
+        # If no Qobuz link found, try searching Qobuz directly
+        if not links.get("qobuz_url") and not existing.get("qobuz"):
+            from app.scanner.services.qobuz import QobuzClient
+            
+            artist_name = context.artist.name
+            if artist_name:
+                try:
+                    qobuz_client = QobuzClient(client=context.client)
+                    qobuz_url = await qobuz_client.search_artist(artist_name)
+                    
+                    if qobuz_url:
+                        if not links:
+                            links = {}
+                        links["qobuz_url"] = qobuz_url
+                        logger.info(f"Found Qobuz link via search: {qobuz_url}")
+                except Exception as e:
+                    logger.warning(f"Qobuz search failed for {artist_name}: {e}")
+        
         if not links:
             # Return success with empty data - no links found is not an error
             return StageResult.success(
