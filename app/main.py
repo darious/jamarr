@@ -35,7 +35,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from pathlib import Path  # noqa: E402
 from app.media import art  # noqa: E402
-from app.api import library, stream, player, search, scan, auth, media_quality  # noqa: E402
+from app.api import library, stream, player, search, scan, auth, media_quality, charts  # noqa: E402
 from app import playlist  # noqa: E402
 
 app.include_router(art.router)
@@ -48,6 +48,9 @@ app.include_router(scan.router)
 app.include_router(auth.router)
 app.include_router(media_quality.router)
 app.include_router(playlist.router)
+
+app.include_router(playlist.router)
+app.include_router(charts.router, prefix="/api")
 
 
 # Serve built SvelteKit frontend (output lives in web/build)
