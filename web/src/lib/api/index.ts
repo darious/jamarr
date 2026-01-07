@@ -599,3 +599,34 @@ export async function reorderPlaylist(playlistId: number, orderedPlaylistTrackId
     });
     if (!res.ok) throw new Error('Failed to reorder playlist');
 }
+
+export interface ChartAlbum {
+    position: number;
+    title: string;
+    artist: string;
+    last_week?: string;
+    peak?: string;
+    weeks?: string;
+    status: string;
+    release_mbid?: string;
+    release_group_mbid?: string;
+    in_library: boolean;
+    local_album_mbid?: string;
+    local_title?: string;
+    local_artist?: string;
+    art_sha1?: string;
+    art_id?: number;
+    musicbrainz_url?: string;
+}
+
+export async function fetchChart(fetchFn: any = fetch): Promise<ChartAlbum[]> {
+    const res = await fetchFn('/api/charts');
+    if (!res.ok) throw new Error('Failed to fetch chart');
+    return await res.json();
+}
+
+export async function refreshChart(): Promise<void> {
+    const res = await fetch('/api/charts/refresh', { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to refresh chart');
+}
+
