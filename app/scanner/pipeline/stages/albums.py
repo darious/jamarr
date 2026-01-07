@@ -55,8 +55,8 @@ class AlbumMetadataStage(EnrichmentStage):
                 )
         
         # Fetch all albums in parallel
-        # Use global DNS semaphore from coordinator to prevent DNS overload
-        from app.scanner.services.coordinator import _dns_semaphore
+        # Use a semaphore to prevent DNS overload
+        _dns_semaphore = asyncio.Semaphore(3)  # Max 3 concurrent DNS operations
         
         tasks = [
             album.fetch_album_metadata(rg_id, context.client, _dns_semaphore)
