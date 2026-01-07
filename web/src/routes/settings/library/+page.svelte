@@ -348,6 +348,7 @@
                     triggerMissingAlbumsScan(
                         mbidFilter || undefined,
                         artistFilter || undefined,
+                        pathValue || undefined,
                     ),
             });
         }

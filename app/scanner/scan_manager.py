@@ -449,15 +449,15 @@ class ScanManager:
             self._current_task = asyncio.create_task(self._run_missing_albums(**kwargs))
             return self._current_task
 
-    async def _run_missing_albums(self, artist_filter=None, mbid_filter=None):
+    async def _run_missing_albums(self, artist_filter=None, mbid_filter=None, path=None):
         try:
              self._broadcast({"type": "start", "mode": "missing_albums", "phase": self._phase})
              # Warm DNS cache before metadata operations
              await warm_dns_cache()
              
              from app.scanner.missing_scanner import MissingAlbumsScanner
-             scanner = MissingAlbumsScanner()
-             await scanner.scan(artist_filter, mbid_filter)
+             scanner = MissingAlbumsScanner(progress_callback=self._update_progress)
+             await scanner.scan(artist_filter, mbid_filter, path_filter=path)
              self._status = "Idle"
              self._broadcast({"type": "complete", "status": "success"})
         except Exception as e:
