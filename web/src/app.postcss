@@ -11,28 +11,28 @@
   
   /* Background Tokens */
   --bg: theme('colors.surface.50');
-  --surface: rgba(255, 255, 255, 0.05);
-  --surface-2: rgba(255, 255, 255, 0.08);
-  --surface-3: rgba(255, 255, 255, 0.12);
+  --surface: rgb(255 255 255 / 5%);
+  --surface-2: rgb(255 255 255 / 8%);
+  --surface-3: rgb(255 255 255 / 12%);
   
   /* Text Tokens */
-  --text: rgba(255, 255, 255, 1);
-  --text-muted: rgba(255, 255, 255, 0.7);
-  --text-subtle: rgba(255, 255, 255, 0.4);
+  --text: rgb(255 255 255 / 100%);
+  --text-muted: rgb(255 255 255 / 70%);
+  --text-subtle: rgb(255 255 255 / 40%);
   
   /* Border Tokens */
-  --border: rgba(255, 255, 255, 0.1);
-  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border: rgb(255 255 255 / 10%);
+  --border-subtle: rgb(255 255 255 / 5%);
   
   /* Interactive Tokens */
-  --interactive-hover: rgba(255, 255, 255, 0.1);
-  --interactive-active: rgba(255, 255, 255, 0.15);
+  --interactive-hover: rgb(255 255 255 / 10%);
+  --interactive-active: rgb(255 255 255 / 15%);
   
   /* Glass Surface Tokens */
-  --glass-bg: rgba(0, 0, 0, 0.6);
-  --glass-bg-strong: rgba(0, 0, 0, 0.75);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  --glass-bg: rgb(0 0 0 / 60%);
+  --glass-bg-strong: rgb(0 0 0 / 75%);
+  --glass-border: rgb(255 255 255 / 10%);
+  --glass-shadow: 0 18px 60px rgb(0 0 0 / 35%);
 }
 
 /* Light Mode Tokens */
@@ -41,9 +41,9 @@
   
   /* Background Tokens */
   --bg: #e2e8f0; /* slate-200 (Significant darkening) */
-  --surface: rgba(0, 0, 0, 0.05);
-  --surface-2: rgba(0, 0, 0, 0.08);
-  --surface-3: rgba(0, 0, 0, 0.1);
+  --surface: rgb(0 0 0 / 5%);
+  --surface-2: rgb(0 0 0 / 8%);
+  --surface-3: rgb(0 0 0 / 10%);
   
   /* Text Tokens */
   --text: #0f172a; /* slate-900 */
@@ -51,18 +51,18 @@
   --text-subtle: #64748b; /* slate-500 */
   
   /* Border Tokens */
-  --border: rgba(0, 0, 0, 0.1);
-  --border-subtle: rgba(0, 0, 0, 0.05);
+  --border: rgb(0 0 0 / 10%);
+  --border-subtle: rgb(0 0 0 / 5%);
 
   /* Interactive Tokens */
-  --interactive-hover: rgba(0, 0, 0, 0.05);
-  --interactive-active: rgba(0, 0, 0, 0.1);
+  --interactive-hover: rgb(0 0 0 / 5%);
+  --interactive-active: rgb(0 0 0 / 10%);
 
   /* Glass Surface Tokens - White frosted */
-  --glass-bg: rgba(255, 255, 255, 0.65);
-  --glass-bg-strong: rgba(255, 255, 255, 0.85);
-  --glass-border: rgba(0, 0, 0, 0.08);
-  --glass-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+  --glass-bg: rgb(255 255 255 / 65%);
+  --glass-bg-strong: rgb(255 255 255 / 85%);
+  --glass-border: rgb(0 0 0 / 8%);
+  --glass-shadow: 0 4px 20px rgb(0 0 0 / 6%);
 }
 
 /* ============================================
@@ -83,8 +83,8 @@
   --accent-700: #b30052;
   --accent-800: #80003b;
   --accent-900: #4d0023;
-  --accent-hover: #ff3388;
-  --accent-contrast: #ffffff;
+  --accent-hover: #f38;
+  --accent-contrast: #fff;
 }
 
 /* Cyan Accent - from logo */
@@ -101,7 +101,7 @@
   --accent-800: #006b80;
   --accent-900: #00404d;
   --accent-hover: #33dfff;
-  --accent-contrast: #000000;
+  --accent-contrast: #000;
 }
 
 /* Blue Accent - from logo dark blue */
@@ -118,7 +118,7 @@
   --accent-800: #1e40af;
   --accent-900: #1e3a8a;
   --accent-hover: #60a5fa;
-  --accent-contrast: #ffffff;
+  --accent-contrast: #fff;
 }
 
 /* Purple Accent */
@@ -135,7 +135,7 @@
   --accent-800: #6b21a8;
   --accent-900: #581c87;
   --accent-hover: #c084fc;
-  --accent-contrast: #ffffff;
+  --accent-contrast: #fff;
 }
 
 /* Orange Accent */
@@ -152,7 +152,7 @@
   --accent-800: #9a3412;
   --accent-900: #7c2d12;
   --accent-hover: #fb923c;
-  --accent-contrast: #ffffff;
+  --accent-contrast: #fff;
 }
 
 /* Yellow Accent */
@@ -169,7 +169,7 @@
   --accent-800: #854d0e;
   --accent-900: #713f12;
   --accent-hover: #facc15;
-  --accent-contrast: #000000;
+  --accent-contrast: #000;
 }
 
 
@@ -178,26 +178,29 @@
    ============================================ */
 
 /* Default / Fallback - Neutral Dark (No Accent) */
+
 /* Default / Fallback - Neutral Dark (No Accent) */
 body {
   /* Removed @apply bg-surface-50 to prevent static theme override */
   background-color: var(--bg);
   color: var(--text);
+
   /* Neutral dark gradient - no accent color-mix */
   background-image: 
-    radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.03), transparent 40%),
-    radial-gradient(circle at 80% 10%, rgba(255, 255, 255, 0.02), transparent 40%),
-    radial-gradient(circle at 50% 70%, rgba(255, 255, 255, 0.01), transparent 40%);
+    radial-gradient(circle at 20% 20%, rgb(255 255 255 / 3%), transparent 40%),
+    radial-gradient(circle at 80% 10%, rgb(255 255 255 / 2%), transparent 40%),
+    radial-gradient(circle at 50% 70%, rgb(255 255 255 / 1%), transparent 40%);
   background-attachment: fixed;
 }
 
 /* Light Mode - Neutral Light (No Accent) */
+
 /* Light Mode - Neutral Light (No Accent) */
 body[data-theme="light"] {
     background-image: 
-    radial-gradient(circle at 20% 20%, rgba(0, 0, 0, 0.15), transparent 50%),
-    radial-gradient(circle at 80% 10%, rgba(0, 0, 0, 0.10), transparent 50%),
-    radial-gradient(circle at 50% 70%, rgba(0, 0, 0, 0.08), transparent 50%);
+    radial-gradient(circle at 20% 20%, rgb(0 0 0 / 15%), transparent 50%),
+    radial-gradient(circle at 80% 10%, rgb(0 0 0 / 10%), transparent 50%),
+    radial-gradient(circle at 50% 70%, rgb(0 0 0 / 8%), transparent 50%);
 }
 
 /* Dark Mode - Accent Tinted (Opt-in) */
@@ -208,22 +211,22 @@ body[data-theme="dark"] {
     radial-gradient(circle at 50% 70%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 40%);
 }
 
-# ... (skipping unchanged utilities)
+
 
 /* Hero Gradient - Dark Mode (Default/Fallback) */
 .hero-gradient {
   background: 
-    radial-gradient(120% 120% at 10% 20%, rgba(28, 31, 46, 0.5), transparent 40%),
-    radial-gradient(120% 120% at 80% 0%, rgba(18, 20, 34, 0.5), transparent 40%),
-    linear-gradient(135deg, rgba(28, 31, 46, 0.95), rgba(18, 20, 34, 0.95));
+    radial-gradient(120% 120% at 10% 20%, rgb(28 31 46 / 50%), transparent 40%),
+    radial-gradient(120% 120% at 80% 0%, rgb(18 20 34 / 50%), transparent 40%),
+    linear-gradient(135deg, rgb(28 31 46 / 95%), rgb(18 20 34 / 95%));
 }
 
 /* Hero Gradient - Light Mode (Neutral) */
 body[data-theme="light"] .hero-gradient {
    background: 
-    radial-gradient(120% 120% at 10% 20%, rgba(0, 0, 0, 0.05), transparent 50%),
-    radial-gradient(120% 120% at 80% 0%, rgba(0, 0, 0, 0.03), transparent 50%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.95));
+    radial-gradient(120% 120% at 10% 20%, rgb(0 0 0 / 5%), transparent 50%),
+    radial-gradient(120% 120% at 80% 0%, rgb(0 0 0 / 3%), transparent 50%),
+    linear-gradient(135deg, rgb(255 255 255 / 90%), rgb(248 250 252 / 95%));
 }
 
 /* Hero Gradient - Dark Mode (Accent Opt-in) */
@@ -231,7 +234,7 @@ body[data-theme="dark"] .hero-gradient {
   background: 
     radial-gradient(120% 120% at 10% 20%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 40%),
     radial-gradient(120% 120% at 80% 0%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 40%),
-    linear-gradient(135deg, rgba(28, 31, 46, 0.95), rgba(18, 20, 34, 0.95));
+    linear-gradient(135deg, rgb(28 31 46 / 95%), rgb(18 20 34 / 95%));
 }
 
 /* ============================================
@@ -242,7 +245,6 @@ body[data-theme="dark"] .hero-gradient {
 .surface-glass-panel {
   background: var(--glass-bg);
   backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
 }
@@ -251,7 +253,6 @@ body[data-theme="dark"] .hero-gradient {
 .surface-glass-popover {
   background: var(--glass-bg-strong);
   backdrop-filter: blur(32px);
-  -webkit-backdrop-filter: blur(32px);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
 }
@@ -262,7 +263,6 @@ body[data-theme="dark"] .hero-gradient {
   .surface-glass-popover {
     background: theme('colors.surface.200');
     backdrop-filter: none;
-    -webkit-backdrop-filter: none;
   }
 }
 
@@ -277,6 +277,7 @@ body[data-theme="dark"] .hero-gradient {
 
 .pill {
   @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold;
+
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text-muted);
@@ -288,25 +289,12 @@ body[data-theme="dark"] .hero-gradient {
 
 .grid-card {
   @apply surface-glass-panel rounded-2xl p-4 transition-transform hover:-translate-y-1;
+
   box-shadow: var(--glass-shadow);
 }
 
 .grid-card:hover {
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
-}
-
-.hero-gradient {
-  background: 
-    radial-gradient(120% 120% at 10% 20%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 40%),
-    radial-gradient(120% 120% at 80% 0%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 40%),
-    linear-gradient(135deg, rgba(28, 31, 46, 0.95), rgba(18, 20, 34, 0.95));
-}
-
-[data-theme="light"] .hero-gradient {
-   background: 
-    radial-gradient(120% 120% at 10% 20%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 50%),
-    radial-gradient(120% 120% at 80% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 50%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.95));
+  box-shadow: 0 24px 80px rgb(0 0 0 / 50%);
 }
 
 /* ============================================
@@ -320,19 +308,18 @@ body[data-theme="dark"] .hero-gradient {
   
   /* Primary Button - Glowing accent style */
   .btn-primary {
-    background: rgba(255, 0, 110, 0.15);
-    background: color-mix(in srgb, var(--accent) 15%, rgba(0, 0, 0, 0.4));
+    background: rgb(255 0 110 / 15%);
+    background: color-mix(in srgb, var(--accent) 15%, rgb(0 0 0 / 40%));
     border: 1px solid #ff006e;
     border-color: var(--accent);
     color: var(--text);
     backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
   }
   
   .btn-primary:hover {
-    background: rgba(255, 0, 110, 0.25) !important;
-    background: color-mix(in srgb, var(--accent) 25%, rgba(0, 0, 0, 0.4)) !important;
-    border-color: #ff3388 !important;
+    background: rgb(255 0 110 / 25%) !important;
+    background: color-mix(in srgb, var(--accent) 25%, rgb(0 0 0 / 40%)) !important;
+    border-color: #f38 !important;
     border-color: var(--accent-hover) !important;
   }
   
@@ -342,7 +329,6 @@ body[data-theme="dark"] .hero-gradient {
     border: 1px solid var(--border);
     color: var(--text);
     backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
   }
   
   .btn-outline:hover {
@@ -382,6 +368,7 @@ body[data-theme="dark"] .hero-gradient {
   .select,
   .range {
     @apply rounded-xl px-3 py-2;
+
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text);
@@ -496,21 +483,19 @@ body[data-theme="dark"] .hero-gradient {
 
   /* Drag Indicator Shadow */
   .drag-indicator-shadow {
-    box-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+    box-shadow: 0 0 8px rgb(255 255 255 / 40%);
   }
 
   /* Custom Volume Slider - No DaisyUI */
   .volume-slider {
-    -webkit-appearance: none;
     appearance: none;
     height: 4px;
-    background: rgba(255, 255, 255, 0.2);
+    background: rgb(255 255 255 / 20%);
     border-radius: 2px;
     outline: none;
   }
   
   .volume-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
     appearance: none;
     width: 16px;
     height: 16px;

@@ -33,3 +33,9 @@ services:
       - ./config.yaml:/app/config.yaml
       - ./pyproject.toml:/app/pyproject.toml
       - ./uv.lock:/app/uv.lock
+
+  jamarr_test_web:
+    image: node:20-slim
+    working_dir: /app/web
+    volumes:
+      - ./web:/app/web

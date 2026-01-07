@@ -13,6 +13,16 @@ run_svelte() {
     fi
 }
 
+run_css() {
+    echo "🔍 Running CSS Lint..."
+    if docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T jamarr_web npm run lint:css; then
+        echo "✅ CSS Lint Passed"
+    else
+        echo "❌ CSS Lint Failed"
+        return 1
+    fi
+}
+
 run_python() {
     echo "🔍 Running Python Check (ruff)..."
     if uv run ruff check .; then
@@ -27,11 +37,15 @@ EXIT_CODE=0
 
 if [[ "$MODE" == "svelte" ]]; then
     run_svelte || EXIT_CODE=1
+elif [[ "$MODE" == "css" ]]; then
+    run_css || EXIT_CODE=1
 elif [[ "$MODE" == "python" ]]; then
     run_python || EXIT_CODE=1
 else
-    # Run both, but don't exit immediately on failure so we run both
+    # Run all
     run_svelte || EXIT_CODE=1
+    echo ""
+    run_css || EXIT_CODE=1
     echo ""
     run_python || EXIT_CODE=1
 fi

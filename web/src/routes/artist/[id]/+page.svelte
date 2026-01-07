@@ -641,7 +641,7 @@
     <!-- Mask Wrapper (Static - Keeps the fade fixed) -->
     <div
       class="absolute inset-0"
-      style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);"
+      style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%);"
     >
       <!-- Sharp Top Layer (Fades into Global Background) -->
       <div
@@ -1349,13 +1349,16 @@
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
   }
+
   .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
   }
+
   .custom-scrollbar::-webkit-scrollbar-thumb {
     background: theme("colors.white / 10%");
     border-radius: 10px;
   }
+
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: theme("colors.white / 20%");
   }

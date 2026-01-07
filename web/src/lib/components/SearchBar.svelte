@@ -154,7 +154,7 @@
         <div
             transition:fade={{ duration: 100 }}
             class="absolute left-0 mt-2 w-full origin-top rounded-xl border border-white/10 backdrop-blur-xl py-2 shadow-2xl ring-1 ring-black/5"
-            style="background-color: rgba(15, 17, 25, 0.95);"
+            style="background-color: rgb(15 17 25 / 95%);"
         >
             {#if results.artists.length > 0}
                 <div class="px-2 py-1">
