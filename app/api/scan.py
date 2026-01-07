@@ -90,7 +90,9 @@ async def trigger_scan(request: ScanRequest):
 
         elif request.type == "missing_albums":
             await manager.start_missing_albums_scan(
-                artist_filter=request.artist_filter, mbid_filter=request.mbid_filter
+                artist_filter=request.artist_filter, 
+                mbid_filter=request.mbid_filter,
+                path=request.path
             )
             return {"message": "Missing albums scan started"}
 
