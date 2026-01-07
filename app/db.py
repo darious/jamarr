@@ -350,6 +350,21 @@ async def init_db():
                 FOREIGN KEY(track_id) REFERENCES track(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_playlist_track_playlist_pos ON playlist_track(playlist_id, position);
+
+            -- Chart Album table
+            CREATE TABLE IF NOT EXISTS chart_album (
+                position INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                artist TEXT NOT NULL,
+                last_week TEXT,
+                peak TEXT,
+                weeks TEXT,
+                status TEXT,
+                release_mbid TEXT,
+                release_group_mbid TEXT,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_chart_album_rg_mbid ON chart_album(release_group_mbid);
         """)
 
         # Create indexes
