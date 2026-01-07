@@ -5,6 +5,7 @@ COPY web/package*.json ./
 RUN npm install -g npm@11.7.0
 RUN npm install
 COPY web/ .
+RUN npx svelte-kit sync
 RUN npm run build
 
 # Stage 2: Runtime
