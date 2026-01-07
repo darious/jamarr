@@ -1,0 +1,10 @@
+.git
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+cache
+web/.svelte-kit
+web/.vite
+web/build
+web/node_modules

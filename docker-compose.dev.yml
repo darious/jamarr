@@ -15,7 +15,7 @@ services:
 
   # Frontend dev server - runs separately with HMR
   jamarr_web:
-    image: node:20-slim
+    image: node:22-slim
     container_name: jamarr_web
     network_mode: "host"
     working_dir: /app/web

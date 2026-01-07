@@ -1,0 +1,3 @@
+FROM node:22-slim
+
+RUN npm install -g npm@11.7.0

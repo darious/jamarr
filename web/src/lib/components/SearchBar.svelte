@@ -132,6 +132,7 @@
         {#if query}
             <button
                 class="absolute right-3 text-white/40 hover:text-white"
+                aria-label="Clear search"
                 on:click={clearSearch}
             >
                 <svg
@@ -200,14 +201,25 @@
                         Albums
                     </h3>
                     {#each results.albums as album}
-                        <button
-                            class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/10"
+                        <div
+                            role="button"
+                            tabindex="0"
+                            class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/10 cursor-pointer"
                             on:click={() =>
                                 navigateToAlbum(
                                     album.title,
                                     album.artist,
                                     album.mbid,
                                 )}
+                            on:keydown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    navigateToAlbum(
+                                        album.title,
+                                        album.artist,
+                                        album.mbid,
+                                    );
+                                }
+                            }}
                         >
                             <div
                                 class="h-8 w-8 rounded bg-white/10 flex items-center justify-center text-xs text-white/40 overflow-hidden"
@@ -242,6 +254,7 @@
                                     {album.title}
                                 </div>
                                 <button
+                                    type="button"
                                     class="truncate text-xs text-white/60 hover:text-white hover:underline block text-left w-full"
                                     on:click|stopPropagation={() =>
                                         navigateToArtist(album.artist)}
@@ -249,7 +262,7 @@
                                     {album.artist}
                                 </button>
                             </div>
-                        </button>
+                        </div>
                     {/each}
                 </div>
             {/if}
