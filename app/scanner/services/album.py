@@ -102,14 +102,6 @@ async def fetch_album_metadata(mbid: str, client: httpx.AsyncClient, dns_semapho
                 wikipedia_url = f"https://en.wikipedia.org/wiki/{wiki_title.replace(' ', '_')}"
                 result["external_links"].append(("wikipedia", wikipedia_url))
         except Exception as e:
-            # Track DNS errors
-            if "Temporary failure in name resolution" in str(e):
-                from app.scanner.services.coordinator import _dns_error_count, _dns_error_lock
-                async with _dns_error_lock:
-                    _dns_error_count += 1
-                    if _dns_error_count > 50:
-                        logger.error(f"Too many DNS failures ({_dns_error_count}), stopping scan")
-                        raise RuntimeError(f"DNS resolver overloaded: {_dns_error_count} failures") from e
             logger.warning(f"Wikidata resolution failed for {mbid}: {e}")
             
     # 4. Scrape Wikipedia if URL found
