@@ -7,11 +7,11 @@ Jamarr is a web-based music controller designed to provide a rich, fast, and rel
 
 ### 1. Backend (Python/FastAPI)
 The backend is the brain of the operation, responsible for:
--   **Library Scanning**: Recursively scans the filesystem, extracts tags (mutagen), and caches metadata in SQLite.
--   **Metadata Enrichment**: Fetches high-quality metadata (artist bios, images, album details) from MusicBrainz and Spotify.
+-   **Library Scanning**: Recursively scans the filesystem, extracts tags (mutagen), and caches metadata in PostgreSQL.
+-   **Metadata Enrichment**: Uses a v3 pipeline architecture to fetch high-quality metadata (artist bios, images, album details, external links) from MusicBrainz, Wikidata, Last.fm, Fanart.tv, Spotify, and Qobuz. See [Scanner V3 Documentation](scanner_v3.md) for details.
 -   **UPnP Control**: Acts as a Control Point, managing playback state, volume, and queue for UPnP devices.
 -   **Queue Management**: Maintains the active play queue and playback state in the database (`renderer_states`) to ensure persistence and reliability even if the frontend disconnects.
--   **Tidal Integration**: Maps local artists/albums to Tidal URLs for external listening.
+-   **Tidal & Qobuz Integration**: Maps local artists/albums to Tidal and Qobuz URLs for external listening.
 -   **API**: Exposes REST endpoints for the frontend.
 
 ### 2. Database (PostgreSQL)
@@ -60,8 +60,15 @@ The frontend provides a polished, app-like user experience:
 │   ├── scanner/          # Library Scanning Logic
 │   │   ├── cli.py        # CLI Entrypoint
 │   │   ├── scan_manager.py # Orchestrates scanning tasks
-│   │   ├── core.py       # Core Scanner Logic
-│   │   ├── metadata.py   # Metadata Fetching (MusicBrainz/Spotify)
+│   │   ├── core.py       # Core Scanner Logic (filesystem)
+│   │   ├── stats.py      # Statistics tracker
+│   │   ├── pipeline/     # V3 Pipeline Architecture
+│   │   │   ├── planner.py   # Enrichment planner
+│   │   │   ├── executor.py  # Pipeline executor
+│   │   │   ├── adapter.py   # Integration adapter
+│   │   │   ├── models.py    # Data models
+│   │   │   └── stages/      # Enrichment stages
+│   │   ├── services/     # External API clients
 │   │   └── tags.py       # Tag Extraction
 │   ├── upnp/             # UPnP Manager & Control Logic
 │   ├── main.py           # App Entrypoint
@@ -77,6 +84,7 @@ The frontend provides a polished, app-like user experience:
 ├── docs/                 # Documentation
 │   ├── DEV_MODE.md       # Development setup guide
 │   ├── database_schema.md # Database schema reference
+│   ├── scanner_v3.md     # V3 pipeline architecture
 │   └── outline.md        # System architecture
 ├── docker-compose.yml    # Production Docker Compose
 ├── docker-compose.dev.yml # Development overrides

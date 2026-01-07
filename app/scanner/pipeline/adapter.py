@@ -1,8 +1,7 @@
 """
-Pipeline Adapter - Bridge between old coordinator interface and new v3 pipeline.
+Pipeline Adapter - Production v3 scanner implementation.
 
-This adapter allows the new pipeline to be used as a drop-in replacement
-for the old MetadataCoordinator without changing scan_manager.py.
+This adapter integrates the v3 pipeline with scan_manager.py.
 """
 
 import asyncio
@@ -24,9 +23,7 @@ logger = logging.getLogger("scanner.pipeline.adapter")
 
 class PipelineAdapter:
     """
-    Adapter to use v3 pipeline with existing scan_manager.
-    
-    Matches the old MetadataCoordinator interface for seamless integration.
+    Production v3 pipeline adapter for scan_manager integration.
     """
     
     def __init__(self, progress_cb: Optional[Callable] = None):

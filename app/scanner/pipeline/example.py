@@ -22,9 +22,7 @@ from app.scanner.pipeline import (
 
 async def enrich_artist_example():
     """
-    Example of enriching an artist using the new pipeline.
-    
-    This replaces the old MetadataCoordinator.process_artist() method.
+    Example of enriching an artist using the v3 pipeline.
     """
     
     # 1. Load artist from database (simulated here)
@@ -99,11 +97,9 @@ async def enrich_artist_example():
         return result
 
 
-async def compare_with_old_coordinator():
+async def compare_pipelines_example():
     """
-    Example showing how to run both old and new pipelines for comparison.
-    
-    This would be used during migration to validate correctness.
+    Example showing how to validate pipeline results.
     """
     
     # Load artist
