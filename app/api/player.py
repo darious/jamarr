@@ -1076,6 +1076,7 @@ async def set_queue(
                 import time
 
                 monitor_start_times[udn] = time.time()
+                last_track_start_time[udn] = time.time()
 
             # Start playback in background
             asyncio.create_task(start_playback())
@@ -1283,6 +1284,7 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
                 import time
 
                 monitor_start_times[udn] = time.time()
+                last_track_start_time[udn] = time.time()
     # Return the state so the client can sync immediately
     return {
         "status": "ok",
@@ -1557,6 +1559,7 @@ async def play_track(
         import time
 
         monitor_start_times[udn] = time.time()
+        last_track_start_time[udn] = time.time()
 
         return {"status": "streaming_started", "renderer": udn}
     else:
