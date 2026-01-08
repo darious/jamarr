@@ -606,7 +606,7 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
             MIN(t.release_date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
-            MAX(t.release_mbid) as release_mbid,
+            t.release_mbid,
             MAX(t.release_mbid) as mbid,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
@@ -614,7 +614,7 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.album IS NOT NULL
-        GROUP BY t.album
+        GROUP BY t.album, t.release_mbid
         ORDER BY year DESC, MAX(t.updated_at) DESC
         LIMIT $1
     """
@@ -636,7 +636,7 @@ async def get_recently_added_albums(
             MIN(t.release_date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
-            MAX(t.release_mbid) as release_mbid,
+            t.release_mbid,
             MAX(t.release_mbid) as mbid,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
@@ -644,7 +644,7 @@ async def get_recently_added_albums(
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.album IS NOT NULL
-        GROUP BY t.album
+        GROUP BY t.album, t.release_mbid
         ORDER BY MAX(t.id) DESC
         LIMIT $1
     """
@@ -667,7 +667,7 @@ async def get_recently_played_albums(
             MIN(t.release_date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
-            MAX(t.release_mbid) as release_mbid,
+            t.release_mbid as release_mbid,
             MAX(t.release_mbid) as mbid,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
@@ -676,7 +676,7 @@ async def get_recently_played_albums(
         JOIN track t ON ph.track_id = t.id
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.album IS NOT NULL
-        GROUP BY t.album
+        GROUP BY t.album, t.release_mbid
         ORDER BY last_played DESC
         LIMIT $1
     """
