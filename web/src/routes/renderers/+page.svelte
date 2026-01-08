@@ -30,6 +30,22 @@
         checkScanStatus();
     });
 
+    const DEFAULT_RENDERER_ICON = "/assets/icon-renderer.svg";
+    const LOCAL_RENDERER_ICON = "/assets/icon-browser.svg";
+
+    function getRendererFallback(renderer: any): string {
+        if (!renderer) return DEFAULT_RENDERER_ICON;
+        if (renderer.type === "local" || renderer.udn?.startsWith("local")) {
+            return LOCAL_RENDERER_ICON;
+        }
+        return DEFAULT_RENDERER_ICON;
+    }
+
+    function getRendererIcon(renderer: any): string {
+        if (renderer?.icon_url) return renderer.icon_url;
+        return getRendererFallback(renderer);
+    }
+
     let scanStatus = "";
     let scanProgress = 0;
     let scanLogs: string[] = [];
@@ -137,8 +153,22 @@
     <div class="grid gap-4 grid-cols-1">
         {#each renderers as r}
             <div
-                class="rounded-xl border border-subtle bg-surface-2 p-6 shadow-lg"
+                class="relative rounded-xl border border-subtle bg-surface-2 p-6 shadow-lg"
             >
+                <div class="absolute right-5 top-5">
+                    <div class="h-16 w-16 rounded-xl bg-surface-3/70 p-2 shadow-inner">
+                        <img
+                            class="h-full w-full rounded-md object-contain"
+                            src={getRendererIcon(r)}
+                            alt=""
+                            loading="lazy"
+                            on:error={(e) => {
+                                (e.currentTarget as HTMLImageElement).src =
+                                    getRendererFallback(r);
+                            }}
+                        />
+                    </div>
+                </div>
                 <div class="mb-4 flex items-center gap-4">
                     <div
                         class="flex h-12 w-12 items-center justify-center rounded-full bg-primary-500/20 text-primary-400"

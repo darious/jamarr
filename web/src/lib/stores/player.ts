@@ -5,6 +5,10 @@ export interface Renderer {
     udn: string;
     name: string;
     type: string;
+    icon_url?: string;
+    icon_mime?: string;
+    icon_width?: number;
+    icon_height?: number;
 }
 
 export interface PlayerState {
