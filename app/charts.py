@@ -285,6 +285,8 @@ async def enrich_entries(entries: List[ChartEntry]):
                         if resp.status_code == 200:
                             data = resp.json()
                             for candidate in data.get("releases", []):
+                                if not _is_album_release(candidate):
+                                    continue
                                 score = _score_candidate(entry, candidate)
                                 if best is None or score > best["score"]:
                                     best = {
@@ -480,6 +482,13 @@ def _score_candidate(entry: ChartEntry, candidate: dict) -> int:
         score += 5
 
     return min(score, 100)
+
+def _is_album_release(candidate: dict) -> bool:
+    rg = candidate.get("release-group") or {}
+    primary_type = (rg.get("primary-type") or "").lower()
+    if primary_type:
+        return primary_type == "album"
+    return True
 
 async def update_chart_db(entries: List[ChartEntry]):
     pool = get_pool()

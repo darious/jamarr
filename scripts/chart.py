@@ -584,6 +584,13 @@ def _score_candidate(entry: ChartEntry, candidate: dict) -> int:
 
     return min(score, 100)
 
+def _is_album_release(candidate: dict) -> bool:
+    rg = candidate.get("release-group") or {}
+    primary_type = (rg.get("primary-type") or "").lower()
+    if primary_type:
+        return primary_type == "album"
+    return True
+
 
 async def populate_mb_matches(entries: list[ChartEntry], mb_base_url: str) -> None:
     semaphore = asyncio.Semaphore(6)
@@ -608,6 +615,8 @@ async def populate_mb_matches(entries: list[ChartEntry], mb_base_url: str) -> No
                     continue
 
                 for candidate in data.get("releases", []):
+                    if not _is_album_release(candidate):
+                        continue
                     score = _score_candidate(entry, candidate)
                     if best is None or score > best["score"]:
                         best = {
