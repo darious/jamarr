@@ -215,6 +215,10 @@ async def init_db():
                 supports_events BOOLEAN DEFAULT FALSE,
                 supports_gapless BOOLEAN DEFAULT FALSE,
                 supported_mime_types TEXT,
+                icon_url TEXT,
+                icon_mime TEXT,
+                icon_width INTEGER,
+                icon_height INTEGER,
                 last_seen_at TIMESTAMPTZ DEFAULT NOW()
             );
             
