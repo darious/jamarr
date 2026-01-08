@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Album, Artist, Track, MissingAlbum } from "$lib/api";
+  import type { Album, Artist, Track, MissingAlbum, Playlist } from "$lib/api";
   import {
     fetchTracks,
     fetchMissingAlbums,
@@ -29,10 +29,10 @@
     canonicalName: string;
     artist?: Artist;
     albums: Album[];
+    playlists: Playlist[];
     similarArtists: {
       name: string;
       mbid?: string | null;
-      art_id?: number | null;
       art_sha1?: string | null;
       in_library?: boolean;
       external_url?: string | null;
@@ -40,6 +40,7 @@
   };
 
   let artist: Artist | undefined = data.artist;
+  let playlists: Playlist[] = data.playlists || [];
   let tracks: Track[] = [];
   let loadingTracks = true;
   let refreshing = false;
@@ -117,6 +118,9 @@
   $: if (data.artist !== artist) {
     artist = data.artist;
   }
+  $: if (data.playlists !== playlists) {
+    playlists = data.playlists || [];
+  }
 
   const refreshTracks = async () => {
     loadingTracks = true;
@@ -152,13 +156,9 @@
   $: if (browser && artist) {
     const bgUrl = artist.background_sha1
       ? `/art/file/${artist.background_sha1}`
-      : artist.background_art_id
-        ? `/art/${artist.background_art_id}`
-        : artist.art_sha1
-          ? `/art/file/${artist.art_sha1}`
-          : artist.art_id
-            ? `/art/${artist.art_id}`
-            : null;
+      : artist.art_sha1
+        ? `/art/file/${artist.art_sha1}`
+        : null;
 
     if (bgUrl) {
       const img = new Image();
@@ -178,11 +178,11 @@
     }
   }
 
-  const formatPlays = (plays?: number) => {
-    if (!plays) return "";
-    if (plays >= 1000000) return `${(plays / 1000000).toFixed(1)}M plays`;
-    if (plays >= 1000) return `${(plays / 1000).toFixed(1)}K plays`;
-    return `${plays} plays`;
+  const formatListens = (listens?: number) => {
+    if (!listens) return "0 listens";
+    if (listens >= 1000000) return `${(listens / 1000000).toFixed(1)}M listens`;
+    if (listens >= 1000) return `${(listens / 1000).toFixed(1)}K listens`;
+    return `${listens} listens`;
   };
 
   const formatDuration = (seconds?: number | null) => {
@@ -203,6 +203,10 @@
       .toUpperCase();
   };
 
+  const getArtUrl = (sha1: string) => {
+    return `/api/art/file/${sha1}`;
+  };
+
   $: displayedTopTracks = (() => {
     const fromMeta = artist?.top_tracks || [];
     return fromMeta.map((t) => {
@@ -212,7 +216,7 @@
         const local = tracks.find((lt) => lt.id === t.local_track_id);
         if (local) {
           // Merge local track data with top track metadata
-          // Local track provides: path, codec, bitrate, sample_rate, bit_depth, art_id, art_sha1
+          // Local track provides: path, codec, bitrate, sample_rate, bit_depth, art_sha1
           // Top track provides: name, album, date, duration_ms, popularity
           result = {
             ...local,
@@ -223,11 +227,8 @@
             duration_seconds: t.duration_seconds || local.duration_seconds,
             popularity: t.popularity,
             // CRITICAL: Preserve artwork from EITHER source (top track API or local track)
-            art_id: t.art_id || local.art_id,
             art_sha1: t.art_sha1 || local.art_sha1,
-            // Ensure API's album_mbid is preferred if available (it comes from release_group_mbid in SQL)
-            album_mbid:
-              t.album_mbid || local.album_mbid || local.mb_release_group_id,
+            mb_release_id: t.mb_release_id || local.mb_release_id,
           };
         } else {
           // Fallback if track not loaded yet - use API data
@@ -244,9 +245,8 @@
             duration_seconds:
               t.duration_seconds ||
               (t.duration_ms ? Math.round(t.duration_ms / 1000) : 0),
-            art_id: t.art_id || null,
             art_sha1: t.art_sha1 || null,
-            album_mbid: t.album_mbid, // Use API data directly
+            mb_release_id: t.mb_release_id, // Use API data directly
             codec: t.codec || null,
             bitrate: null,
             sample_rate_hz: t.sample_rate_hz || null,
@@ -268,7 +268,6 @@
           duration_seconds: t.duration_ms
             ? Math.round(t.duration_ms / 1000)
             : 0,
-          art_id: null,
           codec: null,
           bitrate: null,
           sample_rate_hz: null,
@@ -276,6 +275,68 @@
         };
       }
       if (t.popularity) result.popularity = t.popularity;
+      return result;
+    });
+  })();
+
+  $: displayedMostListened = (() => {
+    const fromMeta = artist?.most_listened || [];
+    return fromMeta.map((t) => {
+      let result: Track;
+      if (t.local_track_id) {
+        const local = tracks.find((lt) => lt.id === t.local_track_id);
+        if (local) {
+          result = {
+            ...local,
+            title: t.name || local.title,
+            album: t.album || local.album,
+            date: t.date || local.date,
+            duration_seconds: t.duration_seconds || local.duration_seconds,
+            art_sha1: t.art_sha1 || local.art_sha1,
+            mb_release_id: t.mb_release_id || local.mb_release_id,
+            plays: t.plays ?? local.plays,
+          };
+        } else {
+          result = {
+            id: t.local_track_id,
+            path: "",
+            title: t.name,
+            artist: artist?.name || "",
+            album: t.album || "",
+            album_artist: artist?.name || "",
+            track_no: null,
+            disc_no: null,
+            date: t.date,
+            duration_seconds: t.duration_seconds || 0,
+            art_sha1: t.art_sha1 || null,
+            mb_release_id: t.mb_release_id,
+            codec: t.codec || null,
+            bitrate: null,
+            sample_rate_hz: t.sample_rate_hz || null,
+            bit_depth: t.bit_depth || null,
+            plays: t.plays ?? undefined,
+          };
+        }
+      } else {
+        result = {
+          id: -1,
+          path: "",
+          title: t.name,
+          artist: artist?.name || "",
+          album: t.album || "",
+          album_artist: artist?.name || "",
+          track_no: null,
+          disc_no: null,
+          date: t.date,
+          duration_seconds: t.duration_seconds || 0,
+          art_sha1: t.art_sha1 || null,
+          codec: t.codec || null,
+          bitrate: null,
+          sample_rate_hz: t.sample_rate_hz || null,
+          bit_depth: t.bit_depth || null,
+          plays: t.plays ?? undefined,
+        };
+      }
       return result;
     });
   })();
@@ -292,7 +353,6 @@
         let techData = {};
         let localId = null;
         let navAlbum = null;
-        let art_id = null;
         let art_sha1 = null;
         let artists: { name: string; mbid?: string }[] | undefined;
 
@@ -311,16 +371,14 @@
             };
 
             // Get artwork - prioritize from Singles API data, then from local track, then from album
-            art_id = s.art_id || localTrack.art_id;
             art_sha1 = s.art_sha1 || localTrack.art_sha1;
 
             // Fallback to album artwork if still not found
-            if (!art_id && !art_sha1) {
+            if (!art_sha1) {
               const album = data.albums.find(
                 (a) => a.album === localTrack.album,
               );
               if (album) {
-                art_id = album.art_id;
                 art_sha1 = album.art_sha1;
               }
             }
@@ -330,10 +388,9 @@
         return {
           ...s,
           localId,
-          art_id,
           art_sha1,
           navAlbum,
-          album_mbid: s.album_mbid,
+          mb_release_id: s.mb_release_id,
           ...techData,
           tracksToPlay,
           artists,
@@ -500,7 +557,7 @@
       await setQueue(albumTracks, 0);
     } else {
       const albumId =
-        (album as any).mbid || (album as any).album_mbid || album.mb_release_id;
+        album.mb_release_id;
       if (albumId) {
         goto(`/album/${albumId}`);
       } else {
@@ -572,6 +629,11 @@
       value: "appears_on",
       count: groupedAlbums.appears_on.length,
     },
+    {
+      label: "Playlists",
+      value: "playlists",
+      count: playlists.length,
+    },
   ]
     .filter((t) => t.count > 0)
     .map((t) => ({ ...t, label: `${t.label} (${t.count})` }));
@@ -579,9 +641,14 @@
   // Track Tabs (Right Side)
   $: trackTabs = [
     {
-      label: "Top Tracks",
+      label: "Most Scrobbled",
       value: "top_tracks",
       count: displayedTopTracks.length,
+    },
+    {
+      label: "Most Listened",
+      value: "most_listened",
+      count: displayedMostListened.length,
     },
     {
       label: "Singles",
@@ -620,13 +687,9 @@
       style={`background-image:url('${
         artist?.background_sha1
           ? `/art/file/${artist.background_sha1}`
-          : artist?.background_art_id
-            ? `/art/${artist.background_art_id}`
-            : artist?.art_sha1
-              ? `/art/file/${artist.art_sha1}`
-              : artist?.art_id
-                ? `/art/${artist.art_id}`
-                : "/assets/default-artist-placeholder.svg"
+          : artist?.art_sha1
+            ? `/art/file/${artist.art_sha1}`
+            : "/assets/default-artist-placeholder.svg"
       }')`}
     ></div>
     <div class="absolute inset-0 bg-surface-900/80"></div>
@@ -649,13 +712,9 @@
         style={`background-image:url('${
           artist?.background_sha1
             ? `/art/file/${artist.background_sha1}`
-            : artist?.background_art_id
-              ? `/art/${artist.background_art_id}`
-              : artist?.art_sha1
-                ? `/art/file/${artist.art_sha1}`
-                : artist?.art_id
-                  ? `/art/${artist.art_id}`
-                  : "/assets/default-artist-placeholder.svg"
+            : artist?.art_sha1
+              ? `/art/file/${artist.art_sha1}`
+              : "/assets/default-artist-placeholder.svg"
         }');`}
       >
         <!-- Gradient Fade to Bottom (Start of merge) - Inside scaling div to match atmosphere -->
@@ -738,11 +797,11 @@
                 <div
                   class="relative aspect-square rounded-full overflow-hidden bg-surface-2 ring-1 ring-subtle group-hover:ring-primary-500 transition-all shadow-lg"
                 >
-                  {#if sim.art_sha1 || sim.art_id}
+                  {#if sim.art_sha1}
                     <img
                       src={sim.art_sha1
                         ? `/art/file/${sim.art_sha1}`
-                        : `/art/${sim.art_id}`}
+                        : ""}
                       class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
                       alt={sim.name}
                     />
@@ -841,16 +900,14 @@
                     class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-105"
                     on:click={() => {
                       const albumId =
-                        album.mbid || album.album_mbid || album.mb_release_id;
+                        album.mb_release_id;
                       if (albumId) goto(`/album/${albumId}`);
                     }}
                   >
                     <img
                       src={album.art_sha1
                         ? `/art/file/${album.art_sha1}`
-                        : album.art_id
-                          ? `/art/${album.art_id}`
-                          : "/assets/default-album-placeholder.svg"}
+                        : "/assets/default-album-placeholder.svg"}
                       alt={album.album}
                       class="h-full w-full object-cover"
                       loading="lazy"
@@ -916,6 +973,93 @@
               {/each}
             </div>
           {/if}
+        {:else if activeTab === "playlists"}
+          {#if playlists.length > 0}
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+              {#each playlists as p (p.id)}
+                <div
+                  class="group relative block surface-glass-panel rounded-xl overflow-hidden hover:bg-surface-2 transition-all duration-300 hover:scale-105 hover:z-10 hover:shadow-xl"
+                >
+                  <div class="aspect-square w-full bg-surface-3 relative transition-transform duration-300">
+                    <a href="/playlists/{p.id}" class="block w-full h-full">
+                      {#if p.thumbnails && p.thumbnails.length > 0}
+                        {#if p.thumbnails.length >= 4}
+                          <div class="grid grid-cols-2 h-full w-full">
+                            {#each p.thumbnails.slice(0, 4) as thumb}
+                              <img
+                                src={getArtUrl(thumb)}
+                                alt=""
+                                class="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                            {/each}
+                          </div>
+                        {:else}
+                          <img
+                            src={getArtUrl(p.thumbnails[0])}
+                            alt={p.name}
+                            class="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        {/if}
+                      {:else}
+                        <div
+                          class="flex items-center justify-center w-full h-full text-subtle bg-surface-2"
+                        >
+                          <svg
+                            class="w-12 h-12"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="1.5"
+                              d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 3-.895 3-2 3 .895 3 2zM9 10l12-3"
+                            />
+                          </svg>
+                        </div>
+                      {/if}
+
+                      {#if !p.is_public}
+                        <div
+                          class="absolute top-2 right-2 bg-surface-3 p-1 rounded-full backdrop-blur-sm z-10"
+                        >
+                          <svg
+                            class="w-3 h-3 text-muted"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                            ></path>
+                          </svg>
+                        </div>
+                      {/if}
+                    </a>
+                  </div>
+
+                  <div class="p-4">
+                    <a href="/playlists/{p.id}" class="block">
+                      <div
+                        class="font-bold text-default truncate text-lg hover:underline decoration-subtle underline-offset-4"
+                      >
+                        {p.name}
+                      </div>
+                    </a>
+                    <div class="text-muted text-xs mt-1">
+                      {p.track_count} tracks • {p.is_public ? "Shared" : "Private"}
+                    </div>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
         {:else if activeTab === "top_tracks"}
           <!-- Top Tracks List View -->
           <div class="space-y-1 max-w-5xl mx-auto">
@@ -926,11 +1070,11 @@
                 artist={{ name: artist?.name || "", mbid: artist?.mbid }}
                 album={{
                   name: track.album || "",
-                  mbid: track.album_mbid,
+                  mbid: track.mb_release_id,
+                  mb_release_id: track.mb_release_id,
                 }}
                 artwork={{
                   sha1: track.art_sha1,
-                  id: track.art_id,
                 }}
                 showIndex={true}
                 index={i + 1}
@@ -940,6 +1084,36 @@
                 showYear={false}
                 showTechDetails={true}
                 showPopularity={true}
+                onPlay={() => track.id > 0 && playTrackById(track.id)}
+                onQueue={() => addTrackToQueue(track.id)}
+                onAddToPlaylist={() => openPlaylistModal(track.id)}
+              />
+            {/each}
+          </div>
+        {:else if activeTab === "most_listened"}
+          <!-- Most Listened Tracks List View -->
+          <div class="space-y-1 max-w-5xl mx-auto">
+            {#each displayedMostListened as track, i}
+              <TrackCard
+                {track}
+                artists={track.artists}
+                artist={{ name: artist?.name || "", mbid: artist?.mbid }}
+                album={{
+                  name: track.album || "",
+                  mbid: track.mb_release_id,
+                  mb_release_id: track.mb_release_id,
+                }}
+                artwork={{
+                  sha1: track.art_sha1,
+                }}
+                showIndex={true}
+                index={i + 1}
+                showArtwork={true}
+                showAlbum={true}
+                showArtist={false}
+                showYear={false}
+                showTechDetails={true}
+                showPopularity={false}
                 onPlay={() => track.id > 0 && playTrackById(track.id)}
                 onQueue={() => addTrackToQueue(track.id)}
                 onAddToPlaylist={() => openPlaylistModal(track.id)}
@@ -959,17 +1133,18 @@
                   bit_depth: single.bit_depth,
                   sample_rate_hz: single.sample_rate_hz,
                   popularity: single.popularity,
+                  plays: single.tracksToPlay?.[0]?.plays,
                 }}
                 artists={single.artists}
                 artist={{ name: artist?.name || "", mbid: artist?.mbid }}
                 album={{
                   name: single.album || "",
-                  mbid: single.album_mbid,
+                  mbid: single.mb_release_id,
+                  mb_release_id: single.mb_release_id,
                   year: single.date,
                 }}
                 artwork={{
                   sha1: single.art_sha1,
-                  id: single.art_id,
                 }}
                 showIndex={false}
                 showArtwork={true}
@@ -1071,6 +1246,20 @@
           <p class="text-xl font-medium text-default">
             {tracks.length} tracks
           </p>
+          {#if artist?.mbid}
+            <a
+              class="text-xl font-medium text-default underline underline-offset-4 hover:text-primary transition-colors"
+              href={`/history?artist_mbid=${encodeURIComponent(
+                artist.mbid,
+              )}&artist_name=${encodeURIComponent(artist?.name || data.name)}`}
+            >
+              {formatListens(artist?.listens)}
+            </a>
+          {:else}
+            <p class="text-xl font-medium text-default">
+              {formatListens(artist?.listens)}
+            </p>
+          {/if}
         </div>
       </div>
 

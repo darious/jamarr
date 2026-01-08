@@ -54,7 +54,6 @@ class PlaylistTrack(BaseModel):
     artist: Optional[str]
     album: Optional[str]
     duration_seconds: Optional[float]
-    artwork_id: Optional[int]
     art_sha1: Optional[str]
     artist_mbid: Optional[str]
     album_mbid: Optional[str]
@@ -147,12 +146,88 @@ async def list_playlists(
         # Process artwork for 2x2 grid
         # We return simply the implementation logic here
         shas = d.pop('artwork_sha1s', [])
+        d.pop("artwork_ids", None)
         if shas:
             d['thumbnails'] = [sha1_to_hex(s) for s in shas if s]
         else:
             d['thumbnails'] = []
         results.append(d)
         
+    return results
+
+
+@router.get("/api/artists/{artist_mbid}/playlists", response_model=List[dict])
+async def list_playlists_for_artist(
+    artist_mbid: str,
+    request: Request,
+    db: asyncpg.Connection = Depends(get_db),
+):
+    current_user = None
+    try:
+        current_user, _ = await require_current_user(request, db)
+    except HTTPException:
+        pass
+
+    params = [artist_mbid]
+    visibility_clause = "p.is_public = TRUE"
+    if current_user:
+        params.append(current_user["id"])
+        visibility_clause = "p.is_public = TRUE OR p.user_id = $2"
+
+    query = f"""
+        SELECT 
+            p.id, p.user_id, p.name, p.description, p.is_public, p.updated_at,
+            COUNT(pt.id) as track_count,
+            COALESCE(SUM(t.duration_seconds), 0) as total_duration,
+            (
+                SELECT array_agg(t2.artwork_id)
+                FROM (
+                    SELECT DISTINCT t.artwork_id 
+                    FROM playlist_track pt2
+                    JOIN track t ON pt2.track_id = t.id
+                    WHERE pt2.playlist_id = p.id AND t.artwork_id IS NOT NULL
+                    LIMIT 4
+                ) t2
+            ) as artwork_ids,
+            (
+                SELECT array_agg(t2.sha1)
+                FROM (
+                    SELECT DISTINCT a.sha1 
+                    FROM playlist_track pt2
+                    JOIN track t ON pt2.track_id = t.id
+                    JOIN artwork a ON t.artwork_id = a.id
+                    WHERE pt2.playlist_id = p.id
+                    LIMIT 4
+                ) t2
+            ) as artwork_sha1s
+        FROM playlist p
+        LEFT JOIN playlist_track pt ON p.id = pt.playlist_id
+        LEFT JOIN track t ON pt.track_id = t.id
+        WHERE ({visibility_clause})
+          AND EXISTS (
+              SELECT 1
+              FROM playlist_track pt2
+              JOIN track_artist ta2 ON ta2.track_id = pt2.track_id
+              WHERE pt2.playlist_id = p.id AND ta2.artist_mbid = $1
+          )
+        GROUP BY p.id
+        ORDER BY p.updated_at DESC
+    """
+    rows = await db.fetch(query, *params)
+
+    results = []
+    from app.api.library import sha1_to_hex
+
+    for row in rows:
+        d = dict(row)
+        shas = d.pop("artwork_sha1s", [])
+        d.pop("artwork_ids", None)
+        if shas:
+            d["thumbnails"] = [sha1_to_hex(s) for s in shas if s]
+        else:
+            d["thumbnails"] = []
+        results.append(d)
+
     return results
 
 @router.get("/api/playlists/{playlist_id}", response_model=dict)
@@ -188,9 +263,10 @@ async def get_playlist(
         SELECT 
             pt.id as playlist_track_id, pt.position,
             t.id as track_id, t.title, t.artist, t.album, t.duration_seconds,
-            t.artwork_id as art_id, a.sha1 as art_sha1, t.path,
+            a.sha1 as art_sha1, t.path,
             t.codec, t.sample_rate_hz, t.bit_depth,
-            t.artist_mbid, t.release_group_mbid as album_mbid,
+            t.artist_mbid, t.release_mbid, t.release_group_mbid as album_mbid,
+            COALESCE(tp.plays, 0) as plays,
             (SELECT jsonb_agg(jsonb_build_object('name', a2.name, 'mbid', a2.mbid) ORDER BY a2.name) 
              FROM track_artist ta2 
              JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
@@ -198,6 +274,11 @@ async def get_playlist(
         FROM playlist_track pt
         JOIN track t ON pt.track_id = t.id
         LEFT JOIN artwork a ON t.artwork_id = a.id
+        LEFT JOIN (
+            SELECT h.track_id, COUNT(*) as plays
+            FROM combined_playback_history h
+            GROUP BY h.track_id
+        ) tp ON tp.track_id = t.id
         WHERE pt.playlist_id = $1
         ORDER BY pt.position ASC
     """
@@ -209,6 +290,9 @@ async def get_playlist(
     for r in t_rows:
         d = dict(r)
         d['art_sha1'] = sha1_to_hex(d['art_sha1'])
+        d.pop("art_id", None)
+        if d.get("release_mbid"):
+            d["mb_release_id"] = d["release_mbid"]
         
         # Parse aggregated artists JSON
         if d.get("aggregated_artists_json"):

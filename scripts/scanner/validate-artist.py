@@ -7,17 +7,17 @@ without modifying the database. It shows exactly what data would
 be saved for a given artist.
 
 Usage:
-    python -m app.scanner.pipeline.validate_artist <mbid> [options]
+    python scripts/validate-artist.py <mbid> [options]
 
 Examples:
     # Enrich The Beatles with all options
-    python -m app.scanner.pipeline.validate_artist b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --all
+    python scripts/validate-artist.py b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --all
 
     # Fetch only missing metadata
-    python -m app.scanner.pipeline.validate_artist b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --missing-only
+    python scripts/validate-artist.py b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --missing-only
 
     # Fetch specific data types
-    python -m app.scanner.pipeline.validate_artist b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --metadata --artwork --bio
+    python scripts/validate-artist.py b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --metadata --artwork --bio
 """
 
 import asyncio
@@ -255,16 +255,16 @@ def main():
         epilog="""
 Examples:
   # Enrich The Beatles with all options
-  python -m app.scanner.pipeline.validate_artist b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --all
+  python scripts/validate-artist.py b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --all
 
   # Fetch only missing metadata
-  python -m app.scanner.pipeline.validate_artist b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --missing-only
+  python scripts/validate-artist.py b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --missing-only
 
   # Fetch specific data types
-  python -m app.scanner.pipeline.validate_artist b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --metadata --artwork --bio
+  python scripts/validate-artist.py b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --metadata --artwork --bio
   
   # Production mode: auto-fetch dependencies (bio needs metadata for Wikipedia URL)
-  python -m app.scanner.pipeline.validate_artist b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --bio --prod-scan
+  python scripts/validate-artist.py b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d --bio --prod-scan
         """
     )
     

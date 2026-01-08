@@ -25,6 +25,8 @@ jobs:
           DB_PASS=jamarr_secret
           TEST_DB_USER=jamarr_test
           TEST_DB_PASSWORD=jamarr_test_secret
+          LASTFM_API_KEY=dummy_lastfm_key
+          LASTFM_SHARED_SECRET=dummy_lastfm_secret
           EOF
 
       - name: Make scripts executable

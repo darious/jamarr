@@ -3,7 +3,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_top_tracks_have_artwork(client, db):
     """
-    Verify that top tracks endpoint returns artwork SHA1/ID.
+    Verify that top tracks endpoint returns artwork SHA1.
     """
     # 1. Setup Data
     artist_mbid = "debug-artist-001"
@@ -60,15 +60,8 @@ async def test_top_tracks_have_artwork(client, db):
     
     print(f"Top Track Data: {tt}")
     
-    # The frontend likely needs both SHA1 and an ID (art_id or artwork_id)
-    # Based on get_albums logic: "Frontend compatibility: expects art_id"
-    
     assert "art_sha1" in tt, "Top track missing art_sha1"
     assert tt["art_sha1"] == artwork_sha1
-    
-    # Check for ID
-    has_id = "art_id" in tt or "artwork_id" in tt
-    assert has_id, "Top track missing art_id/artwork_id for frontend compatibility"
 
     # 4. Verify Singles
     singles = data.get("singles", [])
@@ -77,5 +70,3 @@ async def test_top_tracks_have_artwork(client, db):
     
     print(f"Single Data: {sg}")
     assert "art_sha1" in sg, "Single missing art_sha1"
-    has_id_sg = "art_id" in sg or "artwork_id" in sg
-    assert has_id_sg, "Single missing art_id/artwork_id"

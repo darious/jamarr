@@ -255,8 +255,8 @@ Various endpoints for the home page.
 
 - **GET** `/api/home/new-releases`: Latest albums added.
 - **GET** `/api/home/recently-added-albums`: Same as above (alias in logic?).
-- **GET** `/api/home/recently-played-albums`: Albums played recently.
-- **GET** `/api/home/recently-played-artists`: Artists played recently.
+- **GET** `/api/history/albums`: Albums played recently.
+- **GET** `/api/history/artists`: Artists played recently.
 - **GET** `/api/home/discover-artists`: Random or specific discovery logic.
 
 ## Player (`/api/player`)
@@ -369,7 +369,7 @@ Skip to a specific track index in the queue.
 ### Get History
 Get playback history.
 
-**GET** `/api/player/history`
+**GET** `/api/history/tracks`
 
 **Parameters:**
 - `scope`: `all` or `mine`.
@@ -377,7 +377,7 @@ Get playback history.
 ### Get History Stats
 Get listening statistics.
 
-**GET** `/api/player/history/stats`
+**GET** `/api/history/stats`
 
 **Parameters:**
 - `scope`: `all` or `mine`.

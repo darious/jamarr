@@ -10,7 +10,7 @@ async def test_stream_missing(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_art_missing(client: AsyncClient):
     # Art non-existent
-    response = await client.get("/api/art/99999")
+    response = await client.get("/api/art/file/0000000000000000000000000000000000000000")
     assert response.status_code == 404
 
 @pytest.mark.asyncio

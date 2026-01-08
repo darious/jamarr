@@ -33,6 +33,8 @@
     "vite": "^7.3.1"
   },
   "dependencies": {
-    "colorthief": "^2.6.0"
+    "colorthief": "^2.6.0",
+    "d3-scale": "^4.0.2",
+    "layercake": "^8.0.0"
   }
 }

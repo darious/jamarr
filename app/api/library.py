@@ -91,13 +91,9 @@ async def get_artist_index(
     db: asyncpg.Connection = Depends(get_db),
 ):
     query = """
-        SELECT DISTINCT
-            CASE 
-                WHEN sort_name ~* '^[a-z]' THEN UPPER(SUBSTRING(sort_name FROM 1 FOR 1))
-                ELSE '#' 
-            END as letter
+        SELECT DISTINCT letter
         FROM artist
-        WHERE name IS NOT NULL
+        WHERE name IS NOT NULL AND letter IS NOT NULL
         ORDER BY letter
     """
     rows = await db.fetch(query)
@@ -113,6 +109,49 @@ async def get_artists(
     starts_with: Optional[str] = None,
     db: asyncpg.Connection = Depends(get_db),
 ):
+    if not name and not mbid:
+        query = """
+            SELECT 
+                a.mbid,
+                a.name,
+                a.sort_name,
+                a.bio,
+                ar.sha1 as art_sha1,
+                COALESCE(ac.primary_album_count, 0) as primary_album_count,
+                COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
+            FROM artist a
+            LEFT JOIN artwork ar ON a.artwork_id = ar.id
+            LEFT JOIN (
+                SELECT 
+                    artist_mbid,
+                    COUNT(DISTINCT CASE WHEN type = 'primary' THEN album_mbid END) as primary_album_count,
+                    COUNT(DISTINCT CASE WHEN type = 'contributor' THEN album_mbid END) as appears_on_album_count
+                FROM artist_album
+                GROUP BY artist_mbid
+            ) ac ON ac.artist_mbid = a.mbid
+            WHERE a.name IS NOT NULL
+        """
+        params = []
+        if starts_with:
+            letter = "#" if starts_with == "#" else starts_with.upper()
+            query += " AND a.letter = $1"
+            params.append(letter)
+        query += " ORDER BY LOWER(COALESCE(a.sort_name, a.name)), a.sort_name, a.name"
+
+        rows = await db.fetch(query, *params)
+        return [
+            {
+                "mbid": row["mbid"],
+                "name": row["name"],
+                "sort_name": row["sort_name"],
+                "bio": row["bio"],
+                "art_sha1": sha1_to_hex(row["art_sha1"]),
+                "primary_album_count": row["primary_album_count"],
+                "appears_on_album_count": row["appears_on_album_count"],
+            }
+            for row in rows
+        ]
+
     # Base query for artist info
     query = """
         SELECT 
@@ -132,10 +171,9 @@ async def get_artists(
             MAX(CASE WHEN el.type = 'lastfm' THEN el.url END) as lastfm_url,
             MAX(CASE WHEN el.type = 'discogs' THEN el.url END) as discogs_url,
             COALESCE(ac.primary_album_count, 0) as primary_album_count,
-            COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
+            COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count,
+            COALESCE(lp.listens, 0) as listens
         FROM artist a
-        LEFT JOIN track_artist ta ON a.mbid = ta.artist_mbid
-        LEFT JOIN artist_album aa ON a.mbid = aa.artist_mbid
         LEFT JOIN artwork ar ON a.artwork_id = ar.id
         LEFT JOIN external_link el ON a.mbid = el.entity_id AND el.entity_type = 'artist'
         LEFT JOIN (
@@ -143,11 +181,20 @@ async def get_artists(
                 artist_mbid,
                 COUNT(DISTINCT CASE WHEN type = 'primary' THEN album_mbid END) as primary_album_count,
                 COUNT(DISTINCT CASE WHEN type = 'contributor' THEN album_mbid END) as appears_on_album_count
-            FROM artist_album
-            GROUP BY artist_mbid
+                FROM artist_album
+                GROUP BY artist_mbid
         ) ac ON ac.artist_mbid = a.mbid
+        LEFT JOIN (
+            SELECT ta.artist_mbid, COUNT(DISTINCT source_id) as listens
+            FROM combined_playback_history h
+            JOIN track_artist ta ON ta.track_id = h.track_id
+            GROUP BY ta.artist_mbid
+        ) lp ON lp.artist_mbid = a.mbid
         WHERE a.name IS NOT NULL 
-          AND (ta.artist_mbid IS NOT NULL OR aa.artist_mbid IS NOT NULL)
+          AND (
+              EXISTS (SELECT 1 FROM track_artist ta WHERE ta.artist_mbid = a.mbid)
+              OR EXISTS (SELECT 1 FROM artist_album aa WHERE aa.artist_mbid = a.mbid)
+          )
     """
 
     params = []
@@ -171,7 +218,7 @@ async def get_artists(
             param_num += 1
 
     query += (
-        " GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio, a.sort_name, ac.primary_album_count, ac.appears_on_album_count"
+        " GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio, a.sort_name, ac.primary_album_count, ac.appears_on_album_count, lp.listens"
         " ORDER BY LOWER(a.sort_name), a.sort_name"
     )
 
@@ -208,9 +255,6 @@ async def get_artists(
             "mbid": row["mbid"],
             "name": row["name"],
             "image_url": row["image_url"],
-            "artwork_id": art_info.get("artwork_id") or row["artwork_id"],
-            "art_id": art_info.get("artwork_id")
-            or row["artwork_id"],  # Frontend compatibility
             "art_sha1": sha1_to_hex(art_info.get("art_sha1") or row["art_sha1"]),
             "bio": row["bio"],
             "sort_name": row["sort_name"] or row["name"],
@@ -224,8 +268,8 @@ async def get_artists(
             "tidal_url": row["tidal_url"],
             "primary_album_count": row["primary_album_count"],
             "appears_on_album_count": row["appears_on_album_count"],
+            "listens": row["listens"],
             "albums": [],  # Deprecated
-            "background_art_id": bg_info.get("artwork_id"),
             "background_sha1": sha1_to_hex(bg_info.get("art_sha1")),
         }
 
@@ -236,7 +280,7 @@ async def get_artists(
             top_tracks_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec, 
                     t.bit_depth, t.sample_rate_hz, t.duration_seconds,
-                    a.sha1 as art_sha1, t.artwork_id, t.release_group_mbid as album_mbid
+                    a.sha1 as art_sha1, t.artwork_id, t.release_mbid as mb_release_id
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
                 LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -258,17 +302,58 @@ async def get_artists(
                     "sample_rate_hz": tt_row["sample_rate_hz"],
                     "duration_seconds": tt_row["duration_seconds"],
                     "art_sha1": sha1_to_hex(tt_row["art_sha1"]),
-                    "art_id": tt_row["artwork_id"],
-                    "album_mbid": tt_row["album_mbid"],
+                    "mb_release_id": tt_row["mb_release_id"],
                 }
                 for tt_row in tt_rows
+            ]
+
+            # Fetch most listened tracks (local history)
+            listened_query = """
+                SELECT
+                    t.id as local_track_id,
+                    t.title as title,
+                    t.album,
+                    t.release_date as date,
+                    t.duration_seconds,
+                    t.codec,
+                    t.bit_depth,
+                    t.sample_rate_hz,
+                    a.sha1 as art_sha1,
+                    t.release_mbid as mb_release_id,
+                    COUNT(*) as plays
+                FROM combined_playback_history h
+                JOIN track t ON h.track_id = t.id
+                JOIN track_artist ta ON ta.track_id = t.id
+                LEFT JOIN artwork a ON t.artwork_id = a.id
+                WHERE ta.artist_mbid = $1
+                GROUP BY t.id, t.title, t.album, t.release_date, t.duration_seconds,
+                         t.codec, t.bit_depth, t.sample_rate_hz, a.sha1, t.release_mbid
+                ORDER BY plays DESC
+                LIMIT 10
+            """
+            l_rows = await db.fetch(listened_query, mbid_val)
+            artist_data["most_listened"] = [
+                {
+                    "name": l_row["title"],
+                    "album": l_row["album"],
+                    "date": l_row["date"],
+                    "duration_seconds": l_row["duration_seconds"],
+                    "local_track_id": l_row["local_track_id"],
+                    "codec": l_row["codec"],
+                    "bit_depth": l_row["bit_depth"],
+                    "sample_rate_hz": l_row["sample_rate_hz"],
+                    "art_sha1": sha1_to_hex(l_row["art_sha1"]),
+                    "mb_release_id": l_row["mb_release_id"],
+                    "plays": l_row["plays"],
+                }
+                for l_row in l_rows
             ]
 
             # Fetch singles
             singles_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
                     t.bit_depth, t.sample_rate_hz,
-                    a.sha1 as art_sha1, t.artwork_id, t.release_mbid as album_mbid
+                    a.sha1 as art_sha1, t.artwork_id, t.release_mbid as mb_release_id
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
                 LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -287,9 +372,8 @@ async def get_artists(
                     "bit_depth": s_row["bit_depth"],
                     "sample_rate_hz": s_row["sample_rate_hz"],
                     "art_sha1": sha1_to_hex(s_row["art_sha1"]),
-                    "art_id": s_row["artwork_id"],
                     "album": s_row["album"],
-                    "album_mbid": s_row["album_mbid"],
+                    "mb_release_id": s_row["mb_release_id"],
                 }
                 for s_row in s_rows
             ]
@@ -338,8 +422,6 @@ async def get_artists(
                         "name": sim_row["similar_artist_name"],
                         "mbid": sim_mbid,
                         "image_url": sim_row["image_url"],
-                        "artwork_id": sim_art.get("artwork_id")
-                        or sim_row["artwork_id"],
                         "art_sha1": sha1_to_hex(sim_art.get("art_sha1") or sim_row["art_sha1"]),
                         "in_library": in_library,
                         "external_url": external_url
@@ -364,6 +446,7 @@ async def get_artists(
             artist_data["singles"] = []
             artist_data["similar_artists"] = []
             artist_data["genres"] = []
+            artist_data["most_listened"] = []
 
         artists.append(artist_data)
 
@@ -396,6 +479,7 @@ async def get_albums(
             al.description,
             al.peak_chart_position,
             aa.album_mbid as album_mbid,
+            aa.album_mbid as mb_release_id,
             
             -- Dynamic Type Logic
             MAX(CASE 
@@ -422,26 +506,33 @@ async def get_albums(
             ) as artists,
 
             -- Art
-            COALESCE(MAX(al.artwork_id), MAX(t.artwork_id)) as art_id,
-            MAX(art.sha1) as art_sha1,
+            COALESCE(MAX(art.sha1), MAX(tart.sha1)) as art_sha1,
 
             -- Links
             COALESCE(
                 jsonb_agg(DISTINCT jsonb_build_object('type', el.type, 'url', el.url)) FILTER (WHERE el.url IS NOT NULL),
                 '[]'::jsonb
-            ) as external_links
+            ) as external_links,
+            COALESCE(lp.listens, 0) as listens
 
         FROM artist_album aa
         JOIN album al ON aa.album_mbid = al.mbid
         LEFT JOIN track t ON t.release_mbid = aa.album_mbid
         LEFT JOIN artwork art ON al.artwork_id = art.id
+        LEFT JOIN artwork tart ON t.artwork_id = tart.id
         LEFT JOIN external_link el ON el.entity_type = 'album' AND (el.entity_id = al.release_group_mbid OR el.entity_id = t.release_group_mbid)
+        LEFT JOIN (
+            SELECT t.release_mbid as album_mbid, COUNT(DISTINCT h.source_id) as listens
+            FROM combined_playback_history h
+            JOIN track t ON t.id = h.track_id
+            GROUP BY t.release_mbid
+        ) lp ON lp.album_mbid = aa.album_mbid
 
         WHERE 
             ($1::text IS NULL OR aa.artist_mbid = $1)
             AND ($2::text IS NULL OR aa.album_mbid = $2)
 
-        GROUP BY aa.album_mbid, aa.type, al.mbid
+        GROUP BY aa.album_mbid, aa.type, al.mbid, lp.listens
         ORDER BY al.release_date DESC
     """
     
@@ -504,6 +595,7 @@ async def get_tracks(
             t.album_artist_mbid,
             t.release_group_mbid as album_mbid,
             a.sha1 as art_sha1,
+            COALESCE(tp.plays, 0) as plays,
             (SELECT STRING_AGG(a2.name, ', ' ORDER BY a2.name) 
              FROM track_artist ta2 
              JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
@@ -514,6 +606,11 @@ async def get_tracks(
              WHERE ta2.track_id = t.id) as aggregated_artists_json
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
+        LEFT JOIN (
+            SELECT h.track_id, COUNT(*) as plays
+            FROM combined_playback_history h
+            GROUP BY h.track_id
+        ) tp ON tp.track_id = t.id
     """
     params = []
     param_num = 1
@@ -571,9 +668,7 @@ async def get_tracks(
         # Remove internal helper field
         d.pop("aggregated_artists_json", None)
 
-        # Frontend compatibility: expects art_id
-        if d.get("artwork_id"):
-            d["art_id"] = d["artwork_id"]
+        d.pop("artwork_id", None)
 
         # Frontend compatibility: MusicBrainz IDs
         if d.get("release_mbid"):
@@ -608,6 +703,7 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
             SUM(t.duration_seconds) as total_duration,
             t.release_mbid,
             MAX(t.release_mbid) as mbid,
+            MAX(t.release_mbid) as mb_release_id,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
             'main' as type
@@ -619,7 +715,12 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
         LIMIT $1
     """
     rows = await db.fetch(query, limit)
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        d = dict(row)
+        d.pop("artwork_id", None)
+        results.append(d)
+    return results
 
 
 @router.get("/api/home/recently-added-albums")
@@ -638,6 +739,7 @@ async def get_recently_added_albums(
             SUM(t.duration_seconds) as total_duration,
             t.release_mbid,
             MAX(t.release_mbid) as mbid,
+            MAX(t.release_mbid) as mb_release_id,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
             'main' as type
@@ -649,77 +751,12 @@ async def get_recently_added_albums(
         LIMIT $1
     """
     rows = await db.fetch(query, limit)
-    return [dict(row) for row in rows]
-
-
-@router.get("/api/home/recently-played-albums")
-async def get_recently_played_albums(
-    limit: int = 20, db: asyncpg.Connection = Depends(get_db)
-):
-    # Join playback_history to get specific albums
-    query = """
-        SELECT 
-            t.album, 
-            MAX(t.artwork_id) as artwork_id, 
-            MAX(a.sha1) as art_sha1,
-            COALESCE(MAX(t.album_artist), MAX(t.artist)) as artist_name,
-            MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
-            MIN(t.release_date) as year,
-            COUNT(DISTINCT t.id) as track_count,
-            SUM(t.duration_seconds) as total_duration,
-            t.release_mbid as release_mbid,
-            MAX(t.release_mbid) as mbid,
-            MAX(t.release_group_mbid) as album_mbid,
-            (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
-            MAX(ph.timestamp) as last_played
-        FROM playback_history ph
-        JOIN track t ON ph.track_id = t.id
-        LEFT JOIN artwork a ON t.artwork_id = a.id
-        WHERE t.album IS NOT NULL
-        GROUP BY t.album, t.release_mbid
-        ORDER BY last_played DESC
-        LIMIT $1
-    """
-    rows = await db.fetch(query, limit)
-    return [dict(row) for row in rows]
-
-
-@router.get("/api/home/recently-played-artists")
-async def get_recently_played_artists(
-    limit: int = 20, db: asyncpg.Connection = Depends(get_db)
-):
-    query = """
-        SELECT DISTINCT 
-            a.mbid,
-            a.name,
-            a.image_url, 
-            a.artwork_id,
-            ar.sha1 as art_sha1,
-            a.bio, 
-            MAX(ph.timestamp) as last_played
-        FROM playback_history ph
-        JOIN track t ON ph.track_id = t.id
-        JOIN track_artist ta ON t.id = ta.track_id
-        JOIN artist a ON ta.artist_mbid = a.mbid
-        LEFT JOIN artwork ar ON a.artwork_id = ar.id
-        WHERE a.name IS NOT NULL AND a.name != '' AND a.name != 'null'
-        GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio
-        ORDER BY last_played DESC
-        LIMIT $1
-    """
-    rows = await db.fetch(query, limit)
-    return [
-        {
-            "mbid": row["mbid"],
-            "name": row["name"],
-            "image_url": row["image_url"],
-            "artwork_id": row["artwork_id"],
-            "art_id": row["artwork_id"],  # Compat
-            "art_sha1": sha1_to_hex(row["art_sha1"]),
-            "bio": row["bio"],
-        }
-        for row in rows
-    ]
+    results = []
+    for row in rows:
+        d = dict(row)
+        d.pop("artwork_id", None)
+        results.append(d)
+    return results
 
 
 @router.get("/api/home/discover-artists")
@@ -751,8 +788,6 @@ async def get_discover_artists(
             "mbid": row["mbid"],
             "name": row["name"],
             "image_url": row["image_url"],
-            "artwork_id": row["artwork_id"],
-            "art_id": row["artwork_id"],  # Compat
             "art_sha1": sha1_to_hex(row["art_sha1"]),
             "bio": row["bio"],
         }

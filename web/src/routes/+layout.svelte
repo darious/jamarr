@@ -37,11 +37,29 @@
   let user = data?.user || null;
   let authChecked = false;
   let isAuthPage = false;
+  let activeRendererItem: any = null;
+
+  const DEFAULT_RENDERER_ICON = "/assets/icon-renderer.svg";
+  const LOCAL_RENDERER_ICON = "/assets/icon-browser.svg";
+
+  function getRendererFallback(renderer: any): string {
+    if (!renderer) return DEFAULT_RENDERER_ICON;
+    if (renderer.type === "local" || renderer.udn?.startsWith("local")) {
+      return LOCAL_RENDERER_ICON;
+    }
+    return DEFAULT_RENDERER_ICON;
+  }
+
+  function getRendererIcon(renderer: any): string {
+    if (renderer?.icon_url) return renderer.icon_url;
+    return getRendererFallback(renderer);
+  }
 
   // Track whether we're on an auth page
   $: isAuthPage =
     $page.url.pathname.startsWith("/login") ||
     $page.url.pathname.startsWith("/signup");
+  $: activeRendererItem = rendererList.find((r) => r.udn === activeRenderer);
 
   // Seed auth state from server load to avoid a logged-out flash
   setUser(user);
@@ -196,9 +214,20 @@
               }}
               aria-label="Select Renderer"
             >
-              <span class="truncate max-w-[180px]">
-                {rendererList.find((r) => r.udn === activeRenderer)?.name ||
-                  "Select Player"}
+              <span class="flex items-center gap-2 min-w-0">
+                <img
+                  class="h-[30px] w-[30px] rounded-sm object-contain"
+                  src={getRendererIcon(activeRendererItem)}
+                  alt=""
+                  loading="lazy"
+                  on:error={(e) => {
+                    (e.currentTarget as HTMLImageElement).src =
+                      getRendererFallback(activeRendererItem);
+                  }}
+                />
+                <span class="truncate max-w-[170px]">
+                  {activeRendererItem?.name || "Select Player"}
+                </span>
               </span>
               <svg
                 class="h-4 w-4 opacity-50"
@@ -230,7 +259,19 @@
                         showRenderers = false;
                       }}
                     >
-                      <span class="truncate">{renderer.name}</span>
+                      <span class="flex items-center gap-2 min-w-0">
+                        <img
+                          class="h-[30px] w-[30px] rounded-sm object-contain"
+                          src={getRendererIcon(renderer)}
+                          alt=""
+                          loading="lazy"
+                          on:error={(e) => {
+                            (e.currentTarget as HTMLImageElement).src =
+                              getRendererFallback(renderer);
+                          }}
+                        />
+                        <span class="truncate">{renderer.name}</span>
+                      </span>
                       {#if activeRenderer === renderer.udn}
                         <svg
                           class="h-4 w-4 text-primary-400"

@@ -115,7 +115,6 @@
             artist: t.artist,
             album: t.album,
             duration_seconds: t.duration_seconds,
-            artwork_id: t.art_id,
             path: t.path,
             art_sha1: t.art_sha1,
             codec: t.codec,
@@ -123,6 +122,7 @@
             sample_rate_hz: t.sample_rate_hz,
             artist_mbid: t.artist_mbid,
             album_mbid: t.album_mbid,
+            mb_release_id: t.mb_release_id,
         }));
 
         await setQueue(queueItems as unknown as import("$api").Track[], 0);
@@ -140,7 +140,6 @@
             artist: t.artist,
             album: t.album,
             duration_seconds: t.duration_seconds,
-            artwork_id: t.art_id,
             path: t.path,
             art_sha1: t.art_sha1,
             codec: t.codec,
@@ -148,6 +147,7 @@
             sample_rate_hz: t.sample_rate_hz,
             artist_mbid: t.artist_mbid,
             album_mbid: t.album_mbid,
+            mb_release_id: t.mb_release_id,
         }));
         await addToQueue(queueItems as unknown as import("$api").Track[]);
     }
@@ -526,6 +526,7 @@
                                 codec: track.codec,
                                 bit_depth: track.bit_depth,
                                 sample_rate_hz: track.sample_rate_hz,
+                                plays: track.plays,
                             }}
                             artists={track.artists}
                             artist={{
@@ -534,11 +535,11 @@
                             }}
                             album={{
                                 name: track.album,
-                                mbid: track.album_mbid,
+                                mbid: track.mb_release_id,
+                                mb_release_id: track.mb_release_id,
                             }}
                             artwork={{
                                 sha1: track.art_sha1,
-                                id: track.art_id,
                             }}
                             showIndex={true}
                             index={index + 1}
