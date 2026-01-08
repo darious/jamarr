@@ -112,8 +112,10 @@ async def init_db():
                 image_url TEXT,
                 image_source TEXT,
                 artwork_id BIGINT,
+                letter TEXT,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
+            ALTER TABLE artist ADD COLUMN IF NOT EXISTS letter TEXT;
             
             -- Album table
             CREATE TABLE IF NOT EXISTS album (
@@ -392,6 +394,7 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_track_nav ON track(artist, album, disc_no, track_no);
             CREATE INDEX IF NOT EXISTS idx_track_album ON track(album, disc_no, track_no);
             CREATE INDEX IF NOT EXISTS idx_artist_name ON artist(name);
+            CREATE INDEX IF NOT EXISTS idx_artist_letter ON artist(letter);
             
             -- Maintenance index
             CREATE INDEX IF NOT EXISTS idx_track_updated ON track(updated_at);

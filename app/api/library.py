@@ -91,13 +91,9 @@ async def get_artist_index(
     db: asyncpg.Connection = Depends(get_db),
 ):
     query = """
-        SELECT DISTINCT
-            CASE 
-                WHEN sort_name ~* '^[a-z]' THEN UPPER(SUBSTRING(sort_name FROM 1 FOR 1))
-                ELSE '#' 
-            END as letter
+        SELECT DISTINCT letter
         FROM artist
-        WHERE name IS NOT NULL
+        WHERE name IS NOT NULL AND letter IS NOT NULL
         ORDER BY letter
     """
     rows = await db.fetch(query)
@@ -113,6 +109,49 @@ async def get_artists(
     starts_with: Optional[str] = None,
     db: asyncpg.Connection = Depends(get_db),
 ):
+    if not name and not mbid:
+        query = """
+            SELECT 
+                a.mbid,
+                a.name,
+                a.sort_name,
+                a.bio,
+                ar.sha1 as art_sha1,
+                COALESCE(ac.primary_album_count, 0) as primary_album_count,
+                COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
+            FROM artist a
+            LEFT JOIN artwork ar ON a.artwork_id = ar.id
+            LEFT JOIN (
+                SELECT 
+                    artist_mbid,
+                    COUNT(DISTINCT CASE WHEN type = 'primary' THEN album_mbid END) as primary_album_count,
+                    COUNT(DISTINCT CASE WHEN type = 'contributor' THEN album_mbid END) as appears_on_album_count
+                FROM artist_album
+                GROUP BY artist_mbid
+            ) ac ON ac.artist_mbid = a.mbid
+            WHERE a.name IS NOT NULL
+        """
+        params = []
+        if starts_with:
+            letter = "#" if starts_with == "#" else starts_with.upper()
+            query += " AND a.letter = $1"
+            params.append(letter)
+        query += " ORDER BY LOWER(COALESCE(a.sort_name, a.name)), a.sort_name, a.name"
+
+        rows = await db.fetch(query, *params)
+        return [
+            {
+                "mbid": row["mbid"],
+                "name": row["name"],
+                "sort_name": row["sort_name"],
+                "bio": row["bio"],
+                "art_sha1": sha1_to_hex(row["art_sha1"]),
+                "primary_album_count": row["primary_album_count"],
+                "appears_on_album_count": row["appears_on_album_count"],
+            }
+            for row in rows
+        ]
+
     # Base query for artist info
     query = """
         SELECT 

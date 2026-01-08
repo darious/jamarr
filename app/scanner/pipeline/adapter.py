@@ -476,6 +476,16 @@ class PipelineAdapter:
                         cols.append(f"{key} = ${i}")
                         vals.append(updates[key])
                         i += 1
+
+                if "name" in updates or "sort_name" in updates:
+                    from app.scanner.utils import artist_letter
+
+                    updates["letter"] = artist_letter(
+                        updates.get("name"), updates.get("sort_name")
+                    )
+                    cols.append(f"letter = ${i}")
+                    vals.append(updates["letter"])
+                    i += 1
                 
                 # Always update timestamp
                 cols.append("updated_at = NOW()")
