@@ -326,13 +326,25 @@
         </div>
 
         <!-- Metadata -->
-        <div class="flex flex-col gap-0.5 pointer-events-none">
-          <span class="text-base font-bold text-default truncate" {title}
-            >{title}</span
+        <div class="flex flex-col gap-0.5">
+          <a
+            class="text-base font-bold text-default truncate hover:underline"
+            href={entry.in_library && entry.local_album_mbid
+              ? `/album/${entry.local_album_mbid}`
+              : "#"}
+            title={title}
           >
-          <span class="text-sm text-muted truncate" title={artist}
-            >{artist}</span
+            {title}
+          </a>
+          <a
+            class="text-sm text-muted truncate hover:underline"
+            href={entry.artist_mbid
+              ? `/artist/${entry.artist_mbid}`
+              : `/artist/${encodeURIComponent(artist)}`}
+            title={artist}
           >
+            {artist}
+          </a>
 
           <div
             class="flex items-center gap-2 mt-1 text-[10px] text-subtle font-medium uppercase tracking-wider opacity-60"
