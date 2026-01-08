@@ -6,21 +6,13 @@ def assert_has_artwork_fields(item: Dict[str, Any], required: bool = True) -> No
     """
     # Check for presence of key fields
     if required:
-        # At least one of art_id or art_sha1 should be present if we expect artwork
-        # Note: Some items might genuinely not have artwork, but the KEYS should exist if the API structure guarantees them.
-        # But usually 'art_id' might be null.
+        # Some items might genuinely not have artwork, but the key should exist if the API structure guarantees it.
         pass
 
     # Verify field types if they exist
-    if "art_id" in item and item["art_id"] is not None:
-        assert isinstance(item["art_id"], int), f"art_id must be int, got {type(item['art_id'])}"
-    
     if "art_sha1" in item and item["art_sha1"] is not None:
         assert isinstance(item["art_sha1"], str), f"art_sha1 must be str, got {type(item['art_sha1'])}"
         assert len(item["art_sha1"]) == 40, "art_sha1 must be 40 chars (SHA1)"
-
-    if "background_art_id" in item and item["background_art_id"] is not None:
-         assert isinstance(item["background_art_id"], int)
 
 def assert_track_structure(track: Dict[str, Any]) -> None:
     """Assert a track object has all required fields."""

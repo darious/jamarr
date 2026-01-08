@@ -112,8 +112,10 @@ async def init_db():
                 image_url TEXT,
                 image_source TEXT,
                 artwork_id BIGINT,
+                letter TEXT,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
+            ALTER TABLE artist ADD COLUMN IF NOT EXISTS letter TEXT;
             
             -- Album table
             CREATE TABLE IF NOT EXISTS album (
@@ -213,6 +215,10 @@ async def init_db():
                 supports_events BOOLEAN DEFAULT FALSE,
                 supports_gapless BOOLEAN DEFAULT FALSE,
                 supported_mime_types TEXT,
+                icon_url TEXT,
+                icon_mime TEXT,
+                icon_width INTEGER,
+                icon_height INTEGER,
                 last_seen_at TIMESTAMPTZ DEFAULT NOW()
             );
             
@@ -258,7 +264,11 @@ async def init_db():
                 last_login_at TIMESTAMPTZ,
                 is_active BOOLEAN DEFAULT TRUE,
                 accent_color TEXT DEFAULT '#ff006e',
-                theme_mode TEXT DEFAULT 'dark'
+                theme_mode TEXT DEFAULT 'dark',
+                lastfm_username TEXT,
+                lastfm_session_key TEXT,
+                lastfm_enabled BOOLEAN DEFAULT TRUE,
+                lastfm_connected_at TIMESTAMPTZ
             );
             
             -- Sessions
@@ -382,12 +392,15 @@ async def init_db():
             -- Integrity & joins indexes
             CREATE INDEX IF NOT EXISTS idx_track_artwork ON track(artwork_id);
             CREATE INDEX IF NOT EXISTS idx_track_artist_mbid ON track(artist_mbid);
+            CREATE INDEX IF NOT EXISTS idx_track_release_mbid ON track(release_mbid);
+            CREATE INDEX IF NOT EXISTS idx_track_release_group_mbid ON track(release_group_mbid);
             CREATE INDEX IF NOT EXISTS idx_link_entity ON external_link(entity_type, entity_id);
             
             -- Browsing indexes
             CREATE INDEX IF NOT EXISTS idx_track_nav ON track(artist, album, disc_no, track_no);
             CREATE INDEX IF NOT EXISTS idx_track_album ON track(album, disc_no, track_no);
             CREATE INDEX IF NOT EXISTS idx_artist_name ON artist(name);
+            CREATE INDEX IF NOT EXISTS idx_artist_letter ON artist(letter);
             
             -- Maintenance index
             CREATE INDEX IF NOT EXISTS idx_track_updated ON track(updated_at);
@@ -408,7 +421,10 @@ async def init_db():
             
             -- Performance optimization indexes
             CREATE INDEX IF NOT EXISTS idx_track_artist_map_mbid ON track_artist(artist_mbid);
+            CREATE INDEX IF NOT EXISTS idx_track_artist_map_track ON track_artist(track_id);
             CREATE INDEX IF NOT EXISTS idx_artist_album_map_album ON artist_album(album_mbid);
+            CREATE INDEX IF NOT EXISTS idx_artist_album_map_artist_type ON artist_album(artist_mbid, type);
+            CREATE INDEX IF NOT EXISTS idx_album_release_group_mbid ON album(release_group_mbid);
             CREATE INDEX IF NOT EXISTS idx_link_entity_type ON external_link(entity_type, entity_id, type);
             CREATE INDEX IF NOT EXISTS idx_playback_history_ts ON playback_history(timestamp);
             CREATE INDEX IF NOT EXISTS idx_playback_history_user_ts ON playback_history(user_id, timestamp);
@@ -454,6 +470,127 @@ async def init_db():
                 setweight(to_tsvector('english', COALESCE(album, '')), 'C') ||
                 setweight(to_tsvector('english', COALESCE(album_artist, '')), 'C')
             WHERE fts_vector IS NULL;
+        """)
+
+        # ----------------------------------------------------------------------
+        # Missing migrations (019 - 020)
+        # ----------------------------------------------------------------------
+        await conn.execute("""
+            -- 019: Last.fm scrobble tables
+            CREATE TABLE IF NOT EXISTS lastfm_scrobble (
+                id BIGSERIAL PRIMARY KEY,
+                lastfm_username TEXT NOT NULL,
+                played_at TIMESTAMPTZ NOT NULL,
+                played_at_uts BIGINT,
+                track_mbid TEXT,
+                track_name TEXT NOT NULL,
+                track_url TEXT,
+                artist_mbid TEXT,
+                artist_name TEXT NOT NULL,
+                artist_url TEXT,
+                album_mbid TEXT,
+                album_name TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(lastfm_username, played_at, track_name, artist_name)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_lastfm_scrobble_user_played
+            ON lastfm_scrobble(lastfm_username, played_at DESC);
+            
+            CREATE TABLE IF NOT EXISTS lastfm_scrobble_match (
+                id BIGSERIAL PRIMARY KEY,
+                scrobble_id BIGINT NOT NULL UNIQUE,
+                track_id BIGINT NOT NULL,
+                match_score DOUBLE PRECISION NOT NULL,
+                match_method TEXT NOT NULL,
+                match_reason TEXT,
+                cache_key TEXT,
+                matched_at TIMESTAMPTZ DEFAULT NOW(),
+                FOREIGN KEY(scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE,
+                FOREIGN KEY(track_id) REFERENCES track(id) ON DELETE CASCADE
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_scrobble_match_cache_key 
+                ON lastfm_scrobble_match(cache_key) 
+                WHERE cache_key IS NOT NULL;
+            
+            CREATE INDEX IF NOT EXISTS idx_scrobble_match_track_id 
+                ON lastfm_scrobble_match(track_id);
+            
+            CREATE TABLE IF NOT EXISTS lastfm_skip_artist (
+                artist_name TEXT PRIMARY KEY,
+                reason TEXT,
+                added_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            -- 020: Combined Playback History View
+            
+            CREATE INDEX IF NOT EXISTS idx_lastfm_scrobble_played_at
+            ON lastfm_scrobble(played_at DESC);
+            
+            CREATE OR REPLACE VIEW public.combined_playback_history AS
+            WITH lastfm_rows AS (
+                SELECT
+                    'lastfm'::text AS source,
+                    lsm.id AS source_id,
+                    lsm.track_id,
+                    ls.played_at,
+                    u.id AS user_id,
+                    ls.lastfm_username,
+                    NULL::text AS client_id,
+                    NULL::text AS hostname,
+                    NULL::text AS client_ip,
+                    lsm.match_score,
+                    lsm.match_method
+                FROM lastfm_scrobble_match lsm
+                JOIN lastfm_scrobble ls ON ls.id = lsm.scrobble_id
+                JOIN "user" u on ls.lastfm_username = u.lastfm_username
+            ),
+            local_rows AS (
+                SELECT
+                    'local'::text AS source,
+                    ph.id AS source_id,
+                    ph.track_id,
+                    ph."timestamp" AS played_at,
+                    ph.user_id,
+                    NULL::text AS lastfm_username,
+                    ph.client_id,
+                    ph.hostname,
+                    ph.client_ip,
+                    NULL::double precision AS match_score,
+                    NULL::text AS match_method
+                FROM playback_history ph
+            ),
+            lastfm_filtered AS (
+                SELECT lf.*
+                FROM lastfm_rows lf
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM playback_history lo
+                    WHERE lo.track_id = lf.track_id
+                      AND lo."timestamp" BETWEEN lf.played_at - INTERVAL '5 seconds'
+                                              AND lf.played_at + INTERVAL '5 seconds'
+                )
+            )
+            SELECT * FROM local_rows
+            UNION ALL
+            SELECT * FROM lastfm_filtered;
+            
+            -- Materialized view definition (simplified for init_db, can match view for now)
+            -- Note: Using correct definition with UNION ALL
+            -- To avoid complexity, we drop if exists and recreate
+            DROP MATERIALIZED VIEW IF EXISTS public.combined_playback_history_mat;
+            CREATE MATERIALIZED VIEW public.combined_playback_history_mat AS
+            SELECT * FROM public.combined_playback_history;
+            
+            CREATE UNIQUE INDEX IF NOT EXISTS combined_playback_history_mat_pk
+            ON public.combined_playback_history_mat (source, source_id);
+            
+            CREATE INDEX IF NOT EXISTS combined_playback_history_mat_played_at
+            ON public.combined_playback_history_mat (played_at DESC);
+            
+            CREATE INDEX IF NOT EXISTS combined_playback_history_mat_track_played
+            ON public.combined_playback_history_mat (track_id, played_at DESC);
         """)
 
         print("✅ PostgreSQL database initialized successfully")

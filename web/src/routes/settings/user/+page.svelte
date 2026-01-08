@@ -2,7 +2,15 @@
   import { goto } from "$app/navigation";
   import { onMount, onDestroy } from "svelte";
   import { fade, scale } from "svelte/transition";
-  import { changePassword, updateProfile } from "$lib/api";
+  import {
+    changePassword,
+    updateProfile,
+    getLastfmStatus,
+    startLastfmAuth,
+    disconnectLastfm,
+    toggleLastfm,
+    type LastfmStatus,
+  } from "$lib/api";
   import TabButton from "$lib/components/TabButton.svelte";
   import {
     themeAccent,
@@ -45,6 +53,12 @@
   let passwordMessage = "";
   let passwordError = "";
   let updatingPassword = false;
+
+  // Last.fm state
+  let lastfmStatus: LastfmStatus | null = null;
+  let lastfmMessage = "";
+  let lastfmError = "";
+  let updatingLastfm = false;
 
   // Accent color state
   // selectedAccent uses reactive store above
@@ -112,6 +126,8 @@
     email = user.email || "";
     displayName = user.display_name || "";
     initializedProfile = true;
+    // Load Last.fm status when user is loaded
+    loadLastfmStatus();
   }
 
   async function saveProfile() {
@@ -190,6 +206,77 @@
       accentError = e?.message || "Failed to update accent color.";
     } finally {
       updatingAccent = false;
+    }
+  }
+
+  async function loadLastfmStatus() {
+    if (!user) return;
+    try {
+      lastfmStatus = await getLastfmStatus();
+    } catch (e) {
+      console.error("Failed to load Last.fm status", e);
+    }
+  }
+
+  async function connectLastfm() {
+    console.log("connectLastfm called, user:", user);
+    if (!user) {
+      console.error("No user found");
+      return;
+    }
+    updatingLastfm = true;
+    lastfmMessage = "";
+    lastfmError = "";
+    try {
+      console.log("Calling startLastfmAuth...");
+      const { auth_url } = await startLastfmAuth();
+      console.log("Got auth URL:", auth_url);
+      window.location.href = auth_url;
+    } catch (e: any) {
+      console.error("Failed to connect Last.fm:", e);
+      lastfmError = e?.message || "Failed to connect Last.fm";
+      updatingLastfm = false;
+    }
+  }
+
+  async function disconnectLastfmAccount() {
+    if (!user) return;
+    updatingLastfm = true;
+    lastfmMessage = "";
+    lastfmError = "";
+    try {
+      await disconnectLastfm();
+      lastfmStatus = {
+        connected: false,
+        username: null,
+        enabled: false,
+        connected_at: null,
+      };
+      lastfmMessage = "Last.fm disconnected.";
+    } catch (e: any) {
+      lastfmError = e?.message || "Failed to disconnect Last.fm";
+    } finally {
+      updatingLastfm = false;
+    }
+  }
+
+  async function toggleLastfmScrobbling() {
+    if (!user || !lastfmStatus) return;
+    updatingLastfm = true;
+    lastfmMessage = "";
+    lastfmError = "";
+    const newEnabled = !lastfmStatus.enabled;
+    try {
+      await toggleLastfm(newEnabled);
+      lastfmStatus.enabled = newEnabled;
+      lastfmMessage = newEnabled
+        ? "Scrobbling enabled."
+        : "Scrobbling disabled.";
+      setTimeout(() => (lastfmMessage = ""), 3000);
+    } catch (e: any) {
+      lastfmError = e?.message || "Failed to toggle scrobbling";
+    } finally {
+      updatingLastfm = false;
     }
   }
 </script>
@@ -511,6 +598,133 @@
             {#if updatingPassword}Updating...{:else}Update Password{/if}
           </TabButton>
         </form>
+      </div>
+
+      <!-- Last.fm Integration -->
+      <div class="surface-glass-panel rounded-2xl p-6">
+        <div class="mb-4">
+          <h2 class="text-lg font-semibold">Last.fm Scrobbling</h2>
+          <p class="text-sm text-muted">
+            Connect your Last.fm account to automatically scrobble your plays.
+          </p>
+        </div>
+
+        {#if lastfmMessage}
+          <div
+            class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100 dark:text-emerald-100 text-emerald-700"
+          >
+            {lastfmMessage}
+          </div>
+        {/if}
+        {#if lastfmError}
+          <div
+            class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100 dark:text-red-100 text-red-700"
+          >
+            {lastfmError}
+          </div>
+        {/if}
+
+        <div class="space-y-4">
+          {#if lastfmStatus?.connected}
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm text-muted">Connected as</p>
+                  <p class="font-medium">{lastfmStatus.username}</p>
+                  {#if lastfmStatus.connected_at}
+                    <p class="text-xs text-subtle">
+                      Connected {new Date(
+                        lastfmStatus.connected_at,
+                      ).toLocaleDateString()}
+                    </p>
+                  {/if}
+                </div>
+                <div
+                  class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/20"
+                >
+                  <svg
+                    class="h-5 w-5 text-emerald-500"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clip-rule="evenodd"
+                    />
+                  </svg>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between pt-2">
+                <div>
+                  <p class="text-sm text-muted">Scrobbling</p>
+                  <p class="text-xs text-subtle">
+                    {lastfmStatus.enabled ? "Enabled" : "Disabled"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={lastfmStatus.enabled}
+                  aria-label="Toggle Last.fm scrobbling"
+                  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {lastfmStatus.enabled
+                    ? 'bg-accent'
+                    : 'bg-surface-elevated'}"
+                  on:click={toggleLastfmScrobbling}
+                  disabled={updatingLastfm}
+                >
+                  <span
+                    class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {lastfmStatus.enabled
+                      ? 'translate-x-6'
+                      : 'translate-x-1'}"
+                  ></span>
+                </button>
+              </div>
+            </div>
+
+            <TabButton
+              type="button"
+              disabled={updatingLastfm}
+              className="w-full variant-ghost-error"
+              onClick={disconnectLastfmAccount}
+            >
+              {#if updatingLastfm}Disconnecting...{:else}Disconnect Last.fm{/if}
+            </TabButton>
+          {:else}
+            <div class="text-center py-4">
+              <div
+                class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-elevated"
+              >
+                <svg
+                  class="h-6 w-6 text-muted"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                  />
+                </svg>
+              </div>
+              <p class="text-sm text-muted mb-4">
+                Connect your Last.fm account to track your listening history and
+                discover new music.
+              </p>
+              <TabButton
+                type="button"
+                disabled={updatingLastfm}
+                className="w-full"
+                onClick={connectLastfm}
+              >
+                {#if updatingLastfm}Connecting...{:else}Connect Last.fm{/if}
+              </TabButton>
+            </div>
+          {/if}
+        </div>
       </div>
     </div>
   </div>

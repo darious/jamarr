@@ -2,8 +2,17 @@ services:
   jamarr_db:
     image: postgres:18.1-alpine
     container_name: jamarr_db
+    user: "postgres"
     network_mode: "host"
-    command: postgres -p 8110
+    command:
+      - sh
+      - -c
+      - |
+        if [ "${HOST_IP:-}" != "REDACTED_IP" ]; then
+          echo "Refusing to start prod DB on HOST_IP=${HOST_IP:-<unset>}. Expected REDACTED_IP." >&2
+          exit 1
+        fi
+        exec postgres -p 8110 -c log_error_verbosity=verbose
     restart: unless-stopped
     env_file:
       - .env
@@ -11,8 +20,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: jamarr
+      HOST_IP: ${HOST_IP:-}
     volumes:
-      - /mnt/config/q-docker/jamarr/postgres:/var/lib/postgresql/data
+      - /mnt/config/q-docker/jamarr_pgdata:/var/lib/postgresql/18/docker
 
 
   jamarr:

@@ -422,6 +422,7 @@ class PipelineAdapter:
         This matches the old coordinator's save logic.
         """
         from app.scanner.artwork import upsert_artwork_record, upsert_image_mapping
+        from app.scanner.artwork import download_and_save_artwork
         
         try:
             async with db.transaction():
@@ -466,6 +467,33 @@ class PipelineAdapter:
                         except Exception as e:
                             logger.error(f"Artwork Save Error (background): {e}")
 
+                if (
+                    not artwork_id
+                    and updates.get("image_url")
+                    and updates.get("image_source")
+                ):
+                    try:
+                        downloaded = await download_and_save_artwork(
+                            updates["image_url"],
+                            art_type="artistthumb",
+                            client=get_shared_client(),
+                        )
+                        if downloaded:
+                            artwork_id = await upsert_artwork_record(
+                                db,
+                                downloaded.get("sha1"),
+                                meta=downloaded.get("meta"),
+                                source=updates.get("image_source"),
+                                source_url=updates.get("image_url"),
+                            )
+                            if artwork_id:
+                                await upsert_image_mapping(
+                                    db, artwork_id, "artist", mbid, "artistthumb"
+                                )
+                                updates["artwork_id"] = artwork_id
+                    except Exception as e:
+                        logger.error(f"Artwork Save Error (fallback): {e}")
+
                 # 1. Update Artist Table
                 cols = []
                 vals = []
@@ -476,6 +504,16 @@ class PipelineAdapter:
                         cols.append(f"{key} = ${i}")
                         vals.append(updates[key])
                         i += 1
+
+                if "name" in updates or "sort_name" in updates:
+                    from app.scanner.utils import artist_letter
+
+                    updates["letter"] = artist_letter(
+                        updates.get("name"), updates.get("sort_name")
+                    )
+                    cols.append(f"letter = ${i}")
+                    vals.append(updates["letter"])
+                    i += 1
                 
                 # Always update timestamp
                 cols.append("updated_at = NOW()")

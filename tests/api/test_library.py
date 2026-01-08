@@ -22,10 +22,11 @@ async def library_data(db):
     # Artist
     # Schema has 'artwork_id', not 'art_id'
     await db.execute("""
-        INSERT INTO artist (mbid, name, sort_name, artwork_id)
+        INSERT INTO artist (mbid, name, sort_name, artwork_id, letter)
         VALUES 
-            ('artist-1', 'The Testers', 'Testers, The', 101),
-            ('artist-2', 'Solo Guy', 'Solo Guy', NULL)
+            ('artist-1', 'The Testers', 'Testers, The', 101, 'T'),
+            ('artist-2', 'Solo Guy', 'Solo Guy', NULL, 'S'),
+            ('artist-3', '123 Band', '123 Band', NULL, '#')
     """)
     # Album
     # UPDATED: mbid is Release ID, added release_group_mbid
@@ -79,7 +80,6 @@ async def test_get_artists(client: AsyncClient, db, library_data):
     
     # Verify artwork fields logic
     tester = next(a for a in data if a["name"] == "The Testers")
-    assert tester["art_id"] == 101
     assert tester["art_sha1"] == '1111111111222222222233333333334444444444'
 
     # 2. Filter by name
@@ -101,6 +101,22 @@ async def test_get_artists(client: AsyncClient, db, library_data):
     assert isinstance(artist["top_tracks"], list)
 
 @pytest.mark.asyncio
+async def test_get_artists_lightweight_starts_with(client: AsyncClient, db, library_data):
+    response = await client.get("/api/artists", params={"starts_with": "S"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "Solo Guy"
+    assert "top_tracks" not in data[0]
+    assert "primary_album_count" in data[0]
+    assert "appears_on_album_count" in data[0]
+
+    response = await client.get("/api/artists", params={"starts_with": "#"})
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "123 Band"
+
+@pytest.mark.asyncio
 async def test_get_albums(client: AsyncClient, db, library_data):
     # 1. List all
     response = await client.get("/api/albums")
@@ -116,7 +132,7 @@ async def test_get_albums(client: AsyncClient, db, library_data):
     
     # Check artwork
     test_album = next(a for a in data if a["album"] == "Test Album")
-    assert test_album["art_id"] == 201
+    assert test_album["art_sha1"] == "aaaaabbbbbcccccdddddeeeeefffff1111122222"
     
     # 2. Filter by Artist
     response = await client.get("/api/albums", params={"artist": "The Testers"})
@@ -301,7 +317,7 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     # Expected structure for album-like items
     item = data[0]
     assert "album" in item
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item
     assert item["album"] == "Test Album"
 
     # Test "Recently Added" (by updated_at/id)
@@ -311,26 +327,26 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     assert len(data) > 0
     item = data[0]
     assert "album" in item
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item
 
     # Test "Recently Played Albums"
-    response = await client.get("/api/home/recently-played-albums")
+    response = await client.get("/api/history/albums")
     assert response.status_code == 200
     data = response.json()
     assert len(data) > 0
     item = data[0]
     assert item["album"] == "Test Album"
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item
 
     # Test "Recently Played Artists"
-    response = await client.get("/api/home/recently-played-artists")
+    response = await client.get("/api/history/artists")
     assert response.status_code == 200
     data = response.json()
     assert len(data) > 0
     item = data[0]
     assert_artist_structure(item)
     assert item["name"] == "The Testers"
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item
     
     # Test "Discover Artists" (random/new)
     # The query for discover artists relies on 'last_added' via tracks
@@ -340,4 +356,4 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     assert len(data) > 0
     item = data[0]
     assert_artist_structure(item)
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item

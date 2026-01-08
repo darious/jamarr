@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, HTTPException, Header, Response
+from fastapi import APIRouter, Depends, Request, HTTPException, Header
 import os
 import asyncio
 from app.db import get_db
@@ -231,7 +231,7 @@ async def monitor_upnp_playback(udn: str):
                                 track["logged"] = True
                                 await db.execute(
                                     "UPDATE renderer_state SET queue = $1 WHERE renderer_udn = $2",
-                                    json.dumps(queue),
+                                    json.dumps(_strip_art_ids(queue)),
                                     udn,
                                 )
 
@@ -260,18 +260,20 @@ class Track(BaseModel):
     artist: str
     album: str
     duration_seconds: float
-    artwork_id: Optional[int] = None
-    art_id: Optional[int] = None
     art_sha1: Optional[str] = None
     codec: Optional[str] = None
     bit_depth: Optional[int] = None
     sample_rate_hz: Optional[int] = None
+    artist_mbid: Optional[str] = None
+    album_mbid: Optional[str] = None
+    mb_release_id: Optional[str] = None
     path: Optional[str] = None
     album_artist: Optional[str] = None
     track_no: Optional[int] = None
     disc_no: Optional[int] = None
     release_date: Optional[str] = None
     bitrate: Optional[int] = None
+    plays: Optional[int] = None
     logged: bool = False
     artists: Optional[List[Dict[str, Optional[str]]]] = None
 
@@ -380,8 +382,6 @@ async def _enrich_track_metadata(
         if row:
             if not enriched.get("path"):
                 enriched["path"] = row[0]
-            if not enriched.get("artwork_id"):
-                enriched["artwork_id"] = row[2]
             if not enriched.get("art_sha1"):
                 enriched["art_sha1"] = row[3]
                 if not enriched.get("mime"):
@@ -409,11 +409,20 @@ async def _enrich_track_metadata(
                     artists_val = json.loads(artists_val)
                 enriched["artists"] = artists_val
 
-    # Frontend compat
-    if enriched.get("artwork_id") and not enriched.get("art_id"):
-        enriched["art_id"] = enriched["artwork_id"]
-
     return enriched
+
+
+def _strip_art_ids(queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Ensure renderer_state queues never persist art_id/artwork_id."""
+    cleaned = []
+    for item in queue:
+        if not isinstance(item, dict):
+            cleaned.append(item)
+            continue
+        item.pop("art_id", None)
+        item.pop("artwork_id", None)
+        cleaned.append(item)
+    return cleaned
 
 
 async def get_active_renderer(db: asyncpg.Connection, client_id: str) -> str:
@@ -442,78 +451,41 @@ async def get_active_renderer(db: asyncpg.Connection, client_id: str) -> str:
 async def get_renderer_state_db(db: asyncpg.Connection, udn: str) -> Dict[str, Any]:
     """Get state from DB for a renderer. Returns default if not found."""
     row = await db.fetchrow(
-        "SELECT queue, current_index, position_seconds, is_playing, transport_state, volume FROM renderer_state WHERE renderer_udn = $1",
+        """
+        SELECT queue, current_index, position_seconds, is_playing, transport_state, volume
+        FROM renderer_state
+        WHERE renderer_udn = $1
+        """,
         udn,
     )
-    if row:
-        try:
-            queue = json.loads(row[0])
-        except Exception:
+    if not row:
+        return {
+            "queue": [],
+            "current_index": -1,
+            "position_seconds": 0,
+            "is_playing": False,
+            "transport_state": "STOPPED",
+            "volume": None,
+        }
+
+    try:
+        queue = json.loads(row[0])
+        if not isinstance(queue, list):
             queue = []
+    except Exception:
+        queue = []
 
-        # Backfill missing art_sha1 for legacy queues
-        missing_sha1_ids = set()
-        for t in queue:
-            if t.get("artwork_id") and not t.get("art_sha1"):
-                # Use integer conversion for safety
-                try:
-                    missing_sha1_ids.add(int(t["artwork_id"]))
-                except Exception:
-                    pass
+    for t in queue:
+        t.pop("art_id", None)
+        t.pop("artwork_id", None)
 
-            if missing_sha1_ids:
-                try:
-                    placeholders = ",".join("?" for _ in missing_sha1_ids)
-                    query = f"SELECT id, sha1 FROM artwork WHERE id IN ({placeholders})"
-                    art_rows = await db.fetch(query, list(missing_sha1_ids))
-                    art_map = {r[0]: r[1] for r in art_rows}
-
-                    updated = False
-                    for t in queue:
-                        aid = t.get("artwork_id")
-                        if aid and not t.get("art_sha1"):
-                            try:
-                                aid_int = int(aid)
-                                if aid_int in art_map:
-                                    t["art_sha1"] = art_map[aid_int]
-                                    updated = True
-                            except Exception:
-                                pass
-
-                    if updated:
-                        new_queue_json = json.dumps(queue)
-                        await db.execute(
-                            "UPDATE renderer_state SET queue = $1 WHERE renderer_udn = $2",
-                            new_queue_json,
-                            udn,
-                        )
-                except Exception as e:
-                    import logging
-
-                    logging.getLogger(__name__).error(
-                        f"[Player] Failed to backfill art_sha1: {e}"
-                    )
-
-            # Ensure art_id is present for frontend
-            for t in queue:
-                if t.get("artwork_id") and not t.get("art_id"):
-                    t["art_id"] = t["artwork_id"]
-
-            return {
-                "queue": queue,
-                "current_index": row[1],
-                "position_seconds": row[2],
-                "is_playing": bool(row[3]),
-                "transport_state": row[4] if len(row) > 4 else "STOPPED",
-                "volume": row[5] if len(row) > 5 else None,
-            }
     return {
-        "queue": [],
-        "current_index": -1,
-        "position_seconds": 0,
-        "is_playing": False,
-        "transport_state": "STOPPED",
-        "volume": None,
+        "queue": queue,
+        "current_index": row[1],
+        "position_seconds": row[2],
+        "is_playing": bool(row[3]),
+        "transport_state": row[4] if len(row) > 4 else "STOPPED",
+        "volume": row[5] if len(row) > 5 else None,
     }
 
 
@@ -521,7 +493,7 @@ async def update_renderer_state_db(
     db: asyncpg.Connection, udn: str, state: Dict[str, Any]
 ):
     """Upsert renderer state."""
-    queue_json = json.dumps(state.get("queue", []))
+    queue_json = json.dumps(_strip_art_ids(state.get("queue", [])))
     volume = state.get("volume")
     await db.execute(
         """
@@ -646,8 +618,115 @@ async def log_history(
                 client_id,
                 user_id,
             )
+            
+            # Trigger Last.fm scrobble if user has it enabled
+            if user_id:
+                asyncio.create_task(
+                    _scrobble_to_lastfm(user_id, track_id)
+                )
+                
         except Exception as e:
             logger.error(f"Failed to log history: {e}")
+
+
+async def _update_now_playing_lastfm(user_id: int, track_id: int):
+    """Background task to update Now Playing on Last.fm"""
+    try:
+        from app import lastfm
+        from app.db import get_pool
+        
+        # Get our own database connection from the pool
+        pool = get_pool()
+        async with pool.acquire() as db:
+            # Check if user has Last.fm enabled
+            user_row = await db.fetchrow(
+                'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',
+                user_id
+            )
+            
+            if not user_row or not user_row['lastfm_enabled'] or not user_row['lastfm_session_key']:
+                return
+            
+            # Fetch track metadata
+            track_row = await db.fetchrow(
+                """
+                SELECT title, artist, album, duration_seconds, artist_mbid
+                FROM track
+                WHERE id = $1
+                """,
+                track_id
+            )
+            
+            if not track_row:
+                return
+            
+            # Update Now Playing on Last.fm
+            await lastfm.update_now_playing(
+                session_key=user_row['lastfm_session_key'],
+                track_info={
+                    'track': track_row['title'],
+                    'artist': track_row['artist'],
+                    'album': track_row['album'],
+                    'duration': int(track_row['duration_seconds']) if track_row['duration_seconds'] else None,
+                    'mbid': track_row['artist_mbid'],
+                }
+            )
+            
+            logger.info(f"Updated Now Playing on Last.fm for user {user_id}: {track_row['artist']} - {track_row['title']}")
+        
+    except Exception as e:
+        logger.error(f"Failed to update Now Playing on Last.fm: {e}")
+
+
+async def _scrobble_to_lastfm(user_id: int, track_id: int):
+    """Background task to scrobble a track to Last.fm"""
+    try:
+        from app import lastfm
+        from app.db import get_pool
+        import time
+        
+        # Get our own database connection from the pool
+        pool = get_pool()
+        async with pool.acquire() as db:
+            # Check if user has Last.fm enabled
+            user_row = await db.fetchrow(
+                'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',
+                user_id
+            )
+            
+            if not user_row or not user_row['lastfm_enabled'] or not user_row['lastfm_session_key']:
+                return
+            
+            # Fetch track metadata
+            track_row = await db.fetchrow(
+                """
+                SELECT title, artist, album, duration_seconds, artist_mbid
+                FROM track
+                WHERE id = $1
+                """,
+                track_id
+            )
+            
+            if not track_row:
+                return
+            
+            # Scrobble to Last.fm
+            await lastfm.scrobble_track(
+                session_key=user_row['lastfm_session_key'],
+                track_info={
+                    'track': track_row['title'],
+                    'artist': track_row['artist'],
+                    'album': track_row['album'],
+                    'duration': int(track_row['duration_seconds']) if track_row['duration_seconds'] else None,
+                    'mbid': track_row['artist_mbid'],
+                },
+                timestamp=int(time.time())
+            )
+            
+            logger.info(f"Scrobbled track {track_id} to Last.fm for user {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Failed to scrobble to Last.fm: {e}")
 
 
 # --- Endpoints ---
@@ -656,235 +735,6 @@ async def log_history(
 @router.get("/api/client-ip")
 async def get_client_ip_endpoint(request: Request):
     return {"ip": get_client_ip(request)}
-
-
-@router.get("/api/player/history")
-async def get_playback_history(
-    response: Response,
-    scope: str = "all",
-    days: int = 7,
-    page: int = 1,
-    limit: int = 20,
-    request: Request = None,
-):
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    async for db in get_db():
-        user_row, _ = (
-            await get_session_user(db, request.cookies.get("jamarr_session"))
-            if request
-            else (None, None)
-        )
-        # Date filter
-        from datetime import timedelta
-
-        # Ensure days is valid
-        days = max(1, min(days, 365))
-        
-        where_clauses = ["DATE(h.timestamp) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
-        params_list = [timedelta(days=-(days - 1))]
-        
-        if scope == "mine" and user_row:
-            where_clauses.append("h.user_id = $2")
-            params_list.append(user_row["id"])
-            
-        where_sql = "WHERE " + " AND ".join(where_clauses)
-        
-        # Pagination
-        page = max(1, page)
-        limit = max(1, min(limit, 100))
-        offset = (page - 1) * limit
-        
-        # Add offset/limit to params (adjusting indices)
-        # params_list currently has 1 or 2 items
-        params_list.append(limit)
-        params_list.append(offset)
-        
-        # Calculate indices for SQL placeholders
-        # $1 is duration
-        # $2 is user_id (optional)
-        # Limit is next, Offset is last
-        limit_idx = len(params_list) - 1
-        offset_idx = len(params_list)
-
-        query = f"""
-            SELECT 
-                h.id, h.timestamp, h.client_ip, h.client_id, h.user_id,
-                t.id, t.title, t.artist, t.album, t.artwork_id, t.duration_seconds,
-                t.codec, t.bit_depth, t.sample_rate_hz, t.release_date,
-                u.username, u.display_name, u.email,
-                a.sha1 as art_sha1
-            FROM playback_history h
-            JOIN track t ON h.track_id = t.id
-            LEFT JOIN artwork a ON t.artwork_id = a.id
-            LEFT JOIN "user" u ON u.id = h.user_id
-            {where_sql}
-            ORDER BY h.timestamp DESC
-            LIMIT ${limit_idx} OFFSET ${offset_idx}
-        """
-        rows = await db.fetch(query, *params_list)
-        history = []
-        for row in rows:
-            history.append(
-                {
-                    "id": row[0],
-                    "timestamp": row[1],
-                    "client_ip": row[2],
-                    "client_id": row[3],
-                    "user": {
-                        "id": row[4],
-                        "username": row[15],
-                        "display_name": row[16],
-                        "email": row[17],
-                    }
-                    if row[4]
-                    else None,
-                    "track": {
-                        "id": row[5],
-                        "title": row[6],
-                        "artist": row[7],
-                        "album": row[8],
-                        "artwork_id": row[9],
-                        "art_id": row[9],  # Compat
-                        "art_sha1": row[18],  # New standard
-                        "duration_seconds": row[10],
-                        "codec": row[11],
-                        "bit_depth": row[12],
-                        "sample_rate_hz": row[13],
-                        "release_date": row[14],
-                    },
-                }
-            )
-        return history
-    return []
-
-
-@router.get("/api/player/history/stats")
-async def get_playback_history_stats(
-    response: Response,
-    request: Request,
-    scope: str = "all",
-    days: int = 7,
-):
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    days = max(1, min(days, 365))
-
-    async for db in get_db():
-        user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
-        from datetime import timedelta
-
-        where_clauses = ["DATE(timestamp) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
-        params: List[Any] = [timedelta(days=-(days - 1))]
-        if scope == "mine" and user_row:
-            where_clauses.append("h.user_id = $2")
-            params.append(user_row["id"])
-        where_sql = " AND ".join(where_clauses)
-
-        # Plays per day
-        daily_query = f"""
-            SELECT DATE(timestamp) as day, COUNT(*) as plays
-            FROM playback_history h
-            WHERE {where_sql}
-            GROUP BY day
-            ORDER BY day DESC
-        """
-        rows = await db.fetch(daily_query, *params)
-        daily = [{"day": row[0], "plays": row[1]} for row in rows]
-
-        # Top artists
-        artists_query = f"""
-            SELECT 
-                COALESCE(NULLIF(t.album_artist, ''), t.artist) as artist_name, 
-                MIN(t.artwork_id) as artwork_id, 
-                MAX(a.sha1) as art_sha1, 
-                COUNT(*) as plays
-            FROM playback_history h
-            JOIN track t ON t.id = h.track_id
-            LEFT JOIN artwork a ON t.artwork_id = a.id
-            WHERE {where_sql}
-            GROUP BY COALESCE(NULLIF(t.album_artist, ''), t.artist)
-            ORDER BY plays DESC
-            LIMIT 10
-        """
-        rows = await db.fetch(artists_query, *params)
-        artists = [
-            {
-                "artist": row[0],
-                "artwork_id": row[1],
-                "art_id": row[1],
-                "art_sha1": row[2],
-                "plays": row[3],
-            }
-            for row in rows
-            if row[0]
-        ]
-
-        # Top albums
-        albums_query = f"""
-            SELECT 
-                t.album, 
-                COALESCE(NULLIF(t.album_artist, ''), t.artist) as artist_name, 
-                MIN(t.artwork_id) as artwork_id, 
-                MAX(a.sha1) as art_sha1, 
-                COUNT(*) as plays
-            FROM playback_history h
-            JOIN track t ON t.id = h.track_id
-            LEFT JOIN artwork a ON t.artwork_id = a.id
-                WHERE {where_sql}
-                GROUP BY t.album, COALESCE(NULLIF(t.album_artist, ''), t.artist)
-                ORDER BY plays DESC
-                LIMIT 10
-            """
-        rows = await db.fetch(albums_query, *params)
-        albums = [
-            {
-                "album": row[0],
-                "artist": row[1],
-                "artwork_id": row[2],
-                "art_id": row[2],
-                "art_sha1": row[3],
-                "plays": row[4],
-            }
-            for row in rows
-            if row[0]
-        ]
-
-        # Top tracks
-        tracks_query = f"""
-        SELECT t.id, t.title, t.artist, t.album, t.artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
-        FROM playback_history h
-        JOIN track t ON t.id = h.track_id
-        LEFT JOIN artwork a ON t.artwork_id = a.id
-        WHERE {where_sql}
-            GROUP BY t.id, t.title, t.artist, t.album, t.artwork_id
-            ORDER BY plays DESC
-            LIMIT 10
-        """
-        rows = await db.fetch(tracks_query, *params)
-        tracks = [
-            {
-                "id": row[0],
-                "title": row[1],
-                "artist": row[2],
-                "album": row[3],
-                "artwork_id": row[4],
-                "art_id": row[4],
-                "art_sha1": row[5],
-                "plays": row[6],
-            }
-            for row in rows
-        ]
-
-        return {
-            "daily": daily,
-            "artists": artists,
-            "albums": albums,
-            "tracks": tracks,
-        }
-    return {"daily": [], "artists": [], "albums": [], "tracks": []}
 
 
 @router.get("/api/player/state", response_model=PlayerState)
@@ -910,8 +760,27 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
                         )
                         monitor_start_times[udn] = now
 
+        queue = state["queue"]
+        track_ids = [
+            t.get("id") for t in queue if isinstance(t, dict) and t.get("id")
+        ]
+        if track_ids:
+            plays_rows = await db.fetch(
+                """
+                SELECT h.track_id, COUNT(*) as plays
+                FROM combined_playback_history h
+                WHERE h.track_id = ANY($1::bigint[])
+                GROUP BY h.track_id
+                """,
+                track_ids,
+            )
+            plays_map = {row["track_id"]: row["plays"] for row in plays_rows}
+            for t in queue:
+                if isinstance(t, dict) and t.get("id") and "plays" not in t:
+                    t["plays"] = plays_map.get(t["id"], 0)
+
         return {
-            "queue": state["queue"],
+            "queue": queue,
             "current_index": state["current_index"],
             "position_seconds": state["position_seconds"],
             "is_playing": state["is_playing"],
@@ -955,6 +824,13 @@ async def set_queue(
 
         await update_renderer_state_db(db, udn, state)
         _reset_history_tracker(udn if not udn.startswith("local") else client_id)
+        
+        # Trigger Now Playing update for Last.fm
+        if user_id and enriched_queue and state["current_index"] >= 0:
+            current_track = enriched_queue[state["current_index"]]
+            asyncio.create_task(
+                _update_now_playing_lastfm(user_id, current_track["id"])
+            )
 
         # For UPnP, immediately play the selected track and restart monitor
         if not udn.startswith("local:") and state["queue"]:
@@ -994,6 +870,7 @@ async def set_queue(
                 import time
 
                 monitor_start_times[udn] = time.time()
+                last_track_start_time[udn] = time.time()
 
             # Start playback in background
             asyncio.create_task(start_playback())
@@ -1201,6 +1078,7 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
                 import time
 
                 monitor_start_times[udn] = time.time()
+                last_track_start_time[udn] = time.time()
     # Return the state so the client can sync immediately
     return {
         "status": "ok",
@@ -1475,6 +1353,7 @@ async def play_track(
         import time
 
         monitor_start_times[udn] = time.time()
+        last_track_start_time[udn] = time.time()
 
         return {"status": "streaming_started", "renderer": udn}
     else:

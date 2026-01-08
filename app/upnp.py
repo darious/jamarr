@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from typing import Dict, Any, Optional
-from urllib.parse import urlparse
+import xml.etree.ElementTree as ET
+from typing import Dict, Any, Optional, List
+from urllib.parse import urlparse, urljoin
 import aiohttp
 
 from async_upnp_client.client_factory import UpnpFactory
@@ -18,6 +19,65 @@ logger = logging.getLogger(__name__)
 
 # Search target for MediaRenderer devices
 SSDP_TARGET_MEDIA_RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
+
+
+def _strip_ns(tag: str) -> str:
+    return tag.split("}", 1)[-1] if "}" in tag else tag
+
+
+def _parse_icons(xml_text: str, base_url: str) -> List[Dict[str, Any]]:
+    root = ET.fromstring(xml_text)
+    icons: List[Dict[str, Any]] = []
+    for node in root.iter():
+        if _strip_ns(node.tag) != "icon":
+            continue
+        icon: Dict[str, Any] = {}
+        for child in node:
+            key = _strip_ns(child.tag)
+            val = (child.text or "").strip()
+            if not val:
+                continue
+            if key in {"width", "height", "depth"}:
+                try:
+                    icon[key] = int(val)
+                except ValueError:
+                    icon[key] = val
+            else:
+                icon[key] = val
+        if "url" in icon:
+            icon["url"] = urljoin(base_url, icon["url"])
+        if icon:
+            icons.append(icon)
+    return icons
+
+
+def _pick_best_icon(icons: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not icons:
+        return None
+    filtered = []
+    for icon in icons:
+        mimetype = (icon.get("mimetype") or "").lower()
+        if not mimetype:
+            url = (icon.get("url") or "").lower()
+            if url.endswith(".png"):
+                mimetype = "image/png"
+            elif url.endswith(".jpg") or url.endswith(".jpeg"):
+                mimetype = "image/jpeg"
+        if mimetype not in {"image/png", "image/jpeg", "image/jpg"}:
+            continue
+        if not icon.get("url"):
+            continue
+        icon["mimetype"] = mimetype
+        filtered.append(icon)
+    if not filtered:
+        return None
+    def sort_key(icon: Dict[str, Any]) -> tuple:
+        width = icon.get("width") or 0
+        height = icon.get("height") or 0
+        area = width * height
+        is_png = 1 if (icon.get("mimetype") or "").lower() == "image/png" else 0
+        return (area, is_png)
+    return sorted(filtered, key=sort_key, reverse=True)[0]
 
 
 class UPnPManager:
@@ -84,6 +144,67 @@ class UPnPManager:
             self._session = aiohttp.ClientSession()
             self._requester = AiohttpSessionRequester(self._session, with_sleep=True)
             self._factory = UpnpFactory(self._requester)
+
+    async def _fetch_device_icons(self, location: str) -> List[Dict[str, Any]]:
+        if not location:
+            return []
+        await self._ensure_session()
+        try:
+            async with self._session.get(
+                location, timeout=aiohttp.ClientTimeout(total=8)
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                xml_text = await resp.text()
+        except Exception as e:
+            logger.debug(f"Failed to fetch device description {location}: {e}")
+            return []
+        try:
+            return _parse_icons(xml_text, location)
+        except Exception as e:
+            logger.debug(f"Failed to parse device icons {location}: {e}")
+            return []
+
+    async def _select_renderer_icon(self, location: str) -> Optional[Dict[str, Any]]:
+        icons = await self._fetch_device_icons(location)
+        return _pick_best_icon(icons)
+
+    async def _cache_renderer_icon(self, udn: str, icon: Optional[Dict[str, Any]]):
+        if not udn or not icon or not icon.get("url"):
+            return
+        from app.scanner.artwork import download_and_save_artwork, upsert_artwork_record, upsert_image_mapping
+
+        icon_url = icon["url"]
+        async for db in get_db():
+            row = await db.fetchrow(
+                """
+                SELECT r.icon_url, im.artwork_id
+                FROM renderer r
+                LEFT JOIN image_map im
+                  ON im.entity_type = 'renderer'
+                 AND im.entity_id = $1
+                 AND im.image_type = 'icon'
+                WHERE r.udn = $1
+                """,
+                udn,
+            )
+            if row and row["icon_url"] == icon_url and row["artwork_id"]:
+                return
+
+            downloaded = await download_and_save_artwork(
+                icon_url, art_type="renderer_icon"
+            )
+            if not downloaded:
+                return
+            artwork_id = await upsert_artwork_record(
+                db,
+                downloaded["sha1"],
+                downloaded["meta"],
+                source="upnp",
+                source_url=downloaded["source_url"],
+            )
+            await upsert_image_mapping(db, artwork_id, "renderer", udn, "icon")
+            return
 
     def start_background_scan(self):
         """Start background discovery loop."""
@@ -266,12 +387,20 @@ class UPnPManager:
                         renderer_info["supported_mime_types"] = ""
                         logger.debug("  No MIME type data available")
 
+            icon = await self._select_renderer_icon(location)
+            if icon:
+                renderer_info["icon_url"] = icon.get("url")
+                renderer_info["icon_mime"] = icon.get("mimetype")
+                renderer_info["icon_width"] = icon.get("width")
+                renderer_info["icon_height"] = icon.get("height")
+
             # Store renderer info and DMR device
             self.renderers[udn] = renderer_info
             self.dmr_devices[udn] = dmr
 
             # Persist to database
             await self.save_renderer(renderer_info)
+            await self._cache_renderer_icon(udn, icon)
 
             self.log(f"Added renderer: {renderer_info['friendly_name']} ({udn})")
 
@@ -288,6 +417,9 @@ class UPnPManager:
             rows = await db.fetch("SELECT * FROM renderer")
             for row in rows:
                 r = dict(row)
+                location = r.get("location") or r.get("location_url")
+                if location:
+                    r["location"] = location
                 # Try to verify device is still reachable
                 if await self.verify_device(r):
                     self.renderers[r["udn"]] = r
@@ -300,13 +432,14 @@ class UPnPManager:
 
     async def verify_device(self, r: Dict[str, Any]) -> bool:
         """Quick check if device is reachable."""
-        if not r.get("location"):
+        location = r.get("location") or r.get("location_url")
+        if not location:
             return False
 
         try:
             await self._ensure_session()
             async with self._session.get(
-                r["location"], timeout=aiohttp.ClientTimeout(total=2)
+                location, timeout=aiohttp.ClientTimeout(total=2)
             ) as resp:
                 return resp.status == 200
         except Exception:
@@ -320,8 +453,9 @@ class UPnPManager:
                 INSERT INTO renderer 
                 (udn, friendly_name, location_url, ip, control_url, rendering_control_url, 
                  device_type, manufacturer, model_name, model_number, serial_number, 
-                 firmware_version, supports_events, supports_gapless, supported_mime_types, last_seen_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+                 firmware_version, supports_events, supports_gapless, supported_mime_types,
+                 icon_url, icon_mime, icon_width, icon_height, last_seen_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
                 ON CONFLICT (udn) DO UPDATE SET
                     friendly_name = EXCLUDED.friendly_name,
                     location_url = EXCLUDED.location_url,
@@ -337,6 +471,10 @@ class UPnPManager:
                     supports_events = EXCLUDED.supports_events,
                     supports_gapless = EXCLUDED.supports_gapless,
                     supported_mime_types = EXCLUDED.supported_mime_types,
+                    icon_url = EXCLUDED.icon_url,
+                    icon_mime = EXCLUDED.icon_mime,
+                    icon_width = EXCLUDED.icon_width,
+                    icon_height = EXCLUDED.icon_height,
                     last_seen_at = NOW()
             """,
                 r["udn"],
@@ -354,6 +492,10 @@ class UPnPManager:
                 r.get("supports_events", False),
                 r.get("supports_gapless", False),
                 r.get("supported_mime_types", ""),
+                r.get("icon_url"),
+                r.get("icon_mime"),
+                r.get("icon_width"),
+                r.get("icon_height"),
             )
 
     async def add_device_by_ip(self, ip: str):
@@ -493,7 +635,7 @@ class UPnPManager:
         Args:
             track_id: Track ID from database
             track_path: Path to track file
-            metadata: Track metadata (title, artist, album, artwork_id, duration, mime)
+            metadata: Track metadata (title, artist, album, art_sha1, duration, mime)
         """
         if not self.active_renderer:
             raise ValueError("No active renderer set")
@@ -540,8 +682,8 @@ class UPnPManager:
 
         # Build art URL if available
         art_url = None
-        if metadata.get("artwork_id"):
-            art_url = f"{self.base_url}/art/{metadata['artwork_id']}.jpg"
+        if metadata.get("art_sha1"):
+            art_url = f"{self.base_url}/art/file/{metadata['art_sha1']}?max_size=600"
 
         # Extract metadata fields
         title = metadata.get("title", "Unknown Track")

@@ -61,8 +61,6 @@
         ? `/api/art/file/${track.art_sha1}?max_size=${size}`
         : `/api/art/file/${track.art_sha1}`;
     }
-    // Fallback if sha1 missing (shouldn't happen with backfill)
-    if (track.art_id) return `/art/${track.art_id}`;
     return "/assets/logo.png";
   };
 
@@ -351,9 +349,9 @@
               <div class="text-lg text-white/60 truncate px-8 drop-shadow-md">
                 <a
                   href={$playerState.queue[$playerState.current_index]
-                    ?.album_mbid
-                    ? `/album/${$playerState.queue[$playerState.current_index]?.album_mbid}`
-                    : `/album/${encodeURIComponent($playerState.queue[$playerState.current_index]?.artist || "")}/${encodeURIComponent($playerState.queue[$playerState.current_index]?.album || "")}`}
+                    ?.mb_release_id
+                    ? `/album/${$playerState.queue[$playerState.current_index]?.mb_release_id}`
+                    : "#"}
                   class="hover:text-white hover:underline pointer-events-auto cursor-pointer"
                   on:click|stopPropagation={() => nowPlayingVisible.set(false)}
                 >
@@ -519,7 +517,7 @@
                           sample_rate_hz: track.sample_rate_hz,
                           bitrate: track.bitrate,
                           art_sha1: track.art_sha1,
-                          art_id: track.art_id,
+                          plays: track.plays,
                         }}
                         artists={track.artists}
                         artist={{
@@ -528,11 +526,11 @@
                         }}
                         album={{
                           name: track.album || "",
-                          mbid: track.album_mbid,
+                          mbid: track.mb_release_id,
+                          mb_release_id: track.mb_release_id,
                         }}
                         artwork={{
                           sha1: track.art_sha1,
-                          id: track.art_id,
                         }}
                         showIndex={false}
                         showArtwork={true}

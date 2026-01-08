@@ -27,12 +27,27 @@
   let progress = 0;
   let duration = 0;
   let volume = 1;
-  let deviceName = "Local"; // Default name
-  let lastDeviceName = "Local"; // Track previous device to detect changes
   let hasLoggedCurrentTrack = false; // Track if we've logged this track to history
   let lastLoggedTrackId: number | null = null; // Track the last logged track ID
   let hasAttemptedAutoResume = false; // Track if we've already tried to auto-resume
   let showQueue = false;
+  let activeRenderer: any = null;
+
+  const DEFAULT_RENDERER_ICON = "/assets/icon-renderer.svg";
+  const LOCAL_RENDERER_ICON = "/assets/icon-browser.svg";
+
+  function getRendererFallback(renderer: any): string {
+    if (!renderer) return DEFAULT_RENDERER_ICON;
+    if (renderer.type === "local" || renderer.udn?.startsWith("local")) {
+      return LOCAL_RENDERER_ICON;
+    }
+    return DEFAULT_RENDERER_ICON;
+  }
+
+  function getRendererIcon(renderer: any): string {
+    if (renderer?.icon_url) return renderer.icon_url;
+    return getRendererFallback(renderer);
+  }
 
   // Subscribe to store
   $: currentTrack = $playerState.queue[$playerState.current_index];
@@ -43,13 +58,9 @@
     // Fallback for local if audio not ready
     duration = currentTrack.duration_seconds;
   }
-  $: {
-    const r = $playerState.renderers.find(
-      (r) => r.udn === $playerState.renderer,
-    );
-    deviceName = r ? r.name : "Local";
-    lastDeviceName = deviceName;
-  }
+  $: activeRenderer = $playerState.renderers.find(
+    (r) => r.udn === $playerState.renderer,
+  );
 
   // Sync volume from store if provided
   $: if ($playerState.volume !== null && $playerState.volume !== undefined) {
@@ -590,8 +601,6 @@
     <!-- Controls -->
     <div class="flex flex-col items-center gap-2 w-1/3">
       <div class="flex items-center gap-4">
-        <!-- Shuffle and Repeat moved to right side -->
-
         <button
           class="btn btn-outline btn-sm"
           aria-label="Previous track"
@@ -660,7 +669,7 @@
 
     <!-- Volume / Extra -->
     <div class="w-1/3 flex justify-end items-center gap-4">
-      <div class="flex items-center gap-2 mr-4">
+      <div class="flex items-center gap-2 mr-6">
         <button
           class="btn btn-outline btn-sm {$playerState.repeatMode !== 'off'
             ? 'border-accent bg-accent/10 text-accent'
@@ -721,7 +730,19 @@
           >
         </button>
       </div>
-      <div class="flex flex-col items-center gap-1">
+      <div class="flex items-center gap-3">
+        <div class="h-[88px] w-[88px] rounded-lg bg-surface-3/70 p-1.5 shadow-inner">
+          <img
+            class="h-full w-full rounded object-contain"
+            src={getRendererIcon(activeRenderer)}
+            alt=""
+            loading="lazy"
+            on:error={(e) => {
+              (e.currentTarget as HTMLImageElement).src =
+                getRendererFallback(activeRenderer);
+            }}
+          />
+        </div>
         <div class="flex items-center gap-2 group">
           <VolumeControl
             showIcon={true}
@@ -730,7 +751,6 @@
             sliderStyle=""
           />
         </div>
-        <div class="text-xs text-subtle">{deviceName}</div>
       </div>
       <button
         class="btn btn-outline btn-sm"

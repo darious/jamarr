@@ -84,17 +84,15 @@
                             <img
                                 src={album.art_sha1
                                     ? `/art/file/${album.art_sha1}`
-                                    : album.art_id
-                                      ? `/art/${album.art_id}`
-                                      : "/assets/default-album-placeholder.svg"}
+                                    : "/assets/default-album-placeholder.svg"}
                                 alt={album.album}
                                 class="h-full w-full object-cover"
                                 loading="lazy"
                             />
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="absolute inset-0 z-0"
                                 aria-label="View Album"
                             ></a>
@@ -146,9 +144,9 @@
                         </div>
                         <div class="mt-3">
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="block font-medium leading-tight truncate hover:underline text-default"
                                 title={album.album}>{album.album}</a
                             >
@@ -191,17 +189,15 @@
                             <img
                                 src={album.art_sha1
                                     ? `/art/file/${album.art_sha1}`
-                                    : album.art_id
-                                      ? `/art/${album.art_id}`
-                                      : "/assets/default-album-placeholder.svg"}
+                                    : "/assets/default-album-placeholder.svg"}
                                 alt={album.album}
                                 class="h-full w-full object-cover"
                                 loading="lazy"
                             />
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="absolute inset-0 z-0"
                                 aria-label="View Album"
                             ></a>
@@ -253,9 +249,9 @@
                         </div>
                         <div class="mt-3">
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="block font-medium leading-tight truncate hover:underline text-default"
                                 title={album.album}>{album.album}</a
                             >
@@ -294,17 +290,15 @@
                             <img
                                 src={album.art_sha1
                                     ? `/art/file/${album.art_sha1}`
-                                    : album.art_id
-                                      ? `/art/${album.art_id}`
-                                      : "/assets/default-album-placeholder.svg"}
+                                    : "/assets/default-album-placeholder.svg"}
                                 alt={album.album}
                                 class="h-full w-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
                                 loading="lazy"
                             />
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="absolute inset-0 z-0"
                                 aria-label="View Album"
                             ></a>
@@ -356,9 +350,9 @@
                         </div>
                         <div class="mt-3">
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="block font-medium leading-tight truncate hover:underline text-default"
                                 title={album.album}>{album.album}</a
                             >
@@ -400,9 +394,7 @@
                             <img
                                 src={artist.art_sha1
                                     ? `/art/file/${artist.art_sha1}`
-                                    : artist.art_id
-                                      ? `/art/${artist.art_id}`
-                                      : "/assets/default-artist-placeholder.svg"}
+                                    : "/assets/default-artist-placeholder.svg"}
                                 alt={artist.name}
                                 class="h-full w-full object-cover"
                                 loading="lazy"
@@ -446,9 +438,7 @@
                             <img
                                 src={artist.art_sha1
                                     ? `/art/file/${artist.art_sha1}`
-                                    : artist.art_id
-                                      ? `/art/${artist.art_id}`
-                                      : "/assets/default-artist-placeholder.svg"}
+                                    : "/assets/default-artist-placeholder.svg"}
                                 alt={artist.name}
                                 class="h-full w-full object-cover transition-all duration-500"
                                 loading="lazy"

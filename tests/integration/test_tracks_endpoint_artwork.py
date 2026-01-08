@@ -3,7 +3,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_tracks_endpoint_returns_artwork(client, db):
     """
-    Verify that /api/tracks endpoint returns art_id and art_sha1.
+    Verify that /api/tracks endpoint returns art_sha1.
     """
     # 1. Setup Data
     artist_name = "Debug Tracks Artist"
@@ -47,5 +47,3 @@ async def test_tracks_endpoint_returns_artwork(client, db):
     assert "art_sha1" in track, "Track missing art_sha1"
     assert track["art_sha1"] == artwork_sha1
     
-    assert "art_id" in track, "Track missing art_id (frontend compatibility)"
-    assert track["art_id"] == artwork_id

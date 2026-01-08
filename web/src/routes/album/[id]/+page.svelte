@@ -25,12 +25,9 @@
   // Reactive album art URL - recalculates when data changes
   $: albumArtUrl = (() => {
     if (data.albumMeta?.art_sha1) return `/art/file/${data.albumMeta.art_sha1}`;
-    if (data.albumMeta?.art_id) return `/art/${data.albumMeta.art_id}`;
-    const withArt = data.tracks.find((t) => t.art_sha1 || t.art_id);
+    const withArt = data.tracks.find((t) => t.art_sha1);
     if (withArt?.art_sha1) return `/art/file/${withArt.art_sha1}`;
-    return withArt?.art_id
-      ? `/art/${withArt.art_id}`
-      : "/assets/default-album-placeholder.svg";
+    return "/assets/default-album-placeholder.svg";
   })();
 
   const getMusicBrainzUrl = () => {
@@ -38,8 +35,6 @@
     const track = data.tracks?.[0];
     const mbBase = "http://musicbrainz.org";
     if (track?.mb_release_id) return `${mbBase}/release/${track.mb_release_id}`;
-    if (track?.mb_release_group_id)
-      return `${mbBase}/release-group/${track.mb_release_group_id}`;
     return null;
   };
 
@@ -98,6 +93,13 @@
         0,
       ) / 60,
     );
+
+  const formatListens = (listens?: number) => {
+    if (!listens) return "0 listens";
+    if (listens >= 1000000) return `${(listens / 1000000).toFixed(1)}M listens`;
+    if (listens >= 1000) return `${(listens / 1000).toFixed(1)}K listens`;
+    return `${listens} listens`;
+  };
 
   const formatDuration = (seconds?: number | null) => {
     if (!seconds) return "—";
@@ -227,6 +229,33 @@
                 </button>
               {/if}
             </div>
+            {#if data.albumMeta?.mb_release_id}
+              <div class="mt-2 text-base font-medium text-muted">
+                <a
+                  class="underline underline-offset-4 hover:text-default transition-colors"
+                  href={`/history?album_mbid=${encodeURIComponent(
+                    data.albumMeta.mb_release_id,
+                  )}&album_name=${encodeURIComponent(data.album)}`}
+                >
+                  {formatListens(data.albumMeta.listens)}
+                </a>
+              </div>
+            {:else if data.albumMeta?.album_mbid}
+              <div class="mt-2 text-base font-medium text-muted">
+                <a
+                  class="underline underline-offset-4 hover:text-default transition-colors"
+                  href={`/history?album_mbid=${encodeURIComponent(
+                    data.albumMeta.album_mbid,
+                  )}&album_name=${encodeURIComponent(data.album)}`}
+                >
+                  {formatListens(data.albumMeta.listens)}
+                </a>
+              </div>
+            {:else}
+              <div class="mt-2 text-base font-medium text-muted">
+                {formatListens(data.albumMeta?.listens)}
+              </div>
+            {/if}
           </div>
 
           <div class="space-y-2">

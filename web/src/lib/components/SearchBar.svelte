@@ -27,7 +27,6 @@
             title: string;
             artist: string;
             mbid?: string;
-            art_id?: number;
             art_sha1?: string;
         }[];
         tracks: {
@@ -35,9 +34,8 @@
             title: string;
             artist: string;
             album: string;
-            album_mbid?: string;
+            mb_release_id?: string;
             duration_seconds: number;
-            art_id?: number;
             art_sha1?: string;
         }[];
     }
@@ -95,10 +93,6 @@
     function navigateToAlbum(album: string, artist: string, mbid?: string) {
         if (mbid) {
             goto(`/album/${mbid}`);
-        } else {
-            goto(
-                `/album/${encodeURIComponent(artist)}/${encodeURIComponent(album)}`,
-            );
         }
         clearSearch();
     }
@@ -224,11 +218,11 @@
                             <div
                                 class="h-8 w-8 rounded bg-white/10 flex items-center justify-center text-xs text-white/40 overflow-hidden"
                             >
-                                {#if album.art_sha1 || album.art_id}
+                                {#if album.art_sha1}
                                     <img
                                         src={album.art_sha1
                                             ? `/art/file/${album.art_sha1}`
-                                            : `/art/${album.art_id}`}
+                                            : ""}
                                         alt=""
                                         class="h-full w-full object-cover"
                                     />
@@ -283,24 +277,24 @@
                                 navigateToAlbum(
                                     track.album,
                                     track.artist,
-                                    track.album_mbid,
+                                    track.mb_release_id,
                                 )}
                             on:keydown={(e) =>
                                 e.key === "Enter" &&
                                 navigateToAlbum(
                                     track.album,
                                     track.artist,
-                                    track.album_mbid,
+                                    track.mb_release_id,
                                 )}
                         >
                             <div
                                 class="h-8 w-8 rounded bg-white/10 flex items-center justify-center text-xs text-white/40 overflow-hidden flex-shrink-0"
                             >
-                                {#if track.art_sha1 || track.art_id}
+                                {#if track.art_sha1}
                                     <img
                                         src={track.art_sha1
                                             ? `/art/file/${track.art_sha1}`
-                                            : `/art/${track.art_id}`}
+                                            : ""}
                                         alt=""
                                         class="h-full w-full object-cover"
                                     />
@@ -342,7 +336,7 @@
                                             navigateToAlbum(
                                                 track.album,
                                                 track.artist,
-                                                track.album_mbid,
+                                                track.mb_release_id,
                                             )}
                                     >
                                         {track.album}

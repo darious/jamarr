@@ -130,6 +130,8 @@ class ScanManager:
             self._log_message(f"Starting filesystem scan. Force: {force}")
             self.scanner._stop_event = self._stop_event
             await self.scanner.scan_filesystem(root_path=path, force_rescan=force)
+            async for db in get_db():
+                await self._sync_lastfm_matches(db)
             self._status = "Idle"
             self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
             self._log_message("Scan complete.")
@@ -375,6 +377,9 @@ class ScanManager:
                 self._broadcast({"type": "start", "mode": "prune", "phase": self._phase})
                 await self.scanner.prune_library()
 
+            async for db in get_db():
+                await self._sync_lastfm_matches(db)
+
             self._status = "Idle"
             self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
             self._log_message("Full refresh complete.")
@@ -406,6 +411,29 @@ class ScanManager:
             track_id = await match_track_to_library(db, mbid, name, album)
             if track_id:
                 await db.execute("UPDATE top_track SET track_id = $1, updated_at = NOW() WHERE id = $2", track_id, tt_id)
+
+    async def _sync_lastfm_matches(self, db):
+        updated_ids = set(getattr(self.scanner, "_updated_track_ids", set()))
+        new_ids = set(getattr(self.scanner, "_new_track_ids", set()))
+        deleted_ids = set(getattr(self.scanner, "_deleted_track_ids", set()))
+        if not updated_ids and not new_ids and not deleted_ids:
+            return
+
+        affected_track_ids = list(updated_ids | deleted_ids)
+        affected_scrobble_ids = set()
+        if affected_track_ids:
+            rows = await db.fetch(
+                "SELECT scrobble_id FROM lastfm_scrobble_match WHERE track_id = ANY($1::bigint[])",
+                affected_track_ids,
+            )
+            affected_scrobble_ids = {row["scrobble_id"] for row in rows}
+            await db.execute(
+                "DELETE FROM lastfm_scrobble_match WHERE track_id = ANY($1::bigint[])",
+                affected_track_ids,
+            )
+            self._log_message(
+                f"Last.fm: removed {len(affected_scrobble_ids)} matches for updated/deleted tracks."
+            )
 
     async def start_prune(self):
         async with self._lock:

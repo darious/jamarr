@@ -2,16 +2,13 @@ export interface Artist {
     mbid?: string;
     name: string;
     image_url: string | null;
-    art_id: number | null;
     art_sha1?: string | null;
-    background_art_id?: number | null;
     background_sha1?: string | null;
     bio: string | null;
     similar_artists: {
         name: string;
         mbid?: string | null;
         image_url?: string | null;
-        art_id?: number | null;
         art_sha1?: string | null;
         in_library?: boolean;
         external_url?: string | null;
@@ -31,9 +28,21 @@ export interface Artist {
         bit_depth?: number | null;
         sample_rate_hz?: number | null;
         duration_seconds?: number | null;
-        art_id?: number | null;
         art_sha1?: string | null;
-        album_mbid?: string | null;
+        mb_release_id?: string | null;
+    }[];
+    most_listened?: {
+        name: string;
+        album: string | null;
+        date: string | null;
+        duration_seconds?: number | null;
+        local_track_id?: number | null;
+        codec?: string | null;
+        bit_depth?: number | null;
+        sample_rate_hz?: number | null;
+        art_sha1?: string | null;
+        mb_release_id?: string | null;
+        plays?: number | null;
     }[];
     singles?: {
         mbid: string;
@@ -44,15 +53,15 @@ export interface Artist {
         codec?: string | null;
         bit_depth?: number | null;
         sample_rate_hz?: number | null;
-        art_id?: number | null;
         art_sha1?: string | null;
         album?: string;
-        album_mbid?: string | null;
+        mb_release_id?: string | null;
         popularity?: number;
     }[];
     sort_name: string;
     primary_album_count?: number;
     appears_on_album_count?: number;
+    listens?: number;
     homepage: string | null;
     spotify_url: string | null;
     wikipedia_url: string | null;
@@ -76,7 +85,6 @@ export interface Album {
     album: string;
     mbid?: string;
     album_mbid?: string;
-    art_id: number | null;
     art_sha1?: string | null;
     artist_name: string;
     artist_mbid?: string;
@@ -93,6 +101,7 @@ export interface Album {
     label?: string;
     external_links?: { type: string; url: string }[];
     artists?: { name: string; mbid?: string }[];
+    listens?: number;
 }
 
 export interface Track {
@@ -106,7 +115,6 @@ export interface Track {
     disc_no: number | null;
     date: string | null;
     duration_seconds: number;
-    art_id: number | null;
     art_sha1?: string | null;
     codec: string | null;
     bitrate: number | null;
@@ -118,6 +126,7 @@ export interface Track {
     album_artist_mbid?: string | null;
     album_mbid?: string | null;
     popularity?: number;
+    plays?: number;
     artists?: { name: string; mbid?: string }[];
 }
 
@@ -326,13 +335,13 @@ export async function fetchRecentlyAddedAlbums(fetchFn: any = fetch): Promise<Al
 }
 
 export async function fetchRecentlyPlayedAlbums(fetchFn: any = fetch): Promise<Album[]> {
-    const res = await fetchFn('/api/home/recently-played-albums');
+    const res = await fetchFn('/api/history/albums');
     if (!res.ok) throw new Error('Failed to fetch recently played albums');
     return await res.json();
 }
 
 export async function fetchRecentlyPlayedArtists(fetchFn: any = fetch): Promise<Artist[]> {
-    const res = await fetchFn('/api/home/recently-played-artists');
+    const res = await fetchFn('/api/history/artists');
     if (!res.ok) throw new Error('Failed to fetch recently played artists');
     return await res.json();
 }
@@ -522,13 +531,14 @@ export interface PlaylistTrack {
     album: string;
     duration_seconds: number;
     art_sha1: string | null;
-    art_id: number | null;
     artist_mbid?: string | null;
     album_mbid?: string | null;
+    mb_release_id?: string | null;
     path: string;
     codec?: string;
     sample_rate_hz?: number;
     bit_depth?: number;
+    plays?: number;
     artists?: { name: string; mbid?: string }[];
 }
 
@@ -539,6 +549,12 @@ export interface PlaylistDetail extends Playlist {
 export async function fetchPlaylists(fetchFn: any = fetch): Promise<Playlist[]> {
     const res = await fetchFn('/api/playlists');
     if (!res.ok) throw new Error('Failed to fetch playlists');
+    return await res.json();
+}
+
+export async function fetchArtistPlaylists(artistMbid: string, fetchFn: any = fetch): Promise<Playlist[]> {
+    const res = await fetchFn(`/api/artists/${artistMbid}/playlists`);
+    if (!res.ok) throw new Error('Failed to fetch artist playlists');
     return await res.json();
 }
 
@@ -614,8 +630,8 @@ export interface ChartAlbum {
     local_album_mbid?: string;
     local_title?: string;
     local_artist?: string;
+    artist_mbid?: string;
     art_sha1?: string;
-    art_id?: number;
     musicbrainz_url?: string;
 }
 
@@ -630,3 +646,70 @@ export async function refreshChart(): Promise<void> {
     if (!res.ok) throw new Error('Failed to refresh chart');
 }
 
+// Last.fm Integration
+export interface LastfmStatus {
+    connected: boolean;
+    username: string | null;
+    enabled: boolean;
+    connected_at: string | null;
+}
+
+export async function getLastfmStatus(): Promise<LastfmStatus> {
+    const res = await fetch('/api/lastfm/status', { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to fetch Last.fm status');
+    return await res.json();
+}
+
+export async function startLastfmAuth(): Promise<{ auth_url: string }> {
+    const res = await fetch('/api/lastfm/auth/start', { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to start Last.fm authentication');
+    return await res.json();
+}
+
+export async function disconnectLastfm(): Promise<void> {
+    const res = await fetch('/api/lastfm/disconnect', {
+        method: 'POST',
+        credentials: 'include'
+    });
+    if (!res.ok) throw new Error('Failed to disconnect Last.fm');
+}
+
+export async function toggleLastfm(enabled: boolean): Promise<void> {
+    const res = await fetch('/api/lastfm/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ enabled })
+    });
+    if (!res.ok) throw new Error('Failed to toggle Last.fm scrobbling');
+}
+
+export interface SyncScrobblesResponse {
+    fetched: number;
+    matched: number;
+    skipped: number;
+    unmatched: number;
+    logs: string[];
+}
+
+export async function syncLastfmScrobbles(opts: {
+    fetch_new?: boolean;
+    rematch_all?: boolean;
+    limit?: number;
+} = {}): Promise<SyncScrobblesResponse> {
+    const res = await fetch('/api/lastfm/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+            fetch_new: opts.fetch_new !== false,
+            rematch_all: opts.rematch_all || false,
+            limit: opts.limit ?? null
+        })
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to sync scrobbles');
+    }
+    return await res.json();
+}
