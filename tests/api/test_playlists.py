@@ -117,9 +117,8 @@ async def test_playlist_lifecycle(client, db, auth_token):
     assert len(target["thumbnails"]) == 1
     assert target["thumbnails"][0] == artwork_hex
 
-    # Verify detail has art_id
     detail = (await client.get(f"/api/playlists/{new_pid}", headers=headers)).json()
-    assert detail["tracks"][0]["art_id"] == aid
+    assert detail["tracks"][0]["art_sha1"] == artwork_hex
     assert detail["tracks"][0]["art_sha1"] == artwork_hex
     assert detail["tracks"][0]["path"] == "/tmp/art_track.flac"
 
@@ -144,4 +143,3 @@ async def test_public_private_playlist(client, db, auth_token):
     
     resp = await client.get(f"/api/playlists/{pub_id}", headers=headers)
     assert resp.json()["is_public"] is True
-

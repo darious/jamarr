@@ -25,12 +25,9 @@
   // Reactive album art URL - recalculates when data changes
   $: albumArtUrl = (() => {
     if (data.albumMeta?.art_sha1) return `/art/file/${data.albumMeta.art_sha1}`;
-    if (data.albumMeta?.art_id) return `/art/${data.albumMeta.art_id}`;
-    const withArt = data.tracks.find((t) => t.art_sha1 || t.art_id);
+    const withArt = data.tracks.find((t) => t.art_sha1);
     if (withArt?.art_sha1) return `/art/file/${withArt.art_sha1}`;
-    return withArt?.art_id
-      ? `/art/${withArt.art_id}`
-      : "/assets/default-album-placeholder.svg";
+    return "/assets/default-album-placeholder.svg";
   })();
 
   const getMusicBrainzUrl = () => {

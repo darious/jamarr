@@ -208,9 +208,6 @@ async def get_artists(
             "mbid": row["mbid"],
             "name": row["name"],
             "image_url": row["image_url"],
-            "artwork_id": art_info.get("artwork_id") or row["artwork_id"],
-            "art_id": art_info.get("artwork_id")
-            or row["artwork_id"],  # Frontend compatibility
             "art_sha1": sha1_to_hex(art_info.get("art_sha1") or row["art_sha1"]),
             "bio": row["bio"],
             "sort_name": row["sort_name"] or row["name"],
@@ -225,7 +222,6 @@ async def get_artists(
             "primary_album_count": row["primary_album_count"],
             "appears_on_album_count": row["appears_on_album_count"],
             "albums": [],  # Deprecated
-            "background_art_id": bg_info.get("artwork_id"),
             "background_sha1": sha1_to_hex(bg_info.get("art_sha1")),
         }
 
@@ -258,7 +254,6 @@ async def get_artists(
                     "sample_rate_hz": tt_row["sample_rate_hz"],
                     "duration_seconds": tt_row["duration_seconds"],
                     "art_sha1": sha1_to_hex(tt_row["art_sha1"]),
-                    "art_id": tt_row["artwork_id"],
                     "album_mbid": tt_row["album_mbid"],
                 }
                 for tt_row in tt_rows
@@ -287,7 +282,6 @@ async def get_artists(
                     "bit_depth": s_row["bit_depth"],
                     "sample_rate_hz": s_row["sample_rate_hz"],
                     "art_sha1": sha1_to_hex(s_row["art_sha1"]),
-                    "art_id": s_row["artwork_id"],
                     "album": s_row["album"],
                     "album_mbid": s_row["album_mbid"],
                 }
@@ -338,8 +332,6 @@ async def get_artists(
                         "name": sim_row["similar_artist_name"],
                         "mbid": sim_mbid,
                         "image_url": sim_row["image_url"],
-                        "artwork_id": sim_art.get("artwork_id")
-                        or sim_row["artwork_id"],
                         "art_sha1": sha1_to_hex(sim_art.get("art_sha1") or sim_row["art_sha1"]),
                         "in_library": in_library,
                         "external_url": external_url
@@ -422,8 +414,7 @@ async def get_albums(
             ) as artists,
 
             -- Art
-            COALESCE(MAX(al.artwork_id), MAX(t.artwork_id)) as art_id,
-            MAX(art.sha1) as art_sha1,
+            COALESCE(MAX(art.sha1), MAX(tart.sha1)) as art_sha1,
 
             -- Links
             COALESCE(
@@ -435,6 +426,7 @@ async def get_albums(
         JOIN album al ON aa.album_mbid = al.mbid
         LEFT JOIN track t ON t.release_mbid = aa.album_mbid
         LEFT JOIN artwork art ON al.artwork_id = art.id
+        LEFT JOIN artwork tart ON t.artwork_id = tart.id
         LEFT JOIN external_link el ON el.entity_type = 'album' AND (el.entity_id = al.release_group_mbid OR el.entity_id = t.release_group_mbid)
 
         WHERE 
@@ -571,9 +563,7 @@ async def get_tracks(
         # Remove internal helper field
         d.pop("aggregated_artists_json", None)
 
-        # Frontend compatibility: expects art_id
-        if d.get("artwork_id"):
-            d["art_id"] = d["artwork_id"]
+        d.pop("artwork_id", None)
 
         # Frontend compatibility: MusicBrainz IDs
         if d.get("release_mbid"):
@@ -619,7 +609,12 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
         LIMIT $1
     """
     rows = await db.fetch(query, limit)
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        d = dict(row)
+        d.pop("artwork_id", None)
+        results.append(d)
+    return results
 
 
 @router.get("/api/home/recently-added-albums")
@@ -649,7 +644,12 @@ async def get_recently_added_albums(
         LIMIT $1
     """
     rows = await db.fetch(query, limit)
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        d = dict(row)
+        d.pop("artwork_id", None)
+        results.append(d)
+    return results
 
 
 @router.get("/api/home/recently-played-albums")
@@ -681,7 +681,12 @@ async def get_recently_played_albums(
         LIMIT $1
     """
     rows = await db.fetch(query, limit)
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        d = dict(row)
+        d.pop("artwork_id", None)
+        results.append(d)
+    return results
 
 
 @router.get("/api/home/recently-played-artists")
@@ -713,8 +718,6 @@ async def get_recently_played_artists(
             "mbid": row["mbid"],
             "name": row["name"],
             "image_url": row["image_url"],
-            "artwork_id": row["artwork_id"],
-            "art_id": row["artwork_id"],  # Compat
             "art_sha1": sha1_to_hex(row["art_sha1"]),
             "bio": row["bio"],
         }
@@ -751,8 +754,6 @@ async def get_discover_artists(
             "mbid": row["mbid"],
             "name": row["name"],
             "image_url": row["image_url"],
-            "artwork_id": row["artwork_id"],
-            "art_id": row["artwork_id"],  # Compat
             "art_sha1": sha1_to_hex(row["art_sha1"]),
             "bio": row["bio"],
         }

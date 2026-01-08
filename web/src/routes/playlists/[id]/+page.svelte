@@ -115,7 +115,6 @@
             artist: t.artist,
             album: t.album,
             duration_seconds: t.duration_seconds,
-            artwork_id: t.art_id,
             path: t.path,
             art_sha1: t.art_sha1,
             codec: t.codec,
@@ -140,7 +139,6 @@
             artist: t.artist,
             album: t.album,
             duration_seconds: t.duration_seconds,
-            artwork_id: t.art_id,
             path: t.path,
             art_sha1: t.art_sha1,
             codec: t.codec,
@@ -538,7 +536,6 @@
                             }}
                             artwork={{
                                 sha1: track.art_sha1,
-                                id: track.art_id,
                             }}
                             showIndex={true}
                             index={index + 1}

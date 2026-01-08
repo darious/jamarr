@@ -196,9 +196,7 @@
           <img
             src={dragTrack.art_sha1
               ? `/api/art/file/${dragTrack.art_sha1}?max_size=120`
-              : dragTrack.art_id
-                ? `/api/art/${dragTrack.art_id}`
-                : "/assets/default-album-placeholder.svg"}
+              : "/assets/default-album-placeholder.svg"}
             alt={dragTrack.title || "Artwork"}
             class="h-full w-full object-cover"
           />
@@ -336,7 +334,6 @@
                 sample_rate_hz: track.sample_rate_hz,
                 bitrate: track.bitrate,
                 art_sha1: track.art_sha1,
-                art_id: track.art_id,
               }}
               artists={track.artists}
               artist={{
@@ -349,7 +346,6 @@
               }}
               artwork={{
                 sha1: track.art_sha1,
-                id: track.art_id,
               }}
               showIndex={false}
               showArtwork={true}

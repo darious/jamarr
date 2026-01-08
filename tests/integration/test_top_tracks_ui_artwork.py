@@ -2,8 +2,8 @@
 Test that replicates the exact UI flow for Top Tracks artwork display.
 
 This test verifies:
-1. Artist API returns top_tracks with art_id and art_sha1
-2. Tracks API returns tracks with art_id and art_sha1  
+1. Artist API returns top_tracks with art_sha1
+2. Tracks API returns tracks with art_sha1  
 3. The combination of both provides artwork for the UI
 """
 import pytest
@@ -66,14 +66,11 @@ async def test_top_tracks_ui_artwork_flow(client, db):
     
     print("\n=== Top Track from Artist API ===")
     print(f"local_track_id: {top_track.get('local_track_id')}")
-    print(f"art_id: {top_track.get('art_id')}")
     print(f"art_sha1: {top_track.get('art_sha1')}")
     
-    # THIS IS THE BUG: top_track should have art_id and art_sha1
+    # Top track should have art_sha1 for UI
     assert top_track.get("local_track_id") == track_id, "Top track should reference local track"
-    assert "art_id" in top_track, "Top track MUST have art_id for UI"
     assert "art_sha1" in top_track, "Top track MUST have art_sha1 for UI"
-    assert top_track["art_id"] == artwork_id
     assert top_track["art_sha1"] == artwork_sha1
     
     # Step 2: Fetch tracks (like the UI does) - query by album to avoid SQL bug
@@ -85,13 +82,10 @@ async def test_top_tracks_ui_artwork_flow(client, db):
     local_track = tracks[0]
     print("\n=== Local Track from Tracks API ===")
     print(f"id: {local_track.get('id')}")
-    print(f"art_id: {local_track.get('art_id')}")
     print(f"art_sha1: {local_track.get('art_sha1')}")
     
     # Verify local track also has artwork
-    assert "art_id" in local_track, "Local track MUST have art_id"
     assert "art_sha1" in local_track, "Local track MUST have art_sha1"
-    assert local_track["art_id"] == artwork_id
     assert local_track["art_sha1"] == artwork_sha1
     
     print("\n✅ Both APIs return artwork fields correctly")

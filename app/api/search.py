@@ -11,8 +11,6 @@ class SearchResultArtist(BaseModel):
     name: str
     mbid: str
     image_url: Optional[str] = None
-    artwork_id: Optional[int] = None
-    art_id: Optional[int] = None
     art_sha1: Optional[str] = None
 
 
@@ -20,8 +18,6 @@ class SearchResultAlbum(BaseModel):
     title: str
     artist: str
     mbid: Optional[str] = None
-    artwork_id: Optional[int] = None
-    art_id: Optional[int] = None
     art_sha1: Optional[str] = None
 
 
@@ -32,8 +28,6 @@ class SearchResultTrack(BaseModel):
     album: str
     album_mbid: Optional[str] = None
     duration_seconds: float
-    artwork_id: Optional[int] = None
-    art_id: Optional[int] = None
     art_sha1: Optional[str] = None
 
 
@@ -67,8 +61,6 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
                 name=row["name"],
                 mbid=row["mbid"],
                 image_url=row["image_url"],
-                artwork_id=row["artwork_id"],
-                art_id=row["artwork_id"],
                 art_sha1=row["art_sha1"],
             )
         )
@@ -110,8 +102,6 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
                 title=row["title"],
                 artist=row["artist"] or "Unknown Artist",
                 mbid=row["mbid"],
-                artwork_id=row["artwork_id"],
-                art_id=row["artwork_id"],
                 art_sha1=row["art_sha1"],
             )
         )
@@ -144,8 +134,6 @@ async def search(q: str, db: asyncpg.Connection = Depends(get_db)):
                 album=row["album"],
                 album_mbid=row["album_mbid"],
                 duration_seconds=row["duration_seconds"] or 0.0,
-                artwork_id=row["artwork_id"],
-                art_id=row["artwork_id"],
                 art_sha1=row["art_sha1"],
             )
         )

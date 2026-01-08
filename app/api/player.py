@@ -231,7 +231,7 @@ async def monitor_upnp_playback(udn: str):
                                 track["logged"] = True
                                 await db.execute(
                                     "UPDATE renderer_state SET queue = $1 WHERE renderer_udn = $2",
-                                    json.dumps(queue),
+                                    json.dumps(_strip_art_ids(queue)),
                                     udn,
                                 )
 
@@ -260,8 +260,6 @@ class Track(BaseModel):
     artist: str
     album: str
     duration_seconds: float
-    artwork_id: Optional[int] = None
-    art_id: Optional[int] = None
     art_sha1: Optional[str] = None
     codec: Optional[str] = None
     bit_depth: Optional[int] = None
@@ -380,8 +378,6 @@ async def _enrich_track_metadata(
         if row:
             if not enriched.get("path"):
                 enriched["path"] = row[0]
-            if not enriched.get("artwork_id"):
-                enriched["artwork_id"] = row[2]
             if not enriched.get("art_sha1"):
                 enriched["art_sha1"] = row[3]
                 if not enriched.get("mime"):
@@ -409,11 +405,20 @@ async def _enrich_track_metadata(
                     artists_val = json.loads(artists_val)
                 enriched["artists"] = artists_val
 
-    # Frontend compat
-    if enriched.get("artwork_id") and not enriched.get("art_id"):
-        enriched["art_id"] = enriched["artwork_id"]
-
     return enriched
+
+
+def _strip_art_ids(queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Ensure renderer_state queues never persist art_id/artwork_id."""
+    cleaned = []
+    for item in queue:
+        if not isinstance(item, dict):
+            cleaned.append(item)
+            continue
+        item.pop("art_id", None)
+        item.pop("artwork_id", None)
+        cleaned.append(item)
+    return cleaned
 
 
 async def get_active_renderer(db: asyncpg.Connection, client_id: str) -> str:
@@ -442,78 +447,41 @@ async def get_active_renderer(db: asyncpg.Connection, client_id: str) -> str:
 async def get_renderer_state_db(db: asyncpg.Connection, udn: str) -> Dict[str, Any]:
     """Get state from DB for a renderer. Returns default if not found."""
     row = await db.fetchrow(
-        "SELECT queue, current_index, position_seconds, is_playing, transport_state, volume FROM renderer_state WHERE renderer_udn = $1",
+        """
+        SELECT queue, current_index, position_seconds, is_playing, transport_state, volume
+        FROM renderer_state
+        WHERE renderer_udn = $1
+        """,
         udn,
     )
-    if row:
-        try:
-            queue = json.loads(row[0])
-        except Exception:
+    if not row:
+        return {
+            "queue": [],
+            "current_index": -1,
+            "position_seconds": 0,
+            "is_playing": False,
+            "transport_state": "STOPPED",
+            "volume": None,
+        }
+
+    try:
+        queue = json.loads(row[0])
+        if not isinstance(queue, list):
             queue = []
+    except Exception:
+        queue = []
 
-        # Backfill missing art_sha1 for legacy queues
-        missing_sha1_ids = set()
-        for t in queue:
-            if t.get("artwork_id") and not t.get("art_sha1"):
-                # Use integer conversion for safety
-                try:
-                    missing_sha1_ids.add(int(t["artwork_id"]))
-                except Exception:
-                    pass
+    for t in queue:
+        t.pop("art_id", None)
+        t.pop("artwork_id", None)
 
-            if missing_sha1_ids:
-                try:
-                    placeholders = ",".join("?" for _ in missing_sha1_ids)
-                    query = f"SELECT id, sha1 FROM artwork WHERE id IN ({placeholders})"
-                    art_rows = await db.fetch(query, list(missing_sha1_ids))
-                    art_map = {r[0]: r[1] for r in art_rows}
-
-                    updated = False
-                    for t in queue:
-                        aid = t.get("artwork_id")
-                        if aid and not t.get("art_sha1"):
-                            try:
-                                aid_int = int(aid)
-                                if aid_int in art_map:
-                                    t["art_sha1"] = art_map[aid_int]
-                                    updated = True
-                            except Exception:
-                                pass
-
-                    if updated:
-                        new_queue_json = json.dumps(queue)
-                        await db.execute(
-                            "UPDATE renderer_state SET queue = $1 WHERE renderer_udn = $2",
-                            new_queue_json,
-                            udn,
-                        )
-                except Exception as e:
-                    import logging
-
-                    logging.getLogger(__name__).error(
-                        f"[Player] Failed to backfill art_sha1: {e}"
-                    )
-
-            # Ensure art_id is present for frontend
-            for t in queue:
-                if t.get("artwork_id") and not t.get("art_id"):
-                    t["art_id"] = t["artwork_id"]
-
-            return {
-                "queue": queue,
-                "current_index": row[1],
-                "position_seconds": row[2],
-                "is_playing": bool(row[3]),
-                "transport_state": row[4] if len(row) > 4 else "STOPPED",
-                "volume": row[5] if len(row) > 5 else None,
-            }
     return {
-        "queue": [],
-        "current_index": -1,
-        "position_seconds": 0,
-        "is_playing": False,
-        "transport_state": "STOPPED",
-        "volume": None,
+        "queue": queue,
+        "current_index": row[1],
+        "position_seconds": row[2],
+        "is_playing": bool(row[3]),
+        "transport_state": row[4] if len(row) > 4 else "STOPPED",
+        "volume": row[5] if len(row) > 5 else None,
     }
 
 
@@ -521,7 +489,7 @@ async def update_renderer_state_db(
     db: asyncpg.Connection, udn: str, state: Dict[str, Any]
 ):
     """Upsert renderer state."""
-    queue_json = json.dumps(state.get("queue", []))
+    queue_json = json.dumps(_strip_art_ids(state.get("queue", [])))
     volume = state.get("volume")
     await db.execute(
         """
@@ -852,8 +820,6 @@ async def get_playback_history(
                         "title": row[6],
                         "artist": row[7],
                         "album": row[8],
-                        "artwork_id": row[9],
-                        "art_id": row[9],  # Compat
                         "art_sha1": row[18],  # New standard
                         "duration_seconds": row[10],
                         "codec": row[11],
@@ -920,8 +886,6 @@ async def get_playback_history_stats(
         artists = [
             {
                 "artist": row[0],
-                "artwork_id": row[1],
-                "art_id": row[1],
                 "art_sha1": row[2],
                 "plays": row[3],
             }
@@ -950,8 +914,6 @@ async def get_playback_history_stats(
             {
                 "album": row[0],
                 "artist": row[1],
-                "artwork_id": row[2],
-                "art_id": row[2],
                 "art_sha1": row[3],
                 "plays": row[4],
             }
@@ -977,8 +939,6 @@ async def get_playback_history_stats(
                 "title": row[1],
                 "artist": row[2],
                 "album": row[3],
-                "artwork_id": row[4],
-                "art_id": row[4],
                 "art_sha1": row[5],
                 "plays": row[6],
             }
