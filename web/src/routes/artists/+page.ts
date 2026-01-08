@@ -7,7 +7,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 
   // Parallel fetch: artists for current view + available letters index
   const [artists, index] = await Promise.all([
-    fetchArtists(fetch, { limit: 10000, startsWith: start }),
+    fetchArtists(fetch, { startsWith: start }),
     fetchArtistIndex(fetch)
   ]);
 

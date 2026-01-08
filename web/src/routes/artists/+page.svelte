@@ -79,7 +79,7 @@
             }}
             size="sm"
           >
-            Top 20
+            Primary
           </TabButton>
           <TabButton
             active={showAllArtists}

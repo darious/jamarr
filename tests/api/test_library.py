@@ -22,10 +22,11 @@ async def library_data(db):
     # Artist
     # Schema has 'artwork_id', not 'art_id'
     await db.execute("""
-        INSERT INTO artist (mbid, name, sort_name, artwork_id)
+        INSERT INTO artist (mbid, name, sort_name, artwork_id, letter)
         VALUES 
-            ('artist-1', 'The Testers', 'Testers, The', 101),
-            ('artist-2', 'Solo Guy', 'Solo Guy', NULL)
+            ('artist-1', 'The Testers', 'Testers, The', 101, 'T'),
+            ('artist-2', 'Solo Guy', 'Solo Guy', NULL, 'S'),
+            ('artist-3', '123 Band', '123 Band', NULL, '#')
     """)
     # Album
     # UPDATED: mbid is Release ID, added release_group_mbid
@@ -98,6 +99,22 @@ async def test_get_artists(client: AsyncClient, db, library_data):
     # Detailed fields should be present
     assert "top_tracks" in artist
     assert isinstance(artist["top_tracks"], list)
+
+@pytest.mark.asyncio
+async def test_get_artists_lightweight_starts_with(client: AsyncClient, db, library_data):
+    response = await client.get("/api/artists", params={"starts_with": "S"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "Solo Guy"
+    assert "top_tracks" not in data[0]
+    assert "primary_album_count" in data[0]
+    assert "appears_on_album_count" in data[0]
+
+    response = await client.get("/api/artists", params={"starts_with": "#"})
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["name"] == "123 Band"
 
 @pytest.mark.asyncio
 async def test_get_albums(client: AsyncClient, db, library_data):

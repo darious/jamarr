@@ -25,6 +25,7 @@ from app.scanner.artwork import (
 )
 from app.config import get_music_path, get_max_workers
 from app.scanner.album_helpers import upsert_artist_album
+from app.scanner.utils import artist_letter
 
 logger = logging.getLogger("scanner.core")
 
@@ -254,7 +255,13 @@ class Scanner:
             # Fallback
             for mbid, name in artist_mbids:
                 if mbid and name:
-                     await db.execute("UPDATE artist SET name = $1 WHERE mbid = $2 AND (name IS NULL OR name = '')", name, mbid)
+                     letter = artist_letter(name, None)
+                     await db.execute(
+                         "UPDATE artist SET name = $1, letter = $2 WHERE mbid = $3 AND (name IS NULL OR name = '')",
+                         name,
+                         letter,
+                         mbid,
+                     )
 
         self._db_files_cache = {}
         self._processed_artists_session = set()
@@ -483,12 +490,17 @@ class Scanner:
             artist_mbids.add((mbid, name))
             
             # Ensure artist exists to satisfy FK
+            letter = artist_letter(name, None)
             await db.execute("""
-                INSERT INTO artist (mbid, name, updated_at) VALUES ($1, $2, NOW()) 
+                INSERT INTO artist (mbid, name, letter, updated_at) VALUES ($1, $2, $3, NOW()) 
                 ON CONFLICT (mbid) DO UPDATE SET 
                     name = COALESCE(artist.name, excluded.name),
+                    letter = CASE
+                        WHEN excluded.letter <> '#' THEN excluded.letter
+                        ELSE artist.letter
+                    END,
                     updated_at = NOW()
-            """, mbid, name)
+            """, mbid, name, letter)
 
             await db.execute("""
                 INSERT INTO track_artist (track_id, artist_mbid) VALUES ($1, $2) ON CONFLICT DO NOTHING
@@ -504,12 +516,19 @@ class Scanner:
         if album_mbid:
             for mbid in aa_ids:
                  # Ensure artist exists
+                 name = tags.get("album_artist") or "Various Artists"
+                 sort_name = tags.get("album_artist_sort") or name
+                 letter = artist_letter(name, sort_name)
                  await db.execute("""
-                    INSERT INTO artist (mbid, name, sort_name, updated_at) VALUES ($1, $2, $3, NOW()) 
+                    INSERT INTO artist (mbid, name, sort_name, letter, updated_at) VALUES ($1, $2, $3, $4, NOW()) 
                     ON CONFLICT (mbid) DO UPDATE SET
                         sort_name = COALESCE(artist.sort_name, EXCLUDED.sort_name),
+                        letter = CASE
+                            WHEN excluded.letter <> '#' THEN excluded.letter
+                            ELSE artist.letter
+                        END,
                         updated_at = NOW()
-                 """, mbid, tags.get("album_artist") or "Various Artists", tags.get("album_artist_sort") or tags.get("album_artist") or "Various Artists")
+                 """, mbid, name, sort_name, letter)
                  
                  # Link as Primary
                  await upsert_artist_album(db, mbid, album_mbid, "primary")
@@ -594,7 +613,12 @@ class Scanner:
             ), winners AS (
                 SELECT artist_mbid, name FROM ranked_names WHERE rn = 1
             )
-            UPDATE artist a SET name = w.name, updated_at = NOW()
+            UPDATE artist a SET name = w.name,
+                letter = CASE
+                    WHEN COALESCE(w.name, '') ~* '^[a-z]' THEN UPPER(SUBSTRING(w.name FROM 1 FOR 1))
+                    ELSE '#'
+                END,
+                updated_at = NOW()
             FROM winners w WHERE a.mbid = w.artist_mbid AND a.name != w.name;
         """
         try:
