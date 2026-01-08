@@ -96,6 +96,7 @@
       codec: entry.track.codec,
       bit_depth: entry.track.bit_depth,
       sample_rate_hz: entry.track.sample_rate_hz,
+      mb_release_id: entry.track.mb_release_id,
       path: "", // Will be fetched by backend
       album_artist: null,
       track_no: null,
@@ -289,7 +290,9 @@
                   <div class="min-w-0">
                     <a
                       class="hover:text-default text-default hover:underline block truncate"
-                      href={`/album/${encodeURIComponent(album.artist)}/${encodeURIComponent(album.album)}`}
+                      href={album.mb_release_id
+                        ? `/album/${album.mb_release_id}`
+                        : "#"}
                     >
                       {album.album}
                     </a>
@@ -332,7 +335,9 @@
                   <div class="min-w-0">
                     <a
                       class="hover:text-default text-default hover:underline block truncate"
-                      href={`/album/${encodeURIComponent(track.artist)}/${encodeURIComponent(track.album)}`}
+                      href={track.mb_release_id
+                        ? `/album/${track.mb_release_id}`
+                        : "#"}
                     >
                       {track.title}
                     </a>
@@ -412,7 +417,9 @@
               {#if entry.track.album}
                 <span class="text-subtle">•</span>
                 <a
-                  href={`/album/${encodeURIComponent(entry.track.artist)}/${encodeURIComponent(entry.track.album)}`}
+                  href={entry.track.mb_release_id
+                    ? `/album/${entry.track.mb_release_id}`
+                    : "#"}
                   class="hover:text-default hover:underline"
                   on:click|stopPropagation
                 >

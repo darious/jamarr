@@ -35,6 +35,7 @@
         | {
               name: string;
               mbid?: string;
+              mb_release_id?: string;
               year?: string;
           }
         | undefined = undefined;
@@ -97,10 +98,7 @@
     }
 
     function getAlbumUrl(): string {
-        if (album?.mbid) return `/album/${album.mbid}`;
-        if (artist?.name && album?.name) {
-            return `/album/${encodeURIComponent(artist.name)}/${encodeURIComponent(album.name)}`;
-        }
+        if (album?.mb_release_id) return `/album/${album.mb_release_id}`;
         return "#";
     }
 

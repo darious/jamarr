@@ -12,7 +12,7 @@ export const load: PageLoad = async ({ params, fetch }) => {
   const albums = await fetchAlbums({ albumMbid }, fetch);
 
   const albumMeta: Album | undefined = albums.find(
-    (a) => (a as any).mbid === albumMbid || a.mb_release_id === albumMbid || a.album_mbid === albumMbid
+    (a) => (a as any).mbid === albumMbid || a.mb_release_id === albumMbid
   );
 
   const artist = albumMeta?.artist_name || tracks?.[0]?.artist || 'Unknown Artist';

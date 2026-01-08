@@ -232,7 +232,7 @@ async def get_artists(
             top_tracks_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec, 
                     t.bit_depth, t.sample_rate_hz, t.duration_seconds,
-                    a.sha1 as art_sha1, t.artwork_id, t.release_group_mbid as album_mbid
+                    a.sha1 as art_sha1, t.artwork_id, t.release_mbid as mb_release_id
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
                 LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -254,7 +254,7 @@ async def get_artists(
                     "sample_rate_hz": tt_row["sample_rate_hz"],
                     "duration_seconds": tt_row["duration_seconds"],
                     "art_sha1": sha1_to_hex(tt_row["art_sha1"]),
-                    "album_mbid": tt_row["album_mbid"],
+                    "mb_release_id": tt_row["mb_release_id"],
                 }
                 for tt_row in tt_rows
             ]
@@ -263,7 +263,7 @@ async def get_artists(
             singles_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
                     t.bit_depth, t.sample_rate_hz,
-                    a.sha1 as art_sha1, t.artwork_id, t.release_mbid as album_mbid
+                    a.sha1 as art_sha1, t.artwork_id, t.release_mbid as mb_release_id
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
                 LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -283,7 +283,7 @@ async def get_artists(
                     "sample_rate_hz": s_row["sample_rate_hz"],
                     "art_sha1": sha1_to_hex(s_row["art_sha1"]),
                     "album": s_row["album"],
-                    "album_mbid": s_row["album_mbid"],
+                    "mb_release_id": s_row["mb_release_id"],
                 }
                 for s_row in s_rows
             ]
@@ -388,6 +388,7 @@ async def get_albums(
             al.description,
             al.peak_chart_position,
             aa.album_mbid as album_mbid,
+            aa.album_mbid as mb_release_id,
             
             -- Dynamic Type Logic
             MAX(CASE 
@@ -598,6 +599,7 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
             SUM(t.duration_seconds) as total_duration,
             t.release_mbid,
             MAX(t.release_mbid) as mbid,
+            MAX(t.release_mbid) as mb_release_id,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
             'main' as type
@@ -633,6 +635,7 @@ async def get_recently_added_albums(
             SUM(t.duration_seconds) as total_duration,
             t.release_mbid,
             MAX(t.release_mbid) as mbid,
+            MAX(t.release_mbid) as mb_release_id,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
             'main' as type
@@ -669,6 +672,7 @@ async def get_recently_played_albums(
             SUM(t.duration_seconds) as total_duration,
             t.release_mbid as release_mbid,
             MAX(t.release_mbid) as mbid,
+            MAX(t.release_mbid) as mb_release_id,
             MAX(t.release_group_mbid) as album_mbid,
             (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
             MAX(ph.timestamp) as last_played

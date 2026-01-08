@@ -34,7 +34,7 @@
             title: string;
             artist: string;
             album: string;
-            album_mbid?: string;
+            mb_release_id?: string;
             duration_seconds: number;
             art_sha1?: string;
         }[];
@@ -93,10 +93,6 @@
     function navigateToAlbum(album: string, artist: string, mbid?: string) {
         if (mbid) {
             goto(`/album/${mbid}`);
-        } else {
-            goto(
-                `/album/${encodeURIComponent(artist)}/${encodeURIComponent(album)}`,
-            );
         }
         clearSearch();
     }
@@ -281,14 +277,14 @@
                                 navigateToAlbum(
                                     track.album,
                                     track.artist,
-                                    track.album_mbid,
+                                    track.mb_release_id,
                                 )}
                             on:keydown={(e) =>
                                 e.key === "Enter" &&
                                 navigateToAlbum(
                                     track.album,
                                     track.artist,
-                                    track.album_mbid,
+                                    track.mb_release_id,
                                 )}
                         >
                             <div
@@ -340,7 +336,7 @@
                                             navigateToAlbum(
                                                 track.album,
                                                 track.artist,
-                                                track.album_mbid,
+                                                track.mb_release_id,
                                             )}
                                     >
                                         {track.album}

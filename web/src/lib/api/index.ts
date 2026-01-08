@@ -29,7 +29,7 @@ export interface Artist {
         sample_rate_hz?: number | null;
         duration_seconds?: number | null;
         art_sha1?: string | null;
-        album_mbid?: string | null;
+        mb_release_id?: string | null;
     }[];
     singles?: {
         mbid: string;
@@ -42,7 +42,7 @@ export interface Artist {
         sample_rate_hz?: number | null;
         art_sha1?: string | null;
         album?: string;
-        album_mbid?: string | null;
+        mb_release_id?: string | null;
         popularity?: number;
     }[];
     sort_name: string;
@@ -517,6 +517,7 @@ export interface PlaylistTrack {
     art_sha1: string | null;
     artist_mbid?: string | null;
     album_mbid?: string | null;
+    mb_release_id?: string | null;
     path: string;
     codec?: string;
     sample_rate_hz?: number;

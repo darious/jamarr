@@ -349,9 +349,9 @@
               <div class="text-lg text-white/60 truncate px-8 drop-shadow-md">
                 <a
                   href={$playerState.queue[$playerState.current_index]
-                    ?.album_mbid
-                    ? `/album/${$playerState.queue[$playerState.current_index]?.album_mbid}`
-                    : `/album/${encodeURIComponent($playerState.queue[$playerState.current_index]?.artist || "")}/${encodeURIComponent($playerState.queue[$playerState.current_index]?.album || "")}`}
+                    ?.mb_release_id
+                    ? `/album/${$playerState.queue[$playerState.current_index]?.mb_release_id}`
+                    : "#"}
                   class="hover:text-white hover:underline pointer-events-auto cursor-pointer"
                   on:click|stopPropagation={() => nowPlayingVisible.set(false)}
                 >
@@ -525,7 +525,8 @@
                         }}
                         album={{
                           name: track.album || "",
-                          mbid: track.album_mbid,
+                          mbid: track.mb_release_id,
+                          mb_release_id: track.mb_release_id,
                         }}
                         artwork={{
                           sha1: track.art_sha1,
