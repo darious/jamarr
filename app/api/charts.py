@@ -58,7 +58,8 @@ async def get_chart():
                 FROM album a
                 LEFT JOIN artist_album aa ON a.mbid = aa.album_mbid
                 LEFT JOIN artist ar ON aa.artist_mbid = ar.mbid
-                WHERE c.release_group_mbid IS NOT NULL
+                WHERE aa.type = 'primary'
+                AND c.release_group_mbid IS NOT NULL
                 AND c.release_group_mbid <> ''
                 AND a.release_group_mbid = c.release_group_mbid
                 ORDER BY a.release_date ASC NULLS LAST, a.mbid ASC
