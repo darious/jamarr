@@ -493,7 +493,7 @@ class UPnPManager:
         Args:
             track_id: Track ID from database
             track_path: Path to track file
-            metadata: Track metadata (title, artist, album, artwork_id, duration, mime)
+            metadata: Track metadata (title, artist, album, art_sha1, duration, mime)
         """
         if not self.active_renderer:
             raise ValueError("No active renderer set")
@@ -540,8 +540,8 @@ class UPnPManager:
 
         # Build art URL if available
         art_url = None
-        if metadata.get("artwork_id"):
-            art_url = f"{self.base_url}/art/{metadata['artwork_id']}.jpg"
+        if metadata.get("art_sha1"):
+            art_url = f"{self.base_url}/art/file/{metadata['art_sha1']}?max_size=600"
 
         # Extract metadata fields
         title = metadata.get("title", "Unknown Track")

@@ -54,7 +54,6 @@ class PlaylistTrack(BaseModel):
     artist: Optional[str]
     album: Optional[str]
     duration_seconds: Optional[float]
-    artwork_id: Optional[int]
     art_sha1: Optional[str]
     artist_mbid: Optional[str]
     album_mbid: Optional[str]
@@ -147,6 +146,7 @@ async def list_playlists(
         # Process artwork for 2x2 grid
         # We return simply the implementation logic here
         shas = d.pop('artwork_sha1s', [])
+        d.pop("artwork_ids", None)
         if shas:
             d['thumbnails'] = [sha1_to_hex(s) for s in shas if s]
         else:
@@ -188,7 +188,7 @@ async def get_playlist(
         SELECT 
             pt.id as playlist_track_id, pt.position,
             t.id as track_id, t.title, t.artist, t.album, t.duration_seconds,
-            t.artwork_id as art_id, a.sha1 as art_sha1, t.path,
+            a.sha1 as art_sha1, t.path,
             t.codec, t.sample_rate_hz, t.bit_depth,
             t.artist_mbid, t.release_group_mbid as album_mbid,
             (SELECT jsonb_agg(jsonb_build_object('name', a2.name, 'mbid', a2.mbid) ORDER BY a2.name) 
@@ -209,6 +209,7 @@ async def get_playlist(
     for r in t_rows:
         d = dict(r)
         d['art_sha1'] = sha1_to_hex(d['art_sha1'])
+        d.pop("art_id", None)
         
         # Parse aggregated artists JSON
         if d.get("aggregated_artists_json"):

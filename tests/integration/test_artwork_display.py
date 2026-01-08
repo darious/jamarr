@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 @pytest.mark.asyncio
 async def test_homepage_new_releases_artwork(client: AsyncClient, db, auth_token):
     """
-    Verify that get_new_releases returns artwork_id and art_sha1 
+    Verify that get_new_releases returns art_sha1 
     when the database is correctly populated.
     """
     # 1. Insert Artwork
@@ -17,12 +17,8 @@ async def test_homepage_new_releases_artwork(client: AsyncClient, db, auth_token
         ON CONFLICT (sha1) DO NOTHING
     """, sha1)
     
-    # Get ID
-    art_id = await db.fetchval("SELECT id FROM artwork WHERE sha1=$1", sha1)
-    assert art_id is not None
-
     # 2. Insert Track with this Artwork
-    # We populate min required fields for new_releases query (album, artwork_id, date)
+    # We populate min required fields for new_releases query (album, date)
     await db.execute("""
         INSERT INTO track (
             path, title, artist, album, album_artist, 
@@ -33,7 +29,7 @@ async def test_homepage_new_releases_artwork(client: AsyncClient, db, auth_token
             1, 1, '2024-01-01', 300,
             $1, NOW()
         )
-    """, art_id)
+    """, await db.fetchval("SELECT id FROM artwork WHERE sha1=$1", sha1))
 
     # 3. Call API
     # Note: Requires auth? library.py endpoints usually depend on get_current_user depending on router.
@@ -48,7 +44,6 @@ async def test_homepage_new_releases_artwork(client: AsyncClient, db, auth_token
     assert len(data) > 0
     album = data[0]
     assert album["album"] == "Test Album"
-    assert album["artwork_id"] == art_id
     assert album["art_sha1"] == sha1
     
     print(f"\nAPI Response Item: {album}")
@@ -144,7 +139,7 @@ async def test_artwork_extraction_logic():
 @pytest.mark.asyncio
 async def test_artwork_serving(client: AsyncClient, db, auth_token):
     """
-    Test valid serving of artwork via /api/art/{id}.
+    Test valid serving of artwork via /api/art/file/{sha1}.
     Ensures that extensionless cache files are served with correct Content-Type (e.g. image/jpeg).
     """
     # 1. Create dummy artwork file (Extensionless)
@@ -173,14 +168,10 @@ async def test_artwork_serving(client: AsyncClient, db, auth_token):
         ON CONFLICT (sha1) DO NOTHING
     """, sha1, cache_path, len(data))
     
-    row = await db.fetchrow("SELECT id FROM artwork WHERE sha1=$1", sha1)
-    art_id = row['id']
-    
     # 3. Request Image
     client.cookies = {"jamarr_session": auth_token}
     
-    # A) Standard ID endpoint
-    response = await client.get(f"/api/art/{art_id}")
+    response = await client.get(f"/api/art/file/{sha1}")
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
     assert len(response.content) > 0
@@ -223,13 +214,10 @@ async def test_artwork_serving_fallback(client: AsyncClient, db, auth_token):
         ON CONFLICT (sha1) DO NOTHING
     """, sha1, cache_path, len(data))
     
-    row = await db.fetchrow("SELECT id FROM artwork WHERE sha1=$1", sha1)
-    art_id = row['id']
-    
     # 3. Request Image
     client.cookies = {"jamarr_session": auth_token}
     
-    response = await client.get(f"/api/art/{art_id}")
+    response = await client.get(f"/api/art/file/{sha1}")
     
     ct = response.headers.get("content-type")
     assert ct == "image/jpeg", f"Expected image/jpeg, got {ct}"
@@ -266,13 +254,10 @@ async def test_artwork_serving_null_mime(client: AsyncClient, db, auth_token):
         ON CONFLICT (sha1) DO NOTHING
     """, sha1, cache_path, len(data))
     
-    row = await db.fetchrow("SELECT id FROM artwork WHERE sha1=$1", sha1)
-    art_id = row['id']
-    
     # 3. Request Image
     client.cookies = {"jamarr_session": auth_token}
     
-    response = await client.get(f"/api/art/{art_id}")
+    response = await client.get(f"/api/art/file/{sha1}")
     
     ct = response.headers.get("content-type")
     print(f"Null-Mime Content-Type: {ct}")

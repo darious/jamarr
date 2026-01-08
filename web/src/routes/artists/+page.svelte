@@ -121,9 +121,7 @@
                 <img
                   src={artist.art_sha1
                     ? `/art/file/${artist.art_sha1}`
-                    : artist.art_id
-                      ? `/art/${artist.art_id}`
-                      : "/assets/default-artist-placeholder.svg"}
+                    : "/assets/default-artist-placeholder.svg"}
                   alt={artist.name}
                   class="h-full w-full rounded-2xl object-cover transition-transform duration-200 group-hover:scale-[1.03]"
                 />

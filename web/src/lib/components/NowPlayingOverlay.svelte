@@ -61,8 +61,6 @@
         ? `/api/art/file/${track.art_sha1}?max_size=${size}`
         : `/api/art/file/${track.art_sha1}`;
     }
-    // Fallback if sha1 missing (shouldn't happen with backfill)
-    if (track.art_id) return `/art/${track.art_id}`;
     return "/assets/logo.png";
   };
 
@@ -519,7 +517,6 @@
                           sample_rate_hz: track.sample_rate_hz,
                           bitrate: track.bitrate,
                           art_sha1: track.art_sha1,
-                          art_id: track.art_id,
                         }}
                         artists={track.artists}
                         artist={{
@@ -532,7 +529,6 @@
                         }}
                         artwork={{
                           sha1: track.art_sha1,
-                          id: track.art_id,
                         }}
                         showIndex={false}
                         showArtwork={true}

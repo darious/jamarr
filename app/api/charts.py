@@ -51,8 +51,7 @@ async def get_chart():
                 a.mbid as local_album_mbid,
                 a.title as local_title,
                 a.artist_name as local_artist,
-                art.sha1 as art_sha1,
-                a.artwork_id as art_id
+                art.sha1 as art_sha1
             FROM chart_album c
             LEFT JOIN LATERAL (
                 SELECT a.*, ar.name as artist_name

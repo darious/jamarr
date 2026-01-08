@@ -13,7 +13,6 @@
         popularity?: number;
         bitrate?: number;
         art_sha1?: string;
-        art_id?: number;
     };
 
     // Optional metadata
@@ -43,7 +42,6 @@
     export let artwork:
         | {
               sha1?: string;
-              id?: number;
           }
         | undefined = undefined;
 
@@ -95,7 +93,6 @@
 
     function getArtworkUrl(): string {
         if (artwork?.sha1) return `/art/file/${artwork.sha1}`;
-        if (artwork?.id) return `/art/${artwork.id}`;
         return "/assets/default-album-placeholder.svg";
     }
 

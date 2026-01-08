@@ -10,6 +10,17 @@ from httpx import AsyncClient
 @pytest.mark.asyncio
 async def test_lastfm_status_not_connected(client: AsyncClient, db, auth_token):
     """Test status endpoint when Last.fm not connected."""
+    await db.execute(
+        """
+        UPDATE "user"
+        SET lastfm_username = NULL,
+            lastfm_session_key = NULL,
+            lastfm_enabled = FALSE,
+            lastfm_connected_at = NULL
+        WHERE username = $1
+        """,
+        "testuser",
+    )
     # Get status
     response = await client.get("/api/lastfm/status")
     assert response.status_code == 200
@@ -71,7 +82,7 @@ async def test_lastfm_callback_success(mock_get_session_key, client: AsyncClient
     # Callback
     response = await client.get("/api/lastfm/callback?token=test_token", follow_redirects=False)
     assert response.status_code == 302
-    assert "/settings?lastfm=connected" in response.headers["location"]
+    assert "/settings/user?lastfm=connected" in response.headers["location"]
     
     # Verify database was updated
     user = await db.fetchrow(
@@ -154,6 +165,17 @@ async def test_lastfm_toggle(client: AsyncClient, db, auth_token):
 @pytest.mark.asyncio
 async def test_lastfm_toggle_without_connection(client: AsyncClient, db, auth_token):
     """Test toggling when Last.fm not connected should fail."""
+    await db.execute(
+        """
+        UPDATE "user"
+        SET lastfm_username = NULL,
+            lastfm_session_key = NULL,
+            lastfm_enabled = FALSE,
+            lastfm_connected_at = NULL
+        WHERE username = $1
+        """,
+        "testuser",
+    )
     # Try to toggle
     response = await client.post("/api/lastfm/toggle", json={"enabled": True})
     assert response.status_code == 400

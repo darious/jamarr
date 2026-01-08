@@ -21,7 +21,6 @@
         title: string;
         artist: string;
         album: string;
-        art_id: number | null;
         art_sha1: string | null;
         duration_seconds: number;
         codec: string | null;
@@ -37,14 +36,12 @@
       daily: { day: string; plays: number }[];
       artists: {
         artist: string;
-        art_id: number | null;
         art_sha1: string | null;
         plays: number;
       }[];
       albums: {
         album: string;
         artist: string;
-        art_id: number | null;
         art_sha1: string | null;
         plays: number;
       }[];
@@ -53,7 +50,6 @@
         title: string;
         artist: string;
         album: string;
-        art_id: number | null;
         art_sha1: string | null;
         plays: number;
       }[];
@@ -95,7 +91,7 @@
       title: entry.track.title,
       artist: entry.track.artist,
       album: entry.track.album,
-      art_id: entry.track.art_id,
+      art_sha1: entry.track.art_sha1,
       duration_seconds: entry.track.duration_seconds,
       codec: entry.track.codec,
       bit_depth: entry.track.bit_depth,

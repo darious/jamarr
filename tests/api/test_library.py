@@ -79,7 +79,6 @@ async def test_get_artists(client: AsyncClient, db, library_data):
     
     # Verify artwork fields logic
     tester = next(a for a in data if a["name"] == "The Testers")
-    assert tester["art_id"] == 101
     assert tester["art_sha1"] == '1111111111222222222233333333334444444444'
 
     # 2. Filter by name
@@ -116,7 +115,7 @@ async def test_get_albums(client: AsyncClient, db, library_data):
     
     # Check artwork
     test_album = next(a for a in data if a["album"] == "Test Album")
-    assert test_album["art_id"] == 201
+    assert test_album["art_sha1"] == "aaaaabbbbbcccccdddddeeeeefffff1111122222"
     
     # 2. Filter by Artist
     response = await client.get("/api/albums", params={"artist": "The Testers"})
@@ -301,7 +300,7 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     # Expected structure for album-like items
     item = data[0]
     assert "album" in item
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item
     assert item["album"] == "Test Album"
 
     # Test "Recently Added" (by updated_at/id)
@@ -311,7 +310,7 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     assert len(data) > 0
     item = data[0]
     assert "album" in item
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item
 
     # Test "Recently Played Albums"
     response = await client.get("/api/home/recently-played-albums")
@@ -320,7 +319,7 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     assert len(data) > 0
     item = data[0]
     assert item["album"] == "Test Album"
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item
 
     # Test "Recently Played Artists"
     response = await client.get("/api/home/recently-played-artists")
@@ -330,7 +329,7 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     item = data[0]
     assert_artist_structure(item)
     assert item["name"] == "The Testers"
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item
     
     # Test "Discover Artists" (random/new)
     # The query for discover artists relies on 'last_added' via tracks
@@ -340,4 +339,4 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     assert len(data) > 0
     item = data[0]
     assert_artist_structure(item)
-    assert "art_id" in item or "artwork_id" in item
+    assert "art_sha1" in item

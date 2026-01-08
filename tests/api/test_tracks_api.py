@@ -18,7 +18,7 @@ async def test_get_tracks_by_artist(client, db):
     This validates:
     1. The SQL query doesn't crash with syntax errors
     2. Artist name matching works correctly
-    3. Artwork fields (art_id, art_sha1) are returned
+    3. Artwork fields (art_sha1) are returned
     """
     # Setup test data - use high IDs to avoid conflicts
     artist_name = "Test Artist For Tracks"
@@ -63,12 +63,10 @@ async def test_get_tracks_by_artist(client, db):
     track = tracks[0]
     assert track["title"] == "Test Track"
     assert track["artist"] == artist_name
-    assert "art_id" in track, "Track must have art_id field"
     assert "art_sha1" in track, "Track must have art_sha1 field"
-    assert track["art_id"] == artwork_id
     assert track["art_sha1"] == artwork_sha1
     
-    print(f"\n✅ Track returned with artwork: art_id={track['art_id']}, art_sha1={track['art_sha1'][:20]}...")
+    print(f"\n✅ Track returned with artwork: art_sha1={track['art_sha1'][:20]}...")
 
 
 @pytest.mark.asyncio
@@ -102,7 +100,6 @@ async def test_get_tracks_by_album(client, db):
     
     track = tracks[0]
     assert track["album"] == album_name
-    assert track["art_id"] == artwork_id
     assert track["art_sha1"] == artwork_sha1
 
 

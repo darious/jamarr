@@ -43,7 +43,7 @@ class TestLastfmModule:
         mock_network.get_authenticated_user.return_value = mock_user
         
         mock_skg = Mock()
-        mock_skg.get_session_key.return_value = "session_key_123"
+        mock_skg.get_web_auth_session_key.return_value = "session_key_123"
         mock_skg_class.return_value = mock_skg
         
         # Call function
@@ -52,7 +52,7 @@ class TestLastfmModule:
         # Assertions
         assert session_key == "session_key_123"
         assert username == "testuser"
-        mock_skg.get_session_key.assert_called_once_with("test_token")
+        mock_skg.get_web_auth_session_key.assert_called_once_with(url="", token="test_token")
 
     @pytest.mark.asyncio
     @patch('app.lastfm.pylast.LastFMNetwork')

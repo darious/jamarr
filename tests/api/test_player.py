@@ -207,7 +207,7 @@ async def test_queue_artwork(client: AsyncClient, db):
         VALUES (20, '/music/art.flac', 'Art Song', 'Art Artist', 'Art Album', 100, 900)
     """)
     
-    track = {"id": 20, "title": "Art Song", "artist": "Art Artist", "path": "/music/art.flac", "duration_seconds": 100, "album": "Art Album", "art_id": 900, "art_sha1": "999999"}
+    track = {"id": 20, "title": "Art Song", "artist": "Art Artist", "path": "/music/art.flac", "duration_seconds": 100, "album": "Art Album", "art_sha1": "999999"}
     
     # Set Queue
     await client.post("/api/player/queue", 
@@ -219,7 +219,6 @@ async def test_queue_artwork(client: AsyncClient, db):
     response = await client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
     data = response.json()
     q_track = data["queue"][0]
-    assert q_track["art_id"] == 900
     assert q_track["art_sha1"] == "999999"
 
 @pytest.mark.asyncio

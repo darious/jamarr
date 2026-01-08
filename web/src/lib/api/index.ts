@@ -2,16 +2,13 @@ export interface Artist {
     mbid?: string;
     name: string;
     image_url: string | null;
-    art_id: number | null;
     art_sha1?: string | null;
-    background_art_id?: number | null;
     background_sha1?: string | null;
     bio: string | null;
     similar_artists: {
         name: string;
         mbid?: string | null;
         image_url?: string | null;
-        art_id?: number | null;
         art_sha1?: string | null;
         in_library?: boolean;
         external_url?: string | null;
@@ -31,7 +28,6 @@ export interface Artist {
         bit_depth?: number | null;
         sample_rate_hz?: number | null;
         duration_seconds?: number | null;
-        art_id?: number | null;
         art_sha1?: string | null;
         album_mbid?: string | null;
     }[];
@@ -44,7 +40,6 @@ export interface Artist {
         codec?: string | null;
         bit_depth?: number | null;
         sample_rate_hz?: number | null;
-        art_id?: number | null;
         art_sha1?: string | null;
         album?: string;
         album_mbid?: string | null;
@@ -76,7 +71,6 @@ export interface Album {
     album: string;
     mbid?: string;
     album_mbid?: string;
-    art_id: number | null;
     art_sha1?: string | null;
     artist_name: string;
     artist_mbid?: string;
@@ -106,7 +100,6 @@ export interface Track {
     disc_no: number | null;
     date: string | null;
     duration_seconds: number;
-    art_id: number | null;
     art_sha1?: string | null;
     codec: string | null;
     bitrate: number | null;
@@ -522,7 +515,6 @@ export interface PlaylistTrack {
     album: string;
     duration_seconds: number;
     art_sha1: string | null;
-    art_id: number | null;
     artist_mbid?: string | null;
     album_mbid?: string | null;
     path: string;
@@ -615,7 +607,6 @@ export interface ChartAlbum {
     local_title?: string;
     local_artist?: string;
     art_sha1?: string;
-    art_id?: number;
     musicbrainz_url?: string;
 }
 

@@ -32,7 +32,6 @@
     similarArtists: {
       name: string;
       mbid?: string | null;
-      art_id?: number | null;
       art_sha1?: string | null;
       in_library?: boolean;
       external_url?: string | null;
@@ -152,13 +151,9 @@
   $: if (browser && artist) {
     const bgUrl = artist.background_sha1
       ? `/art/file/${artist.background_sha1}`
-      : artist.background_art_id
-        ? `/art/${artist.background_art_id}`
-        : artist.art_sha1
-          ? `/art/file/${artist.art_sha1}`
-          : artist.art_id
-            ? `/art/${artist.art_id}`
-            : null;
+      : artist.art_sha1
+        ? `/art/file/${artist.art_sha1}`
+        : null;
 
     if (bgUrl) {
       const img = new Image();
@@ -212,7 +207,7 @@
         const local = tracks.find((lt) => lt.id === t.local_track_id);
         if (local) {
           // Merge local track data with top track metadata
-          // Local track provides: path, codec, bitrate, sample_rate, bit_depth, art_id, art_sha1
+          // Local track provides: path, codec, bitrate, sample_rate, bit_depth, art_sha1
           // Top track provides: name, album, date, duration_ms, popularity
           result = {
             ...local,
@@ -223,7 +218,6 @@
             duration_seconds: t.duration_seconds || local.duration_seconds,
             popularity: t.popularity,
             // CRITICAL: Preserve artwork from EITHER source (top track API or local track)
-            art_id: t.art_id || local.art_id,
             art_sha1: t.art_sha1 || local.art_sha1,
             // Ensure API's album_mbid is preferred if available (it comes from release_group_mbid in SQL)
             album_mbid:
@@ -244,7 +238,6 @@
             duration_seconds:
               t.duration_seconds ||
               (t.duration_ms ? Math.round(t.duration_ms / 1000) : 0),
-            art_id: t.art_id || null,
             art_sha1: t.art_sha1 || null,
             album_mbid: t.album_mbid, // Use API data directly
             codec: t.codec || null,
@@ -268,7 +261,6 @@
           duration_seconds: t.duration_ms
             ? Math.round(t.duration_ms / 1000)
             : 0,
-          art_id: null,
           codec: null,
           bitrate: null,
           sample_rate_hz: null,
@@ -292,7 +284,6 @@
         let techData = {};
         let localId = null;
         let navAlbum = null;
-        let art_id = null;
         let art_sha1 = null;
         let artists: { name: string; mbid?: string }[] | undefined;
 
@@ -311,16 +302,14 @@
             };
 
             // Get artwork - prioritize from Singles API data, then from local track, then from album
-            art_id = s.art_id || localTrack.art_id;
             art_sha1 = s.art_sha1 || localTrack.art_sha1;
 
             // Fallback to album artwork if still not found
-            if (!art_id && !art_sha1) {
+            if (!art_sha1) {
               const album = data.albums.find(
                 (a) => a.album === localTrack.album,
               );
               if (album) {
-                art_id = album.art_id;
                 art_sha1 = album.art_sha1;
               }
             }
@@ -330,7 +319,6 @@
         return {
           ...s,
           localId,
-          art_id,
           art_sha1,
           navAlbum,
           album_mbid: s.album_mbid,
@@ -620,13 +608,9 @@
       style={`background-image:url('${
         artist?.background_sha1
           ? `/art/file/${artist.background_sha1}`
-          : artist?.background_art_id
-            ? `/art/${artist.background_art_id}`
-            : artist?.art_sha1
-              ? `/art/file/${artist.art_sha1}`
-              : artist?.art_id
-                ? `/art/${artist.art_id}`
-                : "/assets/default-artist-placeholder.svg"
+          : artist?.art_sha1
+            ? `/art/file/${artist.art_sha1}`
+            : "/assets/default-artist-placeholder.svg"
       }')`}
     ></div>
     <div class="absolute inset-0 bg-surface-900/80"></div>
@@ -649,13 +633,9 @@
         style={`background-image:url('${
           artist?.background_sha1
             ? `/art/file/${artist.background_sha1}`
-            : artist?.background_art_id
-              ? `/art/${artist.background_art_id}`
-              : artist?.art_sha1
-                ? `/art/file/${artist.art_sha1}`
-                : artist?.art_id
-                  ? `/art/${artist.art_id}`
-                  : "/assets/default-artist-placeholder.svg"
+            : artist?.art_sha1
+              ? `/art/file/${artist.art_sha1}`
+              : "/assets/default-artist-placeholder.svg"
         }');`}
       >
         <!-- Gradient Fade to Bottom (Start of merge) - Inside scaling div to match atmosphere -->
@@ -738,11 +718,11 @@
                 <div
                   class="relative aspect-square rounded-full overflow-hidden bg-surface-2 ring-1 ring-subtle group-hover:ring-primary-500 transition-all shadow-lg"
                 >
-                  {#if sim.art_sha1 || sim.art_id}
+                  {#if sim.art_sha1}
                     <img
                       src={sim.art_sha1
                         ? `/art/file/${sim.art_sha1}`
-                        : `/art/${sim.art_id}`}
+                        : ""}
                       class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
                       alt={sim.name}
                     />
@@ -848,9 +828,7 @@
                     <img
                       src={album.art_sha1
                         ? `/art/file/${album.art_sha1}`
-                        : album.art_id
-                          ? `/art/${album.art_id}`
-                          : "/assets/default-album-placeholder.svg"}
+                        : "/assets/default-album-placeholder.svg"}
                       alt={album.album}
                       class="h-full w-full object-cover"
                       loading="lazy"
@@ -930,7 +908,6 @@
                 }}
                 artwork={{
                   sha1: track.art_sha1,
-                  id: track.art_id,
                 }}
                 showIndex={true}
                 index={i + 1}
@@ -969,7 +946,6 @@
                 }}
                 artwork={{
                   sha1: single.art_sha1,
-                  id: single.art_id,
                 }}
                 showIndex={false}
                 showArtwork={true}
