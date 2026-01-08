@@ -173,8 +173,6 @@ async def get_artists(
             COALESCE(ac.primary_album_count, 0) as primary_album_count,
             COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
         FROM artist a
-        LEFT JOIN track_artist ta ON a.mbid = ta.artist_mbid
-        LEFT JOIN artist_album aa ON a.mbid = aa.artist_mbid
         LEFT JOIN artwork ar ON a.artwork_id = ar.id
         LEFT JOIN external_link el ON a.mbid = el.entity_id AND el.entity_type = 'artist'
         LEFT JOIN (
@@ -186,7 +184,10 @@ async def get_artists(
             GROUP BY artist_mbid
         ) ac ON ac.artist_mbid = a.mbid
         WHERE a.name IS NOT NULL 
-          AND (ta.artist_mbid IS NOT NULL OR aa.artist_mbid IS NOT NULL)
+          AND (
+              EXISTS (SELECT 1 FROM track_artist ta WHERE ta.artist_mbid = a.mbid)
+              OR EXISTS (SELECT 1 FROM artist_album aa WHERE aa.artist_mbid = a.mbid)
+          )
     """
 
     params = []
