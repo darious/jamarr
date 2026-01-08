@@ -258,7 +258,11 @@ async def init_db():
                 last_login_at TIMESTAMPTZ,
                 is_active BOOLEAN DEFAULT TRUE,
                 accent_color TEXT DEFAULT '#ff006e',
-                theme_mode TEXT DEFAULT 'dark'
+                theme_mode TEXT DEFAULT 'dark',
+                lastfm_username TEXT,
+                lastfm_session_key TEXT,
+                lastfm_enabled BOOLEAN DEFAULT TRUE,
+                lastfm_connected_at TIMESTAMPTZ
             );
             
             -- Sessions

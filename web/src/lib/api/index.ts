@@ -630,3 +630,40 @@ export async function refreshChart(): Promise<void> {
     if (!res.ok) throw new Error('Failed to refresh chart');
 }
 
+// Last.fm Integration
+export interface LastfmStatus {
+    connected: boolean;
+    username: string | null;
+    enabled: boolean;
+    connected_at: string | null;
+}
+
+export async function getLastfmStatus(): Promise<LastfmStatus> {
+    const res = await fetch('/api/lastfm/status', { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to fetch Last.fm status');
+    return await res.json();
+}
+
+export async function startLastfmAuth(): Promise<{ auth_url: string }> {
+    const res = await fetch('/api/lastfm/auth/start', { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to start Last.fm authentication');
+    return await res.json();
+}
+
+export async function disconnectLastfm(): Promise<void> {
+    const res = await fetch('/api/lastfm/disconnect', {
+        method: 'POST',
+        credentials: 'include'
+    });
+    if (!res.ok) throw new Error('Failed to disconnect Last.fm');
+}
+
+export async function toggleLastfm(enabled: boolean): Promise<void> {
+    const res = await fetch('/api/lastfm/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ enabled })
+    });
+    if (!res.ok) throw new Error('Failed to toggle Last.fm scrobbling');
+}

@@ -23,6 +23,7 @@ dependencies = [
     "aiodns>=3.2.0",
     "pycares>=4.4.0",
     "rapidfuzz",
+    "pylast>=7.0.1",
 ]
 
 
