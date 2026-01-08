@@ -607,6 +607,7 @@ export interface ChartAlbum {
     local_album_mbid?: string;
     local_title?: string;
     local_artist?: string;
+    artist_mbid?: string;
     art_sha1?: string;
     musicbrainz_url?: string;
 }
