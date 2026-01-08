@@ -646,8 +646,115 @@ async def log_history(
                 client_id,
                 user_id,
             )
+            
+            # Trigger Last.fm scrobble if user has it enabled
+            if user_id:
+                asyncio.create_task(
+                    _scrobble_to_lastfm(user_id, track_id)
+                )
+                
         except Exception as e:
             logger.error(f"Failed to log history: {e}")
+
+
+async def _update_now_playing_lastfm(user_id: int, track_id: int):
+    """Background task to update Now Playing on Last.fm"""
+    try:
+        from app import lastfm
+        from app.db import get_pool
+        
+        # Get our own database connection from the pool
+        pool = get_pool()
+        async with pool.acquire() as db:
+            # Check if user has Last.fm enabled
+            user_row = await db.fetchrow(
+                'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',
+                user_id
+            )
+            
+            if not user_row or not user_row['lastfm_enabled'] or not user_row['lastfm_session_key']:
+                return
+            
+            # Fetch track metadata
+            track_row = await db.fetchrow(
+                """
+                SELECT title, artist, album, duration_seconds, artist_mbid
+                FROM track
+                WHERE id = $1
+                """,
+                track_id
+            )
+            
+            if not track_row:
+                return
+            
+            # Update Now Playing on Last.fm
+            await lastfm.update_now_playing(
+                session_key=user_row['lastfm_session_key'],
+                track_info={
+                    'track': track_row['title'],
+                    'artist': track_row['artist'],
+                    'album': track_row['album'],
+                    'duration': int(track_row['duration_seconds']) if track_row['duration_seconds'] else None,
+                    'mbid': track_row['artist_mbid'],
+                }
+            )
+            
+            logger.info(f"Updated Now Playing on Last.fm for user {user_id}: {track_row['artist']} - {track_row['title']}")
+        
+    except Exception as e:
+        logger.error(f"Failed to update Now Playing on Last.fm: {e}")
+
+
+async def _scrobble_to_lastfm(user_id: int, track_id: int):
+    """Background task to scrobble a track to Last.fm"""
+    try:
+        from app import lastfm
+        from app.db import get_pool
+        import time
+        
+        # Get our own database connection from the pool
+        pool = get_pool()
+        async with pool.acquire() as db:
+            # Check if user has Last.fm enabled
+            user_row = await db.fetchrow(
+                'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',
+                user_id
+            )
+            
+            if not user_row or not user_row['lastfm_enabled'] or not user_row['lastfm_session_key']:
+                return
+            
+            # Fetch track metadata
+            track_row = await db.fetchrow(
+                """
+                SELECT title, artist, album, duration_seconds, artist_mbid
+                FROM track
+                WHERE id = $1
+                """,
+                track_id
+            )
+            
+            if not track_row:
+                return
+            
+            # Scrobble to Last.fm
+            await lastfm.scrobble_track(
+                session_key=user_row['lastfm_session_key'],
+                track_info={
+                    'track': track_row['title'],
+                    'artist': track_row['artist'],
+                    'album': track_row['album'],
+                    'duration': int(track_row['duration_seconds']) if track_row['duration_seconds'] else None,
+                    'mbid': track_row['artist_mbid'],
+                },
+                timestamp=int(time.time())
+            )
+            
+            logger.info(f"Scrobbled track {track_id} to Last.fm for user {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Failed to scrobble to Last.fm: {e}")
 
 
 # --- Endpoints ---
@@ -955,6 +1062,13 @@ async def set_queue(
 
         await update_renderer_state_db(db, udn, state)
         _reset_history_tracker(udn if not udn.startswith("local") else client_id)
+        
+        # Trigger Now Playing update for Last.fm
+        if user_id and enriched_queue and state["current_index"] >= 0:
+            current_track = enriched_queue[state["current_index"]]
+            asyncio.create_task(
+                _update_now_playing_lastfm(user_id, current_track["id"])
+            )
 
         # For UPnP, immediately play the selected track and restart monitor
         if not udn.startswith("local:") and state["queue"]:
