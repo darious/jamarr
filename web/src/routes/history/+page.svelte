@@ -22,6 +22,7 @@
         artist: string;
         album: string;
         art_sha1: string | null;
+        mb_release_id?: string | null;
         duration_seconds: number;
         codec: string | null;
         bit_depth: number | null;
@@ -43,6 +44,7 @@
         album: string;
         artist: string;
         art_sha1: string | null;
+        mb_release_id?: string | null;
         plays: number;
       }[];
       tracks: {
@@ -51,6 +53,7 @@
         artist: string;
         album: string;
         art_sha1: string | null;
+        mb_release_id?: string | null;
         plays: number;
       }[];
     };

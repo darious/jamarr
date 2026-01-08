@@ -24,6 +24,7 @@ class ChartAlbum(BaseModel):
     local_album_mbid: Optional[str] = None
     local_title: Optional[str] = None
     local_artist: Optional[str] = None
+    artist_mbid: Optional[str] = None
     art_sha1: Optional[str] = None
     musicbrainz_url: Optional[str] = None
 
@@ -51,10 +52,11 @@ async def get_chart():
                 a.mbid as local_album_mbid,
                 a.title as local_title,
                 a.artist_name as local_artist,
+                a.artist_mbid as artist_mbid,
                 art.sha1 as art_sha1
             FROM chart_album c
             LEFT JOIN LATERAL (
-                SELECT a.*, ar.name as artist_name
+                SELECT a.*, ar.name as artist_name, aa.artist_mbid as artist_mbid
                 FROM album a
                 LEFT JOIN artist_album aa ON a.mbid = aa.album_mbid
                 LEFT JOIN artist ar ON aa.artist_mbid = ar.mbid
