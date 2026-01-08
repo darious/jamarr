@@ -21,4 +21,4 @@ fi
 export PYTHONPATH=/root/code/jamarr
 
 # Run validation
-uv run python -m app.scanner.pipeline.validate_artist "$@"
+uv run python scripts/validate-artist.py "$@"
