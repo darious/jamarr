@@ -342,7 +342,8 @@
               }}
               album={{
                 name: track.album || "",
-                mbid: track.album_mbid,
+                mbid: track.mb_release_id,
+                mb_release_id: track.mb_release_id,
               }}
               artwork={{
                 sha1: track.art_sha1,

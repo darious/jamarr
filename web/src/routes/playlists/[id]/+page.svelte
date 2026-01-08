@@ -122,6 +122,7 @@
             sample_rate_hz: t.sample_rate_hz,
             artist_mbid: t.artist_mbid,
             album_mbid: t.album_mbid,
+            mb_release_id: t.mb_release_id,
         }));
 
         await setQueue(queueItems as unknown as import("$api").Track[], 0);
@@ -146,6 +147,7 @@
             sample_rate_hz: t.sample_rate_hz,
             artist_mbid: t.artist_mbid,
             album_mbid: t.album_mbid,
+            mb_release_id: t.mb_release_id,
         }));
         await addToQueue(queueItems as unknown as import("$api").Track[]);
     }
@@ -532,7 +534,8 @@
                             }}
                             album={{
                                 name: track.album,
-                                mbid: track.album_mbid,
+                                mbid: track.mb_release_id,
+                                mb_release_id: track.mb_release_id,
                             }}
                             artwork={{
                                 sha1: track.art_sha1,

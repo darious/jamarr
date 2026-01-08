@@ -264,6 +264,9 @@ class Track(BaseModel):
     codec: Optional[str] = None
     bit_depth: Optional[int] = None
     sample_rate_hz: Optional[int] = None
+    artist_mbid: Optional[str] = None
+    album_mbid: Optional[str] = None
+    mb_release_id: Optional[str] = None
     path: Optional[str] = None
     album_artist: Optional[str] = None
     track_no: Optional[int] = None
@@ -788,6 +791,7 @@ async def get_playback_history(
                 h.id, h.timestamp, h.client_ip, h.client_id, h.user_id,
                 t.id, t.title, t.artist, t.album, t.artwork_id, t.duration_seconds,
                 t.codec, t.bit_depth, t.sample_rate_hz, t.release_date,
+                t.release_mbid,
                 u.username, u.display_name, u.email,
                 a.sha1 as art_sha1
             FROM playback_history h
@@ -809,9 +813,9 @@ async def get_playback_history(
                     "client_id": row[3],
                     "user": {
                         "id": row[4],
-                        "username": row[15],
-                        "display_name": row[16],
-                        "email": row[17],
+                        "username": row[16],
+                        "display_name": row[17],
+                        "email": row[18],
                     }
                     if row[4]
                     else None,
@@ -820,12 +824,13 @@ async def get_playback_history(
                         "title": row[6],
                         "artist": row[7],
                         "album": row[8],
-                        "art_sha1": row[18],  # New standard
+                        "art_sha1": row[19],  # New standard
                         "duration_seconds": row[10],
                         "codec": row[11],
                         "bit_depth": row[12],
                         "sample_rate_hz": row[13],
                         "release_date": row[14],
+                        "mb_release_id": row[15],
                     },
                 }
             )
@@ -900,6 +905,7 @@ async def get_playback_history_stats(
                 COALESCE(NULLIF(t.album_artist, ''), t.artist) as artist_name, 
                 MIN(t.artwork_id) as artwork_id, 
                 MAX(a.sha1) as art_sha1, 
+                MAX(t.release_mbid) as mb_release_id,
                 COUNT(*) as plays
             FROM playback_history h
             JOIN track t ON t.id = h.track_id
@@ -915,7 +921,8 @@ async def get_playback_history_stats(
                 "album": row[0],
                 "artist": row[1],
                 "art_sha1": row[3],
-                "plays": row[4],
+                "mb_release_id": row[4],
+                "plays": row[5],
             }
             for row in rows
             if row[0]
@@ -923,12 +930,12 @@ async def get_playback_history_stats(
 
         # Top tracks
         tracks_query = f"""
-        SELECT t.id, t.title, t.artist, t.album, t.artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
+        SELECT t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
         FROM playback_history h
         JOIN track t ON t.id = h.track_id
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE {where_sql}
-            GROUP BY t.id, t.title, t.artist, t.album, t.artwork_id
+            GROUP BY t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id
             ORDER BY plays DESC
             LIMIT 10
         """
@@ -939,8 +946,9 @@ async def get_playback_history_stats(
                 "title": row[1],
                 "artist": row[2],
                 "album": row[3],
-                "art_sha1": row[5],
-                "plays": row[6],
+                "mb_release_id": row[4],
+                "art_sha1": row[6],
+                "plays": row[7],
             }
             for row in rows
         ]

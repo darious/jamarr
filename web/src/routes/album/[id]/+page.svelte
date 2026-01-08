@@ -35,8 +35,6 @@
     const track = data.tracks?.[0];
     const mbBase = "http://musicbrainz.org";
     if (track?.mb_release_id) return `${mbBase}/release/${track.mb_release_id}`;
-    if (track?.mb_release_group_id)
-      return `${mbBase}/release-group/${track.mb_release_group_id}`;
     return null;
   };
 

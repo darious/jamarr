@@ -219,9 +219,7 @@
             popularity: t.popularity,
             // CRITICAL: Preserve artwork from EITHER source (top track API or local track)
             art_sha1: t.art_sha1 || local.art_sha1,
-            // Ensure API's album_mbid is preferred if available (it comes from release_group_mbid in SQL)
-            album_mbid:
-              t.album_mbid || local.album_mbid || local.mb_release_group_id,
+            mb_release_id: t.mb_release_id || local.mb_release_id,
           };
         } else {
           // Fallback if track not loaded yet - use API data
@@ -239,7 +237,7 @@
               t.duration_seconds ||
               (t.duration_ms ? Math.round(t.duration_ms / 1000) : 0),
             art_sha1: t.art_sha1 || null,
-            album_mbid: t.album_mbid, // Use API data directly
+            mb_release_id: t.mb_release_id, // Use API data directly
             codec: t.codec || null,
             bitrate: null,
             sample_rate_hz: t.sample_rate_hz || null,
@@ -321,7 +319,7 @@
           localId,
           art_sha1,
           navAlbum,
-          album_mbid: s.album_mbid,
+          mb_release_id: s.mb_release_id,
           ...techData,
           tracksToPlay,
           artists,
@@ -488,7 +486,7 @@
       await setQueue(albumTracks, 0);
     } else {
       const albumId =
-        (album as any).mbid || (album as any).album_mbid || album.mb_release_id;
+        album.mb_release_id;
       if (albumId) {
         goto(`/album/${albumId}`);
       } else {
@@ -821,7 +819,7 @@
                     class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-105"
                     on:click={() => {
                       const albumId =
-                        album.mbid || album.album_mbid || album.mb_release_id;
+                        album.mb_release_id;
                       if (albumId) goto(`/album/${albumId}`);
                     }}
                   >
@@ -904,7 +902,8 @@
                 artist={{ name: artist?.name || "", mbid: artist?.mbid }}
                 album={{
                   name: track.album || "",
-                  mbid: track.album_mbid,
+                  mbid: track.mb_release_id,
+                  mb_release_id: track.mb_release_id,
                 }}
                 artwork={{
                   sha1: track.art_sha1,
@@ -941,7 +940,8 @@
                 artist={{ name: artist?.name || "", mbid: artist?.mbid }}
                 album={{
                   name: single.album || "",
-                  mbid: single.album_mbid,
+                  mbid: single.mb_release_id,
+                  mb_release_id: single.mb_release_id,
                   year: single.date,
                 }}
                 artwork={{

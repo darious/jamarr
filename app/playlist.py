@@ -190,7 +190,7 @@ async def get_playlist(
             t.id as track_id, t.title, t.artist, t.album, t.duration_seconds,
             a.sha1 as art_sha1, t.path,
             t.codec, t.sample_rate_hz, t.bit_depth,
-            t.artist_mbid, t.release_group_mbid as album_mbid,
+            t.artist_mbid, t.release_mbid, t.release_group_mbid as album_mbid,
             (SELECT jsonb_agg(jsonb_build_object('name', a2.name, 'mbid', a2.mbid) ORDER BY a2.name) 
              FROM track_artist ta2 
              JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
@@ -210,6 +210,8 @@ async def get_playlist(
         d = dict(r)
         d['art_sha1'] = sha1_to_hex(d['art_sha1'])
         d.pop("art_id", None)
+        if d.get("release_mbid"):
+            d["mb_release_id"] = d["release_mbid"]
         
         # Parse aggregated artists JSON
         if d.get("aggregated_artists_json"):

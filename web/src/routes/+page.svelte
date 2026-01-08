@@ -90,9 +90,9 @@
                                 loading="lazy"
                             />
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="absolute inset-0 z-0"
                                 aria-label="View Album"
                             ></a>
@@ -144,9 +144,9 @@
                         </div>
                         <div class="mt-3">
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="block font-medium leading-tight truncate hover:underline text-default"
                                 title={album.album}>{album.album}</a
                             >
@@ -195,9 +195,9 @@
                                 loading="lazy"
                             />
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="absolute inset-0 z-0"
                                 aria-label="View Album"
                             ></a>
@@ -249,9 +249,9 @@
                         </div>
                         <div class="mt-3">
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="block font-medium leading-tight truncate hover:underline text-default"
                                 title={album.album}>{album.album}</a
                             >
@@ -296,9 +296,9 @@
                                 loading="lazy"
                             />
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="absolute inset-0 z-0"
                                 aria-label="View Album"
                             ></a>
@@ -350,9 +350,9 @@
                         </div>
                         <div class="mt-3">
                             <a
-                                href={album.mbid || album.album_mbid
-                                    ? `/album/${album.mbid || album.album_mbid}`
-                                    : `/album/${encodeURIComponent(album.artist_name)}/${encodeURIComponent(album.album)}`}
+                                href={album.mb_release_id
+                                    ? `/album/${album.mb_release_id}`
+                                    : "#"}
                                 class="block font-medium leading-tight truncate hover:underline text-default"
                                 title={album.album}>{album.album}</a
                             >

@@ -33,6 +33,21 @@ export const playerState = writable<PlayerState>({
 // UI: Now Playing overlay visibility
 export const nowPlayingVisible = writable<boolean>(false);
 
+function mergeQueueArt(prev: Track[], next: Track[]): Track[] {
+    if (!prev.length || !next.length) return next;
+    const artById = new Map<number, string | null | undefined>();
+    for (const t of prev) {
+        if (t?.id) artById.set(t.id, t.art_sha1 ?? null);
+    }
+    return next.map((t) => {
+        if (!t?.id) return t;
+        if (!t.art_sha1 && artById.has(t.id)) {
+            return { ...t, art_sha1: artById.get(t.id) ?? null };
+        }
+        return t;
+    });
+}
+
 // --- Client ID Logic ---
 function uuidv4() {
     // Fallback for non-secure contexts where crypto.randomUUID is not available
@@ -156,9 +171,10 @@ export async function loadQueueFromServer() {
             // Actually, UI should just use the UDN.
             // If backend says renderer is "local:<myId>", we treat it as active.
 
+            const mergedQueue = mergeQueueArt(get(playerState).queue, data.queue || []);
             playerState.update(s => ({
                 ...s,
-                queue: data.queue || [],
+                queue: mergedQueue,
                 current_index: data.current_index,
                 position_seconds: data.position_seconds,
                 is_playing: data.is_playing,
@@ -270,7 +286,7 @@ export async function reorderQueue(arg1: Track[] | number, arg2?: number) {
             const state = data.state || {};
             playerState.update((s) => ({
                 ...s,
-                queue: state.queue ?? newQueue,
+                queue: state.queue ? mergeQueueArt(s.queue, state.queue) : newQueue,
                 current_index:
                     state.current_index ??
                     (currentTrackId
@@ -333,9 +349,12 @@ export async function playFromQueue(index: number) {
         if (res.ok) {
             const data = await res.json();
             const newState = data.state || {};
+            const mergedQueue = newState.queue
+                ? mergeQueueArt(get(playerState).queue, newState.queue)
+                : undefined;
             playerState.update(s => ({
                 ...s,
-                queue: newState.queue ?? s.queue,
+                queue: mergedQueue ?? s.queue,
                 current_index: newState.current_index ?? index,
                 is_playing: newState.is_playing ?? true,
                 position_seconds: newState.position_seconds ?? 0,

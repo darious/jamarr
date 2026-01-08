@@ -11,8 +11,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
         const tracks = await fetchTracks({ artist, album }, fetch);
 
         if (tracks.length > 0) {
-            // Prioritize album_mbid, then release_group_mbid from track
-            const mbid = tracks[0].album_mbid || tracks[0].mb_release_group_id || tracks[0].mb_release_id;
+            // Prefer release id when available
+            const mbid = tracks[0].mb_release_id;
 
             if (mbid) {
                 throw redirect(308, `/album/${mbid}`); // 308 Permanent Redirect for SEO/Caching
