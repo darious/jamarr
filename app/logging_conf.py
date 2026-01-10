@@ -74,7 +74,13 @@ def configure_logging():
     player_handler = _setup_file_handler("player", "player.log")
     player_logger.addHandler(player_handler)
 
-    # 5. Frontend / Access Logger
+    # 5. Last.fm Logger
+    lastfm_logger = logging.getLogger("app.api.lastfm")
+    lastfm_handler = _setup_file_handler("lastfm", "lastfm.log")
+    lastfm_logger.addHandler(lastfm_handler)
+    lastfm_logger.setLevel(logging.DEBUG)
+
+    # 6. Frontend / Access Logger
     access_logger = logging.getLogger("uvicorn.access")
     access_handler = _setup_file_handler("frontend", "frontend.log")
 
@@ -114,6 +120,7 @@ def configure_logging():
                 "app.upnp",
                 "async_upnp_client",
                 "app.api.player",
+                "app.api.lastfm",
                 "uvicorn.access",
             ]
         )
@@ -125,6 +132,7 @@ def configure_logging():
     upnp_logger.propagate = True
     upnp_client_logger.propagate = True
     player_logger.propagate = True
+    lastfm_logger.propagate = True
     access_logger.propagate = True
 
     return {"level": log_level, "dir": log_dir}

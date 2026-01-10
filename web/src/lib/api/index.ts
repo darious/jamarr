@@ -660,3 +660,33 @@ export async function toggleLastfm(enabled: boolean): Promise<void> {
     });
     if (!res.ok) throw new Error('Failed to toggle Last.fm scrobbling');
 }
+
+export interface SyncScrobblesResponse {
+    fetched: number;
+    matched: number;
+    skipped: number;
+    unmatched: number;
+    logs: string[];
+}
+
+export async function syncLastfmScrobbles(opts: {
+    fetch_new?: boolean;
+    rematch_all?: boolean;
+    limit?: number;
+} = {}): Promise<SyncScrobblesResponse> {
+    const res = await fetch('/api/lastfm/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+            fetch_new: opts.fetch_new !== false,
+            rematch_all: opts.rematch_all || false,
+            limit: opts.limit ?? null
+        })
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to sync scrobbles');
+    }
+    return await res.json();
+}

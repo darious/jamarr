@@ -9,6 +9,7 @@
         fetchArtists,
         triggerMissingAlbumsScan,
         triggerOptimize,
+        syncLastfmScrobbles,
     } from "$lib/api";
     import TabButton from "$lib/components/TabButton.svelte";
     import Checkbox from "$lib/components/Checkbox.svelte";
@@ -90,6 +91,7 @@
     let startTimestamp = 0;
 
     let eventSource: EventSource | undefined;
+    let lastfmEventSource: EventSource | undefined;
 
     onMount(async () => {
         // Connect to SSE
@@ -113,6 +115,29 @@
         eventSource.onerror = (err) => {
             // addLog("Connection lost. Retrying...");
             // EventSource auto-retries, but we might want to know.
+        };
+
+        // Connect to Last.fm SSE
+        lastfmEventSource = new EventSource("/api/lastfm/events");
+
+        lastfmEventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === "log") {
+                    addLog(data.message);
+                } else if (data.type === "start") {
+                    addLog("Starting Last.fm sync...");
+                } else if (data.type === "complete") {
+                    addLog(
+                        `Last.fm sync finished: ${data.status}${
+                            data.error ? ` (${data.error})` : ""
+                        }`,
+                    );
+                }
+            } catch (e) {
+                if (event.data.includes("connected")) return;
+                console.error("Failed to parse Last.fm SSE event", e);
+            }
         };
 
         // Get initial status
@@ -424,6 +449,30 @@
             addLog("Database optimization completed.");
         } catch (e) {
             addLog(`Error optimizing DB: ${e}`);
+        } finally {
+            isRunning = false;
+            status = "Idle";
+        }
+    }
+
+    async function startLastfmSync() {
+        if (isRunning) return;
+
+        try {
+            status = "Syncing Last.fm...";
+            isRunning = true;
+            addLog("Starting Last.fm scrobble sync and matching...");
+
+            const result = await syncLastfmScrobbles({
+                fetch_new: true,
+                rematch_all: false,
+            });
+
+            addLog(
+                `✅ Sync complete: ${result.fetched} fetched, ${result.matched} matched, ${result.unmatched} unmatched`,
+            );
+        } catch (e) {
+            addLog(`Error syncing Last.fm: ${e}`);
         } finally {
             isRunning = false;
             status = "Idle";
@@ -1050,6 +1099,10 @@
 
                 <TabButton onClick={startOptimize} disabled={isRunning}>
                     Optimize Database
+                </TabButton>
+
+                <TabButton onClick={startLastfmSync} disabled={isRunning}>
+                    Update Scrobbles & Match
                 </TabButton>
             </div>
         </div>
