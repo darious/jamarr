@@ -116,6 +116,7 @@ def fetch_page(
     page: int,
     limit: int,
     to_timestamp: Optional[int],
+    from_timestamp: Optional[int],
     max_retries: int,
     backoff_base: float,
     backoff_max: float,
@@ -132,6 +133,8 @@ def fetch_page(
     }
     if to_timestamp:
         params["to"] = str(to_timestamp)
+    if from_timestamp:
+        params["from"] = str(from_timestamp)
     for attempt in range(max_retries + 1):
         try:
             resp = client.get(url, params=params)
@@ -224,6 +227,22 @@ async def get_oldest_scrobble_uts(
     return int(row["oldest"])
 
 
+async def get_newest_scrobble_uts(
+    conn: asyncpg.Connection, username: str
+) -> Optional[int]:
+    row = await conn.fetchrow(
+        """
+        SELECT MAX(played_at_uts) AS newest
+        FROM lastfm_scrobble
+        WHERE lastfm_username = $1
+        """,
+        username,
+    )
+    if not row or row["newest"] is None:
+        return None
+    return int(row["newest"])
+
+
 async def insert_scrobbles(
     conn: asyncpg.Connection, scrobbles: Iterable[Dict[str, Any]]
 ) -> int:
@@ -313,11 +332,17 @@ async def run(args: argparse.Namespace) -> None:
         total_inserted = 0
         dump_rows: List[Dict[str, Any]] = []
         oldest_uts: Optional[int] = None
+        newest_uts: Optional[int] = None
 
         if args.older_than_db:
             async with pool.acquire() as conn:
                 oldest_uts = await get_oldest_scrobble_uts(conn, args.user)
             if oldest_uts is None:
+                print("No existing scrobbles found; fetching latest instead.")
+        if args.newer_than_db:
+            async with pool.acquire() as conn:
+                newest_uts = await get_newest_scrobble_uts(conn, args.user)
+            if newest_uts is None:
                 print("No existing scrobbles found; fetching latest instead.")
 
         with httpx.Client(timeout=30.0) as client:
@@ -329,6 +354,7 @@ async def run(args: argparse.Namespace) -> None:
                     page,
                     limit,
                     oldest_uts - 1 if oldest_uts else None,
+                    newest_uts + 1 if newest_uts else None,
                     args.max_retries,
                     args.backoff_base,
                     args.backoff_max,
@@ -435,6 +461,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--older-than-db",
         action="store_true",
         help="Only pull scrobbles older than the oldest in the DB",
+    )
+    parser.add_argument(
+        "--newer-than-db",
+        action="store_true",
+        help="Only pull scrobbles newer than the newest in the DB",
     )
     return parser
 

@@ -9,11 +9,12 @@ import asyncio
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from collections import Counter
 
 import asyncpg
-import math
 from functools import lru_cache
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -325,49 +326,6 @@ def _release_type_adjust(release_type: Optional[str]) -> Tuple[float, str, int]:
     return 0.0, "", 0
 
 
-MODEL_FEATURES = [
-    "track_mbid_match",
-    "artist_mbid_match",
-    "album_mbid_match",
-    "artist_name_match",
-    "track_name_match",
-    "album_name_match",
-    "album_artist_match",
-    "album_artist_various",
-    "release_type_preferred",
-    "release_type_deprioritized",
-    "fuzzy_title_score",
-]
-
-DEFAULT_SKIP_ARTISTS = {
-    "bbc radio",
-    "bbc radio 1",
-    "bbc radio 1xtra",
-    "bbc radio 2",
-    "bbc radio 3",
-    "bbc radio 4",
-    "bbc radio 4 extra",
-    "bbc radio 5 live",
-    "bbc radio 6 music",
-    "bbc radio scotland",
-    "bbc radio ulster",
-    "bbc radio wales",
-    "bbc world service",
-    "cariad lloyd",
-    "leo laporte and the twits",
-    "muddy knees media",
-    "hotel spa",
-    "tom merritt molly wood and veronica belmont",
-    "steve gibson with leo laporte",
-    "pixel corps",
-    "stephen colbert",
-    "plosive productions",
-    "rain sounds xle library",
-    "nature sounds xle library",
-    "spa",
-}
-
-
 async def ensure_match_table(conn: asyncpg.Connection) -> None:
     await conn.execute(
         """
@@ -378,7 +336,7 @@ async def ensure_match_table(conn: asyncpg.Connection) -> None:
             match_score DOUBLE PRECISION NOT NULL,
             match_method TEXT NOT NULL,
             match_reason TEXT,
-            match_version TEXT,
+            cache_key TEXT,
             matched_at TIMESTAMPTZ DEFAULT NOW(),
             UNIQUE(scrobble_id),
             FOREIGN KEY(scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE,
@@ -387,116 +345,11 @@ async def ensure_match_table(conn: asyncpg.Connection) -> None:
         """
     )
     await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS lastfm_match_cache (
-            id BIGSERIAL PRIMARY KEY,
-            cache_key TEXT UNIQUE NOT NULL,
-            track_id BIGINT NOT NULL,
-            match_score DOUBLE PRECISION NOT NULL,
-            match_method TEXT NOT NULL,
-            match_reason TEXT,
-            match_version TEXT,
-            updated_at TIMESTAMPTZ DEFAULT NOW(),
-            FOREIGN KEY(track_id) REFERENCES track(id) ON DELETE CASCADE
-        );
-        """
+        "ALTER TABLE lastfm_scrobble_match ADD COLUMN IF NOT EXISTS cache_key TEXT"
     )
     await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS lastfm_scrobble_miss (
-            id BIGSERIAL PRIMARY KEY,
-            scrobble_id BIGINT UNIQUE NOT NULL,
-            lastfm_username TEXT NOT NULL,
-            match_version TEXT,
-            reason TEXT,
-            candidate_score DOUBLE PRECISION,
-            candidate_artist TEXT,
-            candidate_album TEXT,
-            candidate_track TEXT,
-            attempted_at TIMESTAMPTZ DEFAULT NOW(),
-            FOREIGN KEY(scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE
-        );
-        """
+        "CREATE INDEX IF NOT EXISTS idx_lastfm_scrobble_match_cache_key ON lastfm_scrobble_match(cache_key)"
     )
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS lastfm_match_candidate (
-            id BIGSERIAL PRIMARY KEY,
-            scrobble_id BIGINT NOT NULL,
-            track_id BIGINT NOT NULL,
-            score DOUBLE PRECISION NOT NULL,
-            method TEXT NOT NULL,
-            reason TEXT,
-            rank INTEGER,
-            cache_key TEXT,
-            candidate_artist TEXT,
-            candidate_album TEXT,
-            candidate_track TEXT,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            UNIQUE(scrobble_id, track_id),
-            FOREIGN KEY(scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE,
-            FOREIGN KEY(track_id) REFERENCES track(id) ON DELETE CASCADE
-        );
-        """
-    )
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS lastfm_match_feedback (
-            id BIGSERIAL PRIMARY KEY,
-            scrobble_id BIGINT NOT NULL,
-            track_id BIGINT NOT NULL,
-            decision TEXT NOT NULL CHECK (decision IN ('accept', 'reject')),
-            notes TEXT,
-            cache_key TEXT,
-            reviewed_at TIMESTAMPTZ DEFAULT NOW(),
-            UNIQUE(scrobble_id, track_id, decision),
-            FOREIGN KEY(scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE,
-            FOREIGN KEY(track_id) REFERENCES track(id) ON DELETE CASCADE
-        );
-        """
-    )
-    await conn.execute(
-        "ALTER TABLE lastfm_match_candidate ADD COLUMN IF NOT EXISTS cache_key TEXT"
-    )
-    await conn.execute(
-        "ALTER TABLE lastfm_match_feedback ADD COLUMN IF NOT EXISTS cache_key TEXT"
-    )
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS lastfm_match_model (
-            name TEXT PRIMARY KEY,
-            weights JSONB NOT NULL,
-            bias DOUBLE PRECISION NOT NULL,
-            updated_at TIMESTAMPTZ DEFAULT NOW()
-        );
-        """
-    )
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS lastfm_scrobble_skip (
-            id BIGSERIAL PRIMARY KEY,
-            scrobble_id BIGINT UNIQUE NOT NULL,
-            lastfm_username TEXT NOT NULL,
-            reason TEXT,
-            skipped_at TIMESTAMPTZ DEFAULT NOW(),
-            FOREIGN KEY(scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE
-        );
-        """
-    )
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS lastfm_skip_artist (
-            artist_name TEXT PRIMARY KEY
-        );
-        """
-    )
-    for artist in DEFAULT_SKIP_ARTISTS:
-        await conn.execute(
-            "INSERT INTO lastfm_skip_artist (artist_name) VALUES ($1) ON CONFLICT DO NOTHING",
-            artist,
-        )
-
-
 async def fetch_scrobbles(
     conn: asyncpg.Connection, username: str, limit: int, include_matched: bool = False
 ) -> List[asyncpg.Record]:
@@ -520,10 +373,8 @@ async def fetch_scrobbles(
                    s.artist_mbid, s.artist_name
             FROM lastfm_scrobble s
             LEFT JOIN lastfm_scrobble_match m ON m.scrobble_id = s.id
-            LEFT JOIN lastfm_scrobble_skip sk ON sk.scrobble_id = s.id
             WHERE s.lastfm_username = $1
               AND m.scrobble_id IS NULL
-              AND sk.scrobble_id IS NULL
             ORDER BY s.played_at DESC
             LIMIT $2
             """,
@@ -567,11 +418,6 @@ async def preload_artist_lookup(conn: asyncpg.Connection) -> Dict[str, str]:
         if name and name not in lookup:
             lookup[name] = row["mbid"]
     return lookup
-
-
-async def preload_skip_artists(conn: asyncpg.Connection) -> set[str]:
-    rows = await conn.fetch("SELECT artist_name FROM lastfm_skip_artist")
-    return {row["artist_name"] for row in rows}
 
 
 async def preload_tracks(
@@ -908,170 +754,6 @@ def _is_various(value: Optional[str]) -> bool:
     return normalize_name(value) in ("various artists", "various", "va")
 
 
-def extract_features(
-    scrobble: asyncpg.Record, candidate: asyncpg.Record
-) -> Dict[str, float]:
-    sc_artist = normalize_artist(scrobble["artist_name"])
-    sc_title = normalize_title(scrobble["track_name"])
-    sc_album = normalize_name(scrobble["album_name"])
-    artist_parts = scrobble_artist_parts(scrobble)
-
-    tr_artist = normalize_artist(candidate["artist"])
-    artist_names = [normalize_artist(name) for name in _get_artist_names(candidate)]
-    tr_title = normalize_title(candidate["title"])
-    tr_album = normalize_name(candidate["album"])
-    tr_album_artist = normalize_artist(candidate["album_artist"])
-    release_type = normalize_name(candidate["release_type"])
-
-    features = {
-        "track_mbid_match": 1.0
-        if scrobble["track_mbid"]
-        and candidate["track_mbid"]
-        and scrobble["track_mbid"] == candidate["track_mbid"]
-        else 0.0,
-        "artist_mbid_match": 1.0
-        if scrobble["artist_mbid"]
-        and candidate["artist_mbid"]
-        and scrobble["artist_mbid"] == candidate["artist_mbid"]
-        else 0.0,
-        "album_mbid_match": 1.0
-        if scrobble["album_mbid"]
-        and candidate["release_mbid"]
-        and scrobble["album_mbid"] == candidate["release_mbid"]
-        else 0.0,
-        "artist_name_match": 1.0
-        if sc_artist
-        and (
-            (tr_artist and sc_artist == tr_artist)
-            or (artist_names and sc_artist in artist_names)
-            or (artist_parts and any(part in artist_names or part == tr_artist for part in artist_parts))
-        )
-        else 0.0,
-        "track_name_match": 1.0 if sc_title and tr_title and sc_title == tr_title else 0.0,
-        "album_name_match": 1.0 if sc_album and tr_album and sc_album == tr_album else 0.0,
-        "album_artist_match": 1.0
-        if sc_artist
-        and (
-            sc_artist == tr_album_artist
-            or (sc_artist == tr_artist and tr_album_artist == "")
-        )
-        else 0.0,
-        "album_artist_various": 1.0 if _is_various(tr_album_artist) else 0.0,
-        "release_type_preferred": 1.0
-        if release_type in ("album", "single", "ep")
-        else 0.0,
-        "release_type_deprioritized": 1.0
-        if release_type in ("compilation", "live", "remix", "soundtrack", "dj mix", "mix")
-        else 0.0,
-        "fuzzy_title_score": 0.0,
-    }
-
-    if sc_title and tr_title:
-        features["fuzzy_title_score"] = fuzz.ratio(sc_title, tr_title) / 100.0
-    return features
-
-
-def apply_model_score(
-    features: Dict[str, float],
-    weights: Dict[str, float],
-    bias: float,
-) -> float:
-    total = bias
-    for name in MODEL_FEATURES:
-        total += weights.get(name, 0.0) * features.get(name, 0.0)
-    return 1.0 / (1.0 + math.exp(-total))
-
-
-async def load_model(conn: asyncpg.Connection, name: str) -> Optional[Tuple[Dict[str, float], float]]:
-    row = await conn.fetchrow(
-        "SELECT weights, bias FROM lastfm_match_model WHERE name = $1",
-        name,
-    )
-    if not row:
-        return None
-    weights = {k: float(v) for k, v in dict(row["weights"]).items()}
-    return weights, float(row["bias"])
-
-
-async def save_model(
-    conn: asyncpg.Connection,
-    name: str,
-    weights: Dict[str, float],
-    bias: float,
-) -> None:
-    await conn.execute(
-        """
-        INSERT INTO lastfm_match_model (name, weights, bias)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (name) DO UPDATE SET
-            weights = EXCLUDED.weights,
-            bias = EXCLUDED.bias,
-            updated_at = NOW()
-        """,
-        name,
-        weights,
-        bias,
-    )
-
-
-async def train_model(
-    conn: asyncpg.Connection,
-    name: str,
-    epochs: int,
-    lr: float,
-) -> Tuple[Dict[str, float], float]:
-    rows = await conn.fetch(
-        """
-        SELECT f.decision, s.track_mbid AS s_track_mbid, s.artist_mbid AS s_artist_mbid,
-               s.album_mbid AS s_album_mbid, s.artist_name AS s_artist_name,
-               s.track_name AS s_track_name, s.album_name AS s_album_name,
-               t.track_mbid AS t_track_mbid, t.artist_mbid AS t_artist_mbid,
-               t.release_mbid AS t_release_mbid, t.artist AS t_artist,
-               t.title AS t_title, t.album AS t_album, t.album_artist AS t_album_artist,
-               t.release_type AS t_release_type
-        FROM lastfm_match_feedback f
-        JOIN lastfm_scrobble s ON s.id = f.scrobble_id
-        JOIN track t ON t.id = f.track_id
-        """,
-    )
-    if not rows:
-        raise RuntimeError("No feedback rows to train on.")
-
-    weights = {name: 0.0 for name in MODEL_FEATURES}
-    bias = 0.0
-
-    for _ in range(epochs):
-        for row in rows:
-            label = 1.0 if row["decision"] == "accept" else 0.0
-            scrobble = {
-                "track_mbid": row["s_track_mbid"],
-                "artist_mbid": row["s_artist_mbid"],
-                "album_mbid": row["s_album_mbid"],
-                "artist_name": row["s_artist_name"],
-                "track_name": row["s_track_name"],
-                "album_name": row["s_album_name"],
-            }
-            candidate = {
-                "track_mbid": row["t_track_mbid"],
-                "artist_mbid": row["t_artist_mbid"],
-                "release_mbid": row["t_release_mbid"],
-                "artist": row["t_artist"],
-                "title": row["t_title"],
-                "album": row["t_album"],
-                "album_artist": row["t_album_artist"],
-                "release_type": row["t_release_type"],
-            }
-            features = extract_features(scrobble, candidate)
-            pred = apply_model_score(features, weights, bias)
-            error = pred - label
-            for name in MODEL_FEATURES:
-                weights[name] -= lr * error * features.get(name, 0.0)
-            bias -= lr * error
-
-    await save_model(conn, name, weights, bias)
-    return weights, bias
-
-
 def score_candidate(
     scrobble: asyncpg.Record, candidate: asyncpg.Record
 ) -> Tuple[float, str, int, int]:
@@ -1216,21 +898,16 @@ def match_scrobble(
     indexes: Dict[str, Dict[Any, List[asyncpg.Record]]],
     artist_lookup: Dict[str, str],
     artist_volume: Dict[str, int],
-    skip_artists: set[str],
     fuzzy: bool,
     fuzzy_title_threshold: int,
-    model: Optional[Tuple[Dict[str, float], float]],
-    auto_accept_threshold: float,
+    fuzzy_metrics: Optional[Counter] = None,
+    fuzzy_metrics_lock: Optional[threading.Lock] = None,
 ) -> Tuple[
     Optional[Tuple[int, float, str, str]],
     str,
     Optional[Tuple[float, str, str, str]],
     List[Dict[str, Any]],
 ]:
-    sc_artist = normalize_artist(scrobble["artist_name"])
-    if sc_artist in skip_artists:
-        return None, "skipped_artist", None, []
-
     candidates = _collect_candidates(scrobble, indexes, artist_lookup)
     if not candidates:
         return None, "no_candidates", None, []
@@ -1265,8 +942,6 @@ def match_scrobble(
                     non_various_title_match_exists = True
 
     best: Optional[Tuple[int, float, str, str, int, int]] = None
-    best_model_score = None
-    best_effective = None
     best_below: Optional[Tuple[float, str, str, str]] = None
     scored: List[Dict[str, Any]] = []
     for candidate in uniq_candidates:
@@ -1281,15 +956,10 @@ def match_scrobble(
             continue
         score, reason, aa_rank, rt_rank = score_candidate(scrobble, candidate)
         method = classify_method(score, reason)
-        model_score = None
-        if model:
-            features = extract_features(scrobble, candidate)
-            model_score = apply_model_score(features, model[0], model[1])
-        effective_score = model_score if model_score is not None else score
         scored.append(
             {
                 "track_id": candidate["id"],
-                "score": effective_score,
+                "score": score,
                 "method": method,
                 "reason": reason,
                 "artist": candidate["artist"] or "",
@@ -1297,32 +967,26 @@ def match_scrobble(
                 "title": candidate["title"] or "",
             }
         )
-        if best_below is None or effective_score > best_below[0]:
+        if best_below is None or score > best_below[0]:
             best_below = (
-                effective_score,
+                score,
                 candidate["artist"] or "",
                 candidate["album"] or "",
                 candidate["title"] or "",
             )
-        if model_score is not None:
-            if model_score < auto_accept_threshold and method != "mbid_track":
-                continue
-        else:
-            if not accept_match(method, score, reason):
-                continue
-            title_match = "track_name" in reason or "fuzzy_title" in reason
-            if not title_match:
-                continue
-            artist_count = artist_volume.get(sc_artist, 0)
-            title_gate = 0.9 if artist_count >= 50 else 0.85
-            if "fuzzy_title" in reason and score < title_gate:
-                continue
-        if best_effective is None or effective_score > best_effective:
-            best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
-            best_model_score = model_score
-            best_effective = effective_score
+        if not accept_match(method, score, reason):
             continue
-        if best and best_effective is not None and abs(effective_score - best_effective) <= 0.01:
+        title_match = "track_name" in reason or "fuzzy_title" in reason
+        if not title_match:
+            continue
+        artist_count = artist_volume.get(sc_artist, 0)
+        title_gate = 0.9 if artist_count >= 50 else 0.85
+        if "fuzzy_title" in reason and score < title_gate:
+            continue
+        if best is None or score > best[1]:
+            best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
+            continue
+        if best and abs(score - best[1]) <= 0.01:
             method_rank = {
                 "mbid_track": 3,
                 "mbid_artist_release": 2,
@@ -1334,45 +998,69 @@ def match_scrobble(
             best_rank = method_rank.get(best[2], -1)
             if current_rank > best_rank:
                 best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
-                best_model_score = model_score
-                best_effective = effective_score
                 continue
             if current_rank == best_rank:
                 if aa_rank > best[4]:
                     best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
-                    best_model_score = model_score
-                    best_effective = effective_score
                     continue
                 if aa_rank == best[4] and rt_rank > best[5]:
                     best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
-                    best_model_score = model_score
-                    best_effective = effective_score
 
     if not best and fuzzy:
+        if fuzzy_metrics is not None:
+            if fuzzy_metrics_lock:
+                with fuzzy_metrics_lock:
+                    fuzzy_metrics["attempted"] += 1
+            else:
+                fuzzy_metrics["attempted"] += 1
         sc_title = normalize_title(scrobble["track_name"])
         if sc_title:
+            if fuzzy_metrics is not None:
+                if fuzzy_metrics_lock:
+                    with fuzzy_metrics_lock:
+                        fuzzy_metrics["with_title"] += 1
+                else:
+                    fuzzy_metrics["with_title"] += 1
             best_fuzzy: Optional[Tuple[int, int]] = None
             for candidate in uniq_candidates:
                 tr_title = normalize_title(candidate["title"])
                 if not tr_title:
                     continue
+                if fuzzy_metrics is not None:
+                    if fuzzy_metrics_lock:
+                        with fuzzy_metrics_lock:
+                            fuzzy_metrics["compared"] += 1
+                    else:
+                        fuzzy_metrics["compared"] += 1
                 similarity = int(fuzz.ratio(sc_title, tr_title))
                 if similarity < fuzzy_title_threshold:
                     continue
                 if not best_fuzzy or similarity > best_fuzzy[1]:
                     best_fuzzy = (candidate["id"], similarity)
             if best_fuzzy:
+                if fuzzy_metrics is not None:
+                    if fuzzy_metrics_lock:
+                        with fuzzy_metrics_lock:
+                            fuzzy_metrics["accepted"] += 1
+                    else:
+                        fuzzy_metrics["accepted"] += 1
                 return (
                     best_fuzzy[0],
                     0.6,
                     "fuzzy_title",
                     f"fuzzy_title_{best_fuzzy[1]}",
                 ), None, None, scored
+        else:
+            if fuzzy_metrics is not None:
+                if fuzzy_metrics_lock:
+                    with fuzzy_metrics_lock:
+                        fuzzy_metrics["missing_title"] += 1
+                else:
+                    fuzzy_metrics["missing_title"] += 1
 
     if not best:
         return None, "below_threshold", best_below, scored
-    final_score = best_model_score if best_model_score is not None else best[1]
-    return (best[0], final_score, best[2], best[3]), None, None, scored
+    return (best[0], best[1], best[2], best[3]), None, None, scored
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -1395,22 +1083,12 @@ async def run(args: argparse.Namespace) -> None:
     ) as pool:
         async with pool.acquire() as conn:
             await ensure_match_table(conn)
-            if args.train_model:
-                await train_model(
-                    conn,
-                    args.model_name,
-                    args.model_epochs,
-                    args.model_lr,
-                )
-                console.print("[green]Model trained and saved.[/green]")
-                return
-            model = None
-            if args.use_model:
-                model = await load_model(conn, args.model_name)
             
             console.print(f"[cyan]Fetching scrobbles for user {args.user}...[/cyan]")
             # Fetch ALL potential work items (filtered by resume logic)
-            all_scrobbles = await fetch_scrobbles(conn, args.user, args.limit, include_matched=args.force)
+            all_scrobbles = await fetch_scrobbles(
+                conn, args.user, args.limit, include_matched=args.force
+            )
             console.print(f"[cyan]Found {len(all_scrobbles)} scrobbles to process.[/cyan]")
             
             if not all_scrobbles:
@@ -1418,8 +1096,6 @@ async def run(args: argparse.Namespace) -> None:
                 return
 
             artist_lookup = await preload_artist_lookup(conn)
-            skip_artists = await preload_skip_artists(conn)
-            
             # Global stats
             global_metrics = {
                 "matched": 0,
@@ -1427,6 +1103,9 @@ async def run(args: argparse.Namespace) -> None:
                 "unmatched": 0,
                 "cache_hits": 0
             }
+            miss_reason_counts = Counter()
+            fuzzy_metrics = Counter()
+            fuzzy_metrics_lock = threading.Lock()
 
             progress = Progress(
                 SpinnerColumn(),
@@ -1481,52 +1160,48 @@ async def run(args: argparse.Namespace) -> None:
                     if cache_keys:
                         cache_rows = await conn.fetch(
                             """
-                            SELECT cache_key, track_id, match_score, match_method, match_reason
-                            FROM lastfm_match_cache
+                            SELECT DISTINCT ON (cache_key)
+                                   cache_key, track_id, match_score, match_method, match_reason
+                            FROM lastfm_scrobble_match
                             WHERE cache_key = ANY($1::text[])
+                            ORDER BY cache_key, matched_at DESC
                             """,
                             cache_keys,
                         )
                         cached_matches = {row["cache_key"]: row for row in cache_rows}
 
-                    match_rows: List[Tuple[int, int, float, str, str, str]] = []
-                    cache_rows: List[Tuple[str, int, float, str, str, str]] = []
-                    miss_rows: List[Tuple[int, str, str, str, Optional[float], Optional[str], Optional[str], Optional[str]]] = []
-                    skip_rows: List[Tuple[int, str, str]] = []
-                    candidate_rows: List[Tuple[int, int, float, str, str, int, str, str, str, str]] = []
+                    match_rows: List[Tuple[int, int, float, str, str, str, Optional[str]]] = []
 
                     # Define process logic closing over current batch context
                     def process_scrobble_batch(scrobble: asyncpg.Record):
                         cache_key = build_cache_key(scrobble)
                         if cache_key and cache_key in cached_matches and not args.force:
                             cached = cached_matches[cache_key]
-                            return ("cache", (scrobble["id"], cached["track_id"], cached["match_score"], cached["match_method"], cached["match_reason"], args.match_version), None, scrobble["id"], scrobble["lastfm_username"], None, None, [], cache_key)
+                            return ("cache", (scrobble["id"], cached["track_id"], cached["match_score"], cached["match_method"], cached["match_reason"], cache_key), scrobble["id"], scrobble["lastfm_username"], None, cache_key)
                         
                         if scrobble["id"] in existing_matches and not args.force:
-                            return ("skip", None, None, scrobble["id"], scrobble["lastfm_username"], None, None, [], cache_key)
+                            return ("skip", None, scrobble["id"], scrobble["lastfm_username"], None, cache_key)
                         
-                        best, miss_reason, miss_candidate, scored = match_scrobble(
+                        best, miss_reason, _miss_candidate, _scored = match_scrobble(
                             scrobble,
                             indexes,
                             artist_lookup,
                             artist_volume,
-                            skip_artists,
                             args.fuzzy,
                             args.fuzzy_title_threshold,
-                            model,
-                            args.auto_accept_threshold,
+                            fuzzy_metrics=fuzzy_metrics if args.debug_miss_reasons else None,
+                            fuzzy_metrics_lock=fuzzy_metrics_lock if args.debug_miss_reasons else None,
                         )
                         
                         if not best:
-                            return ("unmatched", None, None, scrobble["id"], scrobble["lastfm_username"], miss_reason, miss_candidate, scored, cache_key)
+                            return ("unmatched", None, scrobble["id"], scrobble["lastfm_username"], miss_reason, cache_key)
                         
                         track_id, score, method, reason = best
                         if args.dry_run:
-                            return ("matched", None, None, scrobble["id"], scrobble["lastfm_username"], None, None, scored, cache_key)
+                            return ("matched", None, scrobble["id"], scrobble["lastfm_username"], None, cache_key)
                         
-                        match_row = (scrobble["id"], track_id, score, method, reason, args.match_version)
-                        cache_row = (cache_key, track_id, score, method, reason, args.match_version) if cache_key else None
-                        return ("matched", match_row, cache_row, scrobble["id"], scrobble["lastfm_username"], None, None, scored, cache_key)
+                        match_row = (scrobble["id"], track_id, score, method, reason, cache_key)
+                        return ("matched", match_row, scrobble["id"], scrobble["lastfm_username"], None, cache_key)
 
                     # Run Batch
                     if args.workers > 1:
@@ -1538,11 +1213,8 @@ async def run(args: argparse.Namespace) -> None:
                                     res,
                                     args,
                                     global_metrics,
+                                    miss_reason_counts,
                                     match_rows,
-                                    cache_rows,
-                                    miss_rows,
-                                    skip_rows,
-                                    candidate_rows,
                                 )
                                 progress.advance(main_task_id)
                                 progress.update(main_task_id, **global_metrics)
@@ -1553,85 +1225,44 @@ async def run(args: argparse.Namespace) -> None:
                                 res,
                                 args,
                                 global_metrics,
+                                miss_reason_counts,
                                 match_rows,
-                                cache_rows,
-                                miss_rows,
-                                skip_rows,
-                                candidate_rows,
                             )
                             progress.advance(main_task_id)
                             progress.update(main_task_id, **global_metrics)
-
-                    # Fuzzy Pass for Batch
-                    if miss_rows and not args.dry_run and args.fuzzy:
-                        await _run_fuzzy_pass(conn, args, miss_rows, batch_scrobbles, match_rows, global_metrics, progress, main_task_id, console)
 
                     # Commit Batch
                     if not args.dry_run:
                         if match_rows:
                             await conn.executemany("""
-                                INSERT INTO lastfm_scrobble_match (scrobble_id, track_id, match_score, match_method, match_reason, match_version)
+                                INSERT INTO lastfm_scrobble_match (scrobble_id, track_id, match_score, match_method, match_reason, cache_key)
                                 VALUES ($1, $2, $3, $4, $5, $6)
                                 ON CONFLICT (scrobble_id) DO UPDATE SET
                                     track_id = EXCLUDED.track_id, match_score = EXCLUDED.match_score, match_method = EXCLUDED.match_method,
-                                    match_reason = EXCLUDED.match_reason, match_version = EXCLUDED.match_version, matched_at = NOW()
+                                    match_reason = EXCLUDED.match_reason, cache_key = EXCLUDED.cache_key, matched_at = NOW()
                             """, match_rows)
-                            scrobble_ids = [row[0] for row in match_rows]
-                            await conn.execute(
-                                "DELETE FROM lastfm_scrobble_miss WHERE scrobble_id = ANY($1::bigint[])",
-                                scrobble_ids,
-                            )
-                            await conn.execute(
-                                "DELETE FROM lastfm_scrobble_skip WHERE scrobble_id = ANY($1::bigint[])",
-                                scrobble_ids,
-                            )
-                        if cache_rows:
-                            await conn.executemany("""
-                                INSERT INTO lastfm_match_cache (cache_key, track_id, match_score, match_method, match_reason, match_version)
-                                VALUES ($1, $2, $3, $4, $5, $6)
-                                ON CONFLICT (cache_key) DO UPDATE SET
-                                    track_id = EXCLUDED.track_id, match_score = EXCLUDED.match_score, match_method = EXCLUDED.match_method,
-                                    match_reason = EXCLUDED.match_reason, match_version = EXCLUDED.match_version, updated_at = NOW()
-                            """, cache_rows)
-                        if candidate_rows:
-                             await conn.executemany("""
-                                INSERT INTO lastfm_match_candidate (scrobble_id, track_id, score, method, reason, rank, cache_key, candidate_artist, candidate_album, candidate_track)
-                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                                ON CONFLICT (scrobble_id, track_id) DO UPDATE SET
-                                    score = EXCLUDED.score, method = EXCLUDED.method, reason = EXCLUDED.reason, rank = EXCLUDED.rank,
-                                    cache_key = EXCLUDED.cache_key, candidate_artist = EXCLUDED.candidate_artist, candidate_album = EXCLUDED.candidate_album,
-                                    candidate_track = EXCLUDED.candidate_track, created_at = NOW()
-                            """, candidate_rows)
-                        if miss_rows:
-                             # filter out ones recovered by fuzzy
-                             miss_rows_final = [r for r in miss_rows if r is not None]
-                             if miss_rows_final:
-                                 await conn.executemany("""
-                                    INSERT INTO lastfm_scrobble_miss (scrobble_id, lastfm_username, match_version, reason, candidate_score, candidate_artist, candidate_album, candidate_track)
-                                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                                    ON CONFLICT (scrobble_id) DO UPDATE SET
-                                        lastfm_username = EXCLUDED.lastfm_username, match_version = EXCLUDED.match_version, reason = EXCLUDED.reason,
-                                        candidate_score = EXCLUDED.candidate_score, candidate_artist = EXCLUDED.candidate_artist,
-                                        candidate_album = EXCLUDED.candidate_album, candidate_track = EXCLUDED.candidate_track, attempted_at = NOW()
-                                """, miss_rows_final)
-                        if skip_rows:
-                            await conn.executemany(
-                                """
-                                INSERT INTO lastfm_scrobble_skip (scrobble_id, lastfm_username, reason)
-                                VALUES ($1, $2, $3)
-                                ON CONFLICT (scrobble_id) DO UPDATE SET
-                                    lastfm_username = EXCLUDED.lastfm_username,
-                                    reason = EXCLUDED.reason,
-                                    skipped_at = NOW()
-                                """,
-                                skip_rows,
-                            )
                     
                     # Cleanup
                     del indexes
                     del batch_scrobbles
-                    del match_rows, cache_rows, miss_rows, skip_rows, candidate_rows
+                    del match_rows
                     
+            if args.debug_miss_reasons and miss_reason_counts:
+                console.print("[bold]Unmatched breakdown[/bold]")
+                for reason, count in miss_reason_counts.most_common():
+                    console.print(f"  {reason}: {count}")
+            if args.debug_miss_reasons and args.fuzzy and fuzzy_metrics:
+                console.print("[bold]Fuzzy fallback[/bold]")
+                console.print(
+                    "  attempted: {attempted} | with_title: {with_title} | missing_title: {missing_title} | compared: {compared} | accepted: {accepted}".format(
+                        attempted=fuzzy_metrics.get("attempted", 0),
+                        with_title=fuzzy_metrics.get("with_title", 0),
+                        missing_title=fuzzy_metrics.get("missing_title", 0),
+                        compared=fuzzy_metrics.get("compared", 0),
+                        accepted=fuzzy_metrics.get("accepted", 0),
+                    )
+                )
+
             console.print(
                 f"[bold]Done[/bold]. Matched [green]{global_metrics['matched']}[/green], "
                 f"skipped [yellow]{global_metrics['skipped']}[/yellow], "
@@ -1639,8 +1270,8 @@ async def run(args: argparse.Namespace) -> None:
                 f"cache hits [blue]{global_metrics['cache_hits']}[/blue]."
             )
 
-def _handle_result(res, args, metrics, match_rows, cache_rows, miss_rows, skip_rows, candidate_rows):
-    status, match_row, cache_row, s_id, uname, miss_reason, miss_candidate, scored, cache_key = res
+def _handle_result(res, args, metrics, miss_reason_counts, match_rows):
+    status, match_row, s_id, uname, miss_reason, _cache_key = res
     if status == "cache":
         metrics["cache_hits"] += 1
         metrics["matched"] += 1
@@ -1650,155 +1281,10 @@ def _handle_result(res, args, metrics, match_rows, cache_rows, miss_rows, skip_r
     elif status == "matched":
         metrics["matched"] += 1
         if match_row: match_rows.append(match_row)
-        if cache_row: cache_rows.append(cache_row)
-        if scored and not args.dry_run:
-            _store_candidates(args, s_id, scored, cache_key, candidate_rows)
     elif status == "unmatched":
-        if miss_reason == "skipped_artist":
-            metrics["skipped"] += 1
-            if not args.dry_run:
-                skip_rows.append((s_id, uname, miss_reason))
-            return
         metrics["unmatched"] += 1
-        if not args.dry_run:
-            c_score, c_artist, c_album, c_track = (None, None, None, None)
-            if miss_reason == "below_threshold" and miss_candidate:
-                c_score, c_artist, c_album, c_track = miss_candidate
-            miss_rows.append((s_id, uname, args.match_version, miss_reason or "no_candidate_match", c_score, c_artist, c_album, c_track))
-            if scored:
-                _store_candidates(args, s_id, scored, cache_key, candidate_rows)
-
-def _store_candidates(args, scrobble_id, scored, cache_key, candidate_rows):
-    scored_sorted = sorted(scored, key=lambda row: row["score"], reverse=True)
-    best_score = scored_sorted[0]["score"] if scored_sorted else None
-    second_score = scored_sorted[1]["score"] if len(scored_sorted) > 1 else None
-    should_store = (
-        args.store_candidates
-        or (best_score is not None and best_score < args.review_threshold)
-        or (best_score is not None and best_score < args.auto_accept_threshold and second_score is not None and (best_score - second_score) <= args.review_delta)
-    )
-    if should_store:
-        candidate_cache_key = cache_key or f"scrobble:{scrobble_id}"
-        for idx, row in enumerate(scored_sorted[: args.candidate_limit], start=1):
-            candidate_rows.append((scrobble_id, row["track_id"], row["score"], row["method"], row["reason"], idx, candidate_cache_key, row["artist"], row["album"], row["title"]))
-
-async def _run_fuzzy_pass(conn, args, miss_rows, scrobbles, match_rows, metrics, progress, main_task_id, console):
-    miss_map = {row[0]: i for i, row in enumerate(miss_rows)}
-    miss_scrobbles = [s for s in scrobbles if s["id"] in miss_map]
-    
-    fuzzy_matches_found = 0
-    fuzzy_progress = Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TextColumn("recovered [green]{task.fields[recovered]}[/green]"),
-        TimeElapsedColumn(),
-        console=console,
-    )
-    
-    with fuzzy_progress:
-        task_id = fuzzy_progress.add_task(f"Fuzzy Searching {len(miss_rows)} misses", total=len(miss_scrobbles), recovered=0)
-        for scrobble in miss_scrobbles:
-            search_artist = scrobble["artist_name"]
-            title_query = scrobble["track_name"]
-            
-            if not search_artist or not title_query or len(search_artist) < 3 or len(title_query) < 3:
-                fuzzy_progress.advance(task_id)
-                continue
-
-            try:
-                rows = await conn.fetch(
-                    """
-                SELECT t.id, t.title, t.artist, t.album, t.artist_mbid, t.track_mbid, t.release_mbid,
-                       t.duration_seconds, t.album_artist, t.album_artist_mbid, t.release_type
-                FROM track t
-                LEFT JOIN track_artist ta ON ta.track_id = t.id
-                LEFT JOIN artist a ON a.mbid = ta.artist_mbid
-                WHERE t.title % $2
-                  AND (
-                      t.artist % $1
-                      OR t.album_artist % $1
-                      OR a.name % $1
-                  )
-                ORDER BY (t.title <-> $2) + (t.artist <-> $1) ASC
-                LIMIT 10
-                """,
-                    search_artist,
-                    title_query,
-                )
-            except asyncpg.PostgresError as exc:
-                console.print(f"[yellow]Skipping fuzzy DB pass: {exc}[/yellow]")
-                return
-            
-            candidates = rows
-            scored_fuzzy = []
-            for cand in candidates:
-                score, reason, _, _ = score_candidate(scrobble, cand)
-                method = classify_method(score, reason)
-                scored_fuzzy.append({"track_id": cand["id"], "score": score, "reason": reason, "method": method + "_fuzzy_db", "artist": cand["artist"], "title": cand["title"], "album": cand["album"]})
-            
-            scored_fuzzy.sort(key=lambda x: x["score"], reverse=True)
-            if scored_fuzzy and scored_fuzzy[0]["score"] >= args.auto_accept_threshold:
-                best = scored_fuzzy[0]
-                fuzzy_matches_found += 1
-                miss_idx = miss_map[scrobble["id"]]
-                miss_rows[miss_idx] = None
-                metrics["unmatched"] -= 1
-                metrics["matched"] += 1
-                match_rows.append((scrobble["id"], best["track_id"], best["score"], best["method"], best["reason"], args.match_version))
-                fuzzy_progress.update(task_id, recovered=fuzzy_matches_found)
-                fuzzy_progress.advance(task_id)
-                continue
-
-            # Third Pass
-            if not title_query or len(title_query) < 5: 
-                fuzzy_progress.advance(task_id)
-                continue 
-
-            try:
-                rows = await conn.fetch("""
-                SELECT t.id, t.title, t.artist, t.album, t.artist_mbid, t.track_mbid, t.release_mbid,
-                       t.duration_seconds, t.album_artist, t.album_artist_mbid, t.release_type
-                FROM track t
-                WHERE t.title % $1
-                ORDER BY t.title <-> $1 ASC LIMIT 10
-                """, title_query)
-            except asyncpg.PostgresError as exc:
-                console.print(f"[yellow]Skipping fuzzy DB cross-pass: {exc}[/yellow]")
-                break
-            
-            scored_cross = []
-            for cand in rows:
-                tr_artist_norm = normalize_artist(cand["artist"])
-                sc_artist_norm = normalize_artist(scrobble["artist_name"])
-                artist_match = (sc_artist_norm in tr_artist_norm or tr_artist_norm in sc_artist_norm) or (fuzz.partial_ratio(sc_artist_norm, tr_artist_norm) > 80)
-                
-                if artist_match:
-                     score, reason, _, _ = score_candidate(scrobble, cand)
-                     if "artist_name" not in reason: score += 0.4; reason += "+cross_artist_recovery"
-                     if "track_name" not in reason and "fuzzy_token_set" not in reason and fuzz.ratio(title_query, normalize_title(cand["title"])) > 80: score += 0.5; reason += "+fuzzy_title_global"
-                     score = min(score, 1.0)
-                     method = classify_method(score, reason)
-                     scored_cross.append({"track_id": cand["id"], "score": score, "reason": reason, "method": method + "_cross_artist", "artist": cand["artist"], "title": cand["title"], "album": cand["album"]})
-            
-            if scored_cross:
-                scored_cross.sort(key=lambda x: x["score"], reverse=True)
-                best = scored_cross[0]
-                if best["score"] >= args.auto_accept_threshold:
-                    fuzzy_matches_found += 1
-                    miss_idx = miss_map[scrobble["id"]]
-                    miss_rows[miss_idx] = None
-                    metrics["unmatched"] -= 1
-                    metrics["matched"] += 1
-                    match_rows.append((scrobble["id"], best["track_id"], best["score"], best["method"], best["reason"], args.match_version))
-                    fuzzy_progress.update(task_id, recovered=fuzzy_matches_found)
-            
-            fuzzy_progress.advance(task_id)
-    
-    # Update main progress matched count from findings
-    progress.update(main_task_id, **metrics)
-    console.print(f"[green]Fuzzy DB Search recovered {fuzzy_matches_found} matches![/green]")
+        if args.debug_miss_reasons:
+            miss_reason_counts[miss_reason or "no_candidate_match"] += 1
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Match Last.fm scrobbles to library tracks using local data.",
@@ -1816,11 +1302,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing matches",
     )
     parser.add_argument(
-        "--match-version",
-        default="v1",
-        help="Version label for this matching run",
-    )
-    parser.add_argument(
         "--fuzzy",
         action="store_true",
         help="Enable RapidFuzz title matching fallback",
@@ -1832,29 +1313,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum RapidFuzz ratio for title matches",
     )
     parser.add_argument(
-        "--store-candidates",
-        action="store_true",
-        help="Store candidate matches for review",
-    )
-    parser.add_argument(
-        "--candidate-limit",
-        type=int,
-        default=5,
-        help="Max candidates stored per scrobble",
-    )
-    parser.add_argument(
-        "--review-threshold",
-        type=float,
-        default=0.85,
-        help="Store candidates when top score is below this",
-    )
-    parser.add_argument(
-        "--review-delta",
-        type=float,
-        default=0.05,
-        help="Store candidates when top two scores are within this delta",
-    )
-    parser.add_argument(
         "--workers",
         type=int,
         default=1,
@@ -1864,34 +1322,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--auto-accept-threshold",
         type=float,
         default=0.95,
-        help="Auto-accept when model score is above this threshold",
+        help="Auto-accept when score is above this threshold",
     )
     parser.add_argument(
-        "--use-model",
+        "--debug-miss-reasons",
         action="store_true",
-        help="Use trained model when available",
-    )
-    parser.add_argument(
-        "--train-model",
-        action="store_true",
-        help="Train and save the model using feedback, then exit",
-    )
-    parser.add_argument(
-        "--model-name",
-        default="default",
-        help="Model name for storage and retrieval",
-    )
-    parser.add_argument(
-        "--model-epochs",
-        type=int,
-        default=10,
-        help="Training epochs for the model",
-    )
-    parser.add_argument(
-        "--model-lr",
-        type=float,
-        default=0.1,
-        help="Learning rate for the model",
+        help="Print unmatched breakdown by miss reason",
     )
     return parser
 
