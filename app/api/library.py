@@ -307,6 +307,48 @@ async def get_artists(
                 for tt_row in tt_rows
             ]
 
+            # Fetch most listened tracks (local history)
+            listened_query = """
+                SELECT
+                    t.id as local_track_id,
+                    t.title as title,
+                    t.album,
+                    t.release_date as date,
+                    t.duration_seconds,
+                    t.codec,
+                    t.bit_depth,
+                    t.sample_rate_hz,
+                    a.sha1 as art_sha1,
+                    t.release_mbid as mb_release_id,
+                    COUNT(*) as plays
+                FROM combined_playback_history h
+                JOIN track t ON h.track_id = t.id
+                JOIN track_artist ta ON ta.track_id = t.id
+                LEFT JOIN artwork a ON t.artwork_id = a.id
+                WHERE ta.artist_mbid = $1
+                GROUP BY t.id, t.title, t.album, t.release_date, t.duration_seconds,
+                         t.codec, t.bit_depth, t.sample_rate_hz, a.sha1, t.release_mbid
+                ORDER BY plays DESC
+                LIMIT 10
+            """
+            l_rows = await db.fetch(listened_query, mbid_val)
+            artist_data["most_listened"] = [
+                {
+                    "name": l_row["title"],
+                    "album": l_row["album"],
+                    "date": l_row["date"],
+                    "duration_seconds": l_row["duration_seconds"],
+                    "local_track_id": l_row["local_track_id"],
+                    "codec": l_row["codec"],
+                    "bit_depth": l_row["bit_depth"],
+                    "sample_rate_hz": l_row["sample_rate_hz"],
+                    "art_sha1": sha1_to_hex(l_row["art_sha1"]),
+                    "mb_release_id": l_row["mb_release_id"],
+                    "plays": l_row["plays"],
+                }
+                for l_row in l_rows
+            ]
+
             # Fetch singles
             singles_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
@@ -404,6 +446,7 @@ async def get_artists(
             artist_data["singles"] = []
             artist_data["similar_artists"] = []
             artist_data["genres"] = []
+            artist_data["most_listened"] = []
 
         artists.append(artist_data)
 
