@@ -2,6 +2,7 @@ services:
   jamarr_db:
     image: postgres:18.1-alpine
     container_name: jamarr_db
+    user: "postgres"
     network_mode: "host"
     command:
       - sh
@@ -21,7 +22,7 @@ services:
       POSTGRES_DB: jamarr
       HOST_IP: ${HOST_IP:-}
     volumes:
-      - /mnt/config/q-docker/jamarr/postgres:/var/lib/postgresql/data
+      - /mnt/config/q-docker/jamarr_pgdata:/var/lib/postgresql/18/docker
 
 
   jamarr:
