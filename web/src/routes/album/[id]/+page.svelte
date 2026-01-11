@@ -94,6 +94,13 @@
       ) / 60,
     );
 
+  const formatListens = (listens?: number) => {
+    if (!listens) return "0 listens";
+    if (listens >= 1000000) return `${(listens / 1000000).toFixed(1)}M listens`;
+    if (listens >= 1000) return `${(listens / 1000).toFixed(1)}K listens`;
+    return `${listens} listens`;
+  };
+
   const formatDuration = (seconds?: number | null) => {
     if (!seconds) return "—";
     const mins = Math.floor(seconds / 60);
@@ -222,6 +229,33 @@
                 </button>
               {/if}
             </div>
+            {#if data.albumMeta?.mb_release_id}
+              <div class="mt-2 text-base font-medium text-muted">
+                <a
+                  class="underline underline-offset-4 hover:text-default transition-colors"
+                  href={`/history?album_mbid=${encodeURIComponent(
+                    data.albumMeta.mb_release_id,
+                  )}&album_name=${encodeURIComponent(data.album)}`}
+                >
+                  {formatListens(data.albumMeta.listens)}
+                </a>
+              </div>
+            {:else if data.albumMeta?.album_mbid}
+              <div class="mt-2 text-base font-medium text-muted">
+                <a
+                  class="underline underline-offset-4 hover:text-default transition-colors"
+                  href={`/history?album_mbid=${encodeURIComponent(
+                    data.albumMeta.album_mbid,
+                  )}&album_name=${encodeURIComponent(data.album)}`}
+                >
+                  {formatListens(data.albumMeta.listens)}
+                </a>
+              </div>
+            {:else}
+              <div class="mt-2 text-base font-medium text-muted">
+                {formatListens(data.albumMeta?.listens)}
+              </div>
+            {/if}
           </div>
 
           <div class="space-y-2">

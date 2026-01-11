@@ -469,7 +469,8 @@ async def get_albums(
             COALESCE(
                 jsonb_agg(DISTINCT jsonb_build_object('type', el.type, 'url', el.url)) FILTER (WHERE el.url IS NOT NULL),
                 '[]'::jsonb
-            ) as external_links
+            ) as external_links,
+            COALESCE(lp.listens, 0) as listens
 
         FROM artist_album aa
         JOIN album al ON aa.album_mbid = al.mbid
@@ -477,12 +478,18 @@ async def get_albums(
         LEFT JOIN artwork art ON al.artwork_id = art.id
         LEFT JOIN artwork tart ON t.artwork_id = tart.id
         LEFT JOIN external_link el ON el.entity_type = 'album' AND (el.entity_id = al.release_group_mbid OR el.entity_id = t.release_group_mbid)
+        LEFT JOIN (
+            SELECT t.release_mbid as album_mbid, COUNT(DISTINCT h.source_id) as listens
+            FROM combined_playback_history h
+            JOIN track t ON t.id = h.track_id
+            GROUP BY t.release_mbid
+        ) lp ON lp.album_mbid = aa.album_mbid
 
         WHERE 
             ($1::text IS NULL OR aa.artist_mbid = $1)
             AND ($2::text IS NULL OR aa.album_mbid = $2)
 
-        GROUP BY aa.album_mbid, aa.type, al.mbid
+        GROUP BY aa.album_mbid, aa.type, al.mbid, lp.listens
         ORDER BY al.release_date DESC
     """
     

@@ -88,6 +88,7 @@ export interface Album {
     label?: string;
     external_links?: { type: string; url: string }[];
     artists?: { name: string; mbid?: string }[];
+    listens?: number;
 }
 
 export interface Track {

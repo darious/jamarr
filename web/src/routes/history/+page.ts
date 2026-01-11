@@ -3,6 +3,8 @@ export async function load({ fetch, url }) {
     const source = url.searchParams.get('source') || 'all';
     const artistMbid = url.searchParams.get('artist_mbid') || '';
     const artistName = url.searchParams.get('artist_name') || '';
+    const albumMbid = url.searchParams.get('album_mbid') || '';
+    const albumName = url.searchParams.get('album_name') || '';
     const rangeParam = url.searchParams.get('range');
     const fromParam = url.searchParams.get('from');
     const toParam = url.searchParams.get('to');
@@ -84,13 +86,14 @@ export async function load({ fetch, url }) {
     const page = Number.isFinite(pageParam) ? Math.max(1, pageParam) : 1;
 
     const artistQuery = artistMbid ? `&artist_mbid=${encodeURIComponent(artistMbid)}` : '';
+    const albumQuery = albumMbid ? `&album_mbid=${encodeURIComponent(albumMbid)}` : '';
     const [historyRes, statsRes] = await Promise.all([
-        fetch(`/api/history/tracks?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}&page=${page}${artistQuery}`),
-        fetch(`/api/history/stats?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}${artistQuery}`)
+        fetch(`/api/history/tracks?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}&page=${page}${artistQuery}${albumQuery}`),
+        fetch(`/api/history/stats?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}${artistQuery}${albumQuery}`)
     ]);
 
     const history = historyRes.ok ? await historyRes.json() : [];
     const stats = statsRes.ok ? await statsRes.json() : { daily: [], artists: [], albums: [], tracks: [] };
 
-    return { history, scope, source, range, dateFrom, dateTo, page, stats, artistMbid, artistName };
+    return { history, scope, source, range, dateFrom, dateTo, page, stats, artistMbid, artistName, albumMbid, albumName };
 }
