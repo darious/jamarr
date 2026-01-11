@@ -3,6 +3,8 @@
   import { goto, invalidateAll } from "$app/navigation";
   import IconButton from "$lib/components/IconButton.svelte";
   import TabButton from "$lib/components/TabButton.svelte";
+  let showScopeMenu = false;
+  let scopeMenuContainer: HTMLElement | null = null;
 
   export let data: {
     history: Array<{
@@ -59,7 +61,7 @@
     };
   };
 
-  let scope = data.scope || "all";
+  let scope = data.scope || "mine";
   let days = data.days || 7;
   $: page = data.page || 1;
   $: hasNextPage = data.history.length === 20; // Assuming limit is 20
@@ -85,6 +87,16 @@
   function handleImageError(e: Event) {
     const img = e.currentTarget as HTMLImageElement;
     img.src = "/assets/logo.png";
+  }
+
+  function handleScopeWindowClick(e: MouseEvent) {
+    if (!showScopeMenu) return;
+    if (
+      scopeMenuContainer &&
+      !scopeMenuContainer.contains(e.target as Node)
+    ) {
+      showScopeMenu = false;
+    }
   }
 
   async function playTrack(entry: (typeof data.history)[0]) {
@@ -134,6 +146,8 @@
   }
 </script>
 
+<svelte:window on:click={handleScopeWindowClick} />
+
 <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
   <div class="absolute inset-0 bg-surface-1"></div>
 </div>
@@ -148,16 +162,93 @@
       <h1 class="text-4xl md:text-6xl font-bold tracking-tight">History</h1>
     </div>
     <div class="flex items-center gap-4">
-      <div class="flex items-center gap-2">
-        <TabButton
-          active={scope === "mine"}
-          onClick={() => switchScope("mine")}
+      <div class="relative" bind:this={scopeMenuContainer}>
+        <button
+          class="px-4 py-2 text-sm font-normal text-muted hover:text-default transition-all border-b-2 border-transparent hover:border-accent min-w-[200px] justify-between flex items-center gap-2"
+          on:click={() => {
+            showScopeMenu = !showScopeMenu;
+          }}
+          aria-label="Select History Scope"
         >
-          My History
-        </TabButton>
-        <TabButton active={scope === "all"} onClick={() => switchScope("all")}>
-          All History
-        </TabButton>
+          <span class="truncate max-w-[170px]">
+            {scope === "mine" ? "My History" : "All History"}
+          </span>
+          <svg
+            class="h-4 w-4 opacity-50"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </button>
+        {#if showScopeMenu}
+          <div
+            class="absolute right-0 mt-2 w-56 rounded-lg border border-subtle surface-glass-panel shadow-xl z-50"
+          >
+            <div class="p-2 space-y-1">
+              <button
+                class="w-full px-3 py-2 text-left text-sm text-muted hover:text-default transition-all border-b border-transparent hover:border-accent flex items-center justify-between {scope ===
+                'mine'
+                  ? 'text-default border-accent'
+                  : ''}"
+                on:click={() => {
+                  switchScope("mine");
+                  showScopeMenu = false;
+                }}
+              >
+                <span>My History</span>
+                {#if scope === "mine"}
+                  <svg
+                    class="h-4 w-4 text-primary-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                {/if}
+              </button>
+              <button
+                class="w-full px-3 py-2 text-left text-sm text-muted hover:text-default transition-all border-b border-transparent hover:border-accent flex items-center justify-between {scope ===
+                'all'
+                  ? 'text-default border-accent'
+                  : ''}"
+                on:click={() => {
+                  switchScope("all");
+                  showScopeMenu = false;
+                }}
+              >
+                <span>All History</span>
+                {#if scope === "all"}
+                  <svg
+                    class="h-4 w-4 text-primary-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                {/if}
+              </button>
+            </div>
+          </div>
+        {/if}
       </div>
 
       <div class="h-6 w-px bg-white/10 mx-2"></div>
