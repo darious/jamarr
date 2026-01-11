@@ -173,11 +173,11 @@
     }
   }
 
-  const formatPlays = (plays?: number) => {
-    if (!plays) return "";
-    if (plays >= 1000000) return `${(plays / 1000000).toFixed(1)}M plays`;
-    if (plays >= 1000) return `${(plays / 1000).toFixed(1)}K plays`;
-    return `${plays} plays`;
+  const formatListens = (listens?: number) => {
+    if (!listens) return "0 listens";
+    if (listens >= 1000000) return `${(listens / 1000000).toFixed(1)}M listens`;
+    if (listens >= 1000) return `${(listens / 1000).toFixed(1)}K listens`;
+    return `${listens} listens`;
   };
 
   const formatDuration = (seconds?: number | null) => {
@@ -1046,6 +1046,9 @@
           </p>
           <p class="text-xl font-medium text-default">
             {tracks.length} tracks
+          </p>
+          <p class="text-xl font-medium text-default">
+            {formatListens(artist?.listens)}
           </p>
         </div>
       </div>

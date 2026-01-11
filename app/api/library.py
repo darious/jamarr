@@ -171,7 +171,8 @@ async def get_artists(
             MAX(CASE WHEN el.type = 'lastfm' THEN el.url END) as lastfm_url,
             MAX(CASE WHEN el.type = 'discogs' THEN el.url END) as discogs_url,
             COALESCE(ac.primary_album_count, 0) as primary_album_count,
-            COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
+            COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count,
+            COALESCE(lp.listens, 0) as listens
         FROM artist a
         LEFT JOIN artwork ar ON a.artwork_id = ar.id
         LEFT JOIN external_link el ON a.mbid = el.entity_id AND el.entity_type = 'artist'
@@ -180,9 +181,15 @@ async def get_artists(
                 artist_mbid,
                 COUNT(DISTINCT CASE WHEN type = 'primary' THEN album_mbid END) as primary_album_count,
                 COUNT(DISTINCT CASE WHEN type = 'contributor' THEN album_mbid END) as appears_on_album_count
-            FROM artist_album
-            GROUP BY artist_mbid
+                FROM artist_album
+                GROUP BY artist_mbid
         ) ac ON ac.artist_mbid = a.mbid
+        LEFT JOIN (
+            SELECT ta.artist_mbid, COUNT(DISTINCT source_id) as listens
+            FROM combined_playback_history h
+            JOIN track_artist ta ON ta.track_id = h.track_id
+            GROUP BY ta.artist_mbid
+        ) lp ON lp.artist_mbid = a.mbid
         WHERE a.name IS NOT NULL 
           AND (
               EXISTS (SELECT 1 FROM track_artist ta WHERE ta.artist_mbid = a.mbid)
@@ -211,7 +218,7 @@ async def get_artists(
             param_num += 1
 
     query += (
-        " GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio, a.sort_name, ac.primary_album_count, ac.appears_on_album_count"
+        " GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio, a.sort_name, ac.primary_album_count, ac.appears_on_album_count, lp.listens"
         " ORDER BY LOWER(a.sort_name), a.sort_name"
     )
 
@@ -261,6 +268,7 @@ async def get_artists(
             "tidal_url": row["tidal_url"],
             "primary_album_count": row["primary_album_count"],
             "appears_on_album_count": row["appears_on_album_count"],
+            "listens": row["listens"],
             "albums": [],  # Deprecated
             "background_sha1": sha1_to_hex(bg_info.get("art_sha1")),
         }
