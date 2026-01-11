@@ -4,7 +4,9 @@
   import IconButton from "$lib/components/IconButton.svelte";
   import TabButton from "$lib/components/TabButton.svelte";
   let showScopeMenu = false;
+  let showSourceMenu = false;
   let scopeMenuContainer: HTMLElement | null = null;
+  let sourceMenuContainer: HTMLElement | null = null;
 
   export let data: {
     history: Array<{
@@ -33,6 +35,7 @@
       };
     }>;
     scope: string;
+    source: string;
     days: number;
     page: number;
     stats: {
@@ -62,6 +65,7 @@
   };
 
   let scope = data.scope || "mine";
+  let source = data.source || "all";
   let days = data.days || 7;
   $: page = data.page || 1;
   $: hasNextPage = data.history.length === 20; // Assuming limit is 20
@@ -81,7 +85,13 @@
     const date = new Date(
       typeof timestamp === "number" ? timestamp * 1000 : timestamp,
     );
-    return date.toLocaleString();
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, "0");
+    const day = `${date.getDate()}`.padStart(2, "0");
+    const hours = `${date.getHours()}`.padStart(2, "0");
+    const minutes = `${date.getMinutes()}`.padStart(2, "0");
+    const seconds = `${date.getSeconds()}`.padStart(2, "0");
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 
   function handleImageError(e: Event) {
@@ -90,12 +100,20 @@
   }
 
   function handleScopeWindowClick(e: MouseEvent) {
-    if (!showScopeMenu) return;
+    const target = e.target as Node;
     if (
+      showScopeMenu &&
       scopeMenuContainer &&
-      !scopeMenuContainer.contains(e.target as Node)
+      !scopeMenuContainer.contains(target)
     ) {
       showScopeMenu = false;
+    }
+    if (
+      showSourceMenu &&
+      sourceMenuContainer &&
+      !sourceMenuContainer.contains(target)
+    ) {
+      showSourceMenu = false;
     }
   }
 
@@ -125,24 +143,36 @@
   function switchScope(nextScope: string) {
     if (scope === nextScope) return;
     scope = nextScope;
-    goto(`/history?scope=${scope}&days=${days}&page=1`, { replaceState: true }); // Reset to page 1
+    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=1`, {
+      replaceState: true,
+    }); // Reset to page 1
+  }
+
+  function switchSource(nextSource: string) {
+    if (source === nextSource) return;
+    source = nextSource;
+    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=1`, {
+      replaceState: true,
+    }); // Reset to page 1
   }
 
   function updateDays(event: Event) {
     const val = parseInt((event.currentTarget as HTMLInputElement).value, 10);
     if (!Number.isFinite(val)) return;
     days = Math.max(1, Math.min(val, 365));
-    goto(`/history?scope=${scope}&days=${days}&page=1`, { replaceState: true }); // Reset to page 1
+    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=1`, {
+      replaceState: true,
+    }); // Reset to page 1
   }
 
   function nextPage() {
     if (!hasNextPage) return;
-    goto(`/history?scope=${scope}&days=${days}&page=${page + 1}`);
+    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=${page + 1}`);
   }
 
   function prevPage() {
     if (page <= 1) return;
-    goto(`/history?scope=${scope}&days=${days}&page=${page - 1}`);
+    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=${page - 1}`);
   }
 </script>
 
@@ -231,6 +261,126 @@
               >
                 <span>All History</span>
                 {#if scope === "all"}
+                  <svg
+                    class="h-4 w-4 text-primary-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                {/if}
+              </button>
+            </div>
+          </div>
+        {/if}
+      </div>
+
+      <div class="relative" bind:this={sourceMenuContainer}>
+        <button
+          class="px-4 py-2 text-sm font-normal text-muted hover:text-default transition-all border-b-2 border-transparent hover:border-accent min-w-[200px] justify-between flex items-center gap-2"
+          on:click={() => {
+            showSourceMenu = !showSourceMenu;
+          }}
+          aria-label="Select History Source"
+        >
+          <span class="truncate max-w-[170px]">
+            {source === "local"
+              ? "Local Only"
+              : source === "lastfm"
+                ? "Last.fm Only"
+                : "All Sources"}
+          </span>
+          <svg
+            class="h-4 w-4 opacity-50"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </button>
+        {#if showSourceMenu}
+          <div
+            class="absolute right-0 mt-2 w-56 rounded-lg border border-subtle surface-glass-panel shadow-xl z-50"
+          >
+            <div class="p-2 space-y-1">
+              <button
+                class="w-full px-3 py-2 text-left text-sm text-muted hover:text-default transition-all border-b border-transparent hover:border-accent flex items-center justify-between {source ===
+                'all'
+                  ? 'text-default border-accent'
+                  : ''}"
+                on:click={() => {
+                  switchSource("all");
+                  showSourceMenu = false;
+                }}
+              >
+                <span>All Sources</span>
+                {#if source === "all"}
+                  <svg
+                    class="h-4 w-4 text-primary-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                {/if}
+              </button>
+              <button
+                class="w-full px-3 py-2 text-left text-sm text-muted hover:text-default transition-all border-b border-transparent hover:border-accent flex items-center justify-between {source ===
+                'local'
+                  ? 'text-default border-accent'
+                  : ''}"
+                on:click={() => {
+                  switchSource("local");
+                  showSourceMenu = false;
+                }}
+              >
+                <span>Local Only</span>
+                {#if source === "local"}
+                  <svg
+                    class="h-4 w-4 text-primary-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                {/if}
+              </button>
+              <button
+                class="w-full px-3 py-2 text-left text-sm text-muted hover:text-default transition-all border-b border-transparent hover:border-accent flex items-center justify-between {source ===
+                'lastfm'
+                  ? 'text-default border-accent'
+                  : ''}"
+                on:click={() => {
+                  switchSource("lastfm");
+                  showSourceMenu = false;
+                }}
+              >
+                <span>Last.fm Only</span>
+                {#if source === "lastfm"}
                   <svg
                     class="h-4 w-4 text-primary-400"
                     fill="none"
@@ -538,8 +688,17 @@
           <!-- Timestamp & Client Info -->
           <div class="flex items-center gap-4">
             <div class="flex flex-col items-end gap-1 text-xs text-muted">
-              <span class="font-medium">{formatTimestamp(entry.timestamp)}</span
-              >
+              <div class="flex items-center gap-2">
+                {#if entry.source === "lastfm"}
+                  <img
+                    src="/assets/logo-lastfm.png"
+                    alt="Last.fm"
+                    class="h-5 w-5 opacity-90"
+                  />
+                {/if}
+                <span class="font-medium">{formatTimestamp(entry.timestamp)}</span
+                >
+              </div>
               <div class="flex flex-col items-end text-[11px] text-subtle">
                 {#if entry.user}
                   <span>{entry.user.display_name || entry.user.username}</span>
