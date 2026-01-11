@@ -472,6 +472,127 @@ async def init_db():
             WHERE fts_vector IS NULL;
         """)
 
+        # ----------------------------------------------------------------------
+        # Missing migrations (019 - 020)
+        # ----------------------------------------------------------------------
+        await conn.execute("""
+            -- 019: Last.fm scrobble tables
+            CREATE TABLE IF NOT EXISTS lastfm_scrobble (
+                id BIGSERIAL PRIMARY KEY,
+                lastfm_username TEXT NOT NULL,
+                played_at TIMESTAMPTZ NOT NULL,
+                played_at_uts BIGINT,
+                track_mbid TEXT,
+                track_name TEXT NOT NULL,
+                track_url TEXT,
+                artist_mbid TEXT,
+                artist_name TEXT NOT NULL,
+                artist_url TEXT,
+                album_mbid TEXT,
+                album_name TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(lastfm_username, played_at, track_name, artist_name)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_lastfm_scrobble_user_played
+            ON lastfm_scrobble(lastfm_username, played_at DESC);
+            
+            CREATE TABLE IF NOT EXISTS lastfm_scrobble_match (
+                id BIGSERIAL PRIMARY KEY,
+                scrobble_id BIGINT NOT NULL UNIQUE,
+                track_id BIGINT NOT NULL,
+                match_score DOUBLE PRECISION NOT NULL,
+                match_method TEXT NOT NULL,
+                match_reason TEXT,
+                cache_key TEXT,
+                matched_at TIMESTAMPTZ DEFAULT NOW(),
+                FOREIGN KEY(scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE,
+                FOREIGN KEY(track_id) REFERENCES track(id) ON DELETE CASCADE
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_scrobble_match_cache_key 
+                ON lastfm_scrobble_match(cache_key) 
+                WHERE cache_key IS NOT NULL;
+            
+            CREATE INDEX IF NOT EXISTS idx_scrobble_match_track_id 
+                ON lastfm_scrobble_match(track_id);
+            
+            CREATE TABLE IF NOT EXISTS lastfm_skip_artist (
+                artist_name TEXT PRIMARY KEY,
+                reason TEXT,
+                added_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            -- 020: Combined Playback History View
+            
+            CREATE INDEX IF NOT EXISTS idx_lastfm_scrobble_played_at
+            ON lastfm_scrobble(played_at DESC);
+            
+            CREATE OR REPLACE VIEW public.combined_playback_history AS
+            WITH lastfm_rows AS (
+                SELECT
+                    'lastfm'::text AS source,
+                    lsm.id AS source_id,
+                    lsm.track_id,
+                    ls.played_at,
+                    u.id AS user_id,
+                    ls.lastfm_username,
+                    NULL::text AS client_id,
+                    NULL::text AS hostname,
+                    NULL::text AS client_ip,
+                    lsm.match_score,
+                    lsm.match_method
+                FROM lastfm_scrobble_match lsm
+                JOIN lastfm_scrobble ls ON ls.id = lsm.scrobble_id
+                JOIN "user" u on ls.lastfm_username = u.lastfm_username
+            ),
+            local_rows AS (
+                SELECT
+                    'local'::text AS source,
+                    ph.id AS source_id,
+                    ph.track_id,
+                    ph."timestamp" AS played_at,
+                    ph.user_id,
+                    NULL::text AS lastfm_username,
+                    ph.client_id,
+                    ph.hostname,
+                    ph.client_ip,
+                    NULL::double precision AS match_score,
+                    NULL::text AS match_method
+                FROM playback_history ph
+            ),
+            lastfm_filtered AS (
+                SELECT lf.*
+                FROM lastfm_rows lf
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM playback_history lo
+                    WHERE lo.track_id = lf.track_id
+                      AND lo."timestamp" BETWEEN lf.played_at - INTERVAL '5 seconds'
+                                              AND lf.played_at + INTERVAL '5 seconds'
+                )
+            )
+            SELECT * FROM local_rows
+            UNION ALL
+            SELECT * FROM lastfm_filtered;
+            
+            -- Materialized view definition (simplified for init_db, can match view for now)
+            -- Note: Using correct definition with UNION ALL
+            -- To avoid complexity, we drop if exists and recreate
+            DROP MATERIALIZED VIEW IF EXISTS public.combined_playback_history_mat;
+            CREATE MATERIALIZED VIEW public.combined_playback_history_mat AS
+            SELECT * FROM public.combined_playback_history;
+            
+            CREATE UNIQUE INDEX IF NOT EXISTS combined_playback_history_mat_pk
+            ON public.combined_playback_history_mat (source, source_id);
+            
+            CREATE INDEX IF NOT EXISTS combined_playback_history_mat_played_at
+            ON public.combined_playback_history_mat (played_at DESC);
+            
+            CREATE INDEX IF NOT EXISTS combined_playback_history_mat_track_played
+            ON public.combined_playback_history_mat (track_id, played_at DESC);
+        """)
+
         print("✅ PostgreSQL database initialized successfully")
 
 

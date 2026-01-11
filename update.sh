@@ -16,22 +16,38 @@ fi
 export HOST_IP
 echo "Using HOST_IP=${HOST_IP}"
 
-echo "[1/6] Stopping app container..."
+echo "[1/7] Stopping app container..."
 ${COMPOSE} stop jamarr || true
 
-echo "[2/6] Updating repository..."
+echo "[2/7] Updating repository..."
 git pull --rebase
 
-echo "[3/6] Ensuring database container is up..."
+echo "[3/7] Ensuring database container is up..."
 ${COMPOSE} up -d jamarr_db
 
-echo "[4/6] Building latest application image..."
+echo "[4/7] Building latest application image..."
 ${COMPOSE} build jamarr
 
-echo "[5/6] Applying database migrations..."
+echo "[5/7] Backing up database if container is running..."
+DB_CONTAINER="$(${COMPOSE} ps -q jamarr_db)"
+if [[ -n "${DB_CONTAINER}" ]] && [[ "$(docker inspect -f '{{.State.Running}}' "${DB_CONTAINER}")" == "true" ]]; then
+  BACKUP_DIR="/mnt/config/q-docker/jamarr"
+  mkdir -p "${BACKUP_DIR}"
+  BACKUP_PATH="${BACKUP_DIR}/jamarr_rescue_$(date +%F_%H%M%S).sql.gz"
+  if ! docker exec -t jamarr_db pg_dump -h 127.0.0.1 -p 8110 -U jamarr -d jamarr --no-owner --no-privileges \
+    | gzip -c > "${BACKUP_PATH}"; then
+    echo "Database backup failed; aborting." >&2
+    exit 1
+  fi
+  echo "Database backup created at ${BACKUP_PATH}"
+else
+  echo "Database container not running; skipping backup."
+fi
+
+echo "[6/7] Applying database migrations..."
 ${COMPOSE} run --rm jamarr python scripts/apply_migrations.py
 
-echo "[6/6] Starting app container..."
+echo "[7/7] Starting app container..."
 ${COMPOSE} up -d jamarr
 
 echo "✅ Deploy complete"
