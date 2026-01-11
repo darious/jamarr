@@ -1047,9 +1047,20 @@
           <p class="text-xl font-medium text-default">
             {tracks.length} tracks
           </p>
-          <p class="text-xl font-medium text-default">
-            {formatListens(artist?.listens)}
-          </p>
+          {#if artist?.mbid}
+            <a
+              class="text-xl font-medium text-default underline underline-offset-4 hover:text-primary transition-colors"
+              href={`/history?artist_mbid=${encodeURIComponent(
+                artist.mbid,
+              )}&artist_name=${encodeURIComponent(artist?.name || data.name)}`}
+            >
+              {formatListens(artist?.listens)}
+            </a>
+          {:else}
+            <p class="text-xl font-medium text-default">
+              {formatListens(artist?.listens)}
+            </p>
+          {/if}
         </div>
       </div>
 

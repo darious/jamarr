@@ -16,6 +16,7 @@ async def get_playback_history(
     response: Response,
     scope: str = "all",
     source: str = "all",
+    artist_mbid: str | None = None,
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
     page: int = 1,
@@ -60,6 +61,10 @@ async def get_playback_history(
             where_clauses.append(f"h.source = ${len(params_list) + 1}")
             params_list.append(source)
 
+        if artist_mbid:
+            where_clauses.append(f"ta.artist_mbid = ${len(params_list) + 1}")
+            params_list.append(artist_mbid)
+
         where_sql = "WHERE " + " AND ".join(where_clauses)
 
         page = max(1, page)
@@ -72,6 +77,7 @@ async def get_playback_history(
         limit_idx = len(params_list) - 1
         offset_idx = len(params_list)
 
+        artist_join = "JOIN track_artist ta ON ta.track_id = t.id" if artist_mbid else ""
         query = f"""
             SELECT 
                 h.source_id as id, h.played_at as timestamp, h.client_ip, h.client_id, h.user_id,
@@ -83,6 +89,7 @@ async def get_playback_history(
                 , h.source
             FROM combined_playback_history h
             JOIN track t ON h.track_id = t.id
+            {artist_join}
             LEFT JOIN artwork a ON t.artwork_id = a.id
             LEFT JOIN "user" u ON u.id = h.user_id
             {where_sql}
@@ -132,6 +139,7 @@ async def get_playback_history_stats(
     request: Request,
     scope: str = "all",
     source: str = "all",
+    artist_mbid: str | None = None,
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
 ):
@@ -167,11 +175,20 @@ async def get_playback_history_stats(
         if source != "all":
             where_clauses.append(f"h.source = ${len(params) + 1}")
             params.append(source)
+        if artist_mbid:
+            where_clauses.append(f"ta.artist_mbid = ${len(params) + 1}")
+            params.append(artist_mbid)
         where_sql = " AND ".join(where_clauses)
 
+        daily_artist_join = (
+            "JOIN track t ON t.id = h.track_id JOIN track_artist ta ON ta.track_id = t.id"
+            if artist_mbid
+            else ""
+        )
         daily_query = f"""
             SELECT DATE(played_at) as day, COUNT(*) as plays
             FROM combined_playback_history h
+            {daily_artist_join}
             WHERE {where_sql}
             GROUP BY day
             ORDER BY day DESC
@@ -179,6 +196,7 @@ async def get_playback_history_stats(
         rows = await db.fetch(daily_query, *params)
         daily = [{"day": row[0], "plays": row[1]} for row in rows]
 
+        artist_join = "JOIN track_artist ta ON ta.track_id = t.id" if artist_mbid else ""
         artists_query = f"""
             SELECT 
                 COALESCE(NULLIF(t.album_artist, ''), t.artist) as artist_name, 
@@ -187,6 +205,7 @@ async def get_playback_history_stats(
                 COUNT(*) as plays
             FROM combined_playback_history h
             JOIN track t ON t.id = h.track_id
+            {artist_join}
             LEFT JOIN artwork a ON t.artwork_id = a.id
             WHERE {where_sql}
             GROUP BY COALESCE(NULLIF(t.album_artist, ''), t.artist)
@@ -214,6 +233,7 @@ async def get_playback_history_stats(
                 COUNT(*) as plays
             FROM combined_playback_history h
             JOIN track t ON t.id = h.track_id
+            {artist_join}
             LEFT JOIN artwork a ON t.artwork_id = a.id
             WHERE {where_sql}
             GROUP BY t.album, COALESCE(NULLIF(t.album_artist, ''), t.artist)
@@ -237,6 +257,7 @@ async def get_playback_history_stats(
         SELECT t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
         FROM combined_playback_history h
         JOIN track t ON t.id = h.track_id
+        {artist_join}
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE {where_sql}
             GROUP BY t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id
