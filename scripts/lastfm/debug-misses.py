@@ -56,7 +56,8 @@ async def main():
         import re
 
         def _normalize_basic(value):
-            if not value: return ""
+            if not value:
+                return ""
             value = "".join(c for c in unicodedata.normalize("NFKD", value) if not unicodedata.combining(c))
             value = value.lower()
             value = value.replace("&", "and").replace("+", "and")
@@ -69,7 +70,8 @@ async def main():
             return " ".join(value.split())
 
         def normalize_title(value):
-             if not value: return ""
+             if not value:
+                 return ""
              stripped = value # match-lastfm logic simplified for check
              # copy relevant parts from match-lastfm.py if needed, but basic norm is usually the culprit
              return _normalize_basic(stripped)
