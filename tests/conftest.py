@@ -56,28 +56,38 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
     We truncate tables to ensure a clean state for each test.
     """
     async for conn in get_db():
-        # Clean relevant tables
-        await conn.execute("""
-            TRUNCATE TABLE 
-                session,
-                client_session,
-                renderer_state,
-                playback_history,
-                track,
-                artist,
-                album,
-                missing_album,
-                artwork,
-                renderer,
-                top_track,
-                similar_artist,
-                artist_genre,
-                external_link,
-                image_map,
-                track_artist,
-                artist_album
-            RESTART IDENTITY CASCADE;
-        """)
+        # Clean relevant tables (only if they exist)
+        table_rows = await conn.fetch(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        )
+        existing = {row["tablename"] for row in table_rows}
+        tables = [
+            "session",
+            "client_session",
+            "renderer_state",
+            "playback_history",
+            "track",
+            "artist",
+            "album",
+            "missing_album",
+            "artwork",
+            "renderer",
+            "top_track",
+            "similar_artist",
+            "artist_genre",
+            "external_link",
+            "image_map",
+            "lastfm_scrobble",
+            "lastfm_scrobble_match",
+            "lastfm_skip_artist",
+            "track_artist",
+            "artist_album",
+        ]
+        truncate = [t for t in tables if t in existing]
+        if truncate:
+            await conn.execute(
+                f"TRUNCATE TABLE {', '.join(truncate)} RESTART IDENTITY CASCADE;"
+            )
         
         # Reset ScanManager
         from app.scanner.scan_manager import ScanManager

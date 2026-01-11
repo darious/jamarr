@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import asyncpg
 from rapidfuzz import fuzz
