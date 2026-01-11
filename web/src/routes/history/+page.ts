@@ -1,5 +1,5 @@
 export async function load({ fetch, url }) {
-    const scope = url.searchParams.get('scope') || 'all';
+    const scope = url.searchParams.get('scope') || 'mine';
     const daysParam = parseInt(url.searchParams.get('days') || '7', 10);
     const days = Number.isFinite(daysParam) ? Math.max(1, Math.min(daysParam, 365)) : 7;
 
