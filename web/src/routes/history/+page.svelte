@@ -5,6 +5,7 @@
   import { currentUser } from "$lib/stores/user";
   import IconButton from "$lib/components/IconButton.svelte";
   import TabButton from "$lib/components/TabButton.svelte";
+  import HistoryChart from "$lib/components/HistoryChart.svelte";
   let showScopeMenu = false;
   let showSourceMenu = false;
   let showRangeMenu = false;
@@ -98,6 +99,113 @@
     ...(data.stats.daily?.map((d) => Number(d.plays) || 0) || [1]),
     1,
   );
+
+  function getRangeDaysCount() {
+    if (!dateFrom || !dateTo) return 0;
+    const fromDate = new Date(`${dateFrom}T00:00:00`);
+    const toDate = new Date(`${dateTo}T00:00:00`);
+    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+      return 0;
+    }
+    return Math.round((toDate.getTime() - fromDate.getTime()) / 86400000) + 1;
+  }
+
+  function formatMonthLabel(value: string) {
+    const [year, month] = value.split("-");
+    const monthIndex = Number(month) - 1;
+    const names = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const name = names[monthIndex] || "???";
+    return `${name} ${year}`;
+  }
+
+  function getChartRows(
+    dailyStats: typeof data.stats.daily,
+    currentFrom: string,
+    currentTo: string,
+  ) {
+    const statsMap = new Map(
+      (dailyStats || []).map((d) => [d.day, Number(d.plays)]),
+    );
+    const rangeDays = getRangeDaysCount();
+
+    if (rangeDays > 365) {
+      // Group by year for long ranges (> 365 days)
+      const grouped = new Map<string, number>();
+      for (const row of dailyStats || []) {
+        const year = row.day.slice(0, 4);
+        grouped.set(year, (grouped.get(year) || 0) + Number(row.plays));
+      }
+      return Array.from(grouped.entries())
+        .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+        .map(([year, plays]) => ({
+          label: year,
+          plays,
+        }));
+    }
+
+    if (rangeDays > 60) {
+      // Group by month for medium ranges (> 60 days)
+      const grouped = new Map<string, number>();
+      for (const row of dailyStats || []) {
+        const month = row.day.slice(0, 7);
+        grouped.set(month, (grouped.get(month) || 0) + Number(row.plays));
+      }
+      return Array.from(grouped.entries())
+        .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+        .map(([month, plays]) => ({
+          label: formatMonthLabel(month),
+          plays,
+        }));
+    }
+
+    // Daily view: backfill missing days
+    const rows = [];
+    if (currentFrom && currentTo) {
+      const [y1, m1, d1] = currentFrom.split("-").map(Number);
+      const [y2, m2, d2] = currentTo.split("-").map(Number);
+      const current = new Date(y1, m1 - 1, d1);
+      const end = new Date(y2, m2 - 1, d2);
+
+      // Safety break to prevent infinite loops
+      let safety = 0;
+      while (current <= end && safety < 1000) {
+        const y = current.getFullYear();
+        const m = String(current.getMonth() + 1).padStart(2, "0");
+        const d = String(current.getDate()).padStart(2, "0");
+        const dayStr = `${y}-${m}-${d}`;
+
+        rows.push({
+          label: dayStr,
+          plays: statsMap.get(dayStr) || 0,
+        });
+
+        current.setDate(current.getDate() + 1);
+        safety++;
+      }
+      return rows.reverse();
+    }
+
+    // Fallback
+    return (dailyStats || []).map((row) => ({
+      label: row.day,
+      plays: Number(row.plays),
+    }));
+  }
+
+  $: chartRows = getChartRows(data.stats.daily, dateFrom, dateTo);
 
   function formatTime(seconds: number) {
     if (!seconds) return "—";
@@ -392,7 +500,7 @@
 </div>
 
 <section
-  class="relative z-10 mx-auto flex w-full max-w-[1700px] flex-col gap-8 px-8 py-10"
+  class="relative z-10 mx-auto flex w-[calc(100vw-50px)] flex-col gap-8 px-2 py-10"
 >
   <div
     class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
@@ -713,16 +821,10 @@
                 </div>
               </div>
               <div class="flex items-center justify-end gap-2 pt-2">
-                <TabButton
-                  className="text-xs"
-                  onClick={cancelRange}
-                >
+                <TabButton className="text-xs" onClick={cancelRange}>
                   Cancel
                 </TabButton>
-                <TabButton
-                  className="text-xs"
-                  onClick={applyRange}
-                >
+                <TabButton className="text-xs" onClick={applyRange}>
                   Apply
                 </TabButton>
               </div>
@@ -753,56 +855,43 @@
   </div>
 
   <!-- Stats -->
-  <div class="glass-panel space-y-8 p-6">
-    <div class="flex flex-col gap-3">
+  <div class="grid gap-6 lg:grid-cols-[35%_1fr] items-stretch">
+    <div class="glass-panel p-6 flex flex-col h-full">
       <div class="flex items-center justify-between">
         <div>
           <p class="text-sm text-subtle">Playback trend</p>
           <h2 class="text-xl font-semibold text-default">
-            Plays per day ({getRangeLabel(data.range, data.dateFrom, data.dateTo)})
+            Plays per day ({getRangeLabel(
+              data.range,
+              data.dateFrom,
+              data.dateTo,
+            )})
           </h2>
         </div>
       </div>
-      {#if data.stats.daily.length === 0}
-        <p class="text-muted text-sm">No data.</p>
+      {#if chartRows.length === 0}
+        <p class="text-muted text-sm mt-4">No data.</p>
       {:else}
-        {#key `${scope}-${source}-${dateFrom}-${dateTo}-daily`}
-          <div class="space-y-2">
-            {#each data.stats.daily as dayStat (dayStat.day)}
-              <div class="flex items-center gap-3 text-sm text-default/80">
-                <span class="w-28 text-muted font-mono">{dayStat.day}</span>
-                <div
-                  class="flex-1 h-2.5 rounded-full bg-surface-3 overflow-hidden border border-subtle"
-                >
-                  <div
-                    class="h-full rounded-full bg-gradient-to-r from-primary/70 via-primary to-default/80 transition-[width] duration-500"
-                    style:width="{(dayStat.plays / dailyMax) * 100}%"
-                  ></div>
-                </div>
-                <span class="w-12 text-right tabular-nums text-muted">
-                  {dayStat.plays}
-                </span>
-              </div>
-            {/each}
-          </div>
-        {/key}
+        <div class="mt-4 h-[500px]">
+          <HistoryChart rows={chartRows} />
+        </div>
       {/if}
     </div>
 
-    <div class="grid md:grid-cols-3 gap-6">
+    <div class="grid gap-6 lg:grid-cols-3">
       <div
-        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur"
+        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur h-full"
       >
         <h3 class="text-md font-semibold mb-3 text-default">Top Artists</h3>
         {#if data.stats.artists.length === 0}
           <p class="text-muted text-sm">No data.</p>
         {:else}
           <div class="space-y-2 text-sm">
-            {#each data.stats.artists as artist (artist.artist)}
+            {#each data.stats.artists.slice(0, 10) as artist (artist.artist)}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="h-10 w-10 rounded bg-surface-3 overflow-hidden flex-shrink-0"
+                    class="h-9 w-9 rounded bg-surface-3 overflow-hidden flex-shrink-0"
                   >
                     <img
                       src={artist.art_sha1
@@ -826,18 +915,18 @@
         {/if}
       </div>
       <div
-        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur"
+        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur h-full"
       >
         <h3 class="text-md font-semibold mb-3 text-default">Top Albums</h3>
         {#if data.stats.albums.length === 0}
           <p class="text-muted text-sm">No data.</p>
         {:else}
           <div class="space-y-2 text-sm">
-            {#each data.stats.albums as album (album.album + album.artist)}
+            {#each data.stats.albums.slice(0, 10) as album (album.album + album.artist)}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="h-10 w-10 rounded bg-surface-3 overflow-hidden flex-shrink-0"
+                    class="h-9 w-9 rounded bg-surface-3 overflow-hidden flex-shrink-0"
                   >
                     <img
                       src={album.art_sha1
@@ -871,18 +960,18 @@
         {/if}
       </div>
       <div
-        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur"
+        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur h-full"
       >
         <h3 class="text-md font-semibold mb-3 text-default">Top Tracks</h3>
         {#if data.stats.tracks.length === 0}
           <p class="text-muted text-sm">No data.</p>
         {:else}
           <div class="space-y-2 text-sm">
-            {#each data.stats.tracks as track (track.id)}
+            {#each data.stats.tracks.slice(0, 10) as track (track.id)}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="h-10 w-10 rounded bg-surface-3 overflow-hidden flex-shrink-0"
+                    class="h-9 w-9 rounded bg-surface-3 overflow-hidden flex-shrink-0"
                   >
                     <img
                       src={track.art_sha1
@@ -918,144 +1007,150 @@
     </div>
   </div>
 
-  <div class="glass-panel divide-y divide-subtle">
-    {#if data.history.length === 0}
-      <div class="p-6 text-muted">No playback history yet.</div>
-    {:else}
-      {#each data.history as entry}
-        <div
-          class="group flex items-center gap-4 px-4 py-3 hover:bg-surface-2 transition-colors"
-        >
-          <!-- Artwork -->
+  <div class="mx-auto w-full max-w-[1200px]">
+    <div class="glass-panel divide-y divide-subtle">
+      {#if data.history.length === 0}
+        <div class="p-6 text-muted">No playback history yet.</div>
+      {:else}
+        {#each data.history as entry}
           <div
-            class="h-14 w-14 flex-shrink-0 rounded bg-surface-3 overflow-hidden relative"
+            class="group flex items-center gap-4 px-4 py-3 hover:bg-surface-2 transition-colors"
           >
-            <img
-              src={entry.track.art_sha1
-                ? `/api/art/file/${entry.track.art_sha1}?max_size=60`
-                : "/assets/logo.png"}
-              alt="Art"
-              class="h-full w-full object-cover"
-              on:error={handleImageError}
-            />
+            <!-- Artwork -->
             <div
-              class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              class="h-14 w-14 flex-shrink-0 rounded bg-surface-3 overflow-hidden relative"
             >
-              <div class="opacity-0 group-hover:opacity-100 transition-opacity">
-                <IconButton
-                  variant="ghost"
-                  onClick={() => playTrack(entry)}
-                  title="Play"
+              <img
+                src={entry.track.art_sha1
+                  ? `/api/art/file/${entry.track.art_sha1}?max_size=60`
+                  : "/assets/logo.png"}
+                alt="Art"
+                class="h-full w-full object-cover"
+                on:error={handleImageError}
+              />
+              <div
+                class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <div
+                  class="opacity-0 group-hover:opacity-100 transition-opacity"
                 >
-                  <svg
-                    class="h-6 w-6 ml-0.5 text-white"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                  <IconButton
+                    variant="ghost"
+                    onClick={() => playTrack(entry)}
+                    title="Play"
                   >
-                </IconButton>
+                    <svg
+                      class="h-6 w-6 ml-0.5 text-white"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                    >
+                  </IconButton>
+                </div>
               </div>
             </div>
-          </div>
 
-          <!-- Track Info -->
-          <div class="flex-1 min-w-0">
-            <p
-              class="truncate text-sm font-semibold text-default group-hover:text-default"
-            >
-              {entry.track.title}
-            </p>
-            <div
-              class="flex items-center gap-2 text-xs text-muted mt-0.5 flex-wrap"
-            >
-              <a
-                href={`/artist/${encodeURIComponent(entry.track.artist)}`}
-                class="hover:text-default hover:underline"
-                on:click|stopPropagation
+            <!-- Track Info -->
+            <div class="flex-1 min-w-0">
+              <p
+                class="truncate text-sm font-semibold text-default group-hover:text-default"
               >
-                {entry.track.artist}
-              </a>
-              {#if entry.track.album}
-                <span class="text-subtle">•</span>
+                {entry.track.title}
+              </p>
+              <div
+                class="flex items-center gap-2 text-xs text-muted mt-0.5 flex-wrap"
+              >
                 <a
-                  href={entry.track.mb_release_id
-                    ? `/album/${entry.track.mb_release_id}`
-                    : "#"}
+                  href={`/artist/${encodeURIComponent(entry.track.artist)}`}
                   class="hover:text-default hover:underline"
                   on:click|stopPropagation
                 >
-                  {entry.track.album}
+                  {entry.track.artist}
                 </a>
-              {/if}
-              {#if entry.track.codec}
-                <span class="text-subtle">•</span>
-                <span class="uppercase">{entry.track.codec}</span>
-              {/if}
-              {#if entry.track.bit_depth && entry.track.sample_rate_hz}
-                <span class="text-subtle">•</span>
-                <span>
-                  {entry.track.bit_depth}bit / {(
-                    entry.track.sample_rate_hz / 1000
-                  ).toFixed(1)}kHz
-                </span>
-              {/if}
-            </div>
-          </div>
-
-          <!-- Timestamp & Client Info -->
-          <div class="flex items-center gap-4">
-            <div class="flex flex-col items-end gap-1 text-xs text-muted">
-              <div class="flex items-center gap-2">
-                {#if entry.source === "lastfm"}
-                  <img
-                    src="/assets/logo-lastfm.png"
-                    alt="Last.fm"
-                    class="h-5 w-5 opacity-90"
-                  />
+                {#if entry.track.album}
+                  <span class="text-subtle">•</span>
+                  <a
+                    href={entry.track.mb_release_id
+                      ? `/album/${entry.track.mb_release_id}`
+                      : "#"}
+                    class="hover:text-default hover:underline"
+                    on:click|stopPropagation
+                  >
+                    {entry.track.album}
+                  </a>
                 {/if}
-                <span class="font-medium">{formatTimestamp(entry.timestamp)}</span
-                >
-              </div>
-              <div class="flex flex-col items-end text-[11px] text-subtle">
-                {#if entry.user}
-                  <span>{entry.user.display_name || entry.user.username}</span>
-                {:else}
-                  <span>Unknown user</span>
+                {#if entry.track.codec}
+                  <span class="text-subtle">•</span>
+                  <span class="uppercase">{entry.track.codec}</span>
                 {/if}
-                <span>{entry.client_ip}</span>
-                <span class="text-[10px] text-muted/60">
-                  {entry.client_id || "Unknown Client"}
-                </span>
+                {#if entry.track.bit_depth && entry.track.sample_rate_hz}
+                  <span class="text-subtle">•</span>
+                  <span>
+                    {entry.track.bit_depth}bit / {(
+                      entry.track.sample_rate_hz / 1000
+                    ).toFixed(1)}kHz
+                  </span>
+                {/if}
               </div>
             </div>
 
-            <!-- Duration -->
-            <div
-              class="w-14 text-right text-xs text-muted font-medium tabular-nums"
-            >
-              {formatTime(entry.track.duration_seconds)}
+            <!-- Timestamp & Client Info -->
+            <div class="flex items-center gap-4">
+              <div class="flex flex-col items-end gap-1 text-xs text-muted">
+                <div class="flex items-center gap-2">
+                  {#if entry.source === "lastfm"}
+                    <img
+                      src="/assets/logo-lastfm.png"
+                      alt="Last.fm"
+                      class="h-5 w-5 opacity-90"
+                    />
+                  {/if}
+                  <span class="font-medium"
+                    >{formatTimestamp(entry.timestamp)}</span
+                  >
+                </div>
+                <div class="flex flex-col items-end text-[11px] text-subtle">
+                  {#if entry.user}
+                    <span>{entry.user.display_name || entry.user.username}</span
+                    >
+                  {:else}
+                    <span>Unknown user</span>
+                  {/if}
+                  <span>{entry.client_ip}</span>
+                  <span class="text-[10px] text-muted/60">
+                    {entry.client_id || "Unknown Client"}
+                  </span>
+                </div>
+              </div>
+
+              <!-- Duration -->
+              <div
+                class="w-14 text-right text-xs text-muted font-medium tabular-nums"
+              >
+                {formatTime(entry.track.duration_seconds)}
+              </div>
             </div>
           </div>
-        </div>
-      {/each}
-    {/if}
-  </div>
+        {/each}
+      {/if}
+    </div>
 
-  <!-- Pagination -->
-  <div class="flex items-center justify-between p-4 glass-panel">
-    <button
-      class="px-4 py-2 text-sm font-medium rounded-lg hover:bg-surface-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-      disabled={page <= 1}
-      on:click={prevPage}
-    >
-      Previous
-    </button>
-    <span class="text-sm text-subtle">Page {page}</span>
-    <button
-      class="px-4 py-2 text-sm font-medium rounded-lg hover:bg-surface-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-      disabled={!hasNextPage}
-      on:click={nextPage}
-    >
-      Next
-    </button>
+    <!-- Pagination -->
+    <div class="mt-6 flex items-center justify-between p-4 glass-panel">
+      <button
+        class="px-4 py-2 text-sm font-medium rounded-lg hover:bg-surface-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        disabled={page <= 1}
+        on:click={prevPage}
+      >
+        Previous
+      </button>
+      <span class="text-sm text-subtle">Page {page}</span>
+      <button
+        class="px-4 py-2 text-sm font-medium rounded-lg hover:bg-surface-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        disabled={!hasNextPage}
+        on:click={nextPage}
+      >
+        Next
+      </button>
+    </div>
   </div>
 </section>

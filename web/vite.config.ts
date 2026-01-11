@@ -3,6 +3,12 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [sveltekit()],
+  ssr: {
+    noExternal: ['layercake']
+  },
+  optimizeDeps: {
+    include: ['layercake']
+  },
   server: {
     port: 5173,
     proxy: {
