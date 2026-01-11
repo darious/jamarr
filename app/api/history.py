@@ -17,6 +17,7 @@ async def get_playback_history(
     scope: str = "all",
     source: str = "all",
     artist_mbid: str | None = None,
+    album_mbid: str | None = None,
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
     page: int = 1,
@@ -64,6 +65,12 @@ async def get_playback_history(
         if artist_mbid:
             where_clauses.append(f"ta.artist_mbid = ${len(params_list) + 1}")
             params_list.append(artist_mbid)
+
+        if album_mbid:
+            where_clauses.append(
+                f"(t.release_mbid = ${len(params_list) + 1} OR t.release_group_mbid = ${len(params_list) + 1})"
+            )
+            params_list.append(album_mbid)
 
         where_sql = "WHERE " + " AND ".join(where_clauses)
 
@@ -140,6 +147,7 @@ async def get_playback_history_stats(
     scope: str = "all",
     source: str = "all",
     artist_mbid: str | None = None,
+    album_mbid: str | None = None,
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
 ):
@@ -178,13 +186,19 @@ async def get_playback_history_stats(
         if artist_mbid:
             where_clauses.append(f"ta.artist_mbid = ${len(params) + 1}")
             params.append(artist_mbid)
+        if album_mbid:
+            where_clauses.append(
+                f"(t.release_mbid = ${len(params) + 1} OR t.release_group_mbid = ${len(params) + 1})"
+            )
+            params.append(album_mbid)
         where_sql = " AND ".join(where_clauses)
 
-        daily_artist_join = (
-            "JOIN track t ON t.id = h.track_id JOIN track_artist ta ON ta.track_id = t.id"
-            if artist_mbid
-            else ""
-        )
+        needs_track_join = bool(artist_mbid or album_mbid)
+        daily_artist_join = ""
+        if needs_track_join:
+            daily_artist_join = "JOIN track t ON t.id = h.track_id"
+            if artist_mbid:
+                daily_artist_join += " JOIN track_artist ta ON ta.track_id = t.id"
         daily_query = f"""
             SELECT DATE(played_at) as day, COUNT(*) as plays
             FROM combined_playback_history h

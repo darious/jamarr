@@ -72,6 +72,8 @@
     };
     artistMbid?: string;
     artistName?: string;
+    albumMbid?: string;
+    albumName?: string;
   };
 
   let scope = data.scope || "mine";
@@ -85,6 +87,8 @@
   let restoredFilters = false;
   let artistMbid = data.artistMbid || "";
   let artistName = data.artistName || "";
+  let albumMbid = data.albumMbid || "";
+  let albumName = data.albumName || "";
   $: page = data.page || 1;
   $: if (data) {
     scope = data.scope || "mine";
@@ -94,6 +98,8 @@
     dateTo = data.dateTo;
     artistMbid = data.artistMbid || "";
     artistName = data.artistName || "";
+    albumMbid = data.albumMbid || "";
+    albumName = data.albumName || "";
     if (!showRangeMenu) {
       pendingRange = range;
       pendingFrom = dateFrom;
@@ -294,6 +300,7 @@
     to: string;
     page: number;
     includeArtist?: boolean;
+    includeAlbum?: boolean;
   }) {
     const params = new URLSearchParams();
     params.set("scope", opts.scope);
@@ -305,6 +312,10 @@
     if (opts.includeArtist !== false && artistMbid) {
       params.set("artist_mbid", artistMbid);
       if (artistName) params.set("artist_name", artistName);
+    }
+    if (opts.includeAlbum !== false && albumMbid) {
+      params.set("album_mbid", albumMbid);
+      if (albumName) params.set("album_name", albumName);
     }
     return `/history?${params.toString()}`;
   }
@@ -319,6 +330,21 @@
         to: dateTo,
         page: 1,
         includeArtist: false,
+      }),
+      { replaceState: true },
+    );
+  }
+
+  function clearAlbumFilter() {
+    goto(
+      buildHistoryUrl({
+        scope,
+        source,
+        range,
+        from: dateFrom,
+        to: dateTo,
+        page: 1,
+        includeAlbum: false,
       }),
       { replaceState: true },
     );
@@ -610,6 +636,22 @@
               on:click={clearArtistFilter}
               aria-label="Clear artist filter"
               title="Clear artist filter"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      {/if}
+      {#if albumMbid}
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-muted">Album:</span>
+          <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-default">
+            {albumName || albumMbid}
+            <button
+              class="text-muted hover:text-default transition-colors"
+              on:click={clearAlbumFilter}
+              aria-label="Clear album filter"
+              title="Clear album filter"
             >
               ×
             </button>
