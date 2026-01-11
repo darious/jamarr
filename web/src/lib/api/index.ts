@@ -113,6 +113,7 @@ export interface Track {
     album_artist_mbid?: string | null;
     album_mbid?: string | null;
     popularity?: number;
+    plays?: number;
     artists?: { name: string; mbid?: string }[];
 }
 

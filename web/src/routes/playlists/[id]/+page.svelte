@@ -526,6 +526,7 @@
                                 codec: track.codec,
                                 bit_depth: track.bit_depth,
                                 sample_rate_hz: track.sample_rate_hz,
+                                plays: track.plays,
                             }}
                             artists={track.artists}
                             artist={{
