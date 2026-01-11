@@ -279,6 +279,68 @@
     });
   })();
 
+  $: displayedMostListened = (() => {
+    const fromMeta = artist?.most_listened || [];
+    return fromMeta.map((t) => {
+      let result: Track;
+      if (t.local_track_id) {
+        const local = tracks.find((lt) => lt.id === t.local_track_id);
+        if (local) {
+          result = {
+            ...local,
+            title: t.name || local.title,
+            album: t.album || local.album,
+            date: t.date || local.date,
+            duration_seconds: t.duration_seconds || local.duration_seconds,
+            art_sha1: t.art_sha1 || local.art_sha1,
+            mb_release_id: t.mb_release_id || local.mb_release_id,
+            plays: t.plays ?? local.plays,
+          };
+        } else {
+          result = {
+            id: t.local_track_id,
+            path: "",
+            title: t.name,
+            artist: artist?.name || "",
+            album: t.album || "",
+            album_artist: artist?.name || "",
+            track_no: null,
+            disc_no: null,
+            date: t.date,
+            duration_seconds: t.duration_seconds || 0,
+            art_sha1: t.art_sha1 || null,
+            mb_release_id: t.mb_release_id,
+            codec: t.codec || null,
+            bitrate: null,
+            sample_rate_hz: t.sample_rate_hz || null,
+            bit_depth: t.bit_depth || null,
+            plays: t.plays ?? undefined,
+          };
+        }
+      } else {
+        result = {
+          id: -1,
+          path: "",
+          title: t.name,
+          artist: artist?.name || "",
+          album: t.album || "",
+          album_artist: artist?.name || "",
+          track_no: null,
+          disc_no: null,
+          date: t.date,
+          duration_seconds: t.duration_seconds || 0,
+          art_sha1: t.art_sha1 || null,
+          codec: t.codec || null,
+          bitrate: null,
+          sample_rate_hz: t.sample_rate_hz || null,
+          bit_depth: t.bit_depth || null,
+          plays: t.plays ?? undefined,
+        };
+      }
+      return result;
+    });
+  })();
+
   $: displayedSimilarArtists = (() => {
     return data.similarArtists || [];
   })();
@@ -579,9 +641,14 @@
   // Track Tabs (Right Side)
   $: trackTabs = [
     {
-      label: "Top Tracks",
+      label: "Most Scrobbled",
       value: "top_tracks",
       count: displayedTopTracks.length,
+    },
+    {
+      label: "Most Listened",
+      value: "most_listened",
+      count: displayedMostListened.length,
     },
     {
       label: "Singles",
@@ -1017,6 +1084,36 @@
                 showYear={false}
                 showTechDetails={true}
                 showPopularity={true}
+                onPlay={() => track.id > 0 && playTrackById(track.id)}
+                onQueue={() => addTrackToQueue(track.id)}
+                onAddToPlaylist={() => openPlaylistModal(track.id)}
+              />
+            {/each}
+          </div>
+        {:else if activeTab === "most_listened"}
+          <!-- Most Listened Tracks List View -->
+          <div class="space-y-1 max-w-5xl mx-auto">
+            {#each displayedMostListened as track, i}
+              <TrackCard
+                {track}
+                artists={track.artists}
+                artist={{ name: artist?.name || "", mbid: artist?.mbid }}
+                album={{
+                  name: track.album || "",
+                  mbid: track.mb_release_id,
+                  mb_release_id: track.mb_release_id,
+                }}
+                artwork={{
+                  sha1: track.art_sha1,
+                }}
+                showIndex={true}
+                index={i + 1}
+                showArtwork={true}
+                showAlbum={true}
+                showArtist={false}
+                showYear={false}
+                showTechDetails={true}
+                showPopularity={false}
                 onPlay={() => track.id > 0 && playTrackById(track.id)}
                 onQueue={() => addTrackToQueue(track.id)}
                 onAddToPlaylist={() => openPlaylistModal(track.id)}

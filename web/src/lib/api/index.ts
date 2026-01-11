@@ -31,6 +31,19 @@ export interface Artist {
         art_sha1?: string | null;
         mb_release_id?: string | null;
     }[];
+    most_listened?: {
+        name: string;
+        album: string | null;
+        date: string | null;
+        duration_seconds?: number | null;
+        local_track_id?: number | null;
+        codec?: string | null;
+        bit_depth?: number | null;
+        sample_rate_hz?: number | null;
+        art_sha1?: string | null;
+        mb_release_id?: string | null;
+        plays?: number | null;
+    }[];
     singles?: {
         mbid: string;
         title: string;
@@ -525,6 +538,7 @@ export interface PlaylistTrack {
     codec?: string;
     sample_rate_hz?: number;
     bit_depth?: number;
+    plays?: number;
     artists?: { name: string; mbid?: string }[];
 }
 
