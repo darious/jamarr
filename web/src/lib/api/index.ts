@@ -538,6 +538,12 @@ export async function fetchPlaylists(fetchFn: any = fetch): Promise<Playlist[]> 
     return await res.json();
 }
 
+export async function fetchArtistPlaylists(artistMbid: string, fetchFn: any = fetch): Promise<Playlist[]> {
+    const res = await fetchFn(`/api/artists/${artistMbid}/playlists`);
+    if (!res.ok) throw new Error('Failed to fetch artist playlists');
+    return await res.json();
+}
+
 export async function createPlaylist(data: { name: string; description?: string; is_public?: boolean }): Promise<Playlist> {
     const res = await fetch('/api/playlists', {
         method: 'POST',
