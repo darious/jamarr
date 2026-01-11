@@ -1,7 +1,7 @@
 from typing import Any, List
 
 import asyncpg
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Request, Response, Query
 
 from app.auth import get_session_user
 from app.db import get_db
@@ -16,7 +16,8 @@ async def get_playback_history(
     response: Response,
     scope: str = "all",
     source: str = "all",
-    days: int = 7,
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
     page: int = 1,
     limit: int = 20,
     request: Request = None,
@@ -30,12 +31,26 @@ async def get_playback_history(
             if request
             else (None, None)
         )
-        from datetime import timedelta
+        from datetime import date, timedelta
 
-        days = max(1, min(days, 365))
+        today = date.today()
+        default_from = today - timedelta(days=6)
+        default_to = today
 
-        where_clauses = ["DATE(h.played_at) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
-        params_list = [timedelta(days=-(days - 1))]
+        try:
+            from_date = date.fromisoformat(date_from) if date_from else default_from
+        except ValueError:
+            from_date = default_from
+        try:
+            to_date = date.fromisoformat(date_to) if date_to else default_to
+        except ValueError:
+            to_date = default_to
+
+        where_clauses = [
+            "h.played_at >= $1::date",
+            "h.played_at < ($2::date + INTERVAL '1 day')",
+        ]
+        params_list = [from_date, to_date]
 
         if scope == "mine" and user_row:
             where_clauses.append(f"h.user_id = ${len(params_list) + 1}")
@@ -59,7 +74,7 @@ async def get_playback_history(
 
         query = f"""
             SELECT 
-                h.source_id as id, h.played_at as timestamp, h.client_ip, h.user_id,
+                h.source_id as id, h.played_at as timestamp, h.client_ip, h.client_id, h.user_id,
                 t.id, t.title, t.artist, t.album, t.artwork_id, t.duration_seconds,
                 t.codec, t.bit_depth, t.sample_rate_hz, t.release_date,
                 t.release_mbid,
@@ -82,9 +97,10 @@ async def get_playback_history(
                     "id": row[0],
                     "timestamp": row[1],
                     "client_ip": row[2],
-                    "source": row[19],
+                    "client_id": row[3],
+                    "source": row[20],
                     "user": {
-                        "id": row[3],
+                        "id": row[4],
                         "username": row[15],
                         "display_name": row[16],
                         "email": row[17],
@@ -92,17 +108,17 @@ async def get_playback_history(
                     if row[4]
                     else None,
                     "track": {
-                        "id": row[4],
-                        "title": row[5],
-                        "artist": row[6],
-                        "album": row[7],
-                        "art_sha1": row[18],
-                        "duration_seconds": row[9],
-                        "codec": row[10],
-                        "bit_depth": row[11],
-                        "sample_rate_hz": row[12],
-                        "release_date": row[13],
-                        "mb_release_id": row[14],
+                        "id": row[5],
+                        "title": row[6],
+                        "artist": row[7],
+                        "album": row[8],
+                        "art_sha1": row[19],
+                        "duration_seconds": row[10],
+                        "codec": row[11],
+                        "bit_depth": row[12],
+                        "sample_rate_hz": row[13],
+                        "release_date": row[14],
+                        "mb_release_id": row[15],
                     },
                 }
             )
@@ -116,19 +132,35 @@ async def get_playback_history_stats(
     request: Request,
     scope: str = "all",
     source: str = "all",
-    days: int = 7,
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
 ):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
-    days = max(1, min(days, 365))
 
     async for db in get_db():
         user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
-        from datetime import timedelta
+        from datetime import date, timedelta
 
-        where_clauses = ["DATE(played_at) >= CURRENT_DATE + CAST($1 AS INTERVAL)"]
-        params: List[Any] = [timedelta(days=-(days - 1))]
+        today = date.today()
+        default_from = today - timedelta(days=6)
+        default_to = today
+
+        try:
+            from_date = date.fromisoformat(date_from) if date_from else default_from
+        except ValueError:
+            from_date = default_from
+        try:
+            to_date = date.fromisoformat(date_to) if date_to else default_to
+        except ValueError:
+            to_date = default_to
+
+        where_clauses = [
+            "h.played_at >= $1::date",
+            "h.played_at < ($2::date + INTERVAL '1 day')",
+        ]
+        params: List[Any] = [from_date, to_date]
         if scope == "mine" and user_row:
             where_clauses.append(f"h.user_id = ${len(params) + 1}")
             params.append(user_row["id"])
