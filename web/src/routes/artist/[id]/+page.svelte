@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Album, Artist, Track, MissingAlbum } from "$lib/api";
+  import type { Album, Artist, Track, MissingAlbum, Playlist } from "$lib/api";
   import {
     fetchTracks,
     fetchMissingAlbums,
@@ -29,6 +29,7 @@
     canonicalName: string;
     artist?: Artist;
     albums: Album[];
+    playlists: Playlist[];
     similarArtists: {
       name: string;
       mbid?: string | null;
@@ -39,6 +40,7 @@
   };
 
   let artist: Artist | undefined = data.artist;
+  let playlists: Playlist[] = data.playlists || [];
   let tracks: Track[] = [];
   let loadingTracks = true;
   let refreshing = false;
@@ -115,6 +117,9 @@
   // Update artist when route data changes (client nav)
   $: if (data.artist !== artist) {
     artist = data.artist;
+  }
+  $: if (data.playlists !== playlists) {
+    playlists = data.playlists || [];
   }
 
   const refreshTracks = async () => {
@@ -196,6 +201,10 @@
       .slice(0, 2)
       .join("")
       .toUpperCase();
+  };
+
+  const getArtUrl = (sha1: string) => {
+    return `/api/art/file/${sha1}`;
   };
 
   $: displayedTopTracks = (() => {
@@ -558,6 +567,11 @@
       value: "appears_on",
       count: groupedAlbums.appears_on.length,
     },
+    {
+      label: "Playlists",
+      value: "playlists",
+      count: playlists.length,
+    },
   ]
     .filter((t) => t.count > 0)
     .map((t) => ({ ...t, label: `${t.label} (${t.count})` }));
@@ -889,6 +903,93 @@
                     </p>
                   </div>
                 </article>
+              {/each}
+            </div>
+          {/if}
+        {:else if activeTab === "playlists"}
+          {#if playlists.length > 0}
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+              {#each playlists as p (p.id)}
+                <div
+                  class="group relative block surface-glass-panel rounded-xl overflow-hidden hover:bg-surface-2 transition-all duration-300 hover:scale-105 hover:z-10 hover:shadow-xl"
+                >
+                  <div class="aspect-square w-full bg-surface-3 relative transition-transform duration-300">
+                    <a href="/playlists/{p.id}" class="block w-full h-full">
+                      {#if p.thumbnails && p.thumbnails.length > 0}
+                        {#if p.thumbnails.length >= 4}
+                          <div class="grid grid-cols-2 h-full w-full">
+                            {#each p.thumbnails.slice(0, 4) as thumb}
+                              <img
+                                src={getArtUrl(thumb)}
+                                alt=""
+                                class="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                            {/each}
+                          </div>
+                        {:else}
+                          <img
+                            src={getArtUrl(p.thumbnails[0])}
+                            alt={p.name}
+                            class="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        {/if}
+                      {:else}
+                        <div
+                          class="flex items-center justify-center w-full h-full text-subtle bg-surface-2"
+                        >
+                          <svg
+                            class="w-12 h-12"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="1.5"
+                              d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 3-.895 3-2 3 .895 3 2zM9 10l12-3"
+                            />
+                          </svg>
+                        </div>
+                      {/if}
+
+                      {#if !p.is_public}
+                        <div
+                          class="absolute top-2 right-2 bg-surface-3 p-1 rounded-full backdrop-blur-sm z-10"
+                        >
+                          <svg
+                            class="w-3 h-3 text-muted"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                            ></path>
+                          </svg>
+                        </div>
+                      {/if}
+                    </a>
+                  </div>
+
+                  <div class="p-4">
+                    <a href="/playlists/{p.id}" class="block">
+                      <div
+                        class="font-bold text-default truncate text-lg hover:underline decoration-subtle underline-offset-4"
+                      >
+                        {p.name}
+                      </div>
+                    </a>
+                    <div class="text-muted text-xs mt-1">
+                      {p.track_count} tracks • {p.is_public ? "Shared" : "Private"}
+                    </div>
+                  </div>
+                </div>
               {/each}
             </div>
           {/if}

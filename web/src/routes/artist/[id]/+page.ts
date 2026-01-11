@@ -1,5 +1,5 @@
-import type { Album, Artist } from '$api';
-import { fetchAlbums, fetchArtists } from '$api';
+import type { Album, Artist, Playlist } from '$api';
+import { fetchAlbums, fetchArtists, fetchArtistPlaylists } from '$api';
 import type { PageLoad } from './$types';
 
 import { redirect } from '@sveltejs/kit';
@@ -50,6 +50,13 @@ export const load: PageLoad = async ({ params, fetch }) => {
     console.error('Failed to fetch albums', e);
   }
 
+  let playlists: Playlist[] = [];
+  try {
+    playlists = await fetchArtistPlaylists(mbid, fetch);
+  } catch (e) {
+    console.error('Failed to fetch artist playlists', e);
+  }
+
   const similarArtists = (artist?.similar_artists || []).map((sim) => {
     return {
       name: sim.name,
@@ -66,7 +73,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
     canonicalName,
     artist,
     albums,
-    similarArtists
+    similarArtists,
+    playlists
   };
 };
 

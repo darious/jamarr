@@ -155,6 +155,81 @@ async def list_playlists(
         
     return results
 
+
+@router.get("/api/artists/{artist_mbid}/playlists", response_model=List[dict])
+async def list_playlists_for_artist(
+    artist_mbid: str,
+    request: Request,
+    db: asyncpg.Connection = Depends(get_db),
+):
+    current_user = None
+    try:
+        current_user, _ = await require_current_user(request, db)
+    except HTTPException:
+        pass
+
+    params = [artist_mbid]
+    visibility_clause = "p.is_public = TRUE"
+    if current_user:
+        params.append(current_user["id"])
+        visibility_clause = "p.is_public = TRUE OR p.user_id = $2"
+
+    query = f"""
+        SELECT 
+            p.id, p.user_id, p.name, p.description, p.is_public, p.updated_at,
+            COUNT(pt.id) as track_count,
+            COALESCE(SUM(t.duration_seconds), 0) as total_duration,
+            (
+                SELECT array_agg(t2.artwork_id)
+                FROM (
+                    SELECT DISTINCT t.artwork_id 
+                    FROM playlist_track pt2
+                    JOIN track t ON pt2.track_id = t.id
+                    WHERE pt2.playlist_id = p.id AND t.artwork_id IS NOT NULL
+                    LIMIT 4
+                ) t2
+            ) as artwork_ids,
+            (
+                SELECT array_agg(t2.sha1)
+                FROM (
+                    SELECT DISTINCT a.sha1 
+                    FROM playlist_track pt2
+                    JOIN track t ON pt2.track_id = t.id
+                    JOIN artwork a ON t.artwork_id = a.id
+                    WHERE pt2.playlist_id = p.id
+                    LIMIT 4
+                ) t2
+            ) as artwork_sha1s
+        FROM playlist p
+        LEFT JOIN playlist_track pt ON p.id = pt.playlist_id
+        LEFT JOIN track t ON pt.track_id = t.id
+        WHERE ({visibility_clause})
+          AND EXISTS (
+              SELECT 1
+              FROM playlist_track pt2
+              JOIN track_artist ta2 ON ta2.track_id = pt2.track_id
+              WHERE pt2.playlist_id = p.id AND ta2.artist_mbid = $1
+          )
+        GROUP BY p.id
+        ORDER BY p.updated_at DESC
+    """
+    rows = await db.fetch(query, *params)
+
+    results = []
+    from app.api.library import sha1_to_hex
+
+    for row in rows:
+        d = dict(row)
+        shas = d.pop("artwork_sha1s", [])
+        d.pop("artwork_ids", None)
+        if shas:
+            d["thumbnails"] = [sha1_to_hex(s) for s in shas if s]
+        else:
+            d["thumbnails"] = []
+        results.append(d)
+
+    return results
+
 @router.get("/api/playlists/{playlist_id}", response_model=dict)
 async def get_playlist(
     playlist_id: int,
