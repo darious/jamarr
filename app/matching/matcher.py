@@ -10,7 +10,6 @@ from rapidfuzz import fuzz
 
 from app.matching import (
     accept_match,
-    build_cache_key,
     classify_method,
     extract_featured_artist_raw_parts,
     normalize_artist,

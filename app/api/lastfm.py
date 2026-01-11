@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 import asyncpg
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
@@ -273,9 +274,6 @@ async def sync_scrobbles(
 ):
     """Fetch new scrobbles from Last.fm and match them to library tracks."""
     import os
-    from pathlib import Path
-    import sys
-    import httpx
     from app.matching.matcher import (
         preload_artist_lookup,
         preload_skip_artists,

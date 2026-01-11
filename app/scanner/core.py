@@ -169,6 +169,10 @@ class Scanner:
         self._processed_artists_session = set()
         self._batch_counter = 0
         self._batch_size = 100
+        self._new_track_ids = set()
+        self._updated_track_ids = set()
+        self._deleted_track_ids = set()
+        self._deleted_artist_mbids = set()
 
     def _compute_quick_hash(self, path: str, mtime: float, size: int) -> bytes:
         """
@@ -208,6 +212,10 @@ class Scanner:
             "scanned": 0, "added": 0, "updated": 0, "errors": 0, 
             "total_estimate": 0, "current_status": "Scanning", "skipped": 0
         }
+        self._new_track_ids = set()
+        self._updated_track_ids = set()
+        self._deleted_track_ids = set()
+        self._deleted_artist_mbids = set()
         self._stop_event.clear()
         self._processed_artists_session = set()
         
@@ -431,8 +439,10 @@ class Scanner:
             
             if cached:
                 self.stats["updated"] += 1
+                self._updated_track_ids.add(track_id)
             else:
                 self.stats["added"] += 1
+                self._new_track_ids.add(track_id)
                 
             get_api_tracker().track_processed("tracks", track_id)
             
@@ -577,6 +587,14 @@ class Scanner:
              chunk_size = 500
              for i in range(0, len(to_delete), chunk_size):
                  chunk = to_delete[i:i+chunk_size]
+                 artist_rows = await db.fetch(
+                     "SELECT DISTINCT artist_mbid FROM track_artist WHERE track_id = ANY($1::bigint[])",
+                     chunk,
+                 )
+                 for row in artist_rows:
+                     if row["artist_mbid"]:
+                         self._deleted_artist_mbids.add(row["artist_mbid"])
+                 self._deleted_track_ids.update(chunk)
                  await db.execute("DELETE FROM track WHERE id = ANY($1::bigint[])", chunk)
                  
     async def get_artists_in_path(self, root_path: str):
