@@ -70,6 +70,8 @@
         plays: number;
       }[];
     };
+    artistMbid?: string;
+    artistName?: string;
   };
 
   let scope = data.scope || "mine";
@@ -81,6 +83,8 @@
   let pendingFrom = dateFrom;
   let pendingTo = dateTo;
   let restoredFilters = false;
+  let artistMbid = data.artistMbid || "";
+  let artistName = data.artistName || "";
   $: page = data.page || 1;
   $: if (data) {
     scope = data.scope || "mine";
@@ -88,6 +92,8 @@
     range = data.range || "last7";
     dateFrom = data.dateFrom;
     dateTo = data.dateTo;
+    artistMbid = data.artistMbid || "";
+    artistName = data.artistName || "";
     if (!showRangeMenu) {
       pendingRange = range;
       pendingFrom = dateFrom;
@@ -280,12 +286,57 @@
     await setQueue([track], 0);
   }
 
+  function buildHistoryUrl(opts: {
+    scope: string;
+    source: string;
+    range: string;
+    from: string;
+    to: string;
+    page: number;
+    includeArtist?: boolean;
+  }) {
+    const params = new URLSearchParams();
+    params.set("scope", opts.scope);
+    params.set("source", opts.source);
+    params.set("range", opts.range);
+    params.set("from", opts.from);
+    params.set("to", opts.to);
+    params.set("page", String(opts.page));
+    if (opts.includeArtist !== false && artistMbid) {
+      params.set("artist_mbid", artistMbid);
+      if (artistName) params.set("artist_name", artistName);
+    }
+    return `/history?${params.toString()}`;
+  }
+
+  function clearArtistFilter() {
+    goto(
+      buildHistoryUrl({
+        scope,
+        source,
+        range,
+        from: dateFrom,
+        to: dateTo,
+        page: 1,
+        includeArtist: false,
+      }),
+      { replaceState: true },
+    );
+  }
+
   function switchScope(nextScope: string) {
     if (scope === nextScope) return;
     scope = nextScope;
     saveFilters();
     goto(
-      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=1`,
+      buildHistoryUrl({
+        scope,
+        source,
+        range,
+        from: dateFrom,
+        to: dateTo,
+        page: 1,
+      }),
       {
         replaceState: true,
       },
@@ -332,7 +383,14 @@
       dateTo = pendingTo;
       saveFilters();
       goto(
-        `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=1`,
+        buildHistoryUrl({
+          scope,
+          source,
+          range,
+          from: dateFrom,
+          to: dateTo,
+          page: 1,
+        }),
         {
           replaceState: true,
         },
@@ -351,7 +409,14 @@
     dateTo = pendingTo;
     saveFilters();
     goto(
-      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=1`,
+      buildHistoryUrl({
+        scope,
+        source,
+        range,
+        from: dateFrom,
+        to: dateTo,
+        page: 1,
+      }),
       {
         replaceState: true,
       },
@@ -401,7 +466,14 @@
     source = nextSource;
     saveFilters();
     goto(
-      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=1`,
+      buildHistoryUrl({
+        scope,
+        source,
+        range,
+        from: dateFrom,
+        to: dateTo,
+        page: 1,
+      }),
       {
         replaceState: true,
       },
@@ -462,7 +534,14 @@
       const nextTo = stored.to || dateTo;
       restoredFilters = true;
       goto(
-        `/history?scope=${nextScope}&source=${nextSource}&range=${nextRange}&from=${nextFrom}&to=${nextTo}&page=1`,
+        buildHistoryUrl({
+          scope: nextScope,
+          source: nextSource,
+          range: nextRange,
+          from: nextFrom,
+          to: nextTo,
+          page: 1,
+        }),
         { replaceState: true },
       );
     } catch (e) {
@@ -481,14 +560,28 @@
   function nextPage() {
     if (!hasNextPage) return;
     goto(
-      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=${page + 1}`,
+      buildHistoryUrl({
+        scope,
+        source,
+        range,
+        from: dateFrom,
+        to: dateTo,
+        page: page + 1,
+      }),
     );
   }
 
   function prevPage() {
     if (page <= 1) return;
     goto(
-      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=${page - 1}`,
+      buildHistoryUrl({
+        scope,
+        source,
+        range,
+        from: dateFrom,
+        to: dateTo,
+        page: page - 1,
+      }),
     );
   }
 </script>
@@ -507,6 +600,22 @@
   >
     <div class="space-y-2">
       <h1 class="text-4xl md:text-6xl font-bold tracking-tight">History</h1>
+      {#if artistMbid}
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-muted">Artist:</span>
+          <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-default">
+            {artistName || artistMbid}
+            <button
+              class="text-muted hover:text-default transition-colors"
+              on:click={clearArtistFilter}
+              aria-label="Clear artist filter"
+              title="Clear artist filter"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      {/if}
     </div>
     <div class="flex items-center gap-4">
       <div class="relative" bind:this={scopeMenuContainer}>

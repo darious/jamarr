@@ -1,6 +1,8 @@
 export async function load({ fetch, url }) {
     const scope = url.searchParams.get('scope') || 'mine';
     const source = url.searchParams.get('source') || 'all';
+    const artistMbid = url.searchParams.get('artist_mbid') || '';
+    const artistName = url.searchParams.get('artist_name') || '';
     const rangeParam = url.searchParams.get('range');
     const fromParam = url.searchParams.get('from');
     const toParam = url.searchParams.get('to');
@@ -81,13 +83,14 @@ export async function load({ fetch, url }) {
     const pageParam = parseInt(url.searchParams.get('page') || '1', 10);
     const page = Number.isFinite(pageParam) ? Math.max(1, pageParam) : 1;
 
+    const artistQuery = artistMbid ? `&artist_mbid=${encodeURIComponent(artistMbid)}` : '';
     const [historyRes, statsRes] = await Promise.all([
-        fetch(`/api/history/tracks?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}&page=${page}`),
-        fetch(`/api/history/stats?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}`)
+        fetch(`/api/history/tracks?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}&page=${page}${artistQuery}`),
+        fetch(`/api/history/stats?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}${artistQuery}`)
     ]);
 
     const history = historyRes.ok ? await historyRes.json() : [];
     const stats = statsRes.ok ? await statsRes.json() : { daily: [], artists: [], albums: [], tracks: [] };
 
-    return { history, scope, source, range, dateFrom, dateTo, page, stats };
+    return { history, scope, source, range, dateFrom, dateTo, page, stats, artistMbid, artistName };
 }
