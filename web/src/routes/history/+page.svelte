@@ -1,12 +1,16 @@
 <script lang="ts">
   import { setQueue } from "$stores/player";
   import { goto, invalidateAll } from "$app/navigation";
+  import { onMount } from "svelte";
+  import { currentUser } from "$lib/stores/user";
   import IconButton from "$lib/components/IconButton.svelte";
   import TabButton from "$lib/components/TabButton.svelte";
   let showScopeMenu = false;
   let showSourceMenu = false;
+  let showRangeMenu = false;
   let scopeMenuContainer: HTMLElement | null = null;
   let sourceMenuContainer: HTMLElement | null = null;
+  let rangeMenuContainer: HTMLElement | null = null;
 
   export let data: {
     history: Array<{
@@ -14,6 +18,7 @@
       timestamp: string | number;
       client_ip: string;
       client_id: string | null;
+      source?: string;
       user?: {
         id: number | null;
         username: string | null;
@@ -36,7 +41,9 @@
     }>;
     scope: string;
     source: string;
-    days: number;
+    range: string;
+    dateFrom: string;
+    dateTo: string;
     page: number;
     stats: {
       daily: { day: string; plays: number }[];
@@ -66,8 +73,26 @@
 
   let scope = data.scope || "mine";
   let source = data.source || "all";
-  let days = data.days || 7;
+  let range = data.range || "last7";
+  let dateFrom = data.dateFrom;
+  let dateTo = data.dateTo;
+  let pendingRange = range;
+  let pendingFrom = dateFrom;
+  let pendingTo = dateTo;
+  let restoredFilters = false;
   $: page = data.page || 1;
+  $: if (data) {
+    scope = data.scope || "mine";
+    source = data.source || "all";
+    range = data.range || "last7";
+    dateFrom = data.dateFrom;
+    dateTo = data.dateTo;
+    if (!showRangeMenu) {
+      pendingRange = range;
+      pendingFrom = dateFrom;
+      pendingTo = dateTo;
+    }
+  }
   $: hasNextPage = data.history.length === 20; // Assuming limit is 20
   $: dailyMax = Math.max(
     ...(data.stats.daily?.map((d) => Number(d.plays) || 0) || [1]),
@@ -115,6 +140,13 @@
     ) {
       showSourceMenu = false;
     }
+    if (
+      showRangeMenu &&
+      rangeMenuContainer &&
+      !rangeMenuContainer.contains(target)
+    ) {
+      showRangeMenu = false;
+    }
   }
 
   async function playTrack(entry: (typeof data.history)[0]) {
@@ -143,36 +175,213 @@
   function switchScope(nextScope: string) {
     if (scope === nextScope) return;
     scope = nextScope;
-    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=1`, {
-      replaceState: true,
-    }); // Reset to page 1
+    saveFilters();
+    goto(
+      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=1`,
+      {
+        replaceState: true,
+      },
+    ); // Reset to page 1
+  }
+
+  function switchRange(nextRange: string, autoApply = false) {
+    pendingRange = nextRange;
+    if (nextRange !== "custom") {
+      const today = new Date();
+      const formatDate = (date: Date) => {
+        const year = date.getFullYear();
+        const month = `${date.getMonth() + 1}`.padStart(2, "0");
+        const day = `${date.getDate()}`.padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      };
+      const setRange = (days: number) => {
+        pendingTo = formatDate(today);
+        const from = new Date(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate() - (days - 1),
+        );
+        pendingFrom = formatDate(from);
+      };
+      if (nextRange === "all") {
+        pendingFrom = "1970-01-01";
+        pendingTo = formatDate(today);
+      } else if (nextRange === "last30") {
+        setRange(30);
+      } else if (nextRange === "last90") {
+        setRange(90);
+      } else if (nextRange === "last180") {
+        setRange(180);
+      } else if (nextRange === "last365") {
+        setRange(365);
+      } else {
+        setRange(7);
+      }
+    }
+    if (autoApply && nextRange !== "custom") {
+      range = nextRange;
+      dateFrom = pendingFrom;
+      dateTo = pendingTo;
+      saveFilters();
+      goto(
+        `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=1`,
+        {
+          replaceState: true,
+        },
+      );
+      showRangeMenu = false;
+      return;
+    }
+    if (autoApply) {
+      applyRange();
+    }
+  }
+
+  function applyRange() {
+    range = pendingRange === "custom" ? "custom" : pendingRange;
+    dateFrom = pendingFrom;
+    dateTo = pendingTo;
+    saveFilters();
+    goto(
+      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=1`,
+      {
+        replaceState: true,
+      },
+    );
+    showRangeMenu = false;
+  }
+
+  function cancelRange() {
+    pendingRange = range;
+    pendingFrom = dateFrom;
+    pendingTo = dateTo;
+    showRangeMenu = false;
+  }
+
+  function getRangeLabel(
+    labelRange: string | undefined,
+    labelFrom: string | undefined,
+    labelTo: string | undefined,
+  ) {
+    if (!labelFrom || !labelTo) return "Last 7 days";
+    if (labelFrom === "1970-01-01") return "All time";
+    const parseDate = (value: string) => new Date(`${value}T00:00:00`);
+    const from = parseDate(labelFrom);
+    const to = parseDate(labelTo);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      return `${labelFrom} → ${labelTo}`;
+    }
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${`${today.getMonth() + 1}`.padStart(2, "0")}-${`${today.getDate()}`.padStart(2, "0")}`;
+    const isToToday = labelTo === todayKey;
+    const diffDays = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+    if (isToToday) {
+      if (diffDays === 7) return "Last 7 days";
+      if (diffDays === 30) return "Last 30 days";
+      if (diffDays === 90) return "Last 90 days";
+      if (diffDays === 180) return "Last 180 days";
+      if (diffDays === 365) return "Last 365 days";
+    }
+    if (labelRange === "custom") {
+      return `${labelFrom} → ${labelTo}`;
+    }
+    return `${labelFrom} → ${labelTo}`;
   }
 
   function switchSource(nextSource: string) {
     if (source === nextSource) return;
     source = nextSource;
-    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=1`, {
-      replaceState: true,
-    }); // Reset to page 1
+    saveFilters();
+    goto(
+      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=1`,
+      {
+        replaceState: true,
+      },
+    ); // Reset to page 1
   }
 
-  function updateDays(event: Event) {
-    const val = parseInt((event.currentTarget as HTMLInputElement).value, 10);
-    if (!Number.isFinite(val)) return;
-    days = Math.max(1, Math.min(val, 365));
-    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=1`, {
-      replaceState: true,
-    }); // Reset to page 1
+  function updatePendingFrom(event: Event) {
+    pendingFrom = (event.currentTarget as HTMLInputElement).value;
+    pendingRange = "custom";
+  }
+
+  function updatePendingTo(event: Event) {
+    pendingTo = (event.currentTarget as HTMLInputElement).value;
+    pendingRange = "custom";
+  }
+
+  function getStorageKey() {
+    const userId = $currentUser?.id ?? "anon";
+    return `history-filters:${userId}`;
+  }
+
+  function saveFilters() {
+    if (typeof localStorage === "undefined") return;
+    const payload = {
+      scope,
+      source,
+      range,
+      from: dateFrom,
+      to: dateTo,
+    };
+    localStorage.setItem(getStorageKey(), JSON.stringify(payload));
+  }
+
+  function restoreFilters() {
+    if (restoredFilters || typeof localStorage === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const hasFilters =
+      params.has("range") ||
+      params.has("from") ||
+      params.has("to") ||
+      params.has("scope") ||
+      params.has("source");
+    if (hasFilters) {
+      restoredFilters = true;
+      return;
+    }
+    const raw = localStorage.getItem(getStorageKey());
+    if (!raw) {
+      restoredFilters = true;
+      return;
+    }
+    try {
+      const stored = JSON.parse(raw);
+      const nextScope = stored.scope || scope;
+      const nextSource = stored.source || source;
+      const nextRange = stored.range || range;
+      const nextFrom = stored.from || dateFrom;
+      const nextTo = stored.to || dateTo;
+      restoredFilters = true;
+      goto(
+        `/history?scope=${nextScope}&source=${nextSource}&range=${nextRange}&from=${nextFrom}&to=${nextTo}&page=1`,
+        { replaceState: true },
+      );
+    } catch (e) {
+      restoredFilters = true;
+    }
+  }
+
+  onMount(() => {
+    restoreFilters();
+  });
+
+  $: if ($currentUser && !restoredFilters) {
+    restoreFilters();
   }
 
   function nextPage() {
     if (!hasNextPage) return;
-    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=${page + 1}`);
+    goto(
+      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=${page + 1}`,
+    );
   }
 
   function prevPage() {
     if (page <= 1) return;
-    goto(`/history?scope=${scope}&source=${source}&days=${days}&page=${page - 1}`);
+    goto(
+      `/history?scope=${scope}&source=${source}&range=${range}&from=${dateFrom}&to=${dateTo}&page=${page - 1}`,
+    );
   }
 </script>
 
@@ -401,6 +610,127 @@
         {/if}
       </div>
 
+      <div class="relative" bind:this={rangeMenuContainer}>
+        <button
+          class="px-4 py-2 text-sm font-normal text-muted hover:text-default transition-all border-b-2 border-transparent hover:border-accent min-w-[200px] justify-between flex items-center gap-2"
+          on:click={() => {
+            pendingRange = range;
+            pendingFrom = dateFrom;
+            pendingTo = dateTo;
+            showRangeMenu = !showRangeMenu;
+          }}
+          aria-label="Select Date Range"
+        >
+          <span class="truncate max-w-[170px]">
+            {getRangeLabel(data.range, data.dateFrom, data.dateTo)}
+          </span>
+          <svg
+            class="h-4 w-4 opacity-50"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </button>
+        {#if showRangeMenu}
+          <div
+            class="absolute right-0 mt-2 w-80 rounded-lg border border-subtle surface-glass-panel shadow-xl z-50"
+          >
+            <div class="p-3 space-y-3">
+              <div class="grid grid-cols-2 gap-2 text-sm">
+                <TabButton
+                  active={pendingRange === "last7"}
+                  className="w-full justify-start text-left"
+                  onClick={() => switchRange("last7", true)}
+                >
+                  Last 7 days
+                </TabButton>
+                <TabButton
+                  active={pendingRange === "last180"}
+                  className="w-full justify-start text-left"
+                  onClick={() => switchRange("last180", true)}
+                >
+                  Last 180 days
+                </TabButton>
+                <TabButton
+                  active={pendingRange === "last30"}
+                  className="w-full justify-start text-left"
+                  onClick={() => switchRange("last30", true)}
+                >
+                  Last 30 days
+                </TabButton>
+                <TabButton
+                  active={pendingRange === "last365"}
+                  className="w-full justify-start text-left"
+                  onClick={() => switchRange("last365", true)}
+                >
+                  Last 365 days
+                </TabButton>
+                <TabButton
+                  active={pendingRange === "last90"}
+                  className="w-full justify-start text-left"
+                  onClick={() => switchRange("last90", true)}
+                >
+                  Last 90 days
+                </TabButton>
+                <TabButton
+                  active={pendingRange === "all"}
+                  className="w-full justify-start text-left"
+                  onClick={() => switchRange("all", true)}
+                >
+                  All time
+                </TabButton>
+              </div>
+              <div class="h-px bg-white/10"></div>
+              <div class="space-y-2 text-xs text-subtle">
+                <div class="space-y-1">
+                  <span class="uppercase tracking-wider text-[10px] text-muted">
+                    From
+                  </span>
+                  <input
+                    type="date"
+                    class="w-full bg-transparent text-default border border-subtle rounded-md px-3 py-2"
+                    value={pendingFrom}
+                    on:change={updatePendingFrom}
+                  />
+                </div>
+                <div class="space-y-1">
+                  <span class="uppercase tracking-wider text-[10px] text-muted">
+                    To
+                  </span>
+                  <input
+                    type="date"
+                    class="w-full bg-transparent text-default border border-subtle rounded-md px-3 py-2"
+                    value={pendingTo}
+                    on:change={updatePendingTo}
+                  />
+                </div>
+              </div>
+              <div class="flex items-center justify-end gap-2 pt-2">
+                <TabButton
+                  className="text-xs"
+                  onClick={cancelRange}
+                >
+                  Cancel
+                </TabButton>
+                <TabButton
+                  className="text-xs"
+                  onClick={applyRange}
+                >
+                  Apply
+                </TabButton>
+              </div>
+            </div>
+          </div>
+        {/if}
+      </div>
+
       <div class="h-6 w-px bg-white/10 mx-2"></div>
 
       <TabButton onClick={() => invalidateAll()} title="Refresh History">
@@ -419,20 +749,6 @@
           />
         </svg>
       </TabButton>
-      <div class="flex items-center gap-2 text-sm text-subtle">
-        <label for="days" class="hidden md:inline font-medium">Days</label>
-        <div class="relative">
-          <input
-            id="days"
-            type="number"
-            min="1"
-            max="365"
-            class="w-16 bg-transparent text-default border-b border-subtle focus:border-accent focus:outline-none text-center pb-1 transition-colors"
-            bind:value={days}
-            on:change={updateDays}
-          />
-        </div>
-      </div>
     </div>
   </div>
 
@@ -443,14 +759,14 @@
         <div>
           <p class="text-sm text-subtle">Playback trend</p>
           <h2 class="text-xl font-semibold text-default">
-            Plays per day (last {days} days)
+            Plays per day ({getRangeLabel(data.range, data.dateFrom, data.dateTo)})
           </h2>
         </div>
       </div>
       {#if data.stats.daily.length === 0}
         <p class="text-muted text-sm">No data.</p>
       {:else}
-        {#key `${scope}-${days}-daily`}
+        {#key `${scope}-${source}-${dateFrom}-${dateTo}-daily`}
           <div class="space-y-2">
             {#each data.stats.daily as dayStat (dayStat.day)}
               <div class="flex items-center gap-3 text-sm text-default/80">
