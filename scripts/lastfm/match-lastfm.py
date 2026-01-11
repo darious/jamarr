@@ -1173,7 +1173,14 @@ async def run(args: argparse.Namespace) -> None:
                     match_rows: List[Tuple[int, int, float, str, str, str, Optional[str]]] = []
 
                     # Define process logic closing over current batch context
-                    def process_scrobble_batch(scrobble: asyncpg.Record):
+                    def process_scrobble_batch(
+                        scrobble: asyncpg.Record,
+                        indexes=indexes,
+                        artist_lookup=artist_lookup,
+                        artist_volume=artist_volume,
+                        cached_matches=cached_matches,
+                        existing_matches=existing_matches,
+                    ):
                         cache_key = build_cache_key(scrobble)
                         if cache_key and cache_key in cached_matches and not args.force:
                             cached = cached_matches[cache_key]
@@ -1275,12 +1282,14 @@ def _handle_result(res, args, metrics, miss_reason_counts, match_rows):
     if status == "cache":
         metrics["cache_hits"] += 1
         metrics["matched"] += 1
-        if match_row: match_rows.append(match_row)
+        if match_row:
+            match_rows.append(match_row)
     elif status == "skip":
         metrics["skipped"] += 1
     elif status == "matched":
         metrics["matched"] += 1
-        if match_row: match_rows.append(match_row)
+        if match_row:
+            match_rows.append(match_row)
     elif status == "unmatched":
         metrics["unmatched"] += 1
         if args.debug_miss_reasons:

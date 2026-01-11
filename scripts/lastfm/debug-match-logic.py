@@ -3,9 +3,11 @@ import asyncio
 import os
 import re
 import unicodedata
+from pathlib import Path
+from typing import List, Optional
+
 import asyncpg
 from rich.console import Console
-from typing import Optional, List, Set
 
 console = Console()
 
@@ -79,8 +81,6 @@ def split_artist_names(artist_name: str) -> List[str]:
     return [p.strip() for p in parts if p.strip()] 
 
 
-from pathlib import Path
-
 ROOT = Path(__file__).resolve().parent.parent
 
 def load_dotenv(path: Path) -> None:
@@ -147,7 +147,7 @@ async def run():
         print(f"  Scrobble: Artist='{s_row['artist_name']}' Title='{s_row['track_name']}' Album='{s_row['album_name']}'")
         
             # Simulate preload_tracks query
-        print(f"  [bold yellow]Testing Preload Query Logic[/bold yellow]")
+        print("  [bold yellow]Testing Preload Query Logic[/bold yellow]")
         
         # Prepare args
         s_artist_norm = normalize_artist(s_row['artist_name'])
@@ -176,10 +176,10 @@ async def run():
             for r in rows_pl:
                 print(f"      Found: {r['artist']} - {r['title']} (ID: {r['id']})")
         else:
-            print(f"    [red]Preload Query FOUND NOTHING[/red]")
+            print("    [red]Preload Query FOUND NOTHING[/red]")
 
         # Simulate Fuzzy DB Search Query WITH ARTIST TRIGRAM FIX
-        print(f"  [bold yellow]Testing Fuzzy DB Search Query[/bold yellow]")
+        print("  [bold yellow]Testing Fuzzy DB Search Query[/bold yellow]")
         fz_artist_input = s_row['artist_name']
         rows_fz = await conn.fetch("""
              SELECT t.id, t.title, t.artist
@@ -197,7 +197,7 @@ async def run():
              for r in rows_fz:
                  print(f"      Found: {r['artist']} - {r['title']} (ID: {r['id']})")
         else:
-             print(f"    [red]Fuzzy Query FOUND NOTHING[/red]")
+             print("    [red]Fuzzy Query FOUND NOTHING[/red]")
 
         # Fetch Track
         t_row = await conn.fetchrow("""
