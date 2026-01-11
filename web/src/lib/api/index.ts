@@ -319,13 +319,13 @@ export async function fetchRecentlyAddedAlbums(fetchFn: any = fetch): Promise<Al
 }
 
 export async function fetchRecentlyPlayedAlbums(fetchFn: any = fetch): Promise<Album[]> {
-    const res = await fetchFn('/api/home/recently-played-albums');
+    const res = await fetchFn('/api/history/albums');
     if (!res.ok) throw new Error('Failed to fetch recently played albums');
     return await res.json();
 }
 
 export async function fetchRecentlyPlayedArtists(fetchFn: any = fetch): Promise<Artist[]> {
-    const res = await fetchFn('/api/home/recently-played-artists');
+    const res = await fetchFn('/api/history/artists');
     if (!res.ok) throw new Error('Failed to fetch recently played artists');
     return await res.json();
 }

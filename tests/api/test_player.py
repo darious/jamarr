@@ -91,7 +91,7 @@ async def test_set_index(client: AsyncClient, db, player_data):
 @pytest.mark.asyncio
 async def test_history(client: AsyncClient, db, player_data):
     # Retrieve History (empty)
-    response = await client.get("/api/player/history")
+    response = await client.get("/api/history/tracks")
     assert response.status_code == 200
     assert response.json() == []
     
@@ -101,13 +101,13 @@ async def test_history(client: AsyncClient, db, player_data):
         VALUES (10, '127.0.0.1', NULL, NOW())
     """)
     
-    response = await client.get("/api/player/history")
+    response = await client.get("/api/history/tracks")
     data = response.json()
     assert len(data) == 1
     assert data[0]["track"]["id"] == 10
     
     # Stats
-    response = await client.get("/api/player/history/stats")
+    response = await client.get("/api/history/stats")
     data = response.json()
     assert len(data["tracks"]) == 1
     assert data["tracks"][0]["plays"] == 1
@@ -303,7 +303,7 @@ async def test_history_grouping(client: AsyncClient, db, auth_token):
             tid
         )
         
-    response = await client.get("/api/player/history/stats")
+    response = await client.get("/api/history/stats")
     stats = response.json()
     
     # Expect 1 Artist entry ("Main") with 2 plays
@@ -333,7 +333,7 @@ async def test_history_stats_mine_scope(client: AsyncClient, db, player_data, au
     
     # Request with scope=mine
     client.cookies = {"jamarr_session": auth_token}
-    response = await client.get("/api/player/history/stats?scope=mine")
+    response = await client.get("/api/history/stats?scope=mine")
     assert response.status_code == 200
     data = response.json()
     assert len(data["tracks"]) >= 1

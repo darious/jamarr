@@ -28,19 +28,19 @@ async def history_data(db):
 async def test_history_pagination(client: AsyncClient, db, history_data):
     # Default: limit 20
     # We must increase days because default days=7 truncates our 30-item dataset
-    response = await client.get("/api/player/history?days=60")
+    response = await client.get("/api/history/tracks?days=60")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 20
     
     # Page 2: should have remaining 10 items (total 30)
-    response = await client.get("/api/player/history?days=60&page=2")
+    response = await client.get("/api/history/tracks?days=60&page=2")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 10
     
     # Explicit limit
-    response = await client.get("/api/player/history?days=60&limit=5")
+    response = await client.get("/api/history/tracks?days=60&limit=5")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 5
@@ -53,7 +53,7 @@ async def test_history_days_filter(client: AsyncClient, db, history_data):
     # Entries are created at: now, now-1d, now-2d...
     # Entry at now-8d should NOT be included.
     
-    response = await client.get("/api/player/history?days=7")
+    response = await client.get("/api/history/tracks?days=7")
     assert response.status_code == 200
     data = response.json()
     

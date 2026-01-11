@@ -330,7 +330,7 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     assert "art_sha1" in item
 
     # Test "Recently Played Albums"
-    response = await client.get("/api/home/recently-played-albums")
+    response = await client.get("/api/history/albums")
     assert response.status_code == 200
     data = response.json()
     assert len(data) > 0
@@ -339,7 +339,7 @@ async def test_home_feeds(client: AsyncClient, db, library_data):
     assert "art_sha1" in item
 
     # Test "Recently Played Artists"
-    response = await client.get("/api/home/recently-played-artists")
+    response = await client.get("/api/history/artists")
     assert response.status_code == 200
     data = response.json()
     assert len(data) > 0
