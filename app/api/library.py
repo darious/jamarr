@@ -552,6 +552,7 @@ async def get_tracks(
             t.album_artist_mbid,
             t.release_group_mbid as album_mbid,
             a.sha1 as art_sha1,
+            COALESCE(tp.plays, 0) as plays,
             (SELECT STRING_AGG(a2.name, ', ' ORDER BY a2.name) 
              FROM track_artist ta2 
              JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
@@ -562,6 +563,11 @@ async def get_tracks(
              WHERE ta2.track_id = t.id) as aggregated_artists_json
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
+        LEFT JOIN (
+            SELECT h.track_id, COUNT(*) as plays
+            FROM combined_playback_history h
+            GROUP BY h.track_id
+        ) tp ON tp.track_id = t.id
     """
     params = []
     param_num = 1

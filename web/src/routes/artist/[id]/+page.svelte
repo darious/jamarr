@@ -935,6 +935,7 @@
                   bit_depth: single.bit_depth,
                   sample_rate_hz: single.sample_rate_hz,
                   popularity: single.popularity,
+                  plays: single.tracksToPlay?.[0]?.plays,
                 }}
                 artists={single.artists}
                 artist={{ name: artist?.name || "", mbid: artist?.mbid }}

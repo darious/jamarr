@@ -18,6 +18,7 @@ async def get_playback_history(
     source: str = "all",
     artist_mbid: str | None = None,
     album_mbid: str | None = None,
+    track_id: int | None = None,
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
     page: int = 1,
@@ -71,6 +72,10 @@ async def get_playback_history(
                 f"(t.release_mbid = ${len(params_list) + 1} OR t.release_group_mbid = ${len(params_list) + 1})"
             )
             params_list.append(album_mbid)
+
+        if track_id:
+            where_clauses.append(f"h.track_id = ${len(params_list) + 1}")
+            params_list.append(track_id)
 
         where_sql = "WHERE " + " AND ".join(where_clauses)
 
@@ -148,6 +153,7 @@ async def get_playback_history_stats(
     source: str = "all",
     artist_mbid: str | None = None,
     album_mbid: str | None = None,
+    track_id: int | None = None,
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
 ):
@@ -191,6 +197,9 @@ async def get_playback_history_stats(
                 f"(t.release_mbid = ${len(params) + 1} OR t.release_group_mbid = ${len(params) + 1})"
             )
             params.append(album_mbid)
+        if track_id:
+            where_clauses.append(f"h.track_id = ${len(params) + 1}")
+            params.append(track_id)
         where_sql = " AND ".join(where_clauses)
 
         needs_track_join = bool(artist_mbid or album_mbid)

@@ -273,6 +273,7 @@ class Track(BaseModel):
     disc_no: Optional[int] = None
     release_date: Optional[str] = None
     bitrate: Optional[int] = None
+    plays: Optional[int] = None
     logged: bool = False
     artists: Optional[List[Dict[str, Optional[str]]]] = None
 
@@ -759,8 +760,27 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
                         )
                         monitor_start_times[udn] = now
 
+        queue = state["queue"]
+        track_ids = [
+            t.get("id") for t in queue if isinstance(t, dict) and t.get("id")
+        ]
+        if track_ids:
+            plays_rows = await db.fetch(
+                """
+                SELECT h.track_id, COUNT(*) as plays
+                FROM combined_playback_history h
+                WHERE h.track_id = ANY($1::bigint[])
+                GROUP BY h.track_id
+                """,
+                track_ids,
+            )
+            plays_map = {row["track_id"]: row["plays"] for row in plays_rows}
+            for t in queue:
+                if isinstance(t, dict) and t.get("id") and "plays" not in t:
+                    t["plays"] = plays_map.get(t["id"], 0)
+
         return {
-            "queue": state["queue"],
+            "queue": queue,
             "current_index": state["current_index"],
             "position_seconds": state["position_seconds"],
             "is_playing": state["is_playing"],

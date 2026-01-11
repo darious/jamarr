@@ -74,6 +74,8 @@
     artistName?: string;
     albumMbid?: string;
     albumName?: string;
+    trackId?: string;
+    trackName?: string;
   };
 
   let scope = data.scope || "mine";
@@ -89,6 +91,8 @@
   let artistName = data.artistName || "";
   let albumMbid = data.albumMbid || "";
   let albumName = data.albumName || "";
+  let trackId = data.trackId || "";
+  let trackName = data.trackName || "";
   $: page = data.page || 1;
   $: if (data) {
     scope = data.scope || "mine";
@@ -100,6 +104,8 @@
     artistName = data.artistName || "";
     albumMbid = data.albumMbid || "";
     albumName = data.albumName || "";
+    trackId = data.trackId || "";
+    trackName = data.trackName || "";
     if (!showRangeMenu) {
       pendingRange = range;
       pendingFrom = dateFrom;
@@ -301,6 +307,7 @@
     page: number;
     includeArtist?: boolean;
     includeAlbum?: boolean;
+    includeTrack?: boolean;
   }) {
     const params = new URLSearchParams();
     params.set("scope", opts.scope);
@@ -316,6 +323,10 @@
     if (opts.includeAlbum !== false && albumMbid) {
       params.set("album_mbid", albumMbid);
       if (albumName) params.set("album_name", albumName);
+    }
+    if (opts.includeTrack !== false && trackId) {
+      params.set("track_id", trackId);
+      if (trackName) params.set("track_name", trackName);
     }
     return `/history?${params.toString()}`;
   }
@@ -345,6 +356,21 @@
         to: dateTo,
         page: 1,
         includeAlbum: false,
+      }),
+      { replaceState: true },
+    );
+  }
+
+  function clearTrackFilter() {
+    goto(
+      buildHistoryUrl({
+        scope,
+        source,
+        range,
+        from: dateFrom,
+        to: dateTo,
+        page: 1,
+        includeTrack: false,
       }),
       { replaceState: true },
     );
@@ -652,6 +678,22 @@
               on:click={clearAlbumFilter}
               aria-label="Clear album filter"
               title="Clear album filter"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      {/if}
+      {#if trackId}
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-muted">Track:</span>
+          <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-default">
+            {trackName || trackId}
+            <button
+              class="text-muted hover:text-default transition-colors"
+              on:click={clearTrackFilter}
+              aria-label="Clear track filter"
+              title="Clear track filter"
             >
               ×
             </button>

@@ -191,6 +191,7 @@ async def get_playlist(
             a.sha1 as art_sha1, t.path,
             t.codec, t.sample_rate_hz, t.bit_depth,
             t.artist_mbid, t.release_mbid, t.release_group_mbid as album_mbid,
+            COALESCE(tp.plays, 0) as plays,
             (SELECT jsonb_agg(jsonb_build_object('name', a2.name, 'mbid', a2.mbid) ORDER BY a2.name) 
              FROM track_artist ta2 
              JOIN artist a2 ON ta2.artist_mbid = a2.mbid 
@@ -198,6 +199,11 @@ async def get_playlist(
         FROM playlist_track pt
         JOIN track t ON pt.track_id = t.id
         LEFT JOIN artwork a ON t.artwork_id = a.id
+        LEFT JOIN (
+            SELECT h.track_id, COUNT(*) as plays
+            FROM combined_playback_history h
+            GROUP BY h.track_id
+        ) tp ON tp.track_id = t.id
         WHERE pt.playlist_id = $1
         ORDER BY pt.position ASC
     """

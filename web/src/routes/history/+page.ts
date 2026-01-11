@@ -5,6 +5,8 @@ export async function load({ fetch, url }) {
     const artistName = url.searchParams.get('artist_name') || '';
     const albumMbid = url.searchParams.get('album_mbid') || '';
     const albumName = url.searchParams.get('album_name') || '';
+    const trackId = url.searchParams.get('track_id') || '';
+    const trackName = url.searchParams.get('track_name') || '';
     const rangeParam = url.searchParams.get('range');
     const fromParam = url.searchParams.get('from');
     const toParam = url.searchParams.get('to');
@@ -87,13 +89,14 @@ export async function load({ fetch, url }) {
 
     const artistQuery = artistMbid ? `&artist_mbid=${encodeURIComponent(artistMbid)}` : '';
     const albumQuery = albumMbid ? `&album_mbid=${encodeURIComponent(albumMbid)}` : '';
+    const trackQuery = trackId ? `&track_id=${encodeURIComponent(trackId)}` : '';
     const [historyRes, statsRes] = await Promise.all([
-        fetch(`/api/history/tracks?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}&page=${page}${artistQuery}${albumQuery}`),
-        fetch(`/api/history/stats?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}${artistQuery}${albumQuery}`)
+        fetch(`/api/history/tracks?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}&page=${page}${artistQuery}${albumQuery}${trackQuery}`),
+        fetch(`/api/history/stats?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}${artistQuery}${albumQuery}${trackQuery}`)
     ]);
 
     const history = historyRes.ok ? await historyRes.json() : [];
     const stats = statsRes.ok ? await statsRes.json() : { daily: [], artists: [], albums: [], tracks: [] };
 
-    return { history, scope, source, range, dateFrom, dateTo, page, stats, artistMbid, artistName, albumMbid, albumName };
+    return { history, scope, source, range, dateFrom, dateTo, page, stats, artistMbid, artistName, albumMbid, albumName, trackId, trackName };
 }

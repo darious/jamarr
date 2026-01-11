@@ -517,6 +517,7 @@
                           sample_rate_hz: track.sample_rate_hz,
                           bitrate: track.bitrate,
                           art_sha1: track.art_sha1,
+                          plays: track.plays,
                         }}
                         artists={track.artists}
                         artist={{
