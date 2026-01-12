@@ -99,7 +99,7 @@ async def get_playback_history(
                 u.username, u.display_name, u.email,
                 a.sha1 as art_sha1
                 , h.source
-            FROM combined_playback_history h
+            FROM combined_playback_history_mat h
             JOIN track t ON h.track_id = t.id
             {artist_join}
             LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -210,7 +210,7 @@ async def get_playback_history_stats(
                 daily_artist_join += " JOIN track_artist ta ON ta.track_id = t.id"
         daily_query = f"""
             SELECT DATE(played_at) as day, COUNT(*) as plays
-            FROM combined_playback_history h
+            FROM combined_playback_history_mat h
             {daily_artist_join}
             WHERE {where_sql}
             GROUP BY day
@@ -226,7 +226,7 @@ async def get_playback_history_stats(
                 MIN(t.artwork_id) as artwork_id, 
                 MAX(a.sha1) as art_sha1, 
                 COUNT(*) as plays
-            FROM combined_playback_history h
+            FROM combined_playback_history_mat h
             JOIN track t ON t.id = h.track_id
             {artist_join}
             LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -254,7 +254,7 @@ async def get_playback_history_stats(
                 MAX(a.sha1) as art_sha1, 
                 MAX(t.release_mbid) as mb_release_id,
                 COUNT(*) as plays
-            FROM combined_playback_history h
+            FROM combined_playback_history_mat h
             JOIN track t ON t.id = h.track_id
             {artist_join}
             LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -278,7 +278,7 @@ async def get_playback_history_stats(
 
         tracks_query = f"""
         SELECT t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
-        FROM combined_playback_history h
+        FROM combined_playback_history_mat h
         JOIN track t ON t.id = h.track_id
         {artist_join}
         LEFT JOIN artwork a ON t.artwork_id = a.id
