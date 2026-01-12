@@ -3,7 +3,7 @@ set -euo pipefail
 
 COMPOSE="docker compose"
 DB_CONTAINER="$(${COMPOSE} ps -q jamarr_db)"
-BACKUP_DIR="/mnt/config/q-docker/jamarr"
+BACKUP_DIR="/mnt/config/q-jamarr/backup"
 
 usage() {
   cat <<'EOF'
