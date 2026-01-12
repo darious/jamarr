@@ -100,6 +100,7 @@ async def test_history(client: AsyncClient, db, player_data):
         INSERT INTO playback_history (track_id, client_ip, user_id, timestamp)
         VALUES (10, '127.0.0.1', NULL, NOW())
     """)
+    await db.execute("REFRESH MATERIALIZED VIEW combined_playback_history_mat")
     
     response = await client.get("/api/history/tracks")
     data = response.json()
@@ -169,6 +170,13 @@ async def test_progress_logs_history(client: AsyncClient, db, player_data):
     # Verify insertion
     rows = await db.fetch("SELECT * FROM playback_history WHERE track_id = 10")
     assert len(rows) == 1
+
+    # Verify automatic materialized view refresh via API
+    # The stats endpoint should now reflect the new play without manual refresh
+    response = await client.get("/api/history/stats")
+    stats = response.json()
+    assert len(stats["tracks"]) == 1
+    assert stats["tracks"][0]["plays"] == 1
 
     # Verify state persistence (logged flag)
     response = await client.get("/api/player/state", headers=headers)
@@ -302,6 +310,7 @@ async def test_history_grouping(client: AsyncClient, db, auth_token):
             "INSERT INTO playback_history (track_id, timestamp, client_ip) VALUES ($1, NOW(), '127.0.0.1')",
             tid
         )
+    await db.execute("REFRESH MATERIALIZED VIEW combined_playback_history_mat")
         
     response = await client.get("/api/history/stats")
     stats = response.json()
@@ -330,6 +339,7 @@ async def test_history_stats_mine_scope(client: AsyncClient, db, player_data, au
         INSERT INTO playback_history (track_id, client_ip, user_id, timestamp)
         VALUES (10, '127.0.0.1', $1, NOW())
     """, user_id)
+    await db.execute("REFRESH MATERIALIZED VIEW combined_playback_history_mat")
     
     # Request with scope=mine
     client.cookies = {"jamarr_session": auth_token}

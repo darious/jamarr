@@ -23,6 +23,8 @@ async def history_data(db):
             """,
             ts
         )
+    
+    await db.execute("REFRESH MATERIALIZED VIEW combined_playback_history_mat")
 
 @pytest.mark.asyncio
 async def test_history_pagination(client: AsyncClient, db, history_data):

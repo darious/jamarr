@@ -21,6 +21,9 @@
     let newPublic = false;
     let creating = false;
     let showSortDropdown = false;
+    let chartFile: File | null = null;
+    let chartFileName = "";
+    let parseError = "";
 
     // Sorting
     let sortBy: "updated" | "name" = "updated";
@@ -47,23 +50,97 @@
         }
     });
 
+    async function handleFileSelect(event: Event) {
+        const input = event.target as HTMLInputElement;
+        const file = input.files?.[0];
+        parseError = "";
+        
+        if (file) {
+            chartFile = file;
+            chartFileName = file.name;
+        } else {
+            chartFile = null;
+            chartFileName = "";
+        }
+    }
+
+    function parseChartFile(content: string): number[] {
+        const lines = content.trim().split('\n');
+        
+        if (lines.length === 0) {
+            throw new Error("File is empty");
+        }
+        
+        // Check header
+        const header = lines[0].trim();
+        if (header !== "track_id,position") {
+            throw new Error("Invalid file format. Expected header: track_id,position");
+        }
+        
+        const trackIds: number[] = [];
+        const trackData: { id: number; position: number }[] = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue; // Skip empty lines
+            
+            const parts = line.split(',');
+            if (parts.length !== 2) {
+                throw new Error(`Invalid format on line ${i + 1}: ${line}`);
+            }
+            
+            const trackId = parseInt(parts[0].trim());
+            const position = parseInt(parts[1].trim());
+            
+            if (isNaN(trackId) || isNaN(position)) {
+                throw new Error(`Invalid numbers on line ${i + 1}: ${line}`);
+            }
+            
+            trackData.push({ id: trackId, position });
+        }
+        
+        // Sort by position and extract track IDs (renumbering to remove gaps)
+        trackData.sort((a, b) => a.position - b.position);
+        return trackData.map(t => t.id);
+    }
+
     async function handleCreate() {
         if (!newName) return;
+        
+        parseError = "";
+        let trackIds: number[] = [];
+        
+        // Parse chart file if provided
+        if (chartFile) {
+            try {
+                const content = await chartFile.text();
+                trackIds = parseChartFile(content);
+            } catch (e) {
+                parseError = e instanceof Error ? e.message : "Failed to parse file";
+                return;
+            }
+        }
+        
         creating = true;
         try {
             const p = await createPlaylist({
                 name: newName,
                 description: newDesc,
                 is_public: newPublic,
+                track_ids: trackIds.length > 0 ? trackIds : undefined,
             });
             playlists = [p, ...playlists];
             showCreateModal = false;
             newName = "";
             newDesc = "";
             newPublic = false;
+            chartFile = null;
+            chartFileName = "";
+            parseError = "";
             goto(`/playlists/${p.id}`);
         } catch (e) {
             console.error(e);
+            parseError = e instanceof Error ? e.message : "Failed to create playlist";
         } finally {
             creating = false;
         }
@@ -393,6 +470,94 @@
                             class="textarea textarea-bordered bg-surface-2 border-subtle focus:border-accent w-full text-default"
                         ></textarea>
                     </div>
+                    <div class="form-control">
+                        <label class="label" for="chart-file">
+                            <span class="label-text text-default"
+                                >Import from Chart File (Optional)</span
+                            >
+                        </label>
+                        <div class="flex items-center gap-3">
+                            <input
+                                id="chart-file"
+                                type="file"
+                                accept=".txt,.csv"
+                                on:change={handleFileSelect}
+                                class="hidden"
+                            />
+                            <label
+                                for="chart-file"
+                                class="btn btn-sm bg-surface-3 border-subtle hover:border-accent text-default cursor-pointer"
+                            >
+                                <svg
+                                    class="w-4 h-4 mr-2"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                                    />
+                                </svg>
+                                Choose File
+                            </label>
+                            {#if chartFileName}
+                                <span class="text-sm text-default truncate flex-1">
+                                    {chartFileName}
+                                </span>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-ghost text-subtle hover:text-default"
+                                    on:click={() => {
+                                        chartFile = null;
+                                        chartFileName = "";
+                                        parseError = "";
+                                        // Reset file input
+                                        const input = document.getElementById('chart-file') as HTMLInputElement;
+                                        if (input) input.value = '';
+                                    }}
+                                >
+                                    <svg
+                                        class="w-4 h-4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
+                                    </svg>
+                                </button>
+                            {:else}
+                                <span class="text-xs text-subtle">
+                                    Format: track_id,position
+                                </span>
+                            {/if}
+                        </div>
+                    </div>
+                    {#if parseError}
+                        <div class="alert alert-error bg-red-500/10 border border-red-500/20 text-red-400 text-sm p-3 rounded-lg">
+                            <svg
+                                class="w-5 h-5 flex-shrink-0"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                            <span>{parseError}</span>
+                        </div>
+                    {/if}
                     <div class="form-control">
                         <Checkbox
                             bind:checked={newPublic}

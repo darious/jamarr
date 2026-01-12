@@ -655,6 +655,9 @@ async def sync_scrobbles_for_user(
     add_log(log_msg)
     logger.info(log_msg)
 
+    # Refresh materialized view
+    await db.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
+
     return {
         "fetched": fetched,
         "matched": matched,
