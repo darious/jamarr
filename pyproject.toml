@@ -24,6 +24,7 @@ dependencies = [
     "pycares>=4.4.0",
     "rapidfuzz",
     "pylast>=7.0.1",
+    "croniter",
 ]
 
 

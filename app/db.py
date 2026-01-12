@@ -527,6 +527,35 @@ async def init_db():
             
             CREATE INDEX IF NOT EXISTS idx_lastfm_scrobble_played_at
             ON lastfm_scrobble(played_at DESC);
+
+            -- Scheduler tasks
+            CREATE TABLE IF NOT EXISTS scheduled_task (
+                id BIGSERIAL PRIMARY KEY,
+                job_key TEXT NOT NULL,
+                cron TEXT NOT NULL,
+                timezone TEXT NOT NULL DEFAULT 'UTC',
+                enabled BOOLEAN DEFAULT TRUE,
+                last_run_at TIMESTAMPTZ,
+                next_run_at TIMESTAMPTZ,
+                last_status TEXT,
+                last_error TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_scheduled_task_enabled_next_run
+                ON scheduled_task(enabled, next_run_at);
+
+            CREATE TABLE IF NOT EXISTS scheduled_task_run (
+                id BIGSERIAL PRIMARY KEY,
+                task_id BIGINT NOT NULL REFERENCES scheduled_task(id) ON DELETE CASCADE,
+                started_at TIMESTAMPTZ NOT NULL,
+                finished_at TIMESTAMPTZ,
+                status TEXT NOT NULL,
+                error TEXT,
+                duration_ms INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_scheduled_task_run_task_started
+                ON scheduled_task_run(task_id, started_at DESC);
             
             CREATE OR REPLACE VIEW public.combined_playback_history AS
             WITH lastfm_rows AS (

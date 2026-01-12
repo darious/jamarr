@@ -16,7 +16,12 @@ install_frontend_deps() {
     local full_cmd="${install_cmd} && npx svelte-kit sync"
     
     echo "📦 Installing frontend dependencies (${full_cmd})..."
-    docker compose -f "${FRONTEND_COMPOSE_FILE}" run --rm "${FRONTEND_SERVICE}" /bin/sh -c "${full_cmd}"
+    if docker compose -f "${FRONTEND_COMPOSE_FILE}" run --rm "${FRONTEND_SERVICE}" /bin/sh -c "${full_cmd}"; then
+        echo "✅ Frontend dependencies installed"
+    else
+        echo "❌ Frontend dependency install failed"
+        return 1
+    fi
 }
 
 run_svelte() {
