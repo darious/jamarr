@@ -8,7 +8,7 @@ from typing import Dict, Any, List
 
 # Add project root to path
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app import db
 from app.matching import matcher
@@ -111,9 +111,14 @@ async def main():
     parser.add_argument("year", type=int, help="Year of the chart (e.g. 2024)")
     parser.add_argument("--limit", type=int, default=100, help="Limit number of tracks to process")
     parser.add_argument("--output", "-o", type=str, help="Output file (default: chart_{year}.txt)")
+    parser.add_argument("--db-host", type=str, help="Database host (default: from env or 127.0.0.1)")
     
     args = parser.parse_args()
     output_file = args.output or f"chart_{args.year}.txt"
+
+    # Configure DB host if provided
+    if args.db_host:
+        db.DB_HOST = args.db_host
     
     # 1. Fetch Chart Data
     try:
@@ -124,83 +129,28 @@ async def main():
 
     # Filter and limit
     items = items[:args.limit]
-    logger.info(f"Found {len(items)} tracks. Starting matching...")
+    # 2. Match Items
+    from scripts.playlist.playlist_matcher import match_playlist_items
     
-    # 2. Initialize DB & Matcher
-    await db.init_db()
-    
-    matched_count = 0
-    results = []
-    
-    try:
-        conn = await db.get_pool().acquire()
-        try:
-            # Preload matcher data
-            logger.info("Preloading match indexes...")
-            artist_lookup = await matcher.preload_artist_lookup(conn)
-            skip_artists = await matcher.preload_skip_artists(conn)
-            
-            # Prepare "scrobbles" for batch preloading
-            # Matcher expects dict-like objects with specific keys
-            scrobbles = []
-            for item in items:
-                # Normalize keys to match expectation
-                scr = {
-                    "artist_name": item["artist"],
-                    "track_name": item["title"],
-                    "album_name": "", # Single chart usually doesn't have album info
-                    "track_mbid": None,
-                    "artist_mbid": None,
-                    "album_mbid": None,
-                    "id": item["position"] # Use position as ID for tracking
-                }
-                scrobbles.append(scr)
-            
-            # Preload tracks (heavy lifting)
-            # We dummy the artist_volume as we don't have scrobble history context here, 
-            # but we can pass an empty dict or minimal counts.
-            # actually matcher.preload_tracks uses scrobbles list
-            indexes = await matcher.preload_tracks(conn, scrobbles, artist_lookup)
-            
-            # Perform matching
-            logger.info("Matching tracks...")
-            
-            for i, scr in enumerate(scrobbles):
-                position = scr["id"]
-                artist = scr["artist_name"]
-                title = scr["track_name"]
-                
-                # Mock volume to be safe
-                artist_volume = {matcher.normalize_artist(artist): 10} 
-                
-                match = matcher.match_scrobble(
-                    scr,
-                    indexes,
-                    artist_lookup,
-                    artist_volume,
-                    skip_artists
-                )
-                
-                if match:
-                    track_id, score, method, reason = match
-                    logger.info(f"#{position}: {title} - {artist} => MATCHED ({track_id}) [{method}]")
-                    results.append(f"{track_id},{position}")
-                    matched_count += 1
-                else:
-                    logger.info(f"#{position}: {title} - {artist} => NO MATCH")
-
-        finally:
-            await db.get_pool().release(conn)
-            
-    finally:
-        await db.close_db()
+    # Prepare items for matcher
+    matcher_items = []
+    for item in items:
+        matcher_items.append({
+            "artist": item["artist"],
+            "title": item["title"],
+            "album": "",
+            "position": item["position"]
+        })
         
+    results = await match_playlist_items(matcher_items, db_host=args.db_host)
+    
     # 3. Write Output
     with open(output_file, "w") as f:
         f.write("track_id,position\n")
-        f.write("\n".join(results))
+        for track_id, position in results:
+            f.write(f"{track_id},{position}\n")
         
-    logger.info(f"Done. Matched {matched_count}/{len(items)}. Output written to {output_file}")
+    logger.info(f"Output written to {output_file}")
 
 if __name__ == "__main__":
     asyncio.run(main())
