@@ -3,7 +3,7 @@ set -euo pipefail
 
 COMPOSE="docker compose"
 DB_CONTAINER="$(${COMPOSE} ps -q jamarr_db)"
-BACKUP_DIR="/mnt/config/q-docker/jamarr"
+BACKUP_DIR="/mnt/config/q-jamarr/backup"
 
 usage() {
   cat <<'EOF'
@@ -25,7 +25,7 @@ MODE="${1:-}"
 if [[ -z "${MODE}" ]]; then
   mkdir -p "${BACKUP_DIR}"
   BACKUP_PATH="${BACKUP_DIR}/jamarr_rescue_$(date +%F_%H%M%S).sql.gz"
-  if ! docker exec -t jamarr_db pg_dump -h 127.0.0.1 -p 8110 -U jamarr -d jamarr --no-owner --no-privileges \
+  if ! docker exec -i jamarr_db pg_dump -h 127.0.0.1 -p 8110 -U jamarr -d jamarr --no-owner --no-privileges \
     | gzip -c > "${BACKUP_PATH}"; then
     echo "Database backup failed; aborting." >&2
     exit 1

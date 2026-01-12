@@ -148,7 +148,7 @@ def normalize_artist(value: Optional[str]) -> str:
     tokens = name.split()
     if tokens and all(len(token) == 1 for token in tokens):
         return "".join(tokens)
-    return name
+    return _strip_leading_article(name)
 
 
 @lru_cache(maxsize=200000)
@@ -162,11 +162,10 @@ def split_artist_names(value: Optional[str]) -> List[str]:
     """Split multi-artist string into individual artist names."""
     if not value:
         return []
-    value = value.replace("&", "and").replace("feat.", "and").replace("featuring", "and")
-    value = value.replace("ft.", "and").replace("/", "and")
-    value = value.replace(" x ", " and ").replace(" vs ", " and ").replace(" with ", " and ")
+    # Replace separators with specific patterns to avoid partial word matches
+    value = re.sub(r"\s+(?:feat\.?|ft\.?|featuring|with|vs|x)\s+", " and ", value, flags=re.IGNORECASE)
+    value = value.replace("&", "and").replace("/", "and").replace("+", "and")
     value = value.replace(" presents ", " and ").replace(" pres. ", " and ")
-    value = value.replace("+", "and")
     parts = re.split(r"\s*(?:,| and )\s*", value, flags=re.IGNORECASE)
     return [normalize_artist(part) for part in parts if part.strip()]
 

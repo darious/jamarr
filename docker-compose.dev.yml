@@ -12,7 +12,7 @@ services:
 
   jamarr_db:
     volumes:
-      - /mnt/config/q-dev/jamarr/postgres:/var/lib/postgresql/data
+      - /mnt/config/q-dev/jamarr/postgres:/var/lib/postgresql
     command: ["postgres", "-p", "8110", "-c", "log_error_verbosity=verbose"]
 
   # Frontend dev server - runs separately with HMR

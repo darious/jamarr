@@ -417,6 +417,13 @@
                   </a>
                   <a
                     class="menu-item"
+                    href="/settings/scheduler"
+                    on:click={() => (showSettings = false)}
+                  >
+                    Scheduler
+                  </a>
+                  <a
+                    class="menu-item"
                     href="/settings/media-quality"
                     on:click={() => (showSettings = false)}
                   >

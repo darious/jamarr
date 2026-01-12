@@ -214,3 +214,6 @@ cache
 web/build/
 web/.svelte-kit/
 web-build/
+
+# dev container check
+.deps.sha256

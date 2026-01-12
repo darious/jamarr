@@ -29,6 +29,27 @@ echo "Changes to frontend or backend code will auto-reload!"
 echo "No Docker rebuilds needed! 🎉"
 echo ""
 
+
+# Check for dependency changes
+DEP_HASH_FILE=".deps.sha256"
+# Calculate hash of pyproject.toml and uv.lock (if it exists)
+CURRENT_HASH=$(cat pyproject.toml uv.lock 2>/dev/null | sha256sum | awk '{print $1}')
+
+if [[ -f "$DEP_HASH_FILE" ]]; then
+  STORED_HASH=$(cat "$DEP_HASH_FILE")
+else
+  STORED_HASH=""
+fi
+
+if [[ "$CURRENT_HASH" != "$STORED_HASH" ]]; then
+  echo "📦 Dependencies changed (pyproject.toml/uv.lock), rebuilding Docker image..."
+  docker compose build jamarr
+  echo "$CURRENT_HASH" > "$DEP_HASH_FILE"
+  echo "✅ Build complete and hash updated."
+else
+  echo "✨ Dependencies unchanged, skipping build."
+fi
+
 # Start services in detached mode
 docker compose down
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
