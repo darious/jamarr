@@ -42,5 +42,5 @@ async def stream_track(track_id: int, db: asyncpg.Connection = Depends(get_db)):
         else:
             media_type = "application/octet-stream"
 
-    print(f"[Stream] Serving {track_id}: {path} as {media_type}")
+    # print(f"[Stream] Serving {track_id}: {path} as {media_type}")
     return FileResponse(path, media_type=media_type)

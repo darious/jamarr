@@ -219,7 +219,6 @@
   }
 
   async function connectLastfm() {
-    console.log("connectLastfm called, user:", user);
     if (!user) {
       console.error("No user found");
       return;
@@ -228,9 +227,8 @@
     lastfmMessage = "";
     lastfmError = "";
     try {
-      console.log("Calling startLastfmAuth...");
       const { auth_url } = await startLastfmAuth();
-      console.log("Got auth URL:", auth_url);
+
       window.location.href = auth_url;
     } catch (e: any) {
       console.error("Failed to connect Last.fm:", e);

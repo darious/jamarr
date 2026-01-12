@@ -196,9 +196,11 @@
         >
           {#if entry.in_library && entry.art_sha1}
             <img
-              src="/api/art/file/{entry.art_sha1}?max_size=400"
+              src="/api/art/file/{entry.art_sha1}?max_size=300"
               alt={title}
               class="w-full h-full object-cover"
+              loading="lazy"
+              decoding="async"
             />
             <!-- Overlay with Play/Queue -->
             <div
@@ -332,7 +334,7 @@
             href={entry.in_library && entry.local_album_mbid
               ? `/album/${entry.local_album_mbid}`
               : "#"}
-            title={title}
+            {title}
           >
             {title}
           </a>

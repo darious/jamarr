@@ -169,9 +169,9 @@ class UPnPManager:
         icons = await self._fetch_device_icons(location)
         return _pick_best_icon(icons)
 
-    async def _cache_renderer_icon(self, udn: str, icon: Optional[Dict[str, Any]]):
+    async def _cache_renderer_icon(self, udn: str, icon: Optional[Dict[str, Any]]) -> bool:
         if not udn or not icon or not icon.get("url"):
-            return
+            return False
         from app.scanner.artwork import download_and_save_artwork, upsert_artwork_record, upsert_image_mapping
 
         icon_url = icon["url"]
@@ -189,13 +189,13 @@ class UPnPManager:
                 udn,
             )
             if row and row["icon_url"] == icon_url and row["artwork_id"]:
-                return
+                return True
 
             downloaded = await download_and_save_artwork(
                 icon_url, art_type="renderer_icon"
             )
             if not downloaded:
-                return
+                return False
             artwork_id = await upsert_artwork_record(
                 db,
                 downloaded["sha1"],
@@ -204,7 +204,7 @@ class UPnPManager:
                 source_url=downloaded["source_url"],
             )
             await upsert_image_mapping(db, artwork_id, "renderer", udn, "icon")
-            return
+            return True
 
     def start_background_scan(self):
         """Start background discovery loop."""
@@ -398,9 +398,17 @@ class UPnPManager:
             self.renderers[udn] = renderer_info
             self.dmr_devices[udn] = dmr
 
-            # Persist to database
+            # Persist to database (save remote URL as icon_url initially)
+            if "icon_url" in renderer_info:
+                renderer_info["original_icon_url"] = renderer_info["icon_url"]
+            
             await self.save_renderer(renderer_info)
-            await self._cache_renderer_icon(udn, icon)
+            
+            # Cache icon and swap URL if successful
+            has_cached = await self._cache_renderer_icon(udn, icon)
+            if has_cached:
+                renderer_info["icon_url"] = f"/art/renderer/{udn}"
+                self.renderers[udn] = renderer_info # Update in memory
 
             self.log(f"Added renderer: {renderer_info['friendly_name']} ({udn})")
 
@@ -414,9 +422,19 @@ class UPnPManager:
     async def load_persisted_renderers(self):
         """Load previously discovered renderers from database and verify they're still alive."""
         async for db in get_db():
-            rows = await db.fetch("SELECT * FROM renderer")
+            rows = await db.fetch("""
+                SELECT r.*, im.artwork_id as has_local_icon
+                FROM renderer r
+                LEFT JOIN image_map im ON im.entity_type = 'renderer' AND im.entity_id = r.udn AND im.image_type = 'icon'
+            """)
             for row in rows:
                 r = dict(row)
+                has_local = r.pop("has_local_icon", None)
+                r["original_icon_url"] = r.get("icon_url")
+                
+                if has_local:
+                    r["icon_url"] = f"/art/renderer/{r['udn']}"
+
                 location = r.get("location") or r.get("location_url")
                 if location:
                     r["location"] = location
@@ -492,7 +510,7 @@ class UPnPManager:
                 r.get("supports_events", False),
                 r.get("supports_gapless", False),
                 r.get("supported_mime_types", ""),
-                r.get("icon_url"),
+                r.get("original_icon_url") or r.get("icon_url"),
                 r.get("icon_mime"),
                 r.get("icon_width"),
                 r.get("icon_height"),

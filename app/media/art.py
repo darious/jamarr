@@ -56,6 +56,20 @@ async def get_test_artwork():
     return response
 
 
+
+
+
+ALLOWED_SIZES = [100, 200, 300, 400, 600]
+
+
+def _snap_size(size: int) -> int:
+    """Find the smallest allowed size >= requested size."""
+    for s in ALLOWED_SIZES:
+        if s >= size:
+            return s
+    return ALLOWED_SIZES[-1]
+
+
 @router.get("/art/file/{sha1}")
 async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
     # Lookup type to build path
@@ -66,20 +80,33 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
         if not row:
             raise HTTPException(status_code=404, detail="Artwork not found")
 
-        # path might rely on sha1 logic if db is outdated? No, db has path.
-        # But wait, original code used _get_art_path helper.
-        path = _get_art_path(sha1, row["path_on_disk"])
+        original_path = _get_art_path(sha1, row["path_on_disk"])
         mime = row["mime"]
 
-        if not os.path.exists(path):
+        if not os.path.exists(original_path):
             raise HTTPException(status_code=404, detail="Artwork file missing")
 
         # If resizing requested
         if max_size > 0:
+            target_size = _snap_size(max_size)
+            subdir = sha1[:2]
+            resized_dir = os.path.join(CACHE_DIR, "resized", str(target_size), subdir)
+            resized_path = os.path.join(resized_dir, sha1)
+
+            # Serve from cache if exists
+            if os.path.exists(resized_path):
+                response = FileResponse(resized_path, media_type="image/jpeg")
+                response.headers["Cache-Control"] = (
+                    "public, max-age=31536000, immutable"
+                )
+                return response
+
+            # Create if missing
             from PIL import Image
 
             try:
-                with Image.open(path) as img:
+                os.makedirs(resized_dir, exist_ok=True)
+                with Image.open(original_path) as img:
                     # Convert to RGB if needed (handles PNG with transparency)
                     if img.mode in ("RGBA", "LA", "P"):
                         background = Image.new("RGB", img.size, (255, 255, 255))
@@ -96,27 +123,24 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
                         img = img.convert("RGB")
 
                     width, height = img.size
-                    should_resize = width > max_size or height > max_size
+                    should_resize = width > target_size or height > target_size
 
                     if should_resize:
                         if width > height:
-                            new_width = max_size
-                            new_height = int(height * (max_size / width))
+                            new_width = target_size
+                            new_height = int(height * (target_size / width))
                         else:
-                            new_height = max_size
-                            new_width = int(width * (max_size / height))
+                            new_height = target_size
+                            new_width = int(width * (target_size / height))
 
                         img = img.resize(
                             (new_width, new_height), Image.Resampling.LANCZOS
                         )
 
-                    buf = io.BytesIO()
-                    # Use high quality for web, but reasonable size
-                    img.save(buf, format="JPEG", quality=85, optimize=True)
-                    buf.seek(0)
+                    # Save to cache
+                    img.save(resized_path, format="JPEG", quality=85, optimize=True)
 
-                    response = Response(content=buf.getvalue(), media_type="image/jpeg")
-                    # Immutable cache for resized artifacts too - they are derived from SHA1
+                    response = FileResponse(resized_path, media_type="image/jpeg")
                     response.headers["Cache-Control"] = (
                         "public, max-age=31536000, immutable"
                     )
@@ -129,7 +153,7 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
         if not mime:
             # Try to sniff mime from file header
             try:
-                with open(path, "rb") as f:
+                with open(original_path, "rb") as f:
                     header = f.read(12)
                     if header.startswith(b"\xff\xd8\xff"):
                         mime = "image/jpeg"
@@ -142,8 +166,28 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
             except Exception:
                 pass
 
-        response = FileResponse(path, media_type=mime)
+        response = FileResponse(original_path, media_type=mime)
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
 
     raise HTTPException(status_code=500, detail="Database error")
+
+
+@router.get("/art/renderer/{udn}")
+async def get_renderer_icon(udn: str, max_size: int = 0):
+    async for db in get_db():
+        row = await db.fetchrow(
+            """
+            SELECT a.sha1 
+            FROM image_map im
+            JOIN artwork a ON im.artwork_id = a.id
+            WHERE im.entity_type = 'renderer' 
+              AND im.entity_id = $1 
+              AND im.image_type = 'icon'
+            """,
+            udn,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Renderer icon not found")
+
+        return await get_artwork_by_sha1(row["sha1"], max_size=max_size)
