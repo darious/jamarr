@@ -147,3 +147,23 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
         return response
 
     raise HTTPException(status_code=500, detail="Database error")
+
+
+@router.get("/art/renderer/{udn}")
+async def get_renderer_icon(udn: str, max_size: int = 0):
+    async for db in get_db():
+        row = await db.fetchrow(
+            """
+            SELECT a.sha1 
+            FROM image_map im
+            JOIN artwork a ON im.artwork_id = a.id
+            WHERE im.entity_type = 'renderer' 
+              AND im.entity_id = $1 
+              AND im.image_type = 'icon'
+            """,
+            udn,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Renderer icon not found")
+
+        return await get_artwork_by_sha1(row["sha1"], max_size=max_size)
