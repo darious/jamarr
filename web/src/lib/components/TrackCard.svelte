@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { goto } from "$app/navigation";
     import IconButton from "$components/IconButton.svelte";
     import ArtistLinks from "$components/ArtistLinks.svelte";
 
@@ -64,6 +65,7 @@
     export let onAddToPlaylist: (() => void) | undefined = undefined;
     export let onRemove: (() => void) | undefined = undefined;
     export let onClick: (() => void) | undefined = undefined;
+    export let onNavigate: (() => void) | undefined = undefined;
 
     // Drag and drop support
     export let draggable: boolean = false;
@@ -181,11 +183,19 @@
     <!-- Info Block -->
     <div class="min-w-0 space-y-0">
         <!-- Row 1: Track Title -->
-        <p
-            class={`truncate text-base font-semibold ${isDisabled ? "text-subtle line-through" : "text-default"}`}
+        <a
+            href={getAlbumUrl()}
+            class={`truncate text-base font-semibold block transition-colors ${isDisabled ? "text-subtle line-through cursor-default" : "text-default hover:text-primary-500 hover:underline cursor-pointer"}`}
+            on:click|preventDefault|stopPropagation={(e) => {
+                const url = getAlbumUrl();
+                if (url && url !== "#") {
+                    if (onNavigate) onNavigate();
+                    goto(url);
+                }
+            }}
         >
             {track.title}
-        </p>
+        </a>
 
         <!-- Row 2: Artist -->
         {#if showArtist}
@@ -195,6 +205,7 @@
                     {artist}
                     linkClass="hover:text-default hover:underline cursor-pointer"
                     separatorClass="text-subtle"
+                    {onNavigate}
                 />
             </div>
         {/if}
@@ -208,7 +219,13 @@
                     <a
                         href={getAlbumUrl()}
                         class="hover:text-default hover:underline cursor-pointer truncate"
-                        on:click|stopPropagation={() => {}}
+                        on:click|preventDefault|stopPropagation={(e) => {
+                            const url = getAlbumUrl();
+                            if (url && url !== "#") {
+                                if (onNavigate) onNavigate();
+                                goto(url);
+                            }
+                        }}
                     >
                         {album.name}
                     </a>
@@ -238,66 +255,77 @@
             <span class="text-sm text-subtle tabular-nums font-mono">
                 {formatDuration(track.duration_seconds)}
             </span>
-        {#if showTechDetails}
-            <div
-                class="flex items-center gap-2 text-xs text-subtle uppercase tracking-wider font-medium min-h-[16px]"
-            >
-                {#if track.plays && track.plays > 0}
-                    {#if track.id > 0}
-                        <a
-                            class="inline-flex items-center gap-1 text-muted hover:text-default transition-colors"
-                            href={`/history?track_id=${encodeURIComponent(track.id)}&track_name=${encodeURIComponent(track.title)}`}
-                            on:click|stopPropagation={() => {}}
-                            title={`${track.plays} plays`}
-                            aria-label={`${track.plays} plays`}
-                        >
-                            <svg
-                                class="h-3.5 w-3.5 opacity-80"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.8"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                aria-hidden="true"
-                            >
-                                <path d="M14 3v10.5a2.5 2.5 0 1 1-1-2V6h6V3z" />
-                                <circle cx="12" cy="18" r="2.5" />
-                                <path d="M3.5 8.5l3-3 2 2 4.5-4.5" />
-                                <path d="M13 3h7" />
-                            </svg>
-                            <span class="text-xs font-medium">{track.plays}</span>
-                        </a>
-                    {:else}
-                        <span class="inline-flex items-center gap-1 text-muted" title={`${track.plays} plays`}>
-                            <svg
-                                class="h-3.5 w-3.5 opacity-80"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.8"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                aria-hidden="true"
-                            >
-                                <path d="M14 3v10.5a2.5 2.5 0 1 1-1-2V6h6V3z" />
-                                <circle cx="12" cy="18" r="2.5" />
-                                <path d="M3.5 8.5l3-3 2 2 4.5-4.5" />
-                                <path d="M13 3h7" />
-                            </svg>
-                            <span class="text-xs font-medium">{track.plays}</span>
-                        </span>
-                    {/if}
-                {/if}
-                {#if track.codec}
+            {#if showTechDetails}
+                <div
+                    class="flex items-center gap-2 text-xs text-subtle uppercase tracking-wider font-medium min-h-[16px]"
+                >
                     {#if track.plays && track.plays > 0}
-                        <span>·</span>
+                        {#if track.id > 0}
+                            <a
+                                class="inline-flex items-center gap-1 text-muted hover:text-default transition-colors"
+                                href={`/history?track_id=${encodeURIComponent(track.id)}&track_name=${encodeURIComponent(track.title)}`}
+                                on:click|stopPropagation={() => {}}
+                                title={`${track.plays} plays`}
+                                aria-label={`${track.plays} plays`}
+                            >
+                                <svg
+                                    class="h-3.5 w-3.5 opacity-80"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        d="M14 3v10.5a2.5 2.5 0 1 1-1-2V6h6V3z"
+                                    />
+                                    <circle cx="12" cy="18" r="2.5" />
+                                    <path d="M3.5 8.5l3-3 2 2 4.5-4.5" />
+                                    <path d="M13 3h7" />
+                                </svg>
+                                <span class="text-xs font-medium"
+                                    >{track.plays}</span
+                                >
+                            </a>
+                        {:else}
+                            <span
+                                class="inline-flex items-center gap-1 text-muted"
+                                title={`${track.plays} plays`}
+                            >
+                                <svg
+                                    class="h-3.5 w-3.5 opacity-80"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="1.8"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        d="M14 3v10.5a2.5 2.5 0 1 1-1-2V6h6V3z"
+                                    />
+                                    <circle cx="12" cy="18" r="2.5" />
+                                    <path d="M3.5 8.5l3-3 2 2 4.5-4.5" />
+                                    <path d="M13 3h7" />
+                                </svg>
+                                <span class="text-xs font-medium"
+                                    >{track.plays}</span
+                                >
+                            </span>
+                        {/if}
                     {/if}
-                    <span>{track.codec}</span>
-                {/if}
-                {#if track.bit_depth && track.sample_rate_hz}
-                    <span>·</span>
-                    <span
+                    {#if track.codec}
+                        {#if track.plays && track.plays > 0}
+                            <span>·</span>
+                        {/if}
+                        <span>{track.codec}</span>
+                    {/if}
+                    {#if track.bit_depth && track.sample_rate_hz}
+                        <span>·</span>
+                        <span
                             >{track.bit_depth}bit / {Math.round(
                                 track.sample_rate_hz / 1000,
                             )}kHz</span

@@ -198,6 +198,9 @@
       }
     }
 
+    // Flag to prevent timeupdate from overwriting store with 0 during restore
+    let isRestoringPosition = false;
+
     window.addEventListener("jamarr:play-local", (e: CustomEvent) => {
       console.log("[PlayerBar] jamarr:play-local event received:", e.detail);
       const track = e.detail;
@@ -214,29 +217,67 @@
         // Check if we're switching to a different track
         const currentSrc = audio.src;
         const newSrc = `/api/stream/${track.id}`;
+        
+        // Fix: isSameTrack check can be tricky with full URLs. 
+        // We know we are changing tracks if the IDs don't match or src is different.
+        // But for "reload" scenario, src might be empty or same.
         const isSameTrack = currentSrc.includes(newSrc);
 
-        audio.src = newSrc;
+        // Prevent timeupdate from syncing 0 to store while we setup
+        isRestoringPosition = true;
 
-        // Only resume from saved position if it's the SAME track OR it's a fresh load (empty src)
-        // Otherwise start from beginning to avoid race condition with timeupdate events
         const savedPosition = $playerState.position_seconds || 0;
-        
-        // Fix: audio.src is empty string "" on init, or could be current page url in some browsers if not set
         const isColdStart = !currentSrc || currentSrc === window.location.href; 
         
-        if ((isSameTrack || isColdStart) && savedPosition > 0) {
-          console.log(
-            "[PlayerBar] Resuming track from position:",
-            savedPosition,
-          );
-          audio.currentTime = savedPosition;
+        // Define restoration logic to run once metadata is loaded
+        const onLoadedMetadata = () => {
+             console.log("[PlayerBar] loadedmetadata fired");
+             
+             // Check if we should restore
+             if ((isSameTrack || isColdStart) && savedPosition > 0) {
+                console.log(
+                    "[PlayerBar] Resuming track from position (in loadedmetadata):",
+                    savedPosition,
+                );
+                // Wrap in try-catch as setting currentTime can sometimes throw if not ready
+                try {
+                    audio.currentTime = savedPosition;
+                } catch (e) {
+                    console.error("[PlayerBar] Failed to set currentTime:", e);
+                }
+             } else {
+                console.log("[PlayerBar] Starting new track from beginning (in loadedmetadata)");
+                // We do NOT reset store here, because we want only 'timeupdate' to drive the store
+                // efficiently, and we don't want to flash 0 if we can avoid it, 
+                // but for a new track starting at 0 is correct.
+                audio.currentTime = 0;
+                playerState.update((s) => ({ ...s, position_seconds: 0 }));
+             }
+
+             // Allow updates again after a short delay
+             setTimeout(() => {
+                isRestoringPosition = false;
+             }, 200);
+        };
+
+        // Attach one-time listener BUT also check if readyState is already enough
+        // readyState >= 1 means HAVE_METADATA
+        if (audio.readyState >= 1) {
+             console.log("[PlayerBar] Metadata already loaded, running restoration immediately");
+             onLoadedMetadata();
         } else {
-          console.log("[PlayerBar] Starting new track from beginning");
-          audio.currentTime = 0;
-          // Reset position in store to prevent race condition
-          playerState.update((s) => ({ ...s, position_seconds: 0 }));
+             audio.addEventListener("loadedmetadata", onLoadedMetadata, { once: true });
+             
+             // FAIL-SAFE: If loadedmetadata never fires (e.g. network stall), clear the flag eventually
+             setTimeout(() => {
+                 if (isRestoringPosition) {
+                     console.warn("[PlayerBar] loadedmetadata timed out, clearing isRestoringPosition flag");
+                     isRestoringPosition = false;
+                 }
+             }, 2000);
         }
+
+        audio.src = newSrc;
 
         // Force Playback immediately - User action (click) initiated this chain
         audio
@@ -289,6 +330,9 @@
       );
       let timeupdateCount = 0;
       audio.addEventListener("timeupdate", () => {
+        if (isRestoringPosition) {
+             return;
+        }
         timeupdateCount++;
         const oldProgress = progress;
         progress = audio.currentTime;

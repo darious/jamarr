@@ -655,7 +655,9 @@
       {#if artistMbid}
         <div class="flex items-center gap-2">
           <span class="text-sm text-muted">Artist:</span>
-          <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-default">
+          <span
+            class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-default"
+          >
             {artistName || artistMbid}
             <button
               class="text-muted hover:text-default transition-colors"
@@ -671,7 +673,9 @@
       {#if albumMbid}
         <div class="flex items-center gap-2">
           <span class="text-sm text-muted">Album:</span>
-          <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-default">
+          <span
+            class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-default"
+          >
             {albumName || albumMbid}
             <button
               class="text-muted hover:text-default transition-colors"
@@ -687,7 +691,9 @@
       {#if trackId}
         <div class="flex items-center gap-2">
           <span class="text-sm text-muted">Track:</span>
-          <span class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-default">
+          <span
+            class="inline-flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-default"
+          >
             {trackName || trackId}
             <button
               class="text-muted hover:text-default transition-colors"
@@ -1255,7 +1261,8 @@
                 <a
                   href={`/artist/${encodeURIComponent(entry.track.artist)}`}
                   class="hover:text-default hover:underline"
-                  on:click|stopPropagation
+                  on:click|preventDefault|stopPropagation={() =>
+                    goto(`/artist/${encodeURIComponent(entry.track.artist)}`)}
                 >
                   {entry.track.artist}
                 </a>
@@ -1266,7 +1273,11 @@
                       ? `/album/${entry.track.mb_release_id}`
                       : "#"}
                     class="hover:text-default hover:underline"
-                    on:click|stopPropagation
+                    on:click|preventDefault|stopPropagation={() => {
+                      if (entry.track.mb_release_id) {
+                        goto(`/album/${entry.track.mb_release_id}`);
+                      }
+                    }}
                   >
                     {entry.track.album}
                   </a>
