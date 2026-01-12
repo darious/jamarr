@@ -17,6 +17,7 @@
     import Checkbox from "$lib/components/Checkbox.svelte";
     import TrackCard from "$lib/components/TrackCard.svelte";
     import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
+    import { downloadTracks } from "$lib/helpers/downloader";
 
     let playlist: PlaylistDetail | null = null;
     let loading = true;
@@ -150,6 +151,29 @@
             mb_release_id: t.mb_release_id,
         }));
         await addToQueue(queueItems as unknown as import("$api").Track[]);
+    }
+
+    function handleDownload() {
+        if (!playlist || !playlist.tracks.length) return;
+
+        const tracks = playlist.tracks.map((t) => ({
+            id: t.track_id,
+            path: t.path,
+            title: t.title,
+            artist: t.artist,
+            album: t.album,
+            duration_seconds: t.duration_seconds,
+            art_sha1: t.art_sha1,
+            codec: t.codec,
+            bit_depth: t.bit_depth,
+            sample_rate_hz: t.sample_rate_hz,
+        }));
+
+        void downloadTracks({
+            mode: "playlist",
+            folderName: playlist.name,
+            tracks: tracks as unknown as import("$api").Track[],
+        });
     }
 
     async function removeTrack(pt: PlaylistTrack) {
@@ -342,35 +366,61 @@
                     <!-- Hover Overlay with Buttons -->
                     <!-- Hover Overlay with Buttons -->
                     <div
-                        class="absolute inset-0 flex items-center justify-center gap-3 bg-black/60 opacity-0 group-hover:opacity-100 transition-all duration-300 backdrop-blur-[2px] z-20"
+                        class="absolute inset-0 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20 pointer-events-none bg-black/40 backdrop-blur-[2px]"
                     >
-                        <IconButton
-                            variant="ghost"
-                            title="Play"
-                            onClick={(e) => handlePlay(e)}
-                            className="scale-125"
+                        <div
+                            class="pointer-events-auto flex items-center gap-3 text-white"
                         >
-                            <svg
-                                class="h-8 w-8 ml-1"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                                ><path d="M8 5v14l11-7z" /></svg
+                            <IconButton
+                                variant="primary"
+                                title="Play"
+                                onClick={(e) => handlePlay(e)}
+                                stopPropagation={true}
+                                className="shadow-lg transition-all"
                             >
-                        </IconButton>
-                        <IconButton
-                            variant="outline"
-                            title="Add to Queue"
-                            onClick={(e) => handleAddToQueue(e)}
-                        >
-                            <svg
-                                class="h-6 w-6"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                                ><path
-                                    d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
-                                /></svg
+                                <svg
+                                    class="h-6 w-6 ml-0.5"
+                                    fill="currentColor"
+                                    viewBox="0 0 24 24"
+                                    ><path d="M8 5v14l11-7z" /></svg
+                                >
+                            </IconButton>
+                            <IconButton
+                                variant="primary"
+                                title="Add to Queue"
+                                onClick={(e) => handleAddToQueue(e)}
+                                stopPropagation={true}
+                                className="shadow-lg transition-all"
                             >
-                        </IconButton>
+                                <svg
+                                    class="h-6 w-6"
+                                    fill="currentColor"
+                                    viewBox="0 0 24 24"
+                                    ><path
+                                        d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                                    /></svg
+                                >
+                            </IconButton>
+                            <IconButton
+                                variant="primary"
+                                title="Download Playlist"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDownload();
+                                }}
+                                stopPropagation={true}
+                                className="shadow-lg transition-all"
+                            >
+                                <svg
+                                    class="h-6 w-6"
+                                    fill="currentColor"
+                                    viewBox="0 0 24 24"
+                                    ><path
+                                        d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"
+                                    /></svg
+                                >
+                            </IconButton>
+                        </div>
                     </div>
                 </div>
 

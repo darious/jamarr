@@ -2,6 +2,7 @@
   import "../app.postcss";
   import PlayerBar from "$components/PlayerBar.svelte";
   import SearchBar from "$components/SearchBar.svelte";
+  import DownloadManager from "$components/DownloadManager.svelte";
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import {
@@ -66,11 +67,11 @@
   isAuthChecked.set(true);
 
   onMount(async () => {
-    console.log("[Layout] onMount called");
+
     // Subscribe first to get immediate state (including default 'local' renderer)
-    console.log("[Layout] About to subscribe to playerState");
+
     unsub = playerState.subscribe((state) => {
-      console.log("[Layout] playerState updated, renderers:", state.renderers);
+
       rendererList = state.renderers || [];
       activeRenderer = state.renderer || "local";
     });
@@ -84,13 +85,13 @@
       hydrateUser().catch((e) => console.error("Failed to hydrate user", e));
     }
 
-    console.log("[Layout] About to call loadQueueFromServer");
+
     try {
       await loadQueueFromServer();
     } catch (e) {
       console.error("[Layout] loadQueueFromServer failed:", e);
     }
-    console.log("[Layout] loadQueueFromServer completed");
+
 
     // Trigger refresh without awaiting the full 5s discovery if we don't want to block anything else
     // But since subscription is active, store updates will just propagate.
@@ -314,6 +315,14 @@
             >
             <a
               class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
+                $page.url.pathname.startsWith("/discovery")
+                  ? "text-default border-accent"
+                  : "text-muted border-transparent hover:text-default hover:border-accent"
+              }`}
+              href="/discovery">Discovery</a
+            >
+            <a
+              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
                 $page.url.pathname.startsWith("/playlists")
                   ? "text-default border-accent"
                   : "text-muted border-transparent hover:text-default hover:border-accent"
@@ -461,6 +470,7 @@
   </main>
 
   {#if !isAuthPage}
+    <DownloadManager />
     <PlayerBar />
   {/if}
 </div>

@@ -11,7 +11,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app import db
-from app.matching import matcher
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(message)s")

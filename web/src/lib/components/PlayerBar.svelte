@@ -103,9 +103,7 @@
     hasLoggedCurrentTrack = false;
     lastLoggedTrackId = currentTrack.id;
     lastUpdateTime = 0; // Reset progress reporting timer
-    console.log(
-      "[PlayerBar] Track changed, reset hasLoggedCurrentTrack and lastUpdateTime",
-    );
+
   }
 
   // Auto-resume playback when queue is loaded (reactive)
@@ -115,10 +113,7 @@
     $playerState.current_index >= 0 &&
     currentTrack
   ) {
-    console.log(
-      "[PlayerBar] Queue loaded, auto-resuming track:",
-      currentTrack.title,
-    );
+
     hasAttemptedAutoResume = true;
     // Trigger the play-local event to resume ONLY if local
     if ($playerState.renderer.startsWith("local")) {
@@ -126,9 +121,7 @@
         new CustomEvent("jamarr:play-local", { detail: currentTrack }),
       );
     } else {
-      console.log(
-        "[PlayerBar] Remote renderer active, skipping local auto-resume event",
-      );
+
     }
   }
 
@@ -149,7 +142,7 @@
 
     // Remote Seek
     if (!$playerState.renderer.startsWith("local")) {
-      console.log("[PlayerBar] Remote seek to:", time);
+
       seek(time);
       progress = time; // Optimistic
       return;
@@ -157,7 +150,7 @@
 
     // Local Seek
     if (audio) {
-      console.log("[PlayerBar] Local seek to:", time);
+
       audio.currentTime = time;
       progress = time;
       updateProgress(time, isPlaying);
@@ -179,17 +172,14 @@
   }
 
   onMount(() => {
-    console.log("[PlayerBar] onMount called");
+
 
     // Initial Volume Sync: Capture browser-restored volume
     if (audio) {
       // Only update store if it has NOT been initialized yet (null)
       // This prevents overwriting a server-fetched value with a default/local value
       if ($playerState.volume === null) {
-        console.log(
-          "[PlayerBar] Initializing store volume from local audio:",
-          audio.volume,
-        );
+
         // We update the store, and rely on `player.ts` to NOT overwrite this with null.
         playerState.update((s) => ({
           ...s,
@@ -198,47 +188,86 @@
       }
     }
 
+    // Flag to prevent timeupdate from overwriting store with 0 during restore
+    let isRestoringPosition = false;
+
     window.addEventListener("jamarr:play-local", (e: CustomEvent) => {
-      console.log("[PlayerBar] jamarr:play-local event received:", e.detail);
+
       const track = e.detail;
 
       // Relaxed check: Accept "local" or "local:..."
       if (!$playerState.renderer.includes("local")) return;
 
       if (audio) {
-        console.log(
-          "[PlayerBar] Setting audio src to:",
-          `/api/stream/${track.id}`,
-        );
+
 
         // Check if we're switching to a different track
         const currentSrc = audio.src;
         const newSrc = `/api/stream/${track.id}`;
+        
+        // Fix: isSameTrack check can be tricky with full URLs. 
+        // We know we are changing tracks if the IDs don't match or src is different.
+        // But for "reload" scenario, src might be empty or same.
         const isSameTrack = currentSrc.includes(newSrc);
 
-        audio.src = newSrc;
+        // Prevent timeupdate from syncing 0 to store while we setup
+        isRestoringPosition = true;
 
-        // Only resume from saved position if it's the SAME track
-        // Otherwise start from beginning to avoid race condition with timeupdate events
         const savedPosition = $playerState.position_seconds || 0;
-        if (isSameTrack && savedPosition > 0) {
-          console.log(
-            "[PlayerBar] Resuming same track from position:",
-            savedPosition,
-          );
-          audio.currentTime = savedPosition;
+        const isColdStart = !currentSrc || currentSrc === window.location.href; 
+        
+        // Define restoration logic to run once metadata is loaded
+        const onLoadedMetadata = () => {
+
+             
+             // Check if we should restore
+             if ((isSameTrack || isColdStart) && savedPosition > 0) {
+
+                // Wrap in try-catch as setting currentTime can sometimes throw if not ready
+                try {
+                    audio.currentTime = savedPosition;
+                } catch (e) {
+                    console.error("[PlayerBar] Failed to set currentTime:", e);
+                }
+             } else {
+
+                // We do NOT reset store here, because we want only 'timeupdate' to drive the store
+                // efficiently, and we don't want to flash 0 if we can avoid it, 
+                // but for a new track starting at 0 is correct.
+                audio.currentTime = 0;
+                playerState.update((s) => ({ ...s, position_seconds: 0 }));
+             }
+
+             // Allow updates again after a short delay
+             setTimeout(() => {
+                isRestoringPosition = false;
+             }, 200);
+        };
+
+        // Attach one-time listener BUT also check if readyState is already enough
+        // readyState >= 1 means HAVE_METADATA
+        if (audio.readyState >= 1) {
+
+             onLoadedMetadata();
         } else {
-          console.log("[PlayerBar] Starting new track from beginning");
-          audio.currentTime = 0;
-          // Reset position in store to prevent race condition
-          playerState.update((s) => ({ ...s, position_seconds: 0 }));
+             audio.addEventListener("loadedmetadata", onLoadedMetadata, { once: true });
+             
+             // FAIL-SAFE: If loadedmetadata never fires (e.g. network stall), clear the flag eventually
+             setTimeout(() => {
+                 if (isRestoringPosition) {
+                     console.warn("[PlayerBar] loadedmetadata timed out, clearing isRestoringPosition flag");
+                     isRestoringPosition = false;
+                 }
+             }, 2000);
         }
+
+        audio.src = newSrc;
 
         // Force Playback immediately - User action (click) initiated this chain
         audio
           .play()
           .then(() => {
-            console.log("[PlayerBar] Audio playback started successfully");
+
             isPlaying = true;
             playerState.update((s) => ({ ...s, is_playing: true }));
           })
@@ -252,7 +281,7 @@
     });
 
     window.addEventListener("jamarr:seek", (e: CustomEvent) => {
-      console.log("[PlayerBar] jamarr:seek event received:", e.detail);
+
       if (!$playerState.renderer.startsWith("local") || !audio) return;
 
       const pos = e.detail.position;
@@ -264,7 +293,7 @@
     });
 
     window.addEventListener("jamarr:pause", () => {
-      console.log("[PlayerBar] jamarr:pause event received");
+
       if (!$playerState.renderer.startsWith("local") || !audio) return;
       audio.pause();
       isPlaying = false;
@@ -272,7 +301,7 @@
     });
 
     window.addEventListener("jamarr:resume", () => {
-      console.log("[PlayerBar] jamarr:resume event received");
+
       if (!$playerState.renderer.startsWith("local") || !audio) return;
       audio.play().catch((e) => console.error("[PlayerBar] Resume failed:", e));
       isPlaying = true;
@@ -280,11 +309,12 @@
     });
 
     if (audio) {
-      console.log(
-        "[PlayerBar] Audio element found, adding timeupdate and ended listeners",
-      );
+
       let timeupdateCount = 0;
       audio.addEventListener("timeupdate", () => {
+        if (isRestoringPosition) {
+             return;
+        }
         timeupdateCount++;
         const oldProgress = progress;
         progress = audio.currentTime;
@@ -301,12 +331,7 @@
           Math.floor(audio.currentTime) % 5 === 0 &&
           Math.floor(audio.currentTime) !== Math.floor(oldProgress)
         ) {
-          console.log(
-            "[PlayerBar] timeupdate #" + timeupdateCount + ":",
-            audio.currentTime.toFixed(2),
-            "currentTrack:",
-            currentTrack?.title,
-          );
+
         }
 
         checkPlayThreshold(); // Check if we should log to history
@@ -316,17 +341,13 @@
           currentTrack &&
           Math.floor(audio.currentTime) - lastUpdateTime >= 5
         ) {
-          console.log(
-            "[PlayerBar] Calling updateProgress with:",
-            audio.currentTime.toFixed(2),
-            !audio.paused,
-          );
+
           updateProgress(audio.currentTime, !audio.paused);
           lastUpdateTime = Math.floor(audio.currentTime);
         }
       });
       audio.addEventListener("ended", () => {
-        console.log("[PlayerBar] Track ended, calling next()");
+
         next();
       });
     } else {
@@ -360,10 +381,7 @@
               }
 
               if (s.current_index !== state.current_index) {
-                console.log(
-                  "[PlayerBar] Remote track index changed:",
-                  state.current_index,
-                );
+
                 newState.current_index = state.current_index;
                 changed = true;
               }
@@ -404,9 +422,7 @@
                 lastTransportState !== "STOPPED" &&
                 lastTransportState !== "TRANSITIONING"
               ) {
-                console.log(
-                  "[PlayerBar] Remote track finished (STOPPED). Waiting for backend to auto-advance.",
-                );
+
                 // next(); // Handled by backend now
               }
             }
@@ -425,23 +441,18 @@
     // Remote / UPnP Logic
     if (!$playerState.renderer.startsWith("local")) {
       if ($playerState.is_playing) {
-        console.log("[PlayerBar] Remote: pausing");
+
         pause();
         isPlaying = false; // Optimistic update
       } else {
-        console.log("[PlayerBar] Remote: resuming");
+
         resume();
         isPlaying = true; // Optimistic update
       }
       return;
     }
 
-    console.log(
-      "[PlayerBar] togglePlay called, audio.src:",
-      audio?.src,
-      "audio.paused:",
-      audio?.paused,
-    );
+
     if (!audio) {
       console.error("[PlayerBar] togglePlay: audio element not found");
       return;
@@ -459,10 +470,7 @@
     // If no source is set OR source doesn't match current track, dispatch play-local
     const expectedPath = `/api/stream/${currentTrack.id}`;
     if (!audio.src || !audio.src.includes(expectedPath)) {
-      console.log(
-        "[PlayerBar] togglePlay: src missing or mismatch, dispatching play-local event",
-        { current: audio.src, expected: expectedPath },
-      );
+
       // Force is_playing to true so the event handler actually plays
       playerState.update((s) => ({ ...s, is_playing: true }));
       window.dispatchEvent(
@@ -473,12 +481,12 @@
 
     // Local Audio Logic
     if (audio.paused) {
-      console.log("[PlayerBar] togglePlay: playing");
+
       audio.play().catch((e) => console.error("[PlayerBar] Play failed:", e));
       isPlaying = true;
       updateProgress(audio.currentTime, true);
     } else {
-      console.log("[PlayerBar] togglePlay: pausing");
+
       audio.pause();
       isPlaying = false;
       updateProgress(audio.currentTime, false);

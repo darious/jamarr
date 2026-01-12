@@ -5,6 +5,7 @@
   import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
   import IconButton from "$components/IconButton.svelte";
   import TrackCard from "$components/TrackCard.svelte";
+  import { downloadTracks } from "$lib/helpers/downloader";
 
   let showPlaylistModal = false;
   let selectedTrackIds: number[] = [];
@@ -142,6 +143,22 @@
     }
   }
 
+  function handleDownload() {
+    // Use sort_name if available for better folder sorting (e.g. "Kennedy, Dermot")
+    let artistName = data.artist;
+
+    if (data.albumMeta?.artists?.[0]?.sort_name) {
+      artistName = data.albumMeta.artists[0].sort_name;
+    }
+
+    void downloadTracks({
+      mode: "album",
+      folderName: artistName,
+      subFolderName: data.album,
+      tracks: data.tracks,
+    });
+  }
+
   function playTrack(track: Track) {
     // Play just the selected track
     void setQueue([track], 0);
@@ -193,6 +210,15 @@
             >
               <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
                 ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
+              >
+            </IconButton>
+            <IconButton
+              variant="primary"
+              title="Download Album"
+              onClick={handleDownload}
+            >
+              <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
+                ><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" /></svg
               >
             </IconButton>
           </div>
@@ -426,4 +452,7 @@
 <AddToPlaylistModal
   bind:visible={showPlaylistModal}
   trackIds={selectedTrackIds}
+  on:close={() => {
+    selectedTrackIds = [];
+  }}
 />

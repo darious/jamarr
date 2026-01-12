@@ -344,6 +344,7 @@
                   linkClass="hover:text-white hover:underline pointer-events-auto cursor-pointer"
                   separatorClass="text-white/80"
                   stopPropagation={true}
+                  onNavigate={() => nowPlayingVisible.set(false)}
                 />
               </div>
               <div class="text-lg text-white/60 truncate px-8 drop-shadow-md">
@@ -549,6 +550,7 @@
                         isPlaying={$playerState.is_playing}
                         onClick={() => playFromQueue(idx)}
                         onAddToPlaylist={() => openPlaylistModal(track.id)}
+                        onNavigate={() => nowPlayingVisible.set(false)}
                       />
                     </div>
                   {/each}

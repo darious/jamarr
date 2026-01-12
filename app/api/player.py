@@ -147,7 +147,7 @@ async def monitor_upnp_playback(udn: str):
                 await asyncio.sleep(1)
                 continue
 
-            # print(f"[Player] Monitor {udn}: {transport_state} @ {rel_time}s")
+
 
             # 2. Update DB
             async for db in get_db():
@@ -786,6 +786,7 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
             t.get("id") for t in queue if isinstance(t, dict) and t.get("id")
         ]
         if track_ids:
+            # 1. Fetch Plays
             plays_rows = await db.fetch(
                 """
                 SELECT h.track_id, COUNT(*) as plays
@@ -796,9 +797,75 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
                 track_ids,
             )
             plays_map = {row["track_id"]: row["plays"] for row in plays_rows}
+
+            # 2. Fetch missing Art/Path/Mime
+            # optimization: only fetch if actually missing in some tracks?
+            # For simplicity and robustness, assume state might be stale and fetch map for all.
+            # But checking first is better.
+            needs_enrich = False
             for t in queue:
-                if isinstance(t, dict) and t.get("id") and "plays" not in t:
-                    t["plays"] = plays_map.get(t["id"], 0)
+                if isinstance(t, dict):
+                     if not t.get("art_sha1") or not t.get("path"):
+                         needs_enrich = True
+                         break
+            
+            meta_map = {}
+            if needs_enrich:
+                meta_rows = await db.fetch(
+                    """
+                    SELECT t.id, t.path, t.codec, a.sha1 as art_sha1
+                    FROM track t
+                    LEFT JOIN artwork a ON t.artwork_id = a.id
+                    WHERE t.id = ANY($1::bigint[])
+                    """,
+                    track_ids
+                )
+                meta_map = {
+                    r["id"]: {
+                        "path": r["path"], 
+                        "art_sha1": r["art_sha1"], 
+                        "codec": r["codec"]
+                    } 
+                    for r in meta_rows
+                }
+
+            # 3. Apply updates
+            for t in queue:
+                if isinstance(t, dict) and t.get("id"):
+                    tid = t["id"]
+                    
+                    # Apply plays
+                    if "plays" not in t:
+                        t["plays"] = plays_map.get(tid, 0)
+                    
+                    # Apply Meta
+                    if needs_enrich and tid in meta_map:
+                        meta = meta_map[tid]
+                        if not t.get("art_sha1"):
+                            t["art_sha1"] = meta["art_sha1"]
+                        if not t.get("path"):
+                            t["path"] = meta["path"]
+                        if not t.get("codec"):
+                            t["codec"] = meta["codec"]
+                        
+                        # Guess mime if missing and path exists
+                        if not t.get("mime") and t.get("path"):
+                            mime, _ = mimetypes.guess_type(t["path"])
+                            if not mime:
+                                ext = os.path.splitext(t["path"])[1].lower()
+                                if ext == ".flac":
+                                    mime = "audio/flac"
+                                elif ext == ".mp3":
+                                    mime = "audio/mpeg"
+                                elif ext == ".m4a":
+                                    mime = "audio/mp4"
+                                elif ext == ".wav":
+                                    mime = "audio/wav"
+                                elif ext == ".ogg":
+                                    mime = "audio/ogg"
+                                else:
+                                    mime = "audio/flac"
+                            t["mime"] = mime
 
         return {
             "queue": queue,

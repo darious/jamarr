@@ -202,8 +202,8 @@
         }
     }
 
-    function getArtUrl(sha1: string) {
-        return `/api/art/file/${sha1}`;
+    function getArtUrl(sha1: string, size: number = 300) {
+        return `/api/art/file/${sha1}?max_size=${size}`;
     }
 </script>
 
@@ -323,17 +323,21 @@
                                     <div class="grid grid-cols-2 h-full w-full">
                                         {#each p.thumbnails.slice(0, 4) as thumb}
                                             <img
-                                                src={getArtUrl(thumb)}
+                                                src={getArtUrl(thumb, 100)}
                                                 alt=""
                                                 class="w-full h-full object-cover"
+                                                loading="lazy"
+                                                decoding="async"
                                             />
                                         {/each}
                                     </div>
                                 {:else}
                                     <img
-                                        src={getArtUrl(p.thumbnails[0])}
+                                        src={getArtUrl(p.thumbnails[0], 300)}
                                         alt={p.name}
                                         class="w-full h-full object-cover"
+                                        loading="lazy"
+                                        decoding="async"
                                     />
                                 {/if}
                             {:else}
@@ -377,39 +381,43 @@
                             {/if}
                         </a>
 
-                        <!-- Hover Overlay with Buttons -->
-                        <!-- Position absolute on top of the link, intercepting clicks -->
                         <div
-                            class="absolute inset-0 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20 pointer-events-none"
+                            class="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
                         >
-                            <IconButton
-                                variant="primary"
-                                title="Play"
-                                className="pointer-events-auto"
-                                onClick={(e) => handlePlay(e, p.id)}
+                            <div
+                                class="pointer-events-auto flex items-center gap-3 text-white"
                             >
-                                <svg
-                                    class="h-6 w-6 ml-0.5"
-                                    fill="currentColor"
-                                    viewBox="0 0 24 24"
-                                    ><path d="M8 5v14l11-7z" /></svg
+                                <IconButton
+                                    variant="primary"
+                                    title="Play"
+                                    onClick={(e) => handlePlay(e, p.id)}
+                                    stopPropagation={true}
+                                    className="shadow-lg transition-all"
                                 >
-                            </IconButton>
-                            <IconButton
-                                variant="primary"
-                                title="Add to Queue"
-                                className="pointer-events-auto"
-                                onClick={(e) => handleAddToQueue(e, p.id)}
-                            >
-                                <svg
-                                    class="h-6 w-6"
-                                    fill="currentColor"
-                                    viewBox="0 0 24 24"
-                                    ><path
-                                        d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
-                                    /></svg
+                                    <svg
+                                        class="h-6 w-6 ml-0.5"
+                                        fill="currentColor"
+                                        viewBox="0 0 24 24"
+                                        ><path d="M8 5v14l11-7z" /></svg
+                                    >
+                                </IconButton>
+                                <IconButton
+                                    variant="primary"
+                                    title="Add to Queue"
+                                    onClick={(e) => handleAddToQueue(e, p.id)}
+                                    stopPropagation={true}
+                                    className="shadow-lg transition-all"
                                 >
-                            </IconButton>
+                                    <svg
+                                        class="h-6 w-6"
+                                        fill="currentColor"
+                                        viewBox="0 0 24 24"
+                                        ><path
+                                            d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                                        /></svg
+                                    >
+                                </IconButton>
+                            </div>
                         </div>
                     </div>
 
@@ -510,6 +518,7 @@
                                 <button
                                     type="button"
                                     class="btn btn-sm btn-ghost text-subtle hover:text-default"
+                                    aria-label="Clear file"
                                     on:click={() => {
                                         chartFile = null;
                                         chartFileName = "";
