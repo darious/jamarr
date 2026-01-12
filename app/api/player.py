@@ -21,6 +21,29 @@ playback_monitors: Dict[str, asyncio.Task] = {}
 monitor_start_times: Dict[str, float] = {}  # Track when monitors were last started
 # Track when we last started a new track to prevent false "track finished" detection during transitions
 last_track_start_time: Dict[str, float] = {}
+monitor_starting: Dict[str, float] = {}
+
+
+def _mark_monitor_starting(udn: str):
+    monitor_starting[udn] = time.time()
+
+
+def _clear_monitor_starting(udn: str):
+    monitor_starting.pop(udn, None)
+
+
+def _is_monitor_starting(udn: str, window_s: float = 10.0) -> bool:
+    started_at = monitor_starting.get(udn)
+    return bool(started_at) and (time.time() - started_at) < window_s
+
+
+def _start_monitor_task(udn: str):
+    existing = playback_monitors.get(udn)
+    if existing and not existing.done():
+        return existing
+    playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
+    monitor_start_times[udn] = time.time()
+    return playback_monitors[udn]
 
 
 async def play_next_track_internal(udn: str):
@@ -749,16 +772,11 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
             if state["is_playing"]:
                 if udn not in playback_monitors or playback_monitors[udn].done():
                     # Only restart if it's been at least 5 seconds since last start
-                    import time
-
                     now = time.time()
                     last_start = monitor_start_times.get(udn, 0)
-                    if now - last_start > 5:
+                    if now - last_start > 5 and not _is_monitor_starting(udn):
                         logger.info(f"[Player] Auto-restarting monitor for {udn}")
-                        playback_monitors[udn] = asyncio.create_task(
-                            monitor_upnp_playback(udn)
-                        )
-                        monitor_start_times[udn] = now
+                        _start_monitor_task(udn)
 
         queue = state["queue"]
         track_ids = [
@@ -860,19 +878,20 @@ async def set_queue(
 
             # Start playback in background to avoid blocking HTTP response
             async def start_playback():
-                await upnp.set_renderer(udn)
-                env_port = os.environ.get("HOST_PORT")
-                port = env_port if env_port else (request.url.port or 8111)
-                upnp.base_url = f"http://{upnp.local_ip}:{port}"
-                track = state["queue"][state["current_index"]]
-                await upnp.play_track(track["id"], track.get("path"), track)
-                playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
-                import time
-
-                monitor_start_times[udn] = time.time()
-                last_track_start_time[udn] = time.time()
+                try:
+                    await upnp.set_renderer(udn)
+                    env_port = os.environ.get("HOST_PORT")
+                    port = env_port if env_port else (request.url.port or 8111)
+                    upnp.base_url = f"http://{upnp.local_ip}:{port}"
+                    track = state["queue"][state["current_index"]]
+                    await upnp.play_track(track["id"], track.get("path"), track)
+                    _start_monitor_task(udn)
+                    last_track_start_time[udn] = time.time()
+                finally:
+                    _clear_monitor_starting(udn)
 
             # Start playback in background
+            _mark_monitor_starting(udn)
             asyncio.create_task(start_playback())
 
     return {"status": "ok"}
@@ -1073,12 +1092,13 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
                 port = env_port if env_port else 8111
                 upnp.base_url = f"http://{upnp.local_ip}:{port}"
                 track = state["queue"][state["current_index"]]
-                await upnp.play_track(track["id"], track.get("path"), track)
-                playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
-                import time
-
-                monitor_start_times[udn] = time.time()
-                last_track_start_time[udn] = time.time()
+                _mark_monitor_starting(udn)
+                try:
+                    await upnp.play_track(track["id"], track.get("path"), track)
+                    _start_monitor_task(udn)
+                    last_track_start_time[udn] = time.time()
+                finally:
+                    _clear_monitor_starting(udn)
     # Return the state so the client can sync immediately
     return {
         "status": "ok",
@@ -1346,14 +1366,14 @@ async def play_track(
             except Exception:
                 pass
 
-        await upnp.play_track(track["id"], track["path"], track)
-
-        # Start fresh monitor (only for UPnP)
-        playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
-        import time
-
-        monitor_start_times[udn] = time.time()
-        last_track_start_time[udn] = time.time()
+        _mark_monitor_starting(udn)
+        try:
+            await upnp.play_track(track["id"], track["path"], track)
+            # Start fresh monitor (only for UPnP)
+            _start_monitor_task(udn)
+            last_track_start_time[udn] = time.time()
+        finally:
+            _clear_monitor_starting(udn)
 
         return {"status": "streaming_started", "renderer": udn}
     else:
