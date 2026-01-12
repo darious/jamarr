@@ -510,6 +510,7 @@
                                 <button
                                     type="button"
                                     class="btn btn-sm btn-ghost text-subtle hover:text-default"
+                                    aria-label="Clear file"
                                     on:click={() => {
                                         chartFile = null;
                                         chartFileName = "";
