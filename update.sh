@@ -3,80 +3,57 @@ set -euo pipefail
 
 COMPOSE="docker compose"
 
-# Prefer HOST_IP from env; otherwise derive via an internal route (DNS server 192.168.0.11)
+# Derive HOST_IP from the primary network interface (ignoring loopback)
 if [[ -z "${HOST_IP:-}" ]]; then
-  HOST_IP="$(ip route get 192.168.0.11 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
+  # Grab the first IP address that isn't 127.0.0.1
+  HOST_IP="$(hostname -I | awk '{print $1}')"
 fi
-
-if [[ -z "${HOST_IP:-}" ]]; then
-  echo "Unable to determine HOST_IP (tried route to 192.168.0.11). Set HOST_IP manually and retry." >&2
-  exit 1
-fi
-
-export HOST_IP
 echo "Using HOST_IP=${HOST_IP}"
 
-echo "[1/8] Stopping app container..."
-${COMPOSE} stop jamarr || true
-
-echo "[2/8] Updating repository..."
-git pull --rebase
-
-echo "[3/8] Ensuring database container is up..."
-${COMPOSE} up -d jamarr_db
-
-echo "[4/8] Building latest application image..."
+echo "[1/7] Building latest application image..."
+# Build before stopping. If this fails, the old version keeps running.
 ${COMPOSE} build jamarr
 
-echo "[5/8] Waiting for database container to be ready..."
-DB_CONTAINER="$(${COMPOSE} ps -q jamarr_db)"
+echo "[2/7] Ensuring database container is up..."
+${COMPOSE} up -d jamarr_db
+
+echo "[3/7] Waiting for database readiness..."
 DB_READY="false"
-if [[ -n "${DB_CONTAINER}" ]]; then
-  for _ in {1..30}; do
-    if [[ "$(docker inspect -f '{{.State.Status}}' "${DB_CONTAINER}")" == "running" ]]; then
-      if docker exec -t jamarr_db pg_isready -h 127.0.0.1 -p 8110 -U jamarr >/dev/null 2>&1; then
+for _ in {1..30}; do
+    if docker exec jamarr_db pg_isready -h 127.0.0.1 -p 8110 -U jamarr >/dev/null 2>&1; then
         DB_READY="true"
         break
-      fi
     fi
     sleep 1
-  done
-  if [[ "${DB_READY}" != "true" ]]; then
-    echo "Database container did not become ready; aborting." >&2
+done
+
+if [[ "${DB_READY}" != "true" ]]; then
+    echo "Error: Database did not become ready; aborting." >&2
     exit 1
-  fi
 fi
 
-echo "[6/8] Backing up database if container is running..."
-if [[ -n "${DB_CONTAINER}" ]] && [[ "${DB_READY}" == "true" ]]; then
-  BACKUP_DIR="/mnt/config/q-docker/jamarr"
-  mkdir -p "${BACKUP_DIR}"
-  BACKUP_PATH="${BACKUP_DIR}/jamarr_rescue_$(date +%F_%H%M%S).sql.gz"
-  for attempt in {1..5}; do
-    if docker exec -t jamarr_db pg_dump -h 127.0.0.1 -p 8110 -U jamarr -d jamarr --no-owner --no-privileges \
-      | gzip -c > "${BACKUP_PATH}"; then
-      echo "Database backup created at ${BACKUP_PATH}"
-      break
-    fi
-    if [[ "$(docker inspect -f '{{.State.Status}}' "${DB_CONTAINER}")" != "running" ]]; then
-      sleep 1
-      continue
-    fi
-    echo "Database backup failed; aborting." >&2
-    exit 1
-  done
-  if [[ ! -s "${BACKUP_PATH}" ]]; then
-    echo "Database backup failed; aborting." >&2
-    exit 1
-  fi
+echo "[4/7] Creating database backup (pre-migration)..."
+BACKUP_DIR="/mnt/config/q-jamarr/jamarr"
+mkdir -p "${BACKUP_DIR}"
+BACKUP_PATH="${BACKUP_DIR}/jamarr_rescue_$(date +%F_%H%M%S).sql.gz"
+
+# Use -i (interactive) and NOT -t (tty) to ensure binary integrity of the compressed dump
+if docker exec -i jamarr_db pg_dump -h 127.0.0.1 -p 8110 -U jamarr -d jamarr --no-owner --no-privileges | gzip -c > "${BACKUP_PATH}"; then
+    echo "Backup created: ${BACKUP_PATH}"
 else
-  echo "Database container not running; skipping backup."
+    echo "Error: Database backup failed; aborting." >&2
+    exit 1
 fi
 
-echo "[7/8] Applying database migrations..."
+echo "[5/7] Applying database migrations..."
+# Run migrations using the new image we just built
 ${COMPOSE} run --rm jamarr python scripts/apply_migrations.py
 
-echo "[8/8] Starting app container..."
+echo "[6/7] Restarting app container..."
+# 'up -d' recreates only the containers that have changed images or config
 ${COMPOSE} up -d jamarr
+
+echo "[7/7] Cleaning up old images..."
+docker image prune -f
 
 echo "✅ Deploy complete"
