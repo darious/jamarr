@@ -14,6 +14,7 @@ class PlaylistCreate(BaseModel):
     name: str
     description: Optional[str] = None
     is_public: bool = False
+    track_ids: Optional[List[int]] = None
 
 class PlaylistUpdate(BaseModel):
     name: Optional[str] = None
@@ -69,6 +70,24 @@ async def create_playlist(
 ):
     user, _ = await require_current_user(request, db)
     user_id = user['id']
+    
+    # Validate track IDs if provided
+    if playlist.track_ids:
+        # Check that all track IDs exist
+        track_check_query = """
+            SELECT id FROM track WHERE id = ANY($1::int[])
+        """
+        existing_tracks = await db.fetch(track_check_query, playlist.track_ids)
+        existing_ids = {row['id'] for row in existing_tracks}
+        
+        missing_ids = set(playlist.track_ids) - existing_ids
+        if missing_ids:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Track IDs not found: {sorted(missing_ids)}"
+            )
+    
+    # Create playlist
     query = """
         INSERT INTO playlist (user_id, name, description, is_public, updated_at)
         VALUES ($1, $2, $3, $4, NOW())
@@ -81,6 +100,19 @@ async def create_playlist(
         playlist.description,
         playlist.is_public
     )
+    
+    # Add tracks if provided
+    if playlist.track_ids:
+        values = []
+        for position, track_id in enumerate(playlist.track_ids):
+            values.append((row['id'], track_id, position))
+        
+        if values:
+            await db.executemany("""
+                INSERT INTO playlist_track (playlist_id, track_id, position)
+                VALUES ($1, $2, $3)
+            """, values)
+    
     return dict(row)
 
 @router.get("/api/playlists", response_model=List[dict])
@@ -276,7 +308,7 @@ async def get_playlist(
         LEFT JOIN artwork a ON t.artwork_id = a.id
         LEFT JOIN (
             SELECT h.track_id, COUNT(*) as plays
-            FROM combined_playback_history h
+            FROM combined_playback_history_mat h
             GROUP BY h.track_id
         ) tp ON tp.track_id = t.id
         WHERE pt.playlist_id = $1

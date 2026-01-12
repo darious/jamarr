@@ -647,6 +647,9 @@ async def log_history(
                 asyncio.create_task(
                     _scrobble_to_lastfm(user_id, track_id)
                 )
+
+            # Refresh materialized view to update stats immediately
+            await db.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
                 
         except Exception as e:
             logger.error(f"Failed to log history: {e}")
@@ -786,7 +789,7 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
             plays_rows = await db.fetch(
                 """
                 SELECT h.track_id, COUNT(*) as plays
-                FROM combined_playback_history h
+                FROM combined_playback_history_mat h
                 WHERE h.track_id = ANY($1::bigint[])
                 GROUP BY h.track_id
                 """,

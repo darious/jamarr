@@ -186,7 +186,7 @@ async def get_artists(
         ) ac ON ac.artist_mbid = a.mbid
         LEFT JOIN (
             SELECT ta.artist_mbid, COUNT(DISTINCT source_id) as listens
-            FROM combined_playback_history h
+            FROM combined_playback_history_mat h
             JOIN track_artist ta ON ta.track_id = h.track_id
             GROUP BY ta.artist_mbid
         ) lp ON lp.artist_mbid = a.mbid
@@ -321,7 +321,7 @@ async def get_artists(
                     a.sha1 as art_sha1,
                     t.release_mbid as mb_release_id,
                     COUNT(*) as plays
-                FROM combined_playback_history h
+                FROM combined_playback_history_mat h
                 JOIN track t ON h.track_id = t.id
                 JOIN track_artist ta ON ta.track_id = t.id
                 LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -523,7 +523,7 @@ async def get_albums(
         LEFT JOIN external_link el ON el.entity_type = 'album' AND (el.entity_id = al.release_group_mbid OR el.entity_id = t.release_group_mbid)
         LEFT JOIN (
             SELECT t.release_mbid as album_mbid, COUNT(DISTINCT h.source_id) as listens
-            FROM combined_playback_history h
+            FROM combined_playback_history_mat h
             JOIN track t ON t.id = h.track_id
             GROUP BY t.release_mbid
         ) lp ON lp.album_mbid = aa.album_mbid
@@ -608,7 +608,7 @@ async def get_tracks(
         LEFT JOIN artwork a ON t.artwork_id = a.id
         LEFT JOIN (
             SELECT h.track_id, COUNT(*) as plays
-            FROM combined_playback_history h
+            FROM combined_playback_history_mat h
             GROUP BY h.track_id
         ) tp ON tp.track_id = t.id
     """

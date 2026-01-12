@@ -558,7 +558,7 @@ export async function fetchArtistPlaylists(artistMbid: string, fetchFn: any = fe
     return await res.json();
 }
 
-export async function createPlaylist(data: { name: string; description?: string; is_public?: boolean }): Promise<Playlist> {
+export async function createPlaylist(data: { name: string; description?: string; is_public?: boolean; track_ids?: number[] }): Promise<Playlist> {
     const res = await fetch('/api/playlists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
