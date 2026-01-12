@@ -273,6 +273,36 @@ async def sync_scrobbles(
     db: asyncpg.Connection = Depends(get_db),
 ):
     """Fetch new scrobbles from Last.fm and match them to library tracks."""
+    user, _ = await require_current_user(request, db)
+    manager = LastfmSyncManager.get_instance()
+    manager.start_sync()
+    try:
+        result = await sync_scrobbles_for_user(db, user, payload, manager)
+        manager.complete_sync("success")
+        return result
+    except HTTPException as exc:
+        manager.complete_sync("error", exc.detail)
+        raise
+    except RuntimeError as exc:
+        manager.complete_sync("error", str(exc))
+        if str(exc) == "Last.fm account not connected":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Last.fm account not connected. Please connect your Last.fm account in settings.",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+async def sync_scrobbles_for_user(
+    db: asyncpg.Connection,
+    user: dict,
+    payload: SyncRequest,
+    manager: LastfmSyncManager | None = None,
+):
+    """Fetch new scrobbles from Last.fm and match them to library tracks."""
     import os
     from app.matching.matcher import (
         preload_artist_lookup,
@@ -282,21 +312,16 @@ async def sync_scrobbles(
         _build_artist_volume,
     )
     from app.matching import build_cache_key
-    
-    user, _ = await require_current_user(request, db)
-    manager = LastfmSyncManager.get_instance()
-    manager.start_sync()
-    
+
     # Verify user has Last.fm username configured
     lastfm_username = user.get("lastfm_username")
     if not lastfm_username:
-        logger.warning(f"User {user.get('username')} attempted sync without Last.fm username configured")
-        manager.complete_sync("error", "Last.fm account not connected")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Last.fm account not connected. Please connect your Last.fm account in settings."
+        logger.warning(
+            "User %s attempted sync without Last.fm username configured",
+            user.get("username"),
         )
-    
+        raise RuntimeError("Last.fm account not connected")
+
     logger.info(
         "Starting Last.fm sync for user %s (fetch_new=%s, rematch_all=%s, limit=%s)",
         lastfm_username,
@@ -304,38 +329,38 @@ async def sync_scrobbles(
         payload.rematch_all,
         payload.limit,
     )
-    
+
     logs: List[str] = []
+
     def add_log(message: str) -> None:
         logs.append(message)
-        manager.log_message(message)
+        if manager:
+            manager.log_message(message)
+
     fetched = 0
     matched = 0
     skipped = 0
     unmatched = 0
-    
+
     # Fetch new scrobbles if requested
     if payload.fetch_new:
         add_log("Fetching new scrobbles from Last.fm...")
         logger.info(f"Fetching new scrobbles for {lastfm_username}")
-        
+
         api_key = os.environ.get("LASTFM_API_KEY")
         if not api_key:
             logger.error("LASTFM_API_KEY not configured in environment")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="LASTFM_API_KEY not configured"
-            )
-        
+            raise RuntimeError("LASTFM_API_KEY not configured")
+
         # Get newest scrobble timestamp to fetch only newer ones
         newest_uts = await db.fetchval(
             """
             SELECT MAX(played_at_uts) FROM lastfm_scrobble
             WHERE lastfm_username = $1
             """,
-            lastfm_username
+            lastfm_username,
         )
-        
+
         # Fetch scrobbles from Last.fm API
         page = 1
         total_pages: Optional[int] = None
@@ -459,16 +484,16 @@ async def sync_scrobbles(
                     add_log(error_msg)
                     logger.error(error_msg, exc_info=True)
                     break
-        
+
         log_msg = f"Fetched {fetched} new scrobbles"
         add_log(log_msg)
         logger.info(log_msg)
-    
+
     # Match scrobbles
     log_msg = "Matching scrobbles to library tracks..."
     add_log(log_msg)
     logger.info(log_msg)
-    
+
     # Get unmatched scrobbles
     limit_clause = ""
     limit_params: List[Any] = []
@@ -480,7 +505,7 @@ async def sync_scrobbles(
         # Clear all matches and re-match
         await db.execute(
             "DELETE FROM lastfm_scrobble_match WHERE scrobble_id IN (SELECT id FROM lastfm_scrobble WHERE lastfm_username = $1)",
-            user["lastfm_username"]
+            user["lastfm_username"],
         )
         scrobbles = await db.fetch(
             f"""
@@ -510,10 +535,10 @@ async def sync_scrobbles(
             user["lastfm_username"],
             *limit_params,
         )
-    
+
     if not scrobbles:
         add_log("No scrobbles to match")
-        manager.complete_sync("success")
+        logger.info("No scrobbles to match")
         return {
             "fetched": fetched,
             "matched": matched,
@@ -521,15 +546,15 @@ async def sync_scrobbles(
             "unmatched": unmatched,
             "logs": logs,
         }
-    
+
     log_msg = f"Found {len(scrobbles)} scrobbles to match"
     add_log(log_msg)
     logger.info(log_msg)
-    
+
     # Preload data
     artist_lookup = await preload_artist_lookup(db)
     skip_artists = await preload_skip_artists(db)
-    
+
     # Process in batches
     BATCH_SIZE = 1000
     for i in range(0, len(scrobbles), BATCH_SIZE):
@@ -537,11 +562,11 @@ async def sync_scrobbles(
         log_msg = f"Processing batch {i // BATCH_SIZE + 1} ({len(batch)} scrobbles)..."
         add_log(log_msg)
         logger.debug(log_msg)
-        
+
         # Preload tracks for this batch
         indexes = await preload_tracks(db, batch, artist_lookup)
         artist_volume = _build_artist_volume(batch)
-        
+
         # Check cache for existing matches
         cache_keys = [build_cache_key(s) for s in batch]
         cache_keys = [k for k in cache_keys if k]
@@ -560,26 +585,28 @@ async def sync_scrobbles(
             for row in cache_rows:
                 if row["cache_key"] not in cached_matches:
                     cached_matches[row["cache_key"]] = row
-        
+
         # Match each scrobble
         match_rows = []
         for scrobble in batch:
             cache_key = build_cache_key(scrobble)
-            
+
             # Check cache first
             if cache_key and cache_key in cached_matches:
                 cached = cached_matches[cache_key]
-                match_rows.append((
-                    scrobble["id"],
-                    cached["track_id"],
-                    cached["match_score"],
-                    cached["match_method"],
-                    cached["match_reason"],
-                    cache_key,
-                ))
+                match_rows.append(
+                    (
+                        scrobble["id"],
+                        cached["track_id"],
+                        cached["match_score"],
+                        cached["match_method"],
+                        cached["match_reason"],
+                        cache_key,
+                    )
+                )
                 matched += 1
                 continue
-            
+
             # Try to match
             result = match_scrobble(
                 scrobble,
@@ -590,21 +617,23 @@ async def sync_scrobbles(
                 fuzzy=payload.fuzzy,
                 fuzzy_title_threshold=payload.fuzzy_title_threshold,
             )
-            
+
             if result:
                 track_id, score, method, reason = result
-                match_rows.append((
-                    scrobble["id"],
-                    track_id,
-                    score,
-                    method,
-                    reason,
-                    cache_key,
-                ))
+                match_rows.append(
+                    (
+                        scrobble["id"],
+                        track_id,
+                        score,
+                        method,
+                        reason,
+                        cache_key,
+                    )
+                )
                 matched += 1
             else:
                 unmatched += 1
-        
+
         # Insert matches
         if match_rows:
             await db.executemany(
@@ -621,13 +650,11 @@ async def sync_scrobbles(
                 """,
                 match_rows,
             )
-    
+
     log_msg = f"Matching complete: {matched} matched, {unmatched} unmatched"
     add_log(log_msg)
     logger.info(log_msg)
 
-    manager.complete_sync("success")
-    
     return {
         "fetched": fetched,
         "matched": matched,

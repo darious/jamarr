@@ -9,6 +9,7 @@ async def lifespan(app: FastAPI):
     from app.upnp import UPnPManager
     from app.scanner.scan_manager import ScanManager
     from app.scanner.dns_resolver import warm_dns_cache
+    from app.scheduler import Scheduler
 
     # Critical: Warm DNS cache and install monkey-patch BEFORE any clients are created
     await warm_dns_cache()
@@ -16,7 +17,9 @@ async def lifespan(app: FastAPI):
     UPnPManager.get_instance().start_background_scan()
     # ScanManager is lazy initialized but good to have it ready
     ScanManager.get_instance()
+    await Scheduler.get_instance().start()
     yield
+    await Scheduler.get_instance().stop()
     await UPnPManager.get_instance().stop_background_scan()
     await ScanManager.get_instance().shutdown()
     await close_db()
@@ -35,7 +38,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from pathlib import Path  # noqa: E402
 from app.media import art  # noqa: E402
-from app.api import library, stream, player, search, scan, auth, media_quality, charts, lastfm, history  # noqa: E402
+from app.api import library, stream, player, search, scan, auth, media_quality, charts, lastfm, history, scheduler  # noqa: E402
 from app import playlist  # noqa: E402
 
 app.include_router(art.router)
@@ -53,6 +56,7 @@ app.include_router(playlist.router)
 app.include_router(charts.router, prefix="/api")
 app.include_router(lastfm.router)
 app.include_router(history.router)
+app.include_router(scheduler.router)
 
 
 # Serve built SvelteKit frontend (output lives in web/build)

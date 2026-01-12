@@ -646,6 +646,121 @@ export async function refreshChart(): Promise<void> {
     if (!res.ok) throw new Error('Failed to refresh chart');
 }
 
+// Scheduler
+export interface SchedulerJob {
+    key: string;
+    name: string;
+    description: string;
+}
+
+export interface ScheduledTask {
+    id: number;
+    job_key: string;
+    job: SchedulerJob | null;
+    cron: string;
+    timezone: string;
+    enabled: boolean;
+    last_run_at: string | null;
+    next_run_at: string | null;
+    last_status: string | null;
+    last_error: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ScheduledRun {
+    id: number;
+    task_id: number;
+    started_at: string;
+    finished_at: string | null;
+    status: string;
+    error: string | null;
+    duration_ms: number | null;
+}
+
+export async function listSchedulerJobs(): Promise<SchedulerJob[]> {
+    const res = await fetch('/api/scheduler/jobs', { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to fetch scheduler jobs');
+    return await res.json();
+}
+
+export async function listSchedulerTasks(): Promise<ScheduledTask[]> {
+    const res = await fetch('/api/scheduler/tasks', { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to fetch scheduler tasks');
+    return await res.json();
+}
+
+export async function createSchedulerTask(payload: {
+    job_key: string;
+    cron: string;
+    enabled?: boolean;
+}): Promise<ScheduledTask> {
+    const res = await fetch('/api/scheduler/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to create scheduler task');
+    }
+    return await res.json();
+}
+
+export async function updateSchedulerTask(
+    taskId: number,
+    payload: { cron?: string; enabled?: boolean }
+): Promise<ScheduledTask> {
+    const res = await fetch(`/api/scheduler/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to update scheduler task');
+    }
+    return await res.json();
+}
+
+export async function deleteSchedulerTask(taskId: number): Promise<void> {
+    const res = await fetch(`/api/scheduler/tasks/${taskId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+    });
+    if (!res.ok) throw new Error('Failed to delete scheduler task');
+}
+
+export async function runSchedulerTask(taskId: number): Promise<void> {
+    const res = await fetch(`/api/scheduler/tasks/${taskId}/run`, {
+        method: 'POST',
+        credentials: 'include',
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to run scheduler task');
+    }
+}
+
+export async function stopSchedulerTask(taskId: number): Promise<void> {
+    const res = await fetch(`/api/scheduler/tasks/${taskId}/stop`, {
+        method: 'POST',
+        credentials: 'include',
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to stop scheduler task');
+    }
+}
+
+export async function listSchedulerRuns(taskId: number): Promise<ScheduledRun[]> {
+    const res = await fetch(`/api/scheduler/tasks/${taskId}/runs`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to fetch scheduler runs');
+    return await res.json();
+}
+
 // Last.fm Integration
 export interface LastfmStatus {
     connected: boolean;
