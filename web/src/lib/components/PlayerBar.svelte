@@ -218,12 +218,16 @@
 
         audio.src = newSrc;
 
-        // Only resume from saved position if it's the SAME track
+        // Only resume from saved position if it's the SAME track OR it's a fresh load (empty src)
         // Otherwise start from beginning to avoid race condition with timeupdate events
         const savedPosition = $playerState.position_seconds || 0;
-        if (isSameTrack && savedPosition > 0) {
+        
+        // Fix: audio.src is empty string "" on init, or could be current page url in some browsers if not set
+        const isColdStart = !currentSrc || currentSrc === window.location.href; 
+        
+        if ((isSameTrack || isColdStart) && savedPosition > 0) {
           console.log(
-            "[PlayerBar] Resuming same track from position:",
+            "[PlayerBar] Resuming track from position:",
             savedPosition,
           );
           audio.currentTime = savedPosition;
