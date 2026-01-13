@@ -66,11 +66,11 @@
   isAuthChecked.set(true);
 
   onMount(async () => {
-    console.log("[Layout] onMount called");
+
     // Subscribe first to get immediate state (including default 'local' renderer)
-    console.log("[Layout] About to subscribe to playerState");
+
     unsub = playerState.subscribe((state) => {
-      console.log("[Layout] playerState updated, renderers:", state.renderers);
+
       rendererList = state.renderers || [];
       activeRenderer = state.renderer || "local";
     });
@@ -84,13 +84,13 @@
       hydrateUser().catch((e) => console.error("Failed to hydrate user", e));
     }
 
-    console.log("[Layout] About to call loadQueueFromServer");
+
     try {
       await loadQueueFromServer();
     } catch (e) {
       console.error("[Layout] loadQueueFromServer failed:", e);
     }
-    console.log("[Layout] loadQueueFromServer completed");
+
 
     // Trigger refresh without awaiting the full 5s discovery if we don't want to block anything else
     // But since subscription is active, store updates will just propagate.

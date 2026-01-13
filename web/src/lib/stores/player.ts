@@ -86,16 +86,16 @@ export function getHeaders(): HeadersInit {
 // --- Actions ---
 
 export async function refreshRenderers(force: boolean = false) {
-    console.log('[refreshRenderers] Starting...', { force });
+
     try {
-        console.log(`[refreshRenderers] Fetching from: /api/renderers?refresh=${force}`);
+
         const res = await fetch(`/api/renderers?refresh=${force}`, {
             headers: { 'X-Jamarr-Client-Id': getClientId() }
         });
-        console.log('[refreshRenderers] Response status:', res.status);
+
         if (res.ok) {
             const allRenderers = await res.json();
-            console.log('[refreshRenderers] Received renderers:', allRenderers);
+
 
             // Filter out other 'local:*' renderers that are not us
             const myId = getClientId();
@@ -115,7 +115,7 @@ export async function refreshRenderers(force: boolean = false) {
             });
 
             playerState.update(s => ({ ...s, renderers: finalRenderers }));
-            console.log('[refreshRenderers] Store updated');
+
         } else {
             console.error('[refreshRenderers] Response not OK:', res.status, res.statusText);
         }
@@ -161,15 +161,15 @@ async function getClientIp(): Promise<string | null> {
 }
 
 export async function loadQueueFromServer() {
-    console.log('[loadQueueFromServer] Fetching player state...');
+
     try {
         const res = await fetch('/api/player/state', {
             headers: { 'X-Jamarr-Client-Id': getClientId() }
         });
-        console.log('[loadQueueFromServer] Response status:', res.status);
+
         if (res.ok) {
             const data = await res.json();
-            console.log('[loadQueueFromServer] Received data:', data);
+
 
             // Map renderer UDN "local:<myId>" to internal "local" if we want UI consistency?
             // Actually, UI should just use the UDN.
@@ -197,9 +197,9 @@ export async function loadQueueFromServer() {
 }
 
 export async function setQueue(tracks: Track[], startIndex: number = 0) {
-    console.log('[setQueue] Called with tracks:', tracks, 'startIndex:', startIndex);
+
     try {
-        console.log('[setQueue] Calling POST /api/player/queue');
+
         const hostname = window.location.hostname;
         const client_ip = await getClientIp();
         const res = await fetch('/api/player/queue', {
@@ -207,14 +207,14 @@ export async function setQueue(tracks: Track[], startIndex: number = 0) {
             headers: getHeaders(),
             body: JSON.stringify({ queue: tracks, start_index: startIndex, hostname, client_ip })
         });
-        console.log('[setQueue] Response status:', res.status);
+
         if (res.ok) {
             // Don't update store optimistically - immediately refresh from server instead
             // This ensures UI shows accurate state (position, artwork, etc)
-            console.log('[setQueue] Queue set successfully, refreshing state from server');
+
             await loadQueueFromServer();
             // Now trigger playback
-            console.log('[setQueue] Calling playCurrentTrack to start playback');
+
             await playCurrentTrack();
         } else {
             console.error('[setQueue] Failed, status:', res.status, await res.text());
@@ -225,21 +225,21 @@ export async function setQueue(tracks: Track[], startIndex: number = 0) {
 }
 
 export async function addToQueue(tracks: Track[]) {
-    console.log('[addToQueue] Called with tracks:', tracks);
+
     try {
-        console.log('[addToQueue] Calling POST /api/player/queue/append');
+
         const res = await fetch('/api/player/queue/append', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ tracks })
         });
-        console.log('[addToQueue] Response status:', res.status);
+
         if (res.ok) {
             playerState.update(s => ({ ...s, queue: [...s.queue, ...tracks] }));
             // If queue was empty, maybe start playing?
             const s = get(playerState);
             if (s.current_index === -1) {
-                console.log('[addToQueue] Queue was empty, calling playFromQueue(0)');
+
                 await playFromQueue(0);
             }
         } else {
@@ -309,7 +309,7 @@ export async function reorderQueue(arg1: Track[] | number, arg2?: number) {
 }
 
 export async function clearQueue(stopPlayback: boolean = true) {
-    console.log('[clearQueue] Clearing queue (stopPlayback=%s)', stopPlayback);
+
     try {
         const res = await fetch('/api/player/queue/clear', {
             method: 'POST',
@@ -435,7 +435,7 @@ export function toggleRepeat() {
 export async function updateProgress(seconds: number, isPlaying: boolean) {
     playerState.update(s => ({ ...s, position_seconds: seconds, is_playing: isPlaying }));
 
-    console.log('[updateProgress] Sending to server:', { position_seconds: seconds, is_playing: isPlaying });
+
     try {
         const res = await fetch('/api/player/progress', {
             method: 'POST',
@@ -443,7 +443,7 @@ export async function updateProgress(seconds: number, isPlaying: boolean) {
             body: JSON.stringify({ position_seconds: seconds, is_playing: isPlaying })
         });
         if (res.ok) {
-            // console.log('[updateProgress] Server updated successfully');
+
         } else {
             console.error('[updateProgress] Server update failed:', res.status);
         }
@@ -468,7 +468,7 @@ async function playCurrentTrack() {
                 const serverState = await res.json();
                 if (serverState.queue && serverState.queue[serverState.current_index]) {
                     track = serverState.queue[serverState.current_index];
-                    console.log('[playCurrentTrack] Got track from server:', track.title);
+
                 } else {
                     console.error('[playCurrentTrack] No track at current index on server either');
                     return;
@@ -483,25 +483,25 @@ async function playCurrentTrack() {
         }
     }
 
-    console.log('[playCurrentTrack] Called, current track:', track);
+
 
     try {
-        console.log('[playCurrentTrack] Calling POST /api/player/play with track_id:', track.id);
+
         const res = await fetch('/api/player/play', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ track_id: track.id })
         });
-        console.log('[playCurrentTrack] Response status:', res.status);
+
         const data = await res.json();
-        console.log('[playCurrentTrack] Response data:', data);
+
 
         if (data.status === 'local_playback') {
             // Dispatch event for PlayerBar to handle local playback
-            console.log('[playCurrentTrack] Dispatching jamarr:play-local event');
+
             window.dispatchEvent(new CustomEvent('jamarr:play-local', { detail: track }));
         } else {
-            console.log('[playCurrentTrack] Not local playback, data:', data);
+
             // Optimistically update state to Playing for remote
             playerState.update(s => ({ ...s, is_playing: true, position_seconds: 0 }));
 
@@ -536,7 +536,7 @@ export function showNowPlaying(force: boolean) {
 export async function pause() {
     const s = get(playerState);
     if (s.renderer.startsWith('local')) {
-        console.log('[playerStore] Local pause, dispatching jamarr:pause');
+
         window.dispatchEvent(new CustomEvent('jamarr:pause'));
         playerState.update(s => ({ ...s, is_playing: false }));
         return;
@@ -556,7 +556,7 @@ export async function pause() {
 export async function resume() {
     const s = get(playerState);
     if (s.renderer.startsWith('local')) {
-        console.log('[playerStore] Local resume, dispatching jamarr:resume');
+
         window.dispatchEvent(new CustomEvent('jamarr:resume'));
         playerState.update(s => ({ ...s, is_playing: true }));
         return;
@@ -576,7 +576,7 @@ export async function resume() {
 export async function seek(seconds: number) {
     const s = get(playerState);
     if (s.renderer.startsWith('local')) {
-        console.log('[playerStore] Local seek, dispatching jamarr:seek', seconds);
+
         window.dispatchEvent(new CustomEvent('jamarr:seek', { detail: { position: seconds } }));
         playerState.update(state => ({ ...state, position_seconds: seconds }));
         return;

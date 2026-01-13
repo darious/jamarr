@@ -147,7 +147,7 @@ async def monitor_upnp_playback(udn: str):
                 await asyncio.sleep(1)
                 continue
 
-            # print(f"[Player] Monitor {udn}: {transport_state} @ {rel_time}s")
+
 
             # 2. Update DB
             async for db in get_db():

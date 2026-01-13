@@ -5,24 +5,13 @@
     import AddToPlaylistModal from "$lib/components/AddToPlaylistModal.svelte";
     import IconButton from "$lib/components/IconButton.svelte";
 
-    let query = "";
-    let results: any = null;
-    let timer: any;
-    let inputElement: HTMLInputElement;
-    let showResults = false;
-
-    // Playlist Modal
-    let showPlaylistModal = false;
-    let selectedTrackIds: number[] = [];
-
-    const openPlaylistModal = (trackId: number, e: MouseEvent) => {
-        e.stopPropagation();
-        selectedTrackIds = [trackId];
-        showPlaylistModal = true;
-    };
-
     interface SearchResponse {
-        artists: { name: string; mbid: string; image_url?: string }[];
+        artists: {
+            name: string;
+            mbid: string;
+            image_url?: string;
+            art_sha1?: string;
+        }[];
         albums: {
             title: string;
             artist: string;
@@ -39,6 +28,22 @@
             art_sha1?: string;
         }[];
     }
+
+    let query = "";
+    let results: SearchResponse | null = null;
+    let timer: any;
+    let inputElement: HTMLInputElement;
+    let showResults = false;
+
+    // Playlist Modal
+    let showPlaylistModal = false;
+    let selectedTrackIds: number[] = [];
+
+    const openPlaylistModal = (trackId: number, e: MouseEvent) => {
+        e.stopPropagation();
+        selectedTrackIds = [trackId];
+        showPlaylistModal = true;
+    };
 
     const handleInput = () => {
         clearTimeout(timer);
@@ -164,7 +169,13 @@
                             on:click={() =>
                                 navigateToArtist(artist.name, artist.mbid)}
                         >
-                            {#if artist.image_url}
+                            {#if artist.art_sha1}
+                                <img
+                                    src={`/art/file/${artist.art_sha1}?max_size=100`}
+                                    class="h-8 w-8 rounded-full object-cover"
+                                    alt=""
+                                />
+                            {:else if artist.image_url}
                                 <img
                                     src={artist.image_url}
                                     class="h-8 w-8 rounded-full object-cover"
@@ -221,7 +232,7 @@
                                 {#if album.art_sha1}
                                     <img
                                         src={album.art_sha1
-                                            ? `/art/file/${album.art_sha1}`
+                                            ? `/art/file/${album.art_sha1}?max_size=100`
                                             : ""}
                                         alt=""
                                         class="h-full w-full object-cover"
