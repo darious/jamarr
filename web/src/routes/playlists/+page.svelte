@@ -202,8 +202,8 @@
         }
     }
 
-    function getArtUrl(sha1: string) {
-        return `/api/art/file/${sha1}`;
+    function getArtUrl(sha1: string, size: number = 300) {
+        return `/api/art/file/${sha1}?max_size=${size}`;
     }
 </script>
 
@@ -323,17 +323,21 @@
                                     <div class="grid grid-cols-2 h-full w-full">
                                         {#each p.thumbnails.slice(0, 4) as thumb}
                                             <img
-                                                src={getArtUrl(thumb)}
+                                                src={getArtUrl(thumb, 100)}
                                                 alt=""
                                                 class="w-full h-full object-cover"
+                                                loading="lazy"
+                                                decoding="async"
                                             />
                                         {/each}
                                     </div>
                                 {:else}
                                     <img
-                                        src={getArtUrl(p.thumbnails[0])}
+                                        src={getArtUrl(p.thumbnails[0], 300)}
                                         alt={p.name}
                                         class="w-full h-full object-cover"
+                                        loading="lazy"
+                                        decoding="async"
                                     />
                                 {/if}
                             {:else}

@@ -293,10 +293,11 @@
                                 {#if track.art_sha1}
                                     <img
                                         src={track.art_sha1
-                                            ? `/art/file/${track.art_sha1}`
+                                            ? `/art/file/${track.art_sha1}?max_size=100`
                                             : ""}
                                         alt=""
                                         class="h-full w-full object-cover"
+                                        decoding="async"
                                     />
                                 {:else}
                                     <svg

@@ -117,13 +117,15 @@
             href={`/artist/${artist.mbid}`}
           >
             <div class="flex justify-center">
-              <div class="h-[300px] w-[300px] overflow-hidden rounded-xl">
+                <div class="h-[300px] w-[300px] overflow-hidden rounded-xl">
                 <img
                   src={artist.art_sha1
-                    ? `/art/file/${artist.art_sha1}`
+                    ? `/art/file/${artist.art_sha1}?max_size=300`
                     : "/assets/default-artist-placeholder.svg"}
                   alt={artist.name}
                   class="h-full w-full rounded-2xl object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                  loading="lazy"
+                  decoding="async"
                 />
               </div>
             </div>

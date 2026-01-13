@@ -96,7 +96,7 @@
     }
 
     function getArtworkUrl(): string {
-        if (artwork?.sha1) return `/art/file/${artwork.sha1}`;
+        if (artwork?.sha1) return `/art/file/${artwork.sha1}?max_size=100`;
         return "/assets/default-album-placeholder.svg";
     }
 
@@ -166,6 +166,8 @@
                 src={getArtworkUrl()}
                 class="w-full h-full object-cover"
                 alt="Art"
+                loading="lazy"
+                decoding="async"
             />
             <!-- Playing Indicator -->
             {#if isCurrentlyPlaying && isPlaying}
