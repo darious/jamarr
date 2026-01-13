@@ -152,6 +152,40 @@
         await addToQueue(queueItems as unknown as import("$api").Track[]);
     }
 
+    import { downloadTracks } from "$lib/helpers/downloader";
+
+    function handleDownload() {
+        if (!playlist || !playlist.tracks.length) return;
+
+        // Convert PlaylistTracks to Tracks for the helper
+        // We need to map them back to the structure the helper expects.
+        // Actually the helper expects Track objects roughly.
+        // We constructed queueItems earlier which are roughly Tracks.
+
+        const tracks = playlist.tracks.map((t) => ({
+            id: t.track_id,
+            path: t.path,
+            title: t.title,
+            artist: t.artist,
+            album: t.album,
+            duration_seconds: t.duration_seconds,
+            art_sha1: t.art_sha1,
+            codec: t.codec,
+            bit_depth: t.bit_depth, // optional in Track
+            sample_rate_hz: t.sample_rate_hz, // optional
+            // ... other fields if needed by download helper to form filename?
+            // The helper uses 'path' to deduce filename.
+        }));
+
+        void downloadTracks({
+            mode: "playlist",
+            folderName: playlist.name,
+            // tracks need to be compatible with Track interface
+            // The map above is partial but sufficient for the downloader which uses .path and .id
+            tracks: tracks as unknown as import("$api").Track[],
+        });
+    }
+
     async function removeTrack(pt: PlaylistTrack) {
         if (!playlist) return;
         if (!confirm("Remove track?")) return;
@@ -374,6 +408,25 @@
                                     viewBox="0 0 24 24"
                                     ><path
                                         d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                                    /></svg
+                                >
+                            </IconButton>
+                            <IconButton
+                                variant="primary"
+                                title="Download Playlist"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDownload();
+                                }}
+                                stopPropagation={true}
+                                className="shadow-lg transition-all"
+                            >
+                                <svg
+                                    class="h-6 w-6"
+                                    fill="currentColor"
+                                    viewBox="0 0 24 24"
+                                    ><path
+                                        d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"
                                     /></svg
                                 >
                             </IconButton>
