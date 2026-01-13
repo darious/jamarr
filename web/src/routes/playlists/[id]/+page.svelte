@@ -342,35 +342,42 @@
                     <!-- Hover Overlay with Buttons -->
                     <!-- Hover Overlay with Buttons -->
                     <div
-                        class="absolute inset-0 flex items-center justify-center gap-3 bg-black/60 opacity-0 group-hover:opacity-100 transition-all duration-300 backdrop-blur-[2px] z-20"
+                        class="absolute inset-0 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20 pointer-events-none bg-black/40 backdrop-blur-[2px]"
                     >
-                        <IconButton
-                            variant="ghost"
-                            title="Play"
-                            onClick={(e) => handlePlay(e)}
-                            className="scale-125"
+                        <div
+                            class="pointer-events-auto flex items-center gap-3 text-white"
                         >
-                            <svg
-                                class="h-8 w-8 ml-1"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                                ><path d="M8 5v14l11-7z" /></svg
+                            <IconButton
+                                variant="primary"
+                                title="Play"
+                                onClick={(e) => handlePlay(e)}
+                                stopPropagation={true}
+                                className="shadow-lg transition-all"
                             >
-                        </IconButton>
-                        <IconButton
-                            variant="outline"
-                            title="Add to Queue"
-                            onClick={(e) => handleAddToQueue(e)}
-                        >
-                            <svg
-                                class="h-6 w-6"
-                                fill="currentColor"
-                                viewBox="0 0 24 24"
-                                ><path
-                                    d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
-                                /></svg
+                                <svg
+                                    class="h-6 w-6 ml-0.5"
+                                    fill="currentColor"
+                                    viewBox="0 0 24 24"
+                                    ><path d="M8 5v14l11-7z" /></svg
+                                >
+                            </IconButton>
+                            <IconButton
+                                variant="primary"
+                                title="Add to Queue"
+                                onClick={(e) => handleAddToQueue(e)}
+                                stopPropagation={true}
+                                className="shadow-lg transition-all"
                             >
-                        </IconButton>
+                                <svg
+                                    class="h-6 w-6"
+                                    fill="currentColor"
+                                    viewBox="0 0 24 24"
+                                    ><path
+                                        d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                                    /></svg
+                                >
+                            </IconButton>
+                        </div>
                     </div>
                 </div>
 
