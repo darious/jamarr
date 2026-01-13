@@ -293,16 +293,31 @@ async def test_set_renderer_persists_session(client: AsyncClient, db):
 
 @pytest.mark.asyncio
 async def test_history_grouping(client: AsyncClient, db, auth_token):
+    # Create artist first
+    import uuid
+    artist_mbid = str(uuid.uuid4())
+    await db.execute("""
+        INSERT INTO artist (mbid, name)
+        VALUES ($1, 'Main')
+    """, artist_mbid)
+    
     # Insert Album Artist = "Main", Artist = "Main"
     await db.execute("""
-        INSERT INTO track (id, title, artist, album_artist, album, duration_seconds, track_no, path)
-        VALUES (101, 'Solo', 'Main', 'Main', 'AlbumX', 200, 1, '/music/solo.flac')
-    """)
+        INSERT INTO track (id, title, artist, album_artist, album, duration_seconds, track_no, path, artist_mbid)
+        VALUES (101, 'Solo', 'Main', 'Main', 'AlbumX', 200, 1, '/music/solo.flac', $1)
+    """, artist_mbid)
+    
     # Insert Album Artist = "Main", Artist = "Main & Feat"
     await db.execute("""
-        INSERT INTO track (id, title, artist, album_artist, album, duration_seconds, track_no, path)
-        VALUES (102, 'Feat', 'Main & Feat', 'Main', 'AlbumX', 200, 2, '/music/feat.flac')
-    """)
+        INSERT INTO track (id, title, artist, album_artist, album, duration_seconds, track_no, path, artist_mbid)
+        VALUES (102, 'Feat', 'Main & Feat', 'Main', 'AlbumX', 200, 2, '/music/feat.flac', $1)
+    """, artist_mbid)
+    
+    # Create track_artist entries (required for canonical join)
+    await db.execute("""
+        INSERT INTO track_artist (track_id, artist_mbid)
+        VALUES (101, $1), (102, $1)
+    """, artist_mbid)
     
     # Log plays for both
     for tid in [101, 102]:

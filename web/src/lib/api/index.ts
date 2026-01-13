@@ -828,3 +828,83 @@ export async function syncLastfmScrobbles(opts: {
     }
     return await res.json();
 }
+
+// Recommendations
+export interface SeedArtist {
+    mbid: string;
+    name: string;
+    score: number;
+    play_count: number;
+    last_played_at: string;
+    image_url?: string | null;
+    art_sha1?: string | null;
+}
+
+export interface RecommendedArtist {
+    mbid: string;
+    name: string;
+    score: number;
+    support_count: number;
+    image_url?: string | null;
+    art_sha1?: string | null;
+    similar_to: string[];
+}
+
+export interface RecommendedAlbum {
+    mbid: string;
+    title: string;
+    artist: string;
+    artist_mbid: string;
+    score: number;
+    art_sha1?: string | null;
+    year?: string | null;
+}
+
+export async function fetchRecommendationSeeds(days: number = 30, fetchFn: any = fetch): Promise<SeedArtist[]> {
+    const res = await fetchFn(`/api/recommendations/seeds?days=${days}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to fetch recommendation seeds');
+    return await res.json();
+}
+
+export async function fetchRecommendationArtists(days: number = 30, fetchFn: any = fetch): Promise<RecommendedArtist[]> {
+    const res = await fetchFn(`/api/recommendations/artists?days=${days}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to fetch recommended artists');
+    return await res.json();
+}
+
+export async function fetchRecommendationAlbums(days: number = 30, fetchFn: any = fetch): Promise<RecommendedAlbum[]> {
+    const res = await fetchFn(`/api/recommendations/albums?days=${days}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to fetch recommended albums');
+    return await res.json();
+}
+
+export interface RecommendedTrack {
+    id: number;
+    title: string;
+    artist: {
+        name: string;
+        mbid: string;
+    };
+    album: {
+        name: string;
+        mbid: string;
+        mb_release_id: string;
+        year: string | null;
+    };
+    artwork: {
+        sha1: string;
+    };
+    duration_seconds?: number;
+    codec?: string;
+    bit_depth?: number;
+    sample_rate_hz?: number;
+    popularity?: number;
+    plays?: number;
+    bitrate?: number;
+}
+
+export async function fetchRecommendationTracks(days: number = 30, fetchFn: any = fetch): Promise<RecommendedTrack[]> {
+    const res = await fetchFn(`/api/recommendations/tracks?days=${days}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to fetch recommended tracks');
+    return await res.json();
+}
