@@ -363,6 +363,7 @@ async def get_recently_played_albums(
         JOIN track t ON ph.track_id = t.id
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE t.album IS NOT NULL
+              AND ph.timestamp < NOW() + INTERVAL '1 day'
         GROUP BY t.album, t.release_mbid
         ORDER BY last_played DESC
         LIMIT $1
@@ -395,6 +396,7 @@ async def get_recently_played_artists(
         JOIN artist a ON ta.artist_mbid = a.mbid
         LEFT JOIN artwork ar ON a.artwork_id = ar.id
         WHERE a.name IS NOT NULL AND a.name != '' AND a.name != 'null'
+              AND ph.timestamp < NOW() + INTERVAL '1 day'
         GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio
         ORDER BY last_played DESC
         LIMIT $1
