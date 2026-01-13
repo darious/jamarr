@@ -314,6 +314,14 @@
             >
             <a
               class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
+                $page.url.pathname.startsWith("/discovery")
+                  ? "text-default border-accent"
+                  : "text-muted border-transparent hover:text-default hover:border-accent"
+              }`}
+              href="/discovery">Discovery</a
+            >
+            <a
+              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
                 $page.url.pathname.startsWith("/playlists")
                   ? "text-default border-accent"
                   : "text-muted border-transparent hover:text-default hover:border-accent"

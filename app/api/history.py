@@ -219,19 +219,47 @@ async def get_playback_history_stats(
         rows = await db.fetch(daily_query, *params)
         daily = [{"day": row[0], "plays": row[1]} for row in rows]
 
+        # Define artist_join for other queries (albums/tracks)
         artist_join = "JOIN track_artist ta ON ta.track_id = t.id" if artist_mbid else ""
+        artist_join_cond = "JOIN track_artist ta_filter ON ta_filter.track_id = t.id" if artist_mbid else ""
+        
         artists_query = f"""
             SELECT 
-                COALESCE(NULLIF(t.album_artist, ''), t.artist) as artist_name, 
-                MIN(t.artwork_id) as artwork_id, 
-                MAX(a.sha1) as art_sha1, 
+                a.name as artist_name, 
+                a.mbid as artist_mbid, 
+                a.artwork_id, 
+                ar.sha1 as art_sha1, 
                 COUNT(*) as plays
             FROM combined_playback_history_mat h
             JOIN track t ON t.id = h.track_id
-            {artist_join}
-            LEFT JOIN artwork a ON t.artwork_id = a.id
+            JOIN track_artist ta ON ta.track_id = t.id
+            JOIN artist a ON ta.artist_mbid = a.mbid
+            LEFT JOIN artwork ar ON a.artwork_id = ar.id
+            {artist_join_cond if 'ta.' not in locals().get('where_sql', '') else ''} 
+            -- Note: where_sql might reference tables not in this join if we aren't careful.
+            -- standard where_sql uses 'h', 't', 'ta' (if alias matches).
+            -- original code used 'ta' for filter alias.
+            -- I'll ensure filter alias compatibility below.
             WHERE {where_sql}
-            GROUP BY COALESCE(NULLIF(t.album_artist, ''), t.artist)
+            GROUP BY a.name, a.mbid, a.artwork_id, ar.sha1
+            ORDER BY plays DESC
+            LIMIT 10
+        """
+        
+        artists_query = f"""
+            SELECT 
+                a.name as artist_name, 
+                a.mbid as artist_mbid,
+                a.artwork_id, 
+                w.sha1 as art_sha1,
+                COUNT(*) as plays
+            FROM combined_playback_history_mat h
+            JOIN track t ON t.id = h.track_id
+            JOIN track_artist ta ON ta.track_id = t.id
+            JOIN artist a ON ta.artist_mbid = a.mbid
+            LEFT JOIN artwork w ON a.artwork_id = w.id
+            WHERE {where_sql}
+            GROUP BY a.name, a.mbid, a.artwork_id, w.sha1
             ORDER BY plays DESC
             LIMIT 10
         """
@@ -239,8 +267,9 @@ async def get_playback_history_stats(
         artists = [
             {
                 "artist": row[0],
-                "art_sha1": row[2],
-                "plays": row[3],
+                "mbid": row[1], # Ensure frontend can handle this new field or mapped correctly
+                "art_sha1": row[3],
+                "plays": row[4],
             }
             for row in rows
             if row[0]
