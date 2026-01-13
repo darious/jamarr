@@ -83,7 +83,7 @@
                         >
                             <img
                                 src={album.art_sha1
-                                    ? `/art/file/${album.art_sha1}`
+                                    ? `/art/file/${album.art_sha1}?max_size=300`
                                     : "/assets/default-album-placeholder.svg"}
                                 alt={album.album}
                                 class="h-full w-full object-cover"
@@ -188,7 +188,7 @@
                         >
                             <img
                                 src={album.art_sha1
-                                    ? `/art/file/${album.art_sha1}`
+                                    ? `/art/file/${album.art_sha1}?max_size=300`
                                     : "/assets/default-album-placeholder.svg"}
                                 alt={album.album}
                                 class="h-full w-full object-cover"
@@ -393,11 +393,12 @@
                         >
                             <img
                                 src={artist.art_sha1
-                                    ? `/art/file/${artist.art_sha1}`
+                                    ? `/art/file/${artist.art_sha1}?max_size=300`
                                     : "/assets/default-artist-placeholder.svg"}
                                 alt={artist.name}
                                 class="h-full w-full object-cover"
                                 loading="lazy"
+                                decoding="async"
                             />
                         </div>
                         <div class="mt-3">
