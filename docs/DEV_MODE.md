@@ -6,7 +6,15 @@
 ./dev.sh
 ```
 
-This starts all services with hot-reload enabled. No rebuilds needed!
+This starts all services with hot-reload enabled. No rebuilds needed for code changes!
+
+`dev.sh` auto-detects `HOST_IP` from your routing table. If that fails, set it manually:
+
+```bash
+HOST_IP=REDACTED_IP ./dev.sh
+```
+
+Under the hood it runs `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`.
 
 ## What Changed?
 
@@ -28,17 +36,28 @@ This starts all services with hot-reload enabled. No rebuilds needed!
 
 | Service | URL | Hot Reload |
 |---------|-----|------------|
-| Frontend | http://127.0.0.1:5173 | ✅ Vite HMR |
-| Backend API | http://127.0.0.1:8111 | ✅ Uvicorn --reload |
-| PostgreSQL | localhost:8110 | N/A |
-| CloudBeaver | http://127.0.0.1:8978 | N/A |
+| Frontend | http://HOST_IP:5173 | ✅ Vite HMR |
+| Backend API | http://HOST_IP:8111 | ✅ Uvicorn --reload |
+| PostgreSQL | HOST_IP:8110 | N/A |
+| CloudBeaver | http://HOST_IP:8978 | N/A |
+
+## FastAPI Docs
+
+The backend exposes FastAPI's interactive docs in dev mode:
+
+- Swagger UI: `http://HOST_IP:8111/docs`
+- ReDoc: `http://HOST_IP:8111/redoc`
 
 ## Development Workflow
 
-1. **Start dev mode**: `./dev.sh`
+1. **Start dev mode**: `./dev.sh` (or `HOST_IP=... ./dev.sh`)
 2. **Edit frontend code** (`web/src/**`): Changes appear instantly in browser
 3. **Edit backend code** (`app/**`): Server auto-restarts in ~1-2 seconds
 4. **No rebuilds needed!** 🎉
+
+## Dependency Changes
+
+`dev.sh` checks `pyproject.toml` and `uv.lock` hashes. If they changed, it rebuilds the `jamarr` image once and stores the hash in `.deps.sha256`.
 
 ## Production Build
 
@@ -55,7 +74,7 @@ This builds the frontend into the Docker image (as before) for production.
 
 ### Frontend not updating?
 - Check that Vite dev server is running (should see logs)
-- Visit http://127.0.0.1:5173 (not 8111)
+- Visit http://HOST_IP:5173 (not 8111)
 
 ### Backend not reloading?
 - Check volume mounts in docker-compose.dev.yml
