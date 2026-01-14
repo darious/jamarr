@@ -1,34 +1,34 @@
 # Jamarr
 
-**Web-Based UPnP Music Controller**
+**Web-Based Music Controller**
 
-Jamarr is an open-source, web-based music controller designed to scan a local music library, cache rich metadata, and play music to a Naim Uniti Atom (or other UPnP renderers) via a fast, responsive web UI.
+Jamarr is an open-source, web-based music controller designed to scan a local music library, cache rich metadata, and play music locally or to UPnP renderers (e.g., Naim Uniti Atom) via a fast, responsive web UI.
 
 It supports **gapless playback** (via UPnP queue management), **instant search**, **rich artist metadata** (biographies, images, similar artists), and **seamless deployment** via Docker.
 
 ## Features
-- **Dockerized Deployment**: Single-container setup via Docker Compose.
-- **UPnP Control**: Play/Pause, Next, Seek, and Volume control for network players.
-- **Rich Metadata**: Auto-fetches artist bios, images, and similar artists from Spotify/MusicBrainz.
-- **Fast Scanning**: efficiently scans large libraries with local caching.
-- **Modern UI**: Dark-themed, responsive SvelteKit interface.
-- **Playback History**: Tracks listening history for both local and remote playback.
-- **Streaming Integration**: Links artists and albums to Tidal and Qobuz for external playback.
-- **Playlists**: Create and manage local playlists with drag-and-drop reordering.
-- **Top Tracks & Similar Artists**: Fetches and stores popular tracks and related artists.
-- **Queue Persistence**: Playback state and queue are saved to the database, ensuring seamless resumption.
+- **Dockerized Deployment**: Reproducible stack via Docker Compose.
+- **Local + UPnP Playback**: Local streaming via `/api/stream/{track_id}` and UPnP control (Play/Pause/Seek/Volume).
+- **Rich Metadata**: Artist bios, images, similar artists, top tracks, and external links.
+- **Fast Scanning**: Efficient library scan with incremental updates.
+- **Modern UI**: Responsive SvelteKit interface with renderer switching.
+- **History + Last.fm**: Local playback history plus matched Last.fm scrobbles.
+- **Recommendations**: Artist/album/track recs derived from listening history.
+- **Playlists**: Create and manage local playlists with ordering support.
+- **Queue Persistence**: Playback state and queue are saved to PostgreSQL.
 
-For a detailed system overview, see [Architecture & Outline](outline.md).
-For database details, see [Database Schema](database_schema.md).
+For a detailed system overview, see [Architecture & Outline](docs/outline.md).
+For database details, see [Database Schema](docs/DATABASE_SCHEMA.md).
 
 ## Setup
 
 ### Prerequisites
-- Python 3.13+
+- Python 3.14+
 - `uv` (fast Python package/dependency manager)
 - `ffmpeg` (for `ffprobe`) - *Required for scanning and analysis*
+- Docker + Docker Compose (recommended for dev/prod workflows)
 
-### Installation
+### Installation (Local API Only)
 
 1.  **Install dependencies with uv (creates .venv):**
     ```bash
@@ -46,17 +46,20 @@ We provide helper scripts to simplify development, production, and testing workf
 
 | Script | description |
 | :--- | :--- |
-| `./dev.sh` | Starts the stack in **Development Mode** (hot-reload enabled). |
-| `./prod.sh` | Builds and starts the stack in **Production Mode** (optimized build). |
-| `./test.sh` | Runs the API test suite inside the Docker container. |
-| `./server.sh` | (Internal) Entrypoint for the backend container. |
+| `./dev.sh` | Starts the stack in development mode (hot-reload enabled). |
+| `./prod.sh` | Builds and starts the stack in production mode. |
+| `./update.sh` | Production deploy helper (pull, build, migrate, restart). |
+| `./test.sh` | Runs backend tests in the Docker test stack. |
+| `./test-build.sh` | Builds the frontend in a test container (CI-style). |
+| `./test-ext-api.sh` | Runs external API smoke checks. |
+| `./lint.sh [python|svelte|all]` | Runs Ruff and/or Svelte check. |
 
 ### Deployment & Migrations (tl;dr)
 - `update.sh`: prod deploy helper. Stops the app container, `git pull --rebase`, brings DB up, builds the app image, runs DB migrations, then restarts the app. Expects `HOST_IP` set (defaults to 127.0.0.1).
 - Migrations: Versioned SQL files in `scripts/migrations/` tracked via `schema_migration` table. Runner (`scripts/apply_migrations.py`) takes an advisory lock, checks checksums, and applies pending files in order. Runs inside the app container via `docker compose run --rm jamarr python scripts/apply_migrations.py`.
 - `prod.sh`: Build + start everything in prod mode (no migrations).
 - `dev.sh`: Start dev stack with hot-reload and dev overrides.
-- Tests: `test.sh` (standard suite) and `test-slow.sh` (slow-only) run in an isolated Compose project and manage the test DB lifecycle.
+- Tests: `test.sh` runs the backend suite in an isolated Compose project and manages the test DB lifecycle (see `tests/TESTING.md`).
 - Linting: `lint.sh [python|svelte|all]` runs Ruff and/or Svelte check.
 
 ## Deployment (Docker)
@@ -102,7 +105,7 @@ This starts all services in development mode:
 - **PostgreSQL** (port 8110) - Database
 - **CloudBeaver** (port 8978) - Database management UI
 
-**No Docker rebuilds needed** for code changes! See [Development Mode Guide](docs/DEV_MODE.md) for details.
+`dev.sh` auto-detects `HOST_IP` (or use `HOST_IP=... ./dev.sh`) and rebuilds if Python dependencies changed. See [Development Mode Guide](docs/DEV_MODE.md) for details.
 
 ### Manual Development (Without Docker)
 
@@ -133,14 +136,16 @@ Pass pytest arguments directly to the script:
 ./test.sh -k "test_search" # Run only specific tests
 ```
 
+See `tests/TESTING.md` for details on the test stack and troubleshooting.
+
 ### Linting
 
 We provide a helper script to run linters for both the backend (Python/Ruff) and frontend (Svelte/Check).
 
 ```bash
-./lint_check.sh         # Run both Python and Svelte checks
-./lint_check.sh python  # Run only Python checks (ruff)
-./lint_check.sh svelte  # Run only Svelte checks
+./lint.sh         # Run both Python and Svelte checks
+./lint.sh python  # Run only Python checks (ruff)
+./lint.sh svelte  # Run only Svelte checks
 ```
 
 ### Running the Scanner (CLI)
@@ -225,8 +230,8 @@ For detailed architecture documentation, see [Scanner V3 Documentation](docs/sca
     # Update specific artist by MusicBrainz ID (useful for blank names)
     uv run python -m app.scanner.cli metadata --mbid ef5aab86-887d-4fc2-a883-431ef017175a
     
-    # Find artists with blank names
-    sqlite3 cache/library.sqlite "select mbid, name from artists where name is null or name = ''"
+    # Find artists with blank names (PostgreSQL)
+    psql -h localhost -p 8110 -U jamarr -d jamarr -c "select mbid, name from artist where name is null or name = ''"
     ```
 
 3.  **`prune`**: Cleans up the library by removing orphaned data.
@@ -263,37 +268,7 @@ uv run python -m app.scanner.cli prune
 
 ## Database Schema
 
-The database has been normalized to improve data integrity and query performance.
-
-### Core Tables
--   **`tracks`**: Individual audio files.
-    -   Joined to `albums` via `mb_release_group_id`.
-    -   Joined to `artists` via `track_artists` table (multi-artist support).
--   **`albums`**: Release groups (Albums, EPs, Singles).
-    -   Stores `title`, `release_date`, `primary_type`.
-    -   Source: MusicBrainz Release Group.
--   **`artists`**: Artist core info.
-    -   Stores `name`, `bio`, `image_url` (path to cached artwork).
-    -   Source: MusicBrainz (ID) & Spotify (Bio/Image).
-
-### Junction & Helper Tables
--   **`artist_albums`**: Links artists to albums (Many-to-Many).
--   **`track_artists`**: Links artists to tracks (Many-to-Many).
--   **`external_links`**: Stores URLs for Artists and Albums.
-    -   Types: `spotify`, `tidal`, `qobuz`, `wikipedia`, `homepage`.
-    -   Supports prioritized link resolution (e.g., matching Digital Media releases).
--   **`artist_genres`**: Stores genre tags and weights for artists.
--   **`missing_albums`**: Tracks albums found in external sources but missing from the local library.
--   **`artwork`**: Deduplicated artwork storage.
-    -   Images stored by SHA1 hash to prevent duplicates.
-
-### State Management
--   **`renderers`**: UPnP devices discovered on the network.
--   **`renderer_states`**: Current playback status (queue, position, volume) for each renderer.
--   **`client_sessions`**: Tracks active user sessions and their selected renderer.
--   **`playback_history`**: Log of all played tracks.
--   **`users`**: User accounts and authentication data.
--   **`sessions`**: Active login sessions.
+See `docs/DATABASE_SCHEMA.md` for the current table list, views, and indexes.
 
 ## Frontend (SvelteKit + Skeleton)
 

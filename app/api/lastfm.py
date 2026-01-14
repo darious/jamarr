@@ -5,6 +5,7 @@ Last.fm API endpoints for authentication and account management.
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
@@ -14,7 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app.auth import require_current_user
+from app.auth import get_user_by_id, get_refresh_session
+from app.api.deps import get_current_user_jwt
+from app.auth_tokens import hash_refresh_token
 from app.db import get_db
 from app import lastfm
 from app.lastfm_sync_manager import LastfmSyncManager
@@ -22,6 +25,7 @@ from app.lastfm_sync_manager import LastfmSyncManager
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+REFRESH_COOKIE_NAME = os.getenv("REFRESH_COOKIE_NAME", "jamarr_refresh")
 
 
 class ToggleRequest(BaseModel):
@@ -30,12 +34,10 @@ class ToggleRequest(BaseModel):
 
 @router.get("/api/lastfm/status")
 async def get_lastfm_status(
-    request: Request,
     db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     """Get Last.fm connection status for current user."""
-    user, _ = await require_current_user(request, db)
-    
     return {
         "connected": bool(user.get("lastfm_session_key")),
         "username": user.get("lastfm_username"),
@@ -46,13 +48,9 @@ async def get_lastfm_status(
 
 @router.get("/api/lastfm/auth/start")
 async def start_lastfm_auth(
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     """Initiate Last.fm authentication flow."""
-    # Verify user is logged in
-    await require_current_user(request, db)
-    
     try:
         auth_url = lastfm.get_auth_url()
         return {"auth_url": auth_url}
@@ -74,7 +72,7 @@ async def lastfm_callback(
     logger.info(f"Last.fm callback received with token: {token[:10]}...")
     
     try:
-        user, _ = await require_current_user(request, db)
+        user = await _get_user_from_refresh_cookie(request, db)
         logger.info(f"User authenticated: {user['username']}")
     except Exception as e:
         logger.error(f"Authentication failed in callback: {e}")
@@ -124,12 +122,10 @@ async def lastfm_callback(
 
 @router.post("/api/lastfm/disconnect")
 async def disconnect_lastfm(
-    request: Request,
     db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     """Disconnect Last.fm account."""
-    user, _ = await require_current_user(request, db)
-    
     await db.execute(
         """
         UPDATE "user"
@@ -150,12 +146,10 @@ async def disconnect_lastfm(
 @router.post("/api/lastfm/toggle")
 async def toggle_lastfm(
     payload: ToggleRequest,
-    request: Request,
     db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     """Enable or disable Last.fm scrobbling."""
-    user, _ = await require_current_user(request, db)
-    
     # Verify user has connected Last.fm
     if not user.get("lastfm_session_key"):
         raise HTTPException(
@@ -269,11 +263,10 @@ async def _fetch_lastfm_page(
 @router.post("/api/lastfm/sync")
 async def sync_scrobbles(
     payload: SyncRequest,
-    request: Request,
     db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     """Fetch new scrobbles from Last.fm and match them to library tracks."""
-    user, _ = await require_current_user(request, db)
     manager = LastfmSyncManager.get_instance()
     manager.start_sync()
     try:
@@ -677,3 +670,21 @@ async def lastfm_events():
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+async def _get_user_from_refresh_cookie(
+    request: Request,
+    db: asyncpg.Connection,
+) -> asyncpg.Record:
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    token_hash = hash_refresh_token(refresh_token)
+    session = await get_refresh_session(db, token_hash)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    user = await get_user_by_id(db, session["user_id"])
+    if not user or not user.get("is_active", True):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    return user

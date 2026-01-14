@@ -2,6 +2,7 @@ import { writable } from 'svelte/store';
 import type { User } from '$lib/api';
 import { fetchCurrentUser } from '$lib/api';
 import { setThemeAccent, setThemeMode, type AccentColor } from './theme';
+import { setupTokenRefresh, clearAccessToken } from './auth';
 
 export const currentUser = writable<User | null>(null);
 export const isAuthChecked = writable(false);
@@ -62,4 +63,5 @@ export function setUser(user: User | null) {
 
 export function clearUser() {
     currentUser.set(null);
+    clearAccessToken();  // Clear JWT tokens on logout
 }

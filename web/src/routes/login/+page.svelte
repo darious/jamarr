@@ -9,6 +9,7 @@
     isAuthChecked,
     setUser,
   } from "$stores/user";
+  import { setAccessToken, setupTokenRefresh } from "$lib/stores/auth";
 
   let username = "";
   let password = "";
@@ -40,8 +41,18 @@
     loading = true;
     error = "";
     try {
-      const nextUser = await login({ username, password });
-      setUser(nextUser);
+      const response = await login({ username, password });
+      
+      // Store access token in memory
+      setAccessToken(response.access_token);
+      
+      // Update user store
+      setUser(response.user);
+      
+      // Setup automatic token refresh
+      setupTokenRefresh();
+      
+      // Redirect to home
       goto("/");
     } catch (e: any) {
       error = e?.message || "Login failed.";

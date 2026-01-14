@@ -8,7 +8,7 @@ from typing import Optional
 import asyncpg
 from app.db import get_db
 from app.upnp import UPnPManager
-from app.auth import get_session_user
+from app.api.deps import get_optional_user_jwt
 
 from app.models.player import (
     PlayerState,
@@ -193,13 +193,15 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
 
 @router.post("/api/player/queue")
 async def set_queue(
-    update: QueueUpdate, request: Request, client_id: str = Depends(get_client_id)
+    update: QueueUpdate,
+    request: Request,
+    client_id: str = Depends(get_client_id),
+    user: asyncpg.Record | None = Depends(get_optional_user_jwt),
 ):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
         state = await get_renderer_state_db(db, udn)
-        user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
-        user_id = user_row["id"] if user_row else None
+        user_id = user["id"] if user else None
 
         enriched_queue = []
         for t in update.queue:
@@ -275,13 +277,15 @@ async def set_queue(
 
 @router.post("/api/player/queue/append")
 async def append_queue(
-    update: AppendQueue, request: Request, client_id: str = Depends(get_client_id)
+    update: AppendQueue,
+    request: Request,
+    client_id: str = Depends(get_client_id),
+    user: asyncpg.Record | None = Depends(get_optional_user_jwt),
 ):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
         state = await get_renderer_state_db(db, udn)
-        user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
-        user_id = user_row["id"] if user_row else None
+        user_id = user["id"] if user else None
 
         new_tracks = []
         for t in update.tracks:
@@ -504,13 +508,15 @@ async def log_play(
 
 @router.post("/api/player/progress")
 async def update_progress(
-    update: ProgressUpdate, request: Request, client_id: str = Depends(get_client_id)
+    update: ProgressUpdate,
+    request: Request,
+    client_id: str = Depends(get_client_id),
+    user: asyncpg.Record | None = Depends(get_optional_user_jwt),
 ):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
         client_ip = get_client_ip(request)
-        user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
-        user_id = user_row["id"] if user_row else None
+        user_id = user["id"] if user else None
         if udn.startswith("local:"):
             state = await get_renderer_state_db(db, udn)
             state["position_seconds"] = update.position_seconds
@@ -608,6 +614,7 @@ async def play_track(
     request: Request,
     client_id: str = Depends(get_client_id),
     db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record | None = Depends(get_optional_user_jwt),
 ):
     track_id = data.get("track_id")
     if not track_id:
@@ -649,7 +656,7 @@ async def play_track(
     if isinstance(track.get("artists"), str):
         import json
         track["artists"] = json.loads(track["artists"])
-    user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
+    user_row = user
 
     # Mime logic
     mime, _ = mimetypes.guess_type(track["path"])

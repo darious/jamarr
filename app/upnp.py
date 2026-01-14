@@ -266,7 +266,7 @@ class UPnPManager:
     async def seek(self, target_seconds: float):
         return await self.control.seek(target_seconds)
 
-    async def set_volume(self, volume: int):
+    async def set_volume(self, volume: int) -> None:
         return await self.control.set_volume(volume)
 
     async def get_position(self, udn: Optional[str] = None):
@@ -274,4 +274,3 @@ class UPnPManager:
 
     async def get_transport_info(self, udn: Optional[str] = None):
         return await self.control.get_transport_info(udn)
-

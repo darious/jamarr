@@ -1,3 +1,5 @@
+import { getAccessToken, refreshAccessToken } from '$lib/stores/auth';
+
 export interface Artist {
     mbid?: string;
     name: string;
@@ -139,6 +141,47 @@ export interface User {
     theme_mode?: 'dark' | 'light';
     created_at?: string | null;
     last_login?: string | null;
+}
+
+/**
+ * Helper function to make authenticated API requests with JWT
+ * Automatically adds Authorization header and handles token refresh on 401
+ */
+export async function fetchWithAuth(
+    url: string,
+    options: RequestInit = {},
+    fetchImpl: typeof fetch = fetch
+): Promise<Response> {
+    const token = getAccessToken();
+    const headers = new Headers(options.headers);
+
+    if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    const res = await fetchImpl(url, {
+        ...options,
+        headers,
+        credentials: 'include',  // For refresh cookie
+    });
+
+    // If 401, try to refresh and retry once
+    if (res.status === 401) {
+        const refreshed = await refreshAccessToken(fetchImpl);
+        if (refreshed) {
+            const newToken = getAccessToken();
+            if (newToken) {
+                headers.set('Authorization', `Bearer ${newToken}`);
+                return await fetchImpl(url, {
+                    ...options,
+                    headers,
+                    credentials: 'include',
+                });
+            }
+        }
+    }
+
+    return res;
 }
 
 export async function fetchArtists(
@@ -392,7 +435,7 @@ export async function triggerPearlarrDownload(mbid: string): Promise<void> {
 
 export async function signup(
     data: { username: string; email: string; password: string; display_name?: string },
-): Promise<User> {
+): Promise<LoginResponse> {
     const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -406,11 +449,17 @@ export async function signup(
     return await res.json();
 }
 
-export async function login(data: { username: string; password: string }): Promise<User> {
+export interface LoginResponse {
+    access_token: string;
+    token_type: string;
+    user: User;
+}
+
+export async function login(data: { username: string; password: string }): Promise<LoginResponse> {
     const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        credentials: 'include',  // For refresh cookie
         body: JSON.stringify(data)
     });
     if (!res.ok) {
@@ -421,24 +470,43 @@ export async function login(data: { username: string; password: string }): Promi
 }
 
 export async function logout(): Promise<void> {
-    await fetch('/api/auth/logout', {
+    await fetchWithAuth('/api/auth/logout', {
         method: 'POST',
-        credentials: 'include'
     });
 }
 
 export async function fetchCurrentUser(fetchFn: any = fetch): Promise<User | null> {
-    const res = await fetchFn('/api/auth/me', { credentials: 'include' });
-    if (res.status === 401) return null;
+    const token = getAccessToken();
+    if (!token) return null;
+
+    const res = await fetchFn('/api/auth/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (res.status === 401) {
+        // Try to refresh token
+        const refreshed = await refreshAccessToken();
+        if (!refreshed) return null;
+
+        // Retry with new token
+        const newToken = getAccessToken();
+        if (!newToken) return null;
+
+        const retryRes = await fetchFn('/api/auth/me', {
+            headers: { 'Authorization': `Bearer ${newToken}` }
+        });
+        if (!retryRes.ok) return null;
+        return await retryRes.json();
+    }
+
     if (!res.ok) throw new Error('Failed to fetch current user');
     return await res.json();
 }
 
 export async function updateProfile(data: { email: string; display_name?: string }): Promise<User> {
-    const res = await fetch('/api/auth/profile', {
+    const res = await fetchWithAuth('/api/auth/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(data)
     });
     if (!res.ok) {
@@ -449,16 +517,28 @@ export async function updateProfile(data: { email: string; display_name?: string
 }
 
 export async function changePassword(data: { current_password: string; new_password: string }): Promise<void> {
-    const res = await fetch('/api/auth/password', {
+    const res = await fetchWithAuth('/api/auth/password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(data)
     });
     if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
         throw new Error(detail.detail || 'Failed to update password');
     }
+}
+
+export async function updatePreferences(data: { accent_color?: string; theme_mode?: string }): Promise<User> {
+    const res = await fetchWithAuth('/api/auth/preferences', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to update preferences');
+    }
+    return await res.json();
 }
 
 export type ArtistStats = {
@@ -546,20 +626,20 @@ export interface PlaylistDetail extends Playlist {
     tracks: PlaylistTrack[];
 }
 
-export async function fetchPlaylists(fetchFn: any = fetch): Promise<Playlist[]> {
-    const res = await fetchFn('/api/playlists');
+export async function fetchPlaylists(): Promise<Playlist[]> {
+    const res = await fetchWithAuth('/api/playlists');
     if (!res.ok) throw new Error('Failed to fetch playlists');
     return await res.json();
 }
 
-export async function fetchArtistPlaylists(artistMbid: string, fetchFn: any = fetch): Promise<Playlist[]> {
+export async function fetchArtistPlaylists(artistMbid: string, fetchFn: any = fetchWithAuth): Promise<Playlist[]> {
     const res = await fetchFn(`/api/artists/${artistMbid}/playlists`);
     if (!res.ok) throw new Error('Failed to fetch artist playlists');
     return await res.json();
 }
 
 export async function createPlaylist(data: { name: string; description?: string; is_public?: boolean; track_ids?: number[] }): Promise<Playlist> {
-    const res = await fetch('/api/playlists', {
+    const res = await fetchWithAuth('/api/playlists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -568,7 +648,7 @@ export async function createPlaylist(data: { name: string; description?: string;
     return await res.json();
 }
 
-export async function getPlaylist(id: string | number, fetchFn: any = fetch): Promise<PlaylistDetail> {
+export async function getPlaylist(id: string | number, fetchFn: any = fetchWithAuth): Promise<PlaylistDetail> {
     const res = await fetchFn(`/api/playlists/${id}`);
     if (!res.ok) {
         if (res.status === 404) throw new Error('Playlist not found');
@@ -578,7 +658,7 @@ export async function getPlaylist(id: string | number, fetchFn: any = fetch): Pr
 }
 
 export async function updatePlaylist(id: number, data: { name?: string; description?: string; is_public?: boolean }): Promise<void> {
-    const res = await fetch(`/api/playlists/${id}`, {
+    const res = await fetchWithAuth(`/api/playlists/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -587,12 +667,12 @@ export async function updatePlaylist(id: number, data: { name?: string; descript
 }
 
 export async function deletePlaylist(id: number): Promise<void> {
-    const res = await fetch(`/api/playlists/${id}`, { method: 'DELETE' });
+    const res = await fetchWithAuth(`/api/playlists/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Failed to delete playlist');
 }
 
 export async function addTracksToPlaylist(playlistId: number, trackIds: number[]): Promise<void> {
-    const res = await fetch(`/api/playlists/${playlistId}/tracks`, {
+    const res = await fetchWithAuth(`/api/playlists/${playlistId}/tracks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ track_ids: trackIds })
@@ -601,14 +681,14 @@ export async function addTracksToPlaylist(playlistId: number, trackIds: number[]
 }
 
 export async function removeTrackFromPlaylist(playlistId: number, playlistTrackId: number): Promise<void> {
-    const res = await fetch(`/api/playlists/${playlistId}/tracks/${playlistTrackId}`, {
+    const res = await fetchWithAuth(`/api/playlists/${playlistId}/tracks/${playlistTrackId}`, {
         method: 'DELETE'
     });
     if (!res.ok) throw new Error('Failed to remove track');
 }
 
 export async function reorderPlaylist(playlistId: number, orderedPlaylistTrackIds: number[]): Promise<void> {
-    const res = await fetch(`/api/playlists/${playlistId}/reorder`, {
+    const res = await fetchWithAuth(`/api/playlists/${playlistId}/reorder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ allowed_playlist_track_ids: orderedPlaylistTrackIds })
@@ -679,13 +759,13 @@ export interface ScheduledRun {
 }
 
 export async function listSchedulerJobs(): Promise<SchedulerJob[]> {
-    const res = await fetch('/api/scheduler/jobs', { credentials: 'include' });
+    const res = await fetchWithAuth('/api/scheduler/jobs');
     if (!res.ok) throw new Error('Failed to fetch scheduler jobs');
     return await res.json();
 }
 
 export async function listSchedulerTasks(): Promise<ScheduledTask[]> {
-    const res = await fetch('/api/scheduler/tasks', { credentials: 'include' });
+    const res = await fetchWithAuth('/api/scheduler/tasks');
     if (!res.ok) throw new Error('Failed to fetch scheduler tasks');
     return await res.json();
 }
@@ -695,10 +775,9 @@ export async function createSchedulerTask(payload: {
     cron: string;
     enabled?: boolean;
 }): Promise<ScheduledTask> {
-    const res = await fetch('/api/scheduler/tasks', {
+    const res = await fetchWithAuth('/api/scheduler/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -712,10 +791,9 @@ export async function updateSchedulerTask(
     taskId: number,
     payload: { cron?: string; enabled?: boolean }
 ): Promise<ScheduledTask> {
-    const res = await fetch(`/api/scheduler/tasks/${taskId}`, {
+    const res = await fetchWithAuth(`/api/scheduler/tasks/${taskId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -726,17 +804,15 @@ export async function updateSchedulerTask(
 }
 
 export async function deleteSchedulerTask(taskId: number): Promise<void> {
-    const res = await fetch(`/api/scheduler/tasks/${taskId}`, {
+    const res = await fetchWithAuth(`/api/scheduler/tasks/${taskId}`, {
         method: 'DELETE',
-        credentials: 'include',
     });
     if (!res.ok) throw new Error('Failed to delete scheduler task');
 }
 
 export async function runSchedulerTask(taskId: number): Promise<void> {
-    const res = await fetch(`/api/scheduler/tasks/${taskId}/run`, {
+    const res = await fetchWithAuth(`/api/scheduler/tasks/${taskId}/run`, {
         method: 'POST',
-        credentials: 'include',
     });
     if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
@@ -745,9 +821,8 @@ export async function runSchedulerTask(taskId: number): Promise<void> {
 }
 
 export async function stopSchedulerTask(taskId: number): Promise<void> {
-    const res = await fetch(`/api/scheduler/tasks/${taskId}/stop`, {
+    const res = await fetchWithAuth(`/api/scheduler/tasks/${taskId}/stop`, {
         method: 'POST',
-        credentials: 'include',
     });
     if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
@@ -756,7 +831,7 @@ export async function stopSchedulerTask(taskId: number): Promise<void> {
 }
 
 export async function listSchedulerRuns(taskId: number): Promise<ScheduledRun[]> {
-    const res = await fetch(`/api/scheduler/tasks/${taskId}/runs`, { credentials: 'include' });
+    const res = await fetchWithAuth(`/api/scheduler/tasks/${taskId}/runs`);
     if (!res.ok) throw new Error('Failed to fetch scheduler runs');
     return await res.json();
 }
@@ -770,30 +845,28 @@ export interface LastfmStatus {
 }
 
 export async function getLastfmStatus(): Promise<LastfmStatus> {
-    const res = await fetch('/api/lastfm/status', { credentials: 'include' });
+    const res = await fetchWithAuth('/api/lastfm/status');
     if (!res.ok) throw new Error('Failed to fetch Last.fm status');
     return await res.json();
 }
 
 export async function startLastfmAuth(): Promise<{ auth_url: string }> {
-    const res = await fetch('/api/lastfm/auth/start', { credentials: 'include' });
+    const res = await fetchWithAuth('/api/lastfm/auth/start');
     if (!res.ok) throw new Error('Failed to start Last.fm authentication');
     return await res.json();
 }
 
 export async function disconnectLastfm(): Promise<void> {
-    const res = await fetch('/api/lastfm/disconnect', {
+    const res = await fetchWithAuth('/api/lastfm/disconnect', {
         method: 'POST',
-        credentials: 'include'
     });
     if (!res.ok) throw new Error('Failed to disconnect Last.fm');
 }
 
 export async function toggleLastfm(enabled: boolean): Promise<void> {
-    const res = await fetch('/api/lastfm/toggle', {
+    const res = await fetchWithAuth('/api/lastfm/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ enabled })
     });
     if (!res.ok) throw new Error('Failed to toggle Last.fm scrobbling');
@@ -812,10 +885,9 @@ export async function syncLastfmScrobbles(opts: {
     rematch_all?: boolean;
     limit?: number;
 } = {}): Promise<SyncScrobblesResponse> {
-    const res = await fetch('/api/lastfm/sync', {
+    const res = await fetchWithAuth('/api/lastfm/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
             fetch_new: opts.fetch_new !== false,
             rematch_all: opts.rematch_all || false,
@@ -860,20 +932,20 @@ export interface RecommendedAlbum {
     year?: string | null;
 }
 
-export async function fetchRecommendationSeeds(days: number = 30, fetchFn: any = fetch): Promise<SeedArtist[]> {
-    const res = await fetchFn(`/api/recommendations/seeds?days=${days}`, { credentials: 'include' });
+export async function fetchRecommendationSeeds(days: number = 30, fetchFn: any = fetchWithAuth): Promise<SeedArtist[]> {
+    const res = await fetchFn(`/api/recommendations/seeds?days=${days}`);
     if (!res.ok) throw new Error('Failed to fetch recommendation seeds');
     return await res.json();
 }
 
-export async function fetchRecommendationArtists(days: number = 30, fetchFn: any = fetch): Promise<RecommendedArtist[]> {
-    const res = await fetchFn(`/api/recommendations/artists?days=${days}`, { credentials: 'include' });
+export async function fetchRecommendationArtists(days: number = 30, fetchFn: any = fetchWithAuth): Promise<RecommendedArtist[]> {
+    const res = await fetchFn(`/api/recommendations/artists?days=${days}`);
     if (!res.ok) throw new Error('Failed to fetch recommended artists');
     return await res.json();
 }
 
-export async function fetchRecommendationAlbums(days: number = 30, fetchFn: any = fetch): Promise<RecommendedAlbum[]> {
-    const res = await fetchFn(`/api/recommendations/albums?days=${days}`, { credentials: 'include' });
+export async function fetchRecommendationAlbums(days: number = 30, fetchFn: any = fetchWithAuth): Promise<RecommendedAlbum[]> {
+    const res = await fetchFn(`/api/recommendations/albums?days=${days}`);
     if (!res.ok) throw new Error('Failed to fetch recommended albums');
     return await res.json();
 }
@@ -903,8 +975,8 @@ export interface RecommendedTrack {
     bitrate?: number;
 }
 
-export async function fetchRecommendationTracks(days: number = 30, fetchFn: any = fetch): Promise<RecommendedTrack[]> {
-    const res = await fetchFn(`/api/recommendations/tracks?days=${days}`, { credentials: 'include' });
+export async function fetchRecommendationTracks(days: number = 30, fetchFn: any = fetchWithAuth): Promise<RecommendedTrack[]> {
+    const res = await fetchFn(`/api/recommendations/tracks?days=${days}`);
     if (!res.ok) throw new Error('Failed to fetch recommended tracks');
     return await res.json();
 }

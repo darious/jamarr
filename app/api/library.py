@@ -694,18 +694,16 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
     query = """
         SELECT 
             t.album, 
-            MAX(t.artwork_id) as artwork_id, 
             MAX(a.sha1) as art_sha1,
             COALESCE(MAX(t.album_artist), MAX(t.artist)) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
             MIN(t.release_date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
-            t.release_mbid,
             MAX(t.release_mbid) as mbid,
             MAX(t.release_mbid) as mb_release_id,
             MAX(t.release_group_mbid) as album_mbid,
-            (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
+            NULL::uuid as artist_mbid,
             'main' as type
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -715,12 +713,7 @@ async def get_new_releases(limit: int = 20, db: asyncpg.Connection = Depends(get
         LIMIT $1
     """
     rows = await db.fetch(query, limit)
-    results = []
-    for row in rows:
-        d = dict(row)
-        d.pop("artwork_id", None)
-        results.append(d)
-    return results
+    return [dict(row) for row in rows]
 
 
 @router.get("/api/home/recently-added-albums")
@@ -730,18 +723,16 @@ async def get_recently_added_albums(
     query = """
         SELECT 
             t.album, 
-            MAX(t.artwork_id) as artwork_id, 
             MAX(a.sha1) as art_sha1,
             COALESCE(MAX(t.album_artist), MAX(t.artist)) as artist_name,
             MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
             MIN(t.release_date) as year,
             COUNT(DISTINCT t.id) as track_count,
             SUM(t.duration_seconds) as total_duration,
-            t.release_mbid,
             MAX(t.release_mbid) as mbid,
             MAX(t.release_mbid) as mb_release_id,
             MAX(t.release_group_mbid) as album_mbid,
-            (SELECT mbid FROM artist WHERE name = COALESCE(MAX(t.album_artist), MAX(t.artist)) LIMIT 1) as artist_mbid,
+            NULL::uuid as artist_mbid,
             'main' as type
         FROM track t
         LEFT JOIN artwork a ON t.artwork_id = a.id
@@ -751,12 +742,7 @@ async def get_recently_added_albums(
         LIMIT $1
     """
     rows = await db.fetch(query, limit)
-    results = []
-    for row in rows:
-        d = dict(row)
-        d.pop("artwork_id", None)
-        results.append(d)
-    return results
+    return [dict(row) for row in rows]
 
 
 @router.get("/api/home/discover-artists")
