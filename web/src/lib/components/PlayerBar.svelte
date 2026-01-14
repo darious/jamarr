@@ -15,6 +15,7 @@
     shuffleQueue,
     toggleRepeat,
   } from "$stores/player";
+  import { fetchWithAuth } from "$lib/api";
   import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
   import VolumeControl from "$components/VolumeControl.svelte";
   import QueueDrawer from "$components/QueueDrawer.svelte";
@@ -363,7 +364,7 @@
         $playerState.is_playing
       ) {
         try {
-          const res = await fetch("/api/player/state", {
+          const res = await fetchWithAuth("/api/player/state", {
             headers: getHeaders(),
           });
           if (res.ok) {

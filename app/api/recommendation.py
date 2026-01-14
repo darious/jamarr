@@ -1,11 +1,12 @@
 from typing import List, Optional
 from datetime import datetime
 
+import asyncpg
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from app.db import get_pool
-from app.auth import require_current_user
+from app.api.deps import get_current_user_jwt
 
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
@@ -216,9 +217,8 @@ async def get_recommendations(conn, user_id: int, seeds: List[dict], days: int) 
 @router.get("/seeds", response_model=List[SeedArtist])
 async def get_model_seeds(
     days: int = Query(30, description="Number of days to look back (0 for all time)"),
-    user_data: tuple = Depends(require_current_user)
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    user = user_data[0]
     pool = get_pool()
     async with pool.acquire() as conn:
         rows = await get_seeds(conn, user['id'], days)
@@ -238,9 +238,8 @@ async def get_model_seeds(
 @router.get("/artists", response_model=List[RecommendedArtist])
 async def get_recommended_artists(
     days: int = Query(30, description="Number of days to look back"),
-    user_data: tuple = Depends(require_current_user)
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    user = user_data[0]
     pool = get_pool()
     async with pool.acquire() as conn:
         seeds = await get_seeds(conn, user['id'], days)
@@ -263,7 +262,7 @@ async def get_recommended_artists(
 @router.get("/albums", response_model=List[RecommendedAlbum])
 async def get_recommended_albums(
     days: int = Query(30, description="Number of days to look back"),
-    user_data: tuple = Depends(require_current_user)
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     """
     Returns recommended albums from the top recommended artists.
@@ -271,7 +270,6 @@ async def get_recommended_albums(
     LIMIT: 1 Album per Artist.
     ORDER: Same as Artist Rank.
     """
-    user = user_data[0]
     pool = get_pool()
     async with pool.acquire() as conn:
         seeds = await get_seeds(conn, user['id'], days)
@@ -379,13 +377,12 @@ async def get_recommended_albums(
 @router.get("/tracks", response_model=List[RecommendedTrack])
 async def get_recommended_tracks(
     days: int = Query(30, description="Number of days to look back"),
-    user_data: tuple = Depends(require_current_user)
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     """
     Returns recommended tracks from the top recommended artists.
     LIMIT: 3 Tracks per Artist.
     """
-    user = user_data[0]
     pool = get_pool()
     async with pool.acquire() as conn:
         seeds = await get_seeds(conn, user['id'], days)

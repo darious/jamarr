@@ -1,4 +1,9 @@
-export async function load({ fetch, url }) {
+import { fetchWithAuth } from '$lib/api';
+import { refreshAccessToken } from '$lib/stores/auth';
+
+export const ssr = false;
+
+export async function load({ url, fetch }) {
     const scope = url.searchParams.get('scope') || 'mine';
     const source = url.searchParams.get('source') || 'all';
     const artistMbid = url.searchParams.get('artist_mbid') || '';
@@ -90,9 +95,15 @@ export async function load({ fetch, url }) {
     const artistQuery = artistMbid ? `&artist_mbid=${encodeURIComponent(artistMbid)}` : '';
     const albumQuery = albumMbid ? `&album_mbid=${encodeURIComponent(albumMbid)}` : '';
     const trackQuery = trackId ? `&track_id=${encodeURIComponent(trackId)}` : '';
+    if (scope === 'mine') {
+        await refreshAccessToken(fetch);
+    }
+
+    const authFetch = (input: RequestInfo | URL, init?: RequestInit) =>
+        fetchWithAuth(String(input), init, fetch);
     const [historyRes, statsRes] = await Promise.all([
-        fetch(`/api/history/tracks?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}&page=${page}${artistQuery}${albumQuery}${trackQuery}`),
-        fetch(`/api/history/stats?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}${artistQuery}${albumQuery}${trackQuery}`)
+        authFetch(`/api/history/tracks?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}&page=${page}${artistQuery}${albumQuery}${trackQuery}`),
+        authFetch(`/api/history/stats?scope=${scope}&source=${source}&from=${dateFrom}&to=${dateTo}${artistQuery}${albumQuery}${trackQuery}`)
     ]);
 
     const history = historyRes.ok ? await historyRes.json() : [];

@@ -121,9 +121,146 @@ async def get_session_user(
 async def require_current_user(
     request: Request, db: asyncpg.Connection = Depends(get_db)
 ) -> Tuple[asyncpg.Record, str]:
-    """Dependency to require an authenticated user."""
+    """Dependency to require an authenticated user.
+    
+    DEPRECATED: This uses legacy session cookies. Will be replaced with JWT auth.
+    """
     token = request.cookies.get(SESSION_COOKIE_NAME)
     user, token_value = await get_session_user(db, token)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user, token_value or token
+
+
+# ============================================================================
+# Refresh Session Operations (JWT Authentication)
+# ============================================================================
+
+
+async def create_refresh_session(
+    db: asyncpg.Connection,
+    user_id: int,
+    token_hash: str,
+    expires_at: datetime,
+    user_agent: Optional[str],
+    ip: Optional[str],
+) -> int:
+    """Create a new refresh session and return the session ID.
+    
+    Args:
+        db: Database connection
+        user_id: User ID
+        token_hash: SHA-256 hash of the refresh token (never store raw tokens)
+        expires_at: Expiration timestamp
+        user_agent: Optional user agent string
+        ip: Optional IP address
+        
+    Returns:
+        Session ID
+    """
+    session_id = await db.fetchval(
+        """
+        INSERT INTO auth_refresh_session 
+        (user_id, token_hash, created_at, expires_at, last_used_at, user_agent, ip)
+        VALUES ($1, $2, NOW(), $3, NOW(), $4, $5)
+        RETURNING id
+        """,
+        user_id,
+        token_hash,
+        expires_at,
+        user_agent,
+        ip,
+    )
+    return session_id
+
+
+async def get_refresh_session(
+    db: asyncpg.Connection, token_hash: str
+) -> Optional[asyncpg.Record]:
+    """Get refresh session by token hash, joined with user data.
+    
+    Returns None if:
+    - Session doesn't exist
+    - Session is revoked (revoked_at is not NULL)
+    - Session is expired (expires_at < NOW())
+    
+    Args:
+        db: Database connection
+        token_hash: SHA-256 hash of the refresh token
+        
+    Returns:
+        Session record with user data, or None
+    """
+    row = await db.fetchrow(
+        """
+        SELECT 
+            s.*,
+            u.username,
+            u.email,
+            u.display_name,
+            u.is_active
+        FROM auth_refresh_session s
+        JOIN "user" u ON u.id = s.user_id
+        WHERE s.token_hash = $1
+          AND s.revoked_at IS NULL
+          AND s.expires_at > NOW()
+        LIMIT 1
+        """,
+        token_hash,
+    )
+    return row
+
+
+async def revoke_refresh_session(db: asyncpg.Connection, token_hash: str) -> None:
+    """Revoke a refresh session by setting revoked_at timestamp.
+    
+    Args:
+        db: Database connection
+        token_hash: SHA-256 hash of the refresh token
+    """
+    await db.execute(
+        """
+        UPDATE auth_refresh_session
+        SET revoked_at = NOW()
+        WHERE token_hash = $1
+        """,
+        token_hash,
+    )
+
+
+async def revoke_all_user_sessions(db: asyncpg.Connection, user_id: int) -> None:
+    """Revoke all refresh sessions for a user.
+    
+    Used for:
+    - User-initiated "logout all devices"
+    - Admin-initiated session revocation
+    - Password change (optional)
+    
+    Args:
+        db: Database connection
+        user_id: User ID
+    """
+    await db.execute(
+        """
+        UPDATE auth_refresh_session
+        SET revoked_at = NOW()
+        WHERE user_id = $1 AND revoked_at IS NULL
+        """,
+        user_id,
+    )
+
+
+async def purge_expired_refresh_sessions(db: asyncpg.Connection) -> None:
+    """Delete expired refresh sessions.
+    
+    This should be run periodically (e.g., daily) to clean up old sessions.
+    
+    Args:
+        db: Database connection
+    """
+    await db.execute(
+        """
+        DELETE FROM auth_refresh_session
+        WHERE expires_at < NOW()
+        """
+    )
