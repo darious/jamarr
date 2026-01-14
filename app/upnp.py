@@ -1,91 +1,32 @@
-import asyncio
+"""
+UPnP Manager Module
+Delegates functionality to specialized services in app/services/upnp/
+"""
 import logging
-import xml.etree.ElementTree as ET
-from typing import Dict, Any, Optional, List
-from urllib.parse import urlparse, urljoin
+import asyncio
 import aiohttp
+from typing import Dict, Any, Optional, List
 
 from async_upnp_client.client_factory import UpnpFactory
-from async_upnp_client.client import UpnpDevice
 from async_upnp_client.profiles.dlna import DmrDevice
-from async_upnp_client.search import async_search
 from async_upnp_client.aiohttp import AiohttpSessionRequester
-from async_upnp_client.exceptions import UpnpError
-from async_upnp_client.utils import CaseInsensitiveDict
 
-from app.db import get_db
+from app.services.upnp.utils import (
+    select_renderer_icon,
+    fetch_device_icons
+)
+from app.services.upnp.discovery import UPnPDiscovery
+from app.services.upnp.device import UPnPDeviceControl
 
 logger = logging.getLogger(__name__)
 
 # Search target for MediaRenderer devices
 SSDP_TARGET_MEDIA_RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
 
-
-def _strip_ns(tag: str) -> str:
-    return tag.split("}", 1)[-1] if "}" in tag else tag
-
-
-def _parse_icons(xml_text: str, base_url: str) -> List[Dict[str, Any]]:
-    root = ET.fromstring(xml_text)
-    icons: List[Dict[str, Any]] = []
-    for node in root.iter():
-        if _strip_ns(node.tag) != "icon":
-            continue
-        icon: Dict[str, Any] = {}
-        for child in node:
-            key = _strip_ns(child.tag)
-            val = (child.text or "").strip()
-            if not val:
-                continue
-            if key in {"width", "height", "depth"}:
-                try:
-                    icon[key] = int(val)
-                except ValueError:
-                    icon[key] = val
-            else:
-                icon[key] = val
-        if "url" in icon:
-            icon["url"] = urljoin(base_url, icon["url"])
-        if icon:
-            icons.append(icon)
-    return icons
-
-
-def _pick_best_icon(icons: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not icons:
-        return None
-    filtered = []
-    for icon in icons:
-        mimetype = (icon.get("mimetype") or "").lower()
-        if not mimetype:
-            url = (icon.get("url") or "").lower()
-            if url.endswith(".png"):
-                mimetype = "image/png"
-            elif url.endswith(".jpg") or url.endswith(".jpeg"):
-                mimetype = "image/jpeg"
-        if mimetype not in {"image/png", "image/jpeg", "image/jpg"}:
-            continue
-        if not icon.get("url"):
-            continue
-        icon["mimetype"] = mimetype
-        filtered.append(icon)
-    if not filtered:
-        return None
-    def sort_key(icon: Dict[str, Any]) -> tuple:
-        width = icon.get("width") or 0
-        height = icon.get("height") or 0
-        area = width * height
-        is_png = 1 if (icon.get("mimetype") or "").lower() == "image/png" else 0
-        return (area, is_png)
-    return sorted(filtered, key=sort_key, reverse=True)[0]
-
-
 class UPnPManager:
     """
     UPnP/DLNA Media Renderer Manager using async-upnp-client library.
-
-    Manages discovery, control, and state management of UPnP media renderers.
-    Maintains backward compatibility with existing player API.
+    Acts as a facade/coordinator for Discovery and Device Control services.
     """
 
     _instance = None
@@ -104,24 +45,18 @@ class UPnPManager:
         self.local_ip = self._get_local_ip()
         self.base_url = f"http://{self.local_ip}:8111"
 
-        # Discovery state
-        self._discovery_task: Optional[asyncio.Task] = None
-        self._running = False
-
-        # Subnet scanning state
-        self.is_scanning_subnet = False
-        self.scan_msg = ""
-        self.scan_progress = 0
-
         # HTTP session for library
         self._session: Optional[aiohttp.ClientSession] = None
         self._requester: Optional[AiohttpSessionRequester] = None
         self._factory: Optional[UpnpFactory] = None
 
+        # Delegated Services
+        self.discovery = UPnPDiscovery(self)
+        self.control = UPnPDeviceControl(self)
+
     def _get_local_ip(self) -> str:
         """Get local IP address for media streaming URLs."""
         import socket
-
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
@@ -145,34 +80,25 @@ class UPnPManager:
             self._requester = AiohttpSessionRequester(self._session, with_sleep=True)
             self._factory = UpnpFactory(self._requester)
 
+    # --- Delegate to Utils (Public API) ---
     async def _fetch_device_icons(self, location: str) -> List[Dict[str, Any]]:
-        if not location:
-            return []
         await self._ensure_session()
-        try:
-            async with self._session.get(
-                location, timeout=aiohttp.ClientTimeout(total=8)
-            ) as resp:
-                if resp.status != 200:
-                    return []
-                xml_text = await resp.text()
-        except Exception as e:
-            logger.debug(f"Failed to fetch device description {location}: {e}")
-            return []
-        try:
-            return _parse_icons(xml_text, location)
-        except Exception as e:
-            logger.debug(f"Failed to parse device icons {location}: {e}")
-            return []
+        return await fetch_device_icons(self._session, location)
 
     async def _select_renderer_icon(self, location: str) -> Optional[Dict[str, Any]]:
-        icons = await self._fetch_device_icons(location)
-        return _pick_best_icon(icons)
+        await self._ensure_session()
+        return await select_renderer_icon(self._session, location)
 
     async def _cache_renderer_icon(self, udn: str, icon: Optional[Dict[str, Any]]) -> bool:
+        # Kept internal as it interacts with manager-specific DB logic possibly? 
+        # But actually let's implement it here as it was, or move to discovery if strictly discovery related.
+        # It's better here or in a separate persistence service. 
+        # For now, keep logic here to avoid circular imports or complex dependency injection 
+        # if it wasn't moved.
         if not udn or not icon or not icon.get("url"):
             return False
         from app.scanner.artwork import download_and_save_artwork, upsert_artwork_record, upsert_image_mapping
+        from app.db import get_db
 
         icon_url = icon["url"]
         async for db in get_db():
@@ -182,8 +108,8 @@ class UPnPManager:
                 FROM renderer r
                 LEFT JOIN image_map im
                   ON im.entity_type = 'renderer'
-                 AND im.entity_id = $1
-                 AND im.image_type = 'icon'
+                  AND im.entity_id = $1
+                  AND im.image_type = 'icon'
                 WHERE r.udn = $1
                 """,
                 udn,
@@ -206,265 +132,42 @@ class UPnPManager:
             await upsert_image_mapping(db, artwork_id, "renderer", udn, "icon")
             return True
 
+    # --- Delegate to Discovery Service ---
+
     def start_background_scan(self):
-        """Start background discovery loop."""
-        if not self._running:
-            self._running = True
-            self._discovery_task = asyncio.create_task(self._discovery_loop())
-            self.log("Started background UPnP discovery")
+        self.discovery.start_background_scan()
 
     async def stop_background_scan(self):
-        """Stop background discovery loop."""
-        self._running = False
-        if self._discovery_task:
-            self._discovery_task.cancel()
-            try:
-                await asyncio.wait_for(self._discovery_task, timeout=2.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-
-        # Cleanup HTTP session
+        await self.discovery.stop_background_scan()
+        # Cleanup HTTP session part kept here as it owns the session
         if self._session:
             try:
                 await asyncio.wait_for(self._session.close(), timeout=2.0)
             except Exception as e:
                 logger.debug(f"Error closing UPnP session: {e}")
-
             self._session = None
             self._requester = None
             self._factory = None
-
         self.log("Stopped background UPnP discovery")
 
-    async def _discovery_loop(self):
-        """Periodic discovery loop to find and maintain renderer list."""
-        await self.load_persisted_renderers()
-
-        while self._running:
-            try:
-                await self.discover(timeout=3)
-                await asyncio.sleep(30)  # Discover every 30 seconds
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Discovery loop error: {e}")
-                await asyncio.sleep(30)
-
     async def discover(self, timeout=5):
-        """
-        Discover UPnP Media Renderers on the network using async_search.
-
-        Args:
-            timeout: Discovery timeout in seconds
-        """
-        await self._ensure_session()
-
-        self.log(f"Starting UPnP discovery (timeout={timeout}s)...")
-
-        discovered_locations = []
-
-        async def search_callback(headers: CaseInsensitiveDict):
-            """Callback for each discovered device."""
-            location = headers.get("location") or headers.get("LOCATION")
-            st = headers.get("st") or headers.get("ST")
-
-            # Filter for MediaRenderer devices
-            if location and st and "MediaRenderer" in st:
-                if location not in discovered_locations:
-                    discovered_locations.append(location)
-
-        try:
-            # Perform search with callback
-            await async_search(
-                async_callback=search_callback,
-                timeout=timeout,
-                search_target=SSDP_TARGET_MEDIA_RENDERER,
-            )
-
-            # Process discovered devices
-            for location in discovered_locations:
-                await self._add_renderer(location)
-
-            self.log(f"Discovery complete. Found {len(self.renderers)} renderer(s)")
-
-        except Exception as e:
-            logger.error(f"Discovery error: {e}")
-            self.log(f"Discovery error: {e}")
+        await self.discovery.discover(timeout)
 
     async def _add_renderer(self, location: str):
-        """
-        Add or update a renderer from its description URL.
-
-        Args:
-            location: URL to device description XML
-        """
-        try:
-            await self._ensure_session()
-
-            # Create UPnP device from description
-            device: UpnpDevice = await self._factory.async_create_device(location)
-
-            udn = device.udn
-            if not udn:
-                logger.warning(f"Device at {location} has no UDN")
-                return
-
-            # Extract device information
-            parsed_url = urlparse(location)
-            ip = parsed_url.hostname
-
-            renderer_info = {
-                "udn": udn,
-                "name": device.name or "Unknown Device",  # UI expects 'name' field
-                "friendly_name": device.name or "Unknown Device",
-                "location": location,
-                "ip": ip,
-                "device_type": device.device_type,
-                "manufacturer": device.manufacturer,
-                "model_name": device.model_name,
-                "model_number": device.model_number,
-                "serial_number": device.serial_number,
-                "firmware_version": getattr(device, "firmware_version", None),
-            }
-
-            # Find AVTransport and RenderingControl services
-            # Use service_id method which is safer than direct dictionary access
-            try:
-                avt_service = device.service_id("urn:upnp-org:serviceId:AVTransport")
-                if avt_service:
-                    renderer_info["control_url"] = avt_service.control_url
-            except (KeyError, AttributeError):
-                # Try alternative lookup
-                for service in device.services.values():
-                    if "AVTransport" in service.service_type:
-                        renderer_info["control_url"] = service.control_url
-                        break
-
-            try:
-                rc_service = device.service_id(
-                    "urn:upnp-org:serviceId:RenderingControl"
-                )
-                if rc_service:
-                    renderer_info["rendering_control_url"] = rc_service.control_url
-            except (KeyError, AttributeError):
-                # Try alternative lookup
-                for service in device.services.values():
-                    if "RenderingControl" in service.service_type:
-                        renderer_info["rendering_control_url"] = service.control_url
-                        break
-
-            # Create DMR device wrapper with event handler
-            # For now, we pass None for event_handler (will implement in Phase 2)
-            dmr = DmrDevice(device, event_handler=None)
-
-            # Check capabilities
-            renderer_info["supports_events"] = True  # async-upnp-client supports events
-            renderer_info["supports_gapless"] = dmr.has_next_transport_uri
-
-            # Query supported MIME types
-            supported_mimes = await self.get_supported_protocols(udn)
-
-            # Only update MIME types if we got data, otherwise preserve existing data
-            if supported_mimes:
-                renderer_info["supported_mime_types"] = ",".join(
-                    sorted(supported_mimes)
-                )
-                logger.debug(f"  Supports {len(supported_mimes)} MIME types")
-            else:
-                # Check if we have existing MIME types in the database
-                async for db in get_db():
-                    row = await db.fetchrow(
-                        "SELECT supported_mime_types FROM renderer WHERE udn = $1", udn
-                    )
-                    if row and row["supported_mime_types"]:
-                        # Preserve existing MIME types from database
-                        renderer_info["supported_mime_types"] = row[
-                            "supported_mime_types"
-                        ]
-                        logger.debug("  Preserving existing MIME types from database")
-                    else:
-                        # No data available
-                        renderer_info["supported_mime_types"] = ""
-                        logger.debug("  No MIME type data available")
-
-            icon = await self._select_renderer_icon(location)
-            if icon:
-                renderer_info["icon_url"] = icon.get("url")
-                renderer_info["icon_mime"] = icon.get("mimetype")
-                renderer_info["icon_width"] = icon.get("width")
-                renderer_info["icon_height"] = icon.get("height")
-
-            # Store renderer info and DMR device
-            self.renderers[udn] = renderer_info
-            self.dmr_devices[udn] = dmr
-
-            # Persist to database (save remote URL as icon_url initially)
-            if "icon_url" in renderer_info:
-                renderer_info["original_icon_url"] = renderer_info["icon_url"]
-            
-            await self.save_renderer(renderer_info)
-            
-            # Cache icon and swap URL if successful
-            has_cached = await self._cache_renderer_icon(udn, icon)
-            if has_cached:
-                renderer_info["icon_url"] = f"/art/renderer/{udn}"
-                self.renderers[udn] = renderer_info # Update in memory
-
-            self.log(f"Added renderer: {renderer_info['friendly_name']} ({udn})")
-
-        except Exception as e:
-            logger.error(f"Error adding renderer from {location}: {e}")
-            import traceback
-
-            logger.debug(traceback.format_exc())
-            self.log(f"Error adding renderer: {e}")
+        # Exposed for testing/re-add but mainly internal
+        await self.discovery._add_renderer(location)
 
     async def load_persisted_renderers(self):
-        """Load previously discovered renderers from database and verify they're still alive."""
-        async for db in get_db():
-            rows = await db.fetch("""
-                SELECT r.*, im.artwork_id as has_local_icon
-                FROM renderer r
-                LEFT JOIN image_map im ON im.entity_type = 'renderer' AND im.entity_id = r.udn AND im.image_type = 'icon'
-            """)
-            for row in rows:
-                r = dict(row)
-                has_local = r.pop("has_local_icon", None)
-                r["original_icon_url"] = r.get("icon_url")
-                
-                if has_local:
-                    r["icon_url"] = f"/art/renderer/{r['udn']}"
-
-                location = r.get("location") or r.get("location_url")
-                if location:
-                    r["location"] = location
-                # Try to verify device is still reachable
-                if await self.verify_device(r):
-                    self.renderers[r["udn"]] = r
-                    # Try to recreate DMR device
-                    if r.get("location"):
-                        try:
-                            await self._add_renderer(r["location"])
-                        except Exception as e:
-                            logger.debug(f"Could not recreate DMR for {r['udn']}: {e}")
+        await self.discovery.load_persisted_renderers()
 
     async def verify_device(self, r: Dict[str, Any]) -> bool:
-        """Quick check if device is reachable."""
-        location = r.get("location") or r.get("location_url")
-        if not location:
-            return False
-
-        try:
-            await self._ensure_session()
-            async with self._session.get(
-                location, timeout=aiohttp.ClientTimeout(total=2)
-            ) as resp:
-                return resp.status == 200
-        except Exception:
-            return False
+        return await self.discovery.verify_device(r)
 
     async def save_renderer(self, r: Dict[str, Any]):
-        """Persist renderer to database."""
+        # This one writes to DB, kept here or moved? 
+        # It was on Manager. Let's keep it here or move to a persistence module.
+        # Discovery uses it. Let's keep it here to allow Discovery to call back.
+        from app.db import get_db
         async for db in get_db():
             await db.execute(
                 """
@@ -517,73 +220,31 @@ class UPnPManager:
             )
 
     async def add_device_by_ip(self, ip: str):
-        """
-        Manually add a UPnP device by IP address using unicast M-SEARCH and HTTP probing.
-
-        Args:
-            ip: IP address of the device
-        """
-        self.log(f"Attempting to add device at {ip}...")
-
-        # Try common UPnP ports and paths
-        common_urls = [
-            f"http://{ip}:49152/description.xml",
-            f"http://{ip}:8080/description.xml",
-            f"http://{ip}:1400/xml/device_description.xml",  # Sonos
-            f"http://{ip}:60053/upnp/dev/uuid/description.xml",  # Rygel
-        ]
-
-        await self._ensure_session()
-
-        for url in common_urls:
-            try:
-                async with self._session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=3)
-                ) as resp:
-                    if resp.status == 200:
-                        await self._add_renderer(url)
-                        self.log(f"Successfully added device from {url}")
-                        return
-            except Exception as e:
-                logger.debug(f"Failed to probe {url}: {e}")
-
-        self.log(f"Could not find UPnP device at {ip}")
+        await self.discovery.add_device_by_ip(ip)
 
     async def scan_subnet(self):
-        """Active scan of the local subnet for UPnP devices."""
-        self.is_scanning_subnet = True
-        self.scan_progress = 0
-        self.scan_msg = "Scanning local subnet..."
+        await self.discovery.scan_subnet()
+    
+    @property
+    def is_scanning_subnet(self):
+        return self.discovery.is_scanning_subnet
+    
+    @property
+    def scan_msg(self):
+        return self.discovery.scan_msg
+    
+    @property
+    def scan_progress(self):
+        return self.discovery.scan_progress
 
-        # Get local subnet
-        import ipaddress
-
-        local_network = ipaddress.ip_network(f"{self.local_ip}/24", strict=False)
-
-        total_hosts = 254
-        scanned = 0
-
-        for ip in local_network.hosts():
-            if not self.is_scanning_subnet:
-                break
-
-            ip_str = str(ip)
-            scanned += 1
-            self.scan_progress = int((scanned / total_hosts) * 100)
-            self.scan_msg = f"Scanning {ip_str}..."
-
-            await self.add_device_by_ip(ip_str)
-
-        self.is_scanning_subnet = False
-        self.scan_msg = "Scan complete"
-        self.scan_progress = 100
+    # --- Delegate to Device Control Service ---
 
     async def get_renderers(self) -> list:
-        """Get list of all discovered renderers."""
+        # Simple local access
         return list(self.renderers.values())
 
     async def set_renderer(self, udn: str):
-        """Set the active renderer by UDN."""
+        # Local state update
         if udn in self.renderers:
             self.active_renderer = udn
             self.log(f"Active renderer set to: {self.renderers[udn]['friendly_name']}")
@@ -591,318 +252,26 @@ class UPnPManager:
             raise ValueError(f"Renderer {udn} not found")
 
     async def get_supported_protocols(self, udn: str) -> set:
-        """
-        Query device's supported MIME types via GetProtocolInfo.
+        return await self.control.get_supported_protocols(udn)
 
-        Returns:
-            Set of supported MIME types (e.g., {'audio/flac', 'audio/mpeg'})
-        """
-        dmr = self.dmr_devices.get(udn)
-        if not dmr:
-            return set()
-
-        device = dmr.device
-
-        # Find ConnectionManager service
-        cm_service = None
-        for service in device.services.values():
-            if "ConnectionManager" in service.service_type:
-                cm_service = service
-                break
-
-        if not cm_service:
-            logger.debug(f"No ConnectionManager service found for {udn}")
-            return set()
-
-        try:
-            action = cm_service.action("GetProtocolInfo")
-            result = await action.async_call()
-
-            # Parse Sink protocols (what the device can play)
-            sink = result.get("Sink", "")
-            if not sink:
-                return set()
-
-            # Extract unique MIME types
-            mime_types = set()
-            protocols = sink.split(",")
-            for proto in protocols:
-                parts = proto.split(":")
-                if len(parts) >= 3:
-                    mime = parts[2]
-                    if mime and mime != "*":
-                        mime_types.add(mime)
-
-            logger.debug(f"Device {udn} supports {len(mime_types)} MIME types")
-            return mime_types
-
-        except Exception as e:
-            logger.debug(f"Error querying protocols for {udn}: {e}")
-            return set()
-
-    async def play_track(
-        self,
-        track_id: int,
-        track_path: str,
-        metadata: Dict[str, Any],
-        username: str = None,
-    ):
-        """
-        Play a track on the active renderer.
-
-        Args:
-            track_id: Track ID from database
-            track_path: Path to track file
-            metadata: Track metadata (title, artist, album, art_sha1, duration, mime)
-        """
-        if not self.active_renderer:
-            raise ValueError("No active renderer set")
-
-        dmr = self.dmr_devices.get(self.active_renderer)
-        if not dmr:
-            raise ValueError(f"DMR device not found for {self.active_renderer}")
-
-        # Build media URL
-        media_url = f"{self.base_url}/api/stream/{track_id}"
-
-        # Get MIME type from metadata
-        mime_type = metadata.get("mime", "audio/flac")
-
-        # Get supported MIME types from renderer info (stored in database)
-        renderer_info = self.renderers.get(self.active_renderer, {})
-        supported_mimes_str = renderer_info.get("supported_mime_types", "")
-        supported_mimes = (
-            set(supported_mimes_str.split(",")) if supported_mimes_str else set()
-        )
-
-        # Choose the best MIME type for this device
-        # Try to match the exact MIME type first, then try variants
-        if mime_type == "audio/flac":
-            # FLAC has two common variants: audio/flac and audio/x-flac
-            # Check which one the device supports
-            if "audio/flac" in supported_mimes:
-                mime_type = "audio/flac"  # Sonos prefers this
-                logger.debug("Device supports audio/flac")
-            elif "audio/x-flac" in supported_mimes:
-                mime_type = "audio/x-flac"  # Some devices prefer this
-                logger.debug("Device supports audio/x-flac")
-            else:
-                # Fallback: if we don't have device info, use audio/flac as default
-                mime_type = "audio/flac"
-                logger.debug("Device protocols unknown, using audio/flac as default")
-        elif mime_type == "audio/mp4":
-            # M4A/AAC - usually audio/mp4 or audio/x-m4a
-            if "audio/mp4" in supported_mimes:
-                mime_type = "audio/mp4"
-            elif "audio/x-m4a" in supported_mimes:
-                mime_type = "audio/x-m4a"
-        # For other types (audio/mpeg, etc.), keep as-is
-
-        # Build art URL if available
-        art_url = None
-        if metadata.get("art_sha1"):
-            art_url = f"{self.base_url}/art/file/{metadata['art_sha1']}?max_size=600"
-
-        # Extract metadata fields
-        title = metadata.get("title", "Unknown Track")
-        artist = metadata.get("artist", "Unknown Artist")
-        album = metadata.get("album", "Unknown Album")
-
-        # Get renderer info
-        renderer_name = self.renderers.get(self.active_renderer, {}).get(
-            "friendly_name", "Unknown"
-        )
-        renderer_location = self.renderers.get(self.active_renderer, {}).get(
-            "location", ""
-        )
-        renderer_ip = (
-            renderer_location.split("//")[1].split(":")[0]
-            if "//" in renderer_location
-            else "Unknown"
-        )
-
-        # Build comprehensive log message
-        log_parts = [
-            f"Playing: {track_path} : {title} by {artist} ({mime_type}) on {renderer_name}"
-        ]
-        if renderer_ip and renderer_ip != "Unknown":
-            log_parts.append(f"({renderer_ip})")
-        if username:
-            log_parts.append(f"requested by {username}")
-
-        logger.info(" ".join(log_parts))
-
-        # Manually construct DIDL-Lite XML matching the legacy implementation exactly
-        # This format has been tested and works with Naim and other renderers
-        import html
-
-        title_esc = html.escape(title)
-        artist_esc = html.escape(artist)
-        album_esc = html.escape(album)
-
-        # Note: Legacy uses dc:creator instead of upnp:artist, and includes dlna namespace
-        # Build albumArtURI element if artwork is available
-        art_element = ""
-        if art_url:
-            art_element = f"<upnp:albumArtURI>{html.escape(art_url)}</upnp:albumArtURI>"
-
-        didl_lite = f"""
-        <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">
-            <item id="1" parentID="0" restricted="1">
-                <dc:title>{title_esc}</dc:title>
-                <dc:creator>{artist_esc}</dc:creator>
-                <upnp:artist>{artist_esc}</upnp:artist>
-                <upnp:album>{album_esc}</upnp:album>
-                <upnp:class>object.item.audioItem.musicTrack</upnp:class>
-                {art_element}
-                <res protocolInfo="http-get:*:{mime_type}:*">{media_url}</res>
-            </item>
-        </DIDL-Lite>
-        """
-
-        # Set transport URI with manually constructed metadata
-        await dmr.async_set_transport_uri(
-            media_url=media_url, media_title=title, meta_data=didl_lite
-        )
-
-        # Wait for device to be ready
-        await dmr.async_wait_for_can_play(max_wait_time=5)
-
-        # Start playback
-        try:
-            await dmr.async_play()
-        except UpnpError as e:
-            # Error 701 means "Transition not available" - device is already playing
-            if "701" in str(e):
-                logger.info("Device already playing, ignoring play command")
-            else:
-                raise
+    async def play_track(self, track_id: int, track_path: str, metadata: Dict[str, Any], username: str = None):
+        return await self.control.play_track(track_id, track_path, metadata, username)
 
     async def pause(self):
-        """Pause playback on active renderer."""
-        if not self.active_renderer:
-            return
-
-        dmr = self.dmr_devices.get(self.active_renderer)
-        if dmr:
-            await dmr.async_pause()
-            self.log("Playback paused")
+        return await self.control.pause()
 
     async def resume(self):
-        """Resume playback on active renderer."""
-        if not self.active_renderer:
-            return
-
-        dmr = self.dmr_devices.get(self.active_renderer)
-        if dmr:
-            await dmr.async_play()
-            self.log("Playback resumed")
-
-    async def set_volume(self, volume_percent: int):
-        """
-        Set volume on active renderer.
-
-        Args:
-            volume_percent: Volume level 0-100
-        """
-        if not self.active_renderer:
-            return
-
-        dmr = self.dmr_devices.get(self.active_renderer)
-        if dmr and dmr.has_volume_level:
-            # Convert 0-100 to 0.0-1.0
-            volume_level = volume_percent / 100.0
-            await dmr.async_set_volume_level(volume_level)
-            self.log(f"Volume set to {volume_percent}%")
-
-    async def get_position(self, udn: Optional[str] = None) -> tuple:
-        """
-        Get current playback position and duration.
-
-        Args:
-            udn: Renderer UDN (uses active if None)
-
-        Returns:
-            Tuple of (position_seconds, duration_seconds)
-        """
-        target_udn = udn or self.active_renderer
-        if not target_udn:
-            return (0, 0)
-
-        dmr = self.dmr_devices.get(target_udn)
-        if not dmr:
-            return (0, 0)
-
-        # Update device state from UPnP device
-        try:
-            await dmr.async_update()
-        except Exception as e:
-            logger.debug(f"Failed to update DMR state: {e}")
-            return (0, 0)
-
-        # Get position and duration from DMR device
-        position = dmr.media_position
-        duration = dmr.media_duration
-
-        # Convert to seconds - handle both int and timedelta types
-        if isinstance(position, int):
-            position_seconds = position
-        elif position:
-            position_seconds = position.total_seconds()
-        else:
-            position_seconds = 0
-
-        if isinstance(duration, int):
-            duration_seconds = duration
-        elif duration:
-            duration_seconds = duration.total_seconds()
-        else:
-            duration_seconds = 0
-
-        return (position_seconds, duration_seconds)
-
-    async def get_transport_info(self, udn: Optional[str] = None) -> str:
-        """
-        Get current transport state.
-
-        Args:
-            udn: Renderer UDN (uses active if None)
-
-        Returns:
-            Transport state string (PLAYING, STOPPED, PAUSED_PLAYBACK, etc.)
-        """
-        target_udn = udn or self.active_renderer
-        if not target_udn:
-            return "STOPPED"
-
-        dmr = self.dmr_devices.get(target_udn)
-        if not dmr:
-            return "STOPPED"
-
-        # Update device state from UPnP device
-        try:
-            await dmr.async_update()
-        except Exception as e:
-            logger.debug(f"Failed to update DMR state: {e}")
-            return "STOPPED"
-
-        transport_state = dmr.transport_state
-        return transport_state.value if transport_state else "STOPPED"
+        return await self.control.resume()
 
     async def seek(self, target_seconds: float):
-        """
-        Seek to a specific time position.
+        return await self.control.seek(target_seconds)
 
-        Args:
-            target_seconds: Target position in seconds
-        """
-        if not self.active_renderer:
-            return
+    async def set_volume(self, volume: int):
+        return await self.control.set_volume(volume)
 
-        dmr = self.dmr_devices.get(self.active_renderer)
-        if dmr:
-            from datetime import timedelta
+    async def get_position(self, udn: Optional[str] = None):
+        return await self.control.get_position(udn)
 
-            target_time = timedelta(seconds=target_seconds)
-            await dmr.async_seek_rel_time(target_time)
-            self.log(f"Seeked to {target_seconds}s")
+    async def get_transport_info(self, udn: Optional[str] = None):
+        return await self.control.get_transport_info(udn)
+

@@ -1,15 +1,15 @@
 # Database Schema
 
-The application uses a **PostgreSQL** database (running in Docker on port 8110).
+The application uses a PostgreSQL database (running in Docker on port 8110).
 
 ## Extensions
-- `citext`: Enabled for case-insensitive text matching (used for usernames, emails, artist names).
+- `citext`: Case-insensitive text matching (usernames, emails, artist names).
+- `pg_trgm`: Trigram indexes for fast fuzzy searching.
 
-## Entity Relationship Diagram
+## Entity Relationship Diagram (simplified)
 
 ```mermaid
 erDiagram
-    %% Core Entities
     track {
         BIGSERIAL id PK
         TEXT title
@@ -21,7 +21,7 @@ erDiagram
 
     artist {
         TEXT mbid PK
-        TEXT name
+        CITEXT name
         BIGINT artwork_id FK
     }
 
@@ -38,37 +38,56 @@ erDiagram
         TEXT name
     }
 
-    user {
+    "user" {
         BIGSERIAL id PK
         CITEXT username
     }
 
-    %% Relationships
+    renderer {
+        BIGSERIAL id PK
+        TEXT udn
+    }
+
+    renderer_state {
+        TEXT renderer_udn PK
+    }
+
+    playback_history {
+        BIGSERIAL id PK
+        BIGINT track_id FK
+    }
+
+    lastfm_scrobble {
+        BIGSERIAL id PK
+        TEXT lastfm_username
+    }
+
+    lastfm_scrobble_match {
+        BIGSERIAL id PK
+        BIGINT scrobble_id FK
+        BIGINT track_id FK
+    }
+
     track }|..|| album : "belongs to"
     track ||--o{ track_artist : "has"
     track ||--o| artwork : "has"
-    
+
     artist ||--o{ track_artist : "performs"
     artist ||--o{ artist_album : "releases"
     artist ||--o| artwork : "has"
-    
+
     album ||--o{ artist_album : "by"
     album ||--o| artwork : "has"
-    
-    playlist }|..|| user : "owner"
+
+    playlist }|..|| "user" : "owner"
     playlist ||..|{ playlist_track : "contains"
     playlist_track }|..|| track : "refers"
 
-    %% Junctions
-    track_artist {
-        BIGINT track_id FK
-        TEXT artist_mbid FK
-    }
+    playback_history }|..|| track : "plays"
+    renderer_state }|..|| renderer : "state"
 
-    artist_album {
-        TEXT artist_mbid FK
-        TEXT album_mbid FK
-    }
+    lastfm_scrobble_match }|..|| lastfm_scrobble : "matches"
+    lastfm_scrobble_match }|..|| track : "links"
 ```
 
 ## Tables
@@ -78,17 +97,20 @@ Stores metadata for individual audio files.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
-| `path` | TEXT | Absolute file path. Unique, Not Null. |
-| `updated_at` | TIMESTAMPTZ | Timestamp of last update. Default: NOW(). |
+| `id` | BIGSERIAL | Primary key. |
+| `path` | TEXT | Absolute file path. Unique, not null. |
+| `updated_at` | TIMESTAMPTZ | Timestamp of last update. Default: `NOW()`. |
 | `title` | TEXT | Track title. |
-| `artist` | TEXT | Artist name (from tags). |
+| `artist` | TEXT | Track artist (raw tag). |
 | `album` | TEXT | Album name. |
 | `album_artist` | TEXT | Album artist name. |
 | `track_no` | INTEGER | Track number. |
 | `disc_no` | INTEGER | Disc number. |
-| `release_date` | DATE | Release date. |
-
+| `release_date` | DATE | Release date (normalized). |
+| `release_type` | TEXT | Normalized release type (Album, Single, etc.). |
+| `release_type_raw` | TEXT | Raw release type from tags. |
+| `release_date_raw` | TEXT | Raw release date string. |
+| `release_date_tag` | TEXT | Original date tag value. |
 | `duration_seconds` | DOUBLE PRECISION | Duration in seconds. |
 | `codec` | TEXT | Audio codec. |
 | `sample_rate_hz` | INTEGER | Sample rate in Hz. |
@@ -102,27 +124,25 @@ Stores metadata for individual audio files.
 | `release_track_mbid` | TEXT | MusicBrainz Release Track ID. |
 | `release_mbid` | TEXT | MusicBrainz Release ID. |
 | `release_group_mbid` | TEXT | MusicBrainz Release Group ID. |
-| `artwork_id` | BIGINT | Foreign Key referencing `artwork.id`. |
-| `fts_vector` | TSVECTOR | Full-text search vector (title, artist, album). |
-| `release_type` | TEXT | Normalized release type (e.g. Album, Single). |
-| `release_type_raw` | TEXT | Raw release type from tags. |
-| `release_date_raw` | TEXT | Raw release date string. |
-| `release_date_tag` | TEXT | Original date tag value. |
+| `artwork_id` | BIGINT | Foreign key to `artwork.id`. |
 | `size_bytes` | BIGINT | File size in bytes. |
 | `quick_hash` | BYTEA | Partial hash for quick comparison. |
 | `mtime` | DOUBLE PRECISION | Modification time. |
+| `fts_vector` | TSVECTOR | Full-text search vector (title/artist/album). |
 
 ### `artist`
 Stores rich metadata for artists.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `mbid` | TEXT | Primary Key. MusicBrainz Artist ID. |
+| `mbid` | TEXT | Primary key. MusicBrainz Artist ID. |
 | `name` | CITEXT | Artist name (case-insensitive). |
 | `sort_name` | TEXT | Sort name. |
 | `bio` | TEXT | Artist biography. |
 | `image_url` | TEXT | URL to external artist image. |
-| `artwork_id` | BIGINT | Foreign Key referencing `artwork.id`. |
+| `image_source` | TEXT | Source of the image (Last.fm, Fanart, etc.). |
+| `artwork_id` | BIGINT | Foreign key to `artwork.id`. |
+| `letter` | TEXT | Cached alpha group for navigation. |
 | `updated_at` | TIMESTAMPTZ | Timestamp of last update. |
 
 ### `album`
@@ -130,13 +150,13 @@ Stores derived album information.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `mbid` | TEXT | Primary Key. MusicBrainz Release Group ID. |
-| `title` | TEXT | Album title. |
-| `release_date` | TEXT | Release date. |
-| `primary_type` | TEXT | Album type (e.g., Album, EP). |
-| `secondary_types` | TEXT | Secondary types. |
-| `artwork_id` | BIGINT | Foreign Key referencing `artwork.id`. |
+| `mbid` | TEXT | Primary key. MusicBrainz Release ID. |
 | `release_group_mbid` | TEXT | MusicBrainz Release Group ID. |
+| `title` | TEXT | Album title. |
+| `release_date` | DATE | Release date (normalized). |
+| `release_type` | TEXT | Normalized release type. |
+| `release_type_raw` | TEXT | Raw release type from tags. |
+| `artwork_id` | BIGINT | Foreign key to `artwork.id`. |
 | `description` | TEXT | Album description/wiki. |
 | `peak_chart_position` | INTEGER | Peak chart position (0 if unknown). |
 | `updated_at` | TIMESTAMPTZ | Timestamp of last update. |
@@ -146,19 +166,19 @@ Junction table linking artists to albums.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `artist_mbid` | TEXT | Foreign Key `artist.mbid`. |
-| `album_mbid` | TEXT | Foreign Key `album.mbid`. |
-| `type` | TEXT | Relationship type. |
+| `artist_mbid` | TEXT | Foreign key `artist.mbid`. |
+| `album_mbid` | TEXT | Foreign key `album.mbid`. |
+| `type` | TEXT | Relationship type (primary, featured, etc.). |
 
 ### `external_link`
 Stores external URLs for entities.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
-| `entity_type` | TEXT | 'artist' or 'album'. |
+| `id` | BIGSERIAL | Primary key. |
+| `entity_type` | TEXT | `artist` or `album`. |
 | `entity_id` | TEXT | MBID of the entity. |
-| `type` | TEXT | Link type (e.g., spotify, tidal). |
+| `type` | TEXT | Link type (spotify, tidal, qobuz, etc.). |
 | `url` | TEXT | The external URL. |
 
 ### `track_artist`
@@ -166,15 +186,15 @@ Junction table linking artists to tracks.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `track_id` | BIGINT | Foreign Key `track.id`. |
-| `artist_mbid` | TEXT | Foreign Key `artist.mbid`. |
+| `track_id` | BIGINT | Foreign key `track.id`. |
+| `artist_mbid` | TEXT | Foreign key `artist.mbid`. |
 
 ### `artwork`
 Stores unique artwork files.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
+| `id` | BIGSERIAL | Primary key. |
 | `sha1` | TEXT | SHA1 hash of image. Unique. |
 | `type` | TEXT | Image type. |
 | `mime` | TEXT | MIME type. |
@@ -193,11 +213,11 @@ Maps artwork to entities.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `artwork_id` | BIGINT | Foreign Key `artwork.id`. |
-| `entity_type` | TEXT | 'artist', 'album', 'track'. |
+| `artwork_id` | BIGINT | Foreign key `artwork.id`. |
+| `entity_type` | TEXT | `artist`, `album`, or `track`. |
 | `entity_id` | TEXT | Entity identifier. |
-| `image_type` | TEXT | e.g., 'artistthumb'. |
-| `score` | DOUBLE PRECISION | Score/Rank. |
+| `image_type` | TEXT | e.g., `artistthumb`. |
+| `score` | DOUBLE PRECISION | Score/rank. |
 | `created_at` | TIMESTAMPTZ | Creation time. |
 
 ### `renderer`
@@ -205,16 +225,27 @@ Stores discovered UPnP devices.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
+| `id` | BIGSERIAL | Primary key. |
 | `friendly_name` | TEXT | Device name. |
 | `udn` | TEXT | Unique Device Name. Unique. |
 | `location_url` | TEXT | Device description URL. |
 | `ip` | TEXT | Device IP. |
 | `control_url` | TEXT | AVTransport URL. |
 | `rendering_control_url` | TEXT | RenderingControl URL. |
+| `device_type` | TEXT | UPnP device type. |
+| `manufacturer` | TEXT | Manufacturer. |
+| `model_name` | TEXT | Model name. |
+| `model_number` | TEXT | Model number. |
+| `serial_number` | TEXT | Serial number. |
+| `firmware_version` | TEXT | Firmware version. |
+| `event_subscription_sid` | TEXT | Active event subscription SID. |
 | `supports_events` | BOOLEAN | If device supports UPnP events. |
 | `supports_gapless` | BOOLEAN | If device supports gapless playback. |
 | `supported_mime_types` | TEXT | List of supported MIME types. |
+| `icon_url` | TEXT | Renderer icon URL. |
+| `icon_mime` | TEXT | Renderer icon MIME type. |
+| `icon_width` | INTEGER | Icon width. |
+| `icon_height` | INTEGER | Icon height. |
 | `last_seen_at` | TIMESTAMPTZ | Last seen timestamp. |
 
 ### `renderer_state`
@@ -222,12 +253,12 @@ Current playback state for renderers.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `renderer_udn` | TEXT | Primary Key. |
+| `renderer_udn` | TEXT | Primary key (renderer UDN). |
 | `queue` | TEXT | JSON queue. |
 | `current_index` | INTEGER | Current track index. |
 | `position_seconds` | DOUBLE PRECISION | Playback position. |
 | `is_playing` | BOOLEAN | Playback status. |
-| `transport_state` | TEXT | UPnP state (e.g., PLAYING). |
+| `transport_state` | TEXT | UPnP state (PLAYING, STOPPED, etc.). |
 | `volume` | INTEGER | Volume (0-100). |
 | `updated_at` | TIMESTAMPTZ | Last update. |
 
@@ -236,7 +267,7 @@ Maps clients to active renderers.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `client_id` | TEXT | Primary Key. |
+| `client_id` | TEXT | Primary key. |
 | `active_renderer_udn` | TEXT | Active renderer UDN. |
 | `last_seen_at` | TIMESTAMPTZ | Last activity. |
 
@@ -245,8 +276,8 @@ Log of played tracks.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
-| `track_id` | BIGINT | Foreign Key `track.id`. |
+| `id` | BIGSERIAL | Primary key. |
+| `track_id` | BIGINT | Foreign key `track.id`. |
 | `timestamp` | TIMESTAMPTZ | Playback time. |
 | `client_ip` | TEXT | Client IP. |
 | `hostname` | TEXT | Hostname. |
@@ -258,7 +289,7 @@ User accounts.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
+| `id` | BIGSERIAL | Primary key. |
 | `username` | CITEXT | Username (case-insensitive). Unique. |
 | `email` | CITEXT | Email (case-insensitive). Unique. |
 | `password_hash` | TEXT | Hashed password. |
@@ -266,14 +297,20 @@ User accounts.
 | `created_at` | TIMESTAMPTZ | Creation time. |
 | `last_login_at` | TIMESTAMPTZ | Last login. |
 | `is_active` | BOOLEAN | Active status. |
+| `accent_color` | TEXT | UI accent color (hex). |
+| `theme_mode` | TEXT | `dark` or `light`. |
+| `lastfm_username` | TEXT | Linked Last.fm username. |
+| `lastfm_session_key` | TEXT | Last.fm session key. |
+| `lastfm_enabled` | BOOLEAN | Last.fm sync enabled. |
+| `lastfm_connected_at` | TIMESTAMPTZ | When Last.fm was linked. |
 
 ### `session`
 User sessions.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
-| `user_id` | BIGINT | Foreign Key `user.id`. |
+| `id` | BIGSERIAL | Primary key. |
+| `user_id` | BIGINT | Foreign key `user.id`. |
 | `token` | TEXT | Session token. Unique. |
 | `created_at` | TIMESTAMPTZ | Creation time. |
 | `expires_at` | TIMESTAMPTZ | Expiration time. |
@@ -285,10 +322,10 @@ Top tracks for artists.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
-| `artist_mbid` | TEXT | Foreign Key `artist.mbid`. |
-| `type` | TEXT | 'top' or 'single'. |
-| `track_id` | BIGINT | Foreign Key `track.id` (optional). |
+| `id` | BIGSERIAL | Primary key. |
+| `artist_mbid` | TEXT | Foreign key `artist.mbid`. |
+| `type` | TEXT | `top` or `single`. |
+| `track_id` | BIGINT | Foreign key `track.id` (optional). |
 | `external_name` | TEXT | External track name. |
 | `external_album` | TEXT | External album name. |
 | `external_date` | TEXT | Release date. |
@@ -314,9 +351,9 @@ Artist genres.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `artist_mbid` | TEXT | Foreign Key `artist.mbid`. |
+| `artist_mbid` | TEXT | Foreign key `artist.mbid`. |
 | `genre` | TEXT | Genre. |
-| `count` | INTEGER | Weight/Count. |
+| `count` | INTEGER | Weight/count. |
 | `updated_at` | TIMESTAMPTZ | Last update. |
 
 ### `missing_album`
@@ -324,27 +361,22 @@ Missing albums from discography.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
-| `artist_mbid` | TEXT | Foreign Key `artist.mbid`. |
+| `id` | BIGSERIAL | Primary key. |
+| `artist_mbid` | TEXT | Foreign key `artist.mbid`. |
 | `release_group_mbid` | TEXT | Release Group MBID. |
 | `title` | TEXT | Title. |
 | `release_date` | TEXT | Date. |
 | `primary_type` | TEXT | Type. |
-| `image_url` | TEXT | Artwork URL. |
-| `musicbrainz_url` | TEXT | MB URL. |
-| `tidal_url` | TEXT | Tidal URL. |
-| `qobuz_url` | TEXT | Qobuz URL. |
+| `musicbrainz_url` | TEXT | MusicBrainz URL. |
 | `updated_at` | TIMESTAMPTZ | Last update. |
-
-
 
 ### `playlist`
 User created playlists.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
-| `user_id` | BIGINT | Foreign Key `user.id`. |
+| `id` | BIGSERIAL | Primary key. |
+| `user_id` | BIGINT | Foreign key `user.id`. |
 | `name` | TEXT | Playlist name. |
 | `description` | TEXT | Optional description. |
 | `is_public` | BOOLEAN | Visibility flag. |
@@ -355,16 +387,127 @@ Tracks within a playlist.
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `id` | BIGSERIAL | Primary Key. |
-| `playlist_id` | BIGINT | Foreign Key `playlist.id`. |
-| `track_id` | BIGINT | Foreign Key `track.id`. |
+| `id` | BIGSERIAL | Primary key. |
+| `playlist_id` | BIGINT | Foreign key `playlist.id`. |
+| `track_id` | BIGINT | Foreign key `track.id`. |
 | `position` | INTEGER | Order position (0-indexed). |
 
-## Indexes
+### `chart_album`
+Official chart album snapshots.
 
-- **Full Text Search**: `idx_track_fts` (GIN on `track.fts_vector`).
-- **Lookups**: `idx_session_token`, `idx_session_user`, `idx_track_artwork`, `idx_track_artist_mbid`.
-- **Browsing**: `idx_track_nav` (`artist`, `album`, ...), `idx_track_album`, `idx_artist_name`.
-- **Maintenance**: `idx_track_updated`.
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `position` | INTEGER | Primary key (chart position). |
+| `title` | TEXT | Album title. |
+| `artist` | TEXT | Artist name. |
+| `last_week` | TEXT | Last week's position. |
+| `peak` | TEXT | Peak position. |
+| `weeks` | TEXT | Weeks on chart. |
+| `status` | TEXT | Status marker. |
+| `release_mbid` | TEXT | MusicBrainz release ID. |
+| `release_group_mbid` | TEXT | MusicBrainz release group ID. |
+| `updated_at` | TIMESTAMPTZ | Last update. |
 
+### `lastfm_scrobble`
+Raw Last.fm scrobble data.
 
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | BIGSERIAL | Primary key. |
+| `lastfm_username` | TEXT | Last.fm username. |
+| `played_at` | TIMESTAMPTZ | Scrobble time. |
+| `played_at_uts` | BIGINT | Unix timestamp. |
+| `track_mbid` | TEXT | Track MBID. |
+| `track_name` | TEXT | Track name. |
+| `track_url` | TEXT | Track URL. |
+| `artist_mbid` | TEXT | Artist MBID. |
+| `artist_name` | TEXT | Artist name. |
+| `artist_url` | TEXT | Artist URL. |
+| `album_mbid` | TEXT | Album MBID. |
+| `album_name` | TEXT | Album name. |
+| `created_at` | TIMESTAMPTZ | Insert time. |
+
+### `lastfm_scrobble_match`
+Matches Last.fm scrobbles to local tracks.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | BIGSERIAL | Primary key. |
+| `scrobble_id` | BIGINT | Foreign key `lastfm_scrobble.id`. |
+| `track_id` | BIGINT | Foreign key `track.id`. |
+| `match_score` | DOUBLE PRECISION | Match score. |
+| `match_method` | TEXT | Match method. |
+| `match_reason` | TEXT | Optional reason string. |
+| `cache_key` | TEXT | Optional cache key. |
+| `matched_at` | TIMESTAMPTZ | Match time. |
+
+### `lastfm_skip_artist`
+Filter list for non-music scrobbles.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `artist_name` | TEXT | Primary key. |
+| `reason` | TEXT | Skip reason. |
+| `added_at` | TIMESTAMPTZ | Added time. |
+
+### `scheduled_task`
+Scheduled jobs (cron).
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | BIGSERIAL | Primary key. |
+| `job_key` | TEXT | Job identifier. |
+| `cron` | TEXT | Cron expression. |
+| `timezone` | TEXT | Timezone. |
+| `enabled` | BOOLEAN | Enabled flag. |
+| `last_run_at` | TIMESTAMPTZ | Last run timestamp. |
+| `next_run_at` | TIMESTAMPTZ | Next scheduled run. |
+| `last_status` | TEXT | Status of last run. |
+| `last_error` | TEXT | Error details. |
+| `created_at` | TIMESTAMPTZ | Creation time. |
+| `updated_at` | TIMESTAMPTZ | Update time. |
+
+### `scheduled_task_run`
+Run history for scheduled jobs.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | BIGSERIAL | Primary key. |
+| `task_id` | BIGINT | Foreign key `scheduled_task.id`. |
+| `started_at` | TIMESTAMPTZ | Start time. |
+| `finished_at` | TIMESTAMPTZ | Finish time. |
+| `status` | TEXT | Run status. |
+| `error` | TEXT | Error details. |
+| `duration_ms` | INTEGER | Duration in ms. |
+
+## Views
+
+### `combined_playback_history`
+Union view of local `playback_history` and matched Last.fm scrobbles.
+
+Columns: `source`, `source_id`, `track_id`, `played_at`, `user_id`, `lastfm_username`,
+`client_id`, `hostname`, `client_ip`, `match_score`, `match_method`.
+
+### `combined_playback_history_mat`
+Materialized view for fast history reads. Same columns as `combined_playback_history`.
+
+## Indexes (selected)
+
+- **Full Text Search**: `idx_track_fts` (GIN on `track.fts_vector`), `idx_album_title_fts`.
+- **Trigram Search**: `idx_artist_name_trgm`.
+- **Track Lookups**: `idx_track_nav`, `idx_track_album`, `idx_track_updated`,
+  `idx_track_artwork`, `idx_track_artist_mbid`, `idx_track_release_mbid`,
+  `idx_track_release_group_mbid`.
+- **Mapping Tables**: `idx_track_artist_map_track`, `idx_track_artist_map_mbid`,
+  `idx_artist_album_map_album`, `idx_artist_album_map_artist_type`.
+- **External Links**: `idx_link_entity`, `idx_link_entity_type`.
+- **Playback History**: `idx_playback_history_ts`, `idx_playback_history_user_ts`,
+  `idx_playback_history_track_ts`.
+- **Last.fm**: `idx_lastfm_scrobble_user_played`, `idx_lastfm_scrobble_played_at`,
+  `idx_scrobble_match_cache_key`, `idx_scrobble_match_track_id`.
+- **Recommendations**: `idx_cph_user_played_at`, `idx_cph_track_user`,
+  `idx_top_track_track_type`, `idx_top_track_type_popularity`,
+  `idx_artist_album_artist_type`.
+- **Playlists**: `idx_playlist_user_id`, `idx_playlist_updated_at`,
+  `idx_playlist_track_playlist_pos`, `idx_playlist_track_track_id`.
+- **Charts**: `idx_chart_album_rg_mbid`.
