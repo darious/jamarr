@@ -1,339 +1,51 @@
 from fastapi import APIRouter, Depends, Request, HTTPException, Header
 import os
 import asyncio
-from app.db import get_db
-import asyncpg
-from app.upnp import UPnPManager
 import mimetypes
-from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
-import json
 import logging
 import time
+from typing import Optional
+import asyncpg
+from app.db import get_db
+from app.upnp import UPnPManager
 from app.auth import get_session_user
+
+from app.models.player import (
+    PlayerState,
+    QueueUpdate,
+    AppendQueue,
+    IndexUpdate,
+    ProgressUpdate,
+    LogPlayRequest,
+)
+from app.services.player.globals import (
+    playback_monitors,
+    monitor_start_times,
+    last_track_start_time,
+)
+from app.services.player.state import (
+    track_path_exists,
+    enrich_track_metadata,
+    get_active_renderer,
+    get_renderer_state_db,
+    update_renderer_state_db,
+)
+from app.services.player.history import (
+    log_history,
+    reset_history_tracker,
+    update_now_playing_lastfm,
+)
+from app.services.player.monitor import (
+    monitor_upnp_playback,
+    start_monitor_task,
+    _mark_monitor_starting,
+    _clear_monitor_starting,
+    _is_monitor_starting,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 upnp = UPnPManager.get_instance()
-
-# Global map to track Playback Monitor Tasks (UDN -> Task)
-playback_monitors: Dict[str, asyncio.Task] = {}
-monitor_start_times: Dict[str, float] = {}  # Track when monitors were last started
-# Track when we last started a new track to prevent false "track finished" detection during transitions
-last_track_start_time: Dict[str, float] = {}
-monitor_starting: Dict[str, float] = {}
-
-
-def _mark_monitor_starting(udn: str):
-    monitor_starting[udn] = time.time()
-
-
-def _clear_monitor_starting(udn: str):
-    monitor_starting.pop(udn, None)
-
-
-def _is_monitor_starting(udn: str, window_s: float = 10.0) -> bool:
-    started_at = monitor_starting.get(udn)
-    return bool(started_at) and (time.time() - started_at) < window_s
-
-
-def _start_monitor_task(udn: str):
-    existing = playback_monitors.get(udn)
-    if existing and not existing.done():
-        return existing
-    playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
-    monitor_start_times[udn] = time.time()
-    return playback_monitors[udn]
-
-
-async def play_next_track_internal(udn: str):
-    """Internal helper to advance queue and play next track."""
-    async for db in get_db():
-        state = await get_renderer_state_db(db, udn)
-        queue = state["queue"]
-        current_index = state["current_index"]
-
-        next_index = current_index + 1
-        if 0 <= next_index < len(queue):
-            track = queue[next_index]
-            logger.info(
-                f"[Player] Auto-advancing to track {next_index}: {track['title']}"
-            )
-
-            # Setup UPnP
-            # Note: We assume UPnPManager needs active renderer set.
-            # This follows the pattern in play_track endpoint.
-            await upnp.set_renderer(udn)
-
-            # Use stored IP/Port if possible, or attempt to reconstruct
-            # Since this is a background task, accessing request.url is hard.
-            # We rely on UPnPManager's existing base_url or reconstruct it.
-            # If base_url is missing, art might break.
-            upnp.base_url = f"http://{upnp.local_ip}:8111"
-
-            # Check if mime is present, else guess
-            if "mime" not in track or not track["mime"]:
-                mime, _ = mimetypes.guess_type(track.get("path", ""))
-                if not mime:
-                    ext = os.path.splitext(track.get("path", ""))[1].lower()
-                    if ext == ".flac":
-                        mime = "audio/flac"
-                    elif ext == ".mp3":
-                        mime = "audio/mpeg"
-                    elif ext == ".m4a":
-                        mime = "audio/mp4"
-                    elif ext == ".wav":
-                        mime = "audio/wav"
-                    elif ext == ".ogg":
-                        mime = "audio/ogg"
-                    else:
-                        mime = "audio/flac"
-                track["mime"] = mime
-
-            await upnp.play_track(track["id"], track["path"], track)
-            # Record track start time to prevent false "track finished" detection
-            last_track_start_time[udn] = time.time()
-
-            # Update DB
-            state["current_index"] = next_index
-            state["is_playing"] = True
-            state["position_seconds"] = 0
-            # state['transport_state'] = "PLAYING" # Optimistic
-            await update_renderer_state_db(db, udn, state)
-
-            # Remove immediate history logging.
-            # We rely on the client (PlayerBar) to log history after 30s threshold to ensure:
-            # 1. Correct Client IP/ID is logged.
-            # 2. Track is actually listened to (not skipped immediately).
-            # await log_history(db, track['id'], "127.0.0.1", "System Auto-Advance")
-
-        else:
-            logger.info("[Player] End of queue reached.")
-            state["is_playing"] = False
-            state["position_seconds"] = 0
-            # state['transport_state'] = "STOPPED" # Already stopped
-            await update_renderer_state_db(db, udn, state)
-
-
-async def monitor_upnp_playback(udn: str):
-    """Background task to poll UPnP device for position and update DB."""
-    logger.info(f"[Player] Starting UPnP monitor for {udn}")
-
-    # Grace period: Wait for device to react to Play command before polling
-    # This prevents detecting "STOPPED" immediately after a manual Play/Skip.
-    await asyncio.sleep(3)
-
-    was_playing = False  # Initialize to prevent UnboundLocalError
-    consecutive_errors = 0
-    try:
-        while True:
-            # 1. Fetch position & transport from UPnP
-            try:
-                rel_time, _ = await upnp.get_position(udn)
-                transport_state = await upnp.get_transport_info(udn)
-                consecutive_errors = 0  # Reset on success
-            except Exception as e:
-                consecutive_errors += 1
-                logger.error(
-                    f"[Player] Monitor {udn}: Error fetching state (attempt {consecutive_errors}/10): {e}",
-                    exc_info=True,
-                )
-                if consecutive_errors > 10:
-                    logger.error(
-                        f"[Player] Monitor {udn}: Too many consecutive errors, stopping"
-                    )
-                    break
-                # Use last known values and continue
-                await asyncio.sleep(1)
-                continue
-
-
-
-            # 2. Update DB
-            async for db in get_db():
-                # What the DB currently thinks (may differ from the device)
-                state = await get_renderer_state_db(db, udn)
-                was_playing = state["is_playing"]
-
-                # Update live stats from the device
-                if transport_state == "PLAYING" and (rel_time is None or rel_time == 0):
-                    # Some renderers report 0 at start; keep moving forward based on last known position.
-                    rel_time = max(0, state.get("position_seconds", 0) + 1)
-                state["position_seconds"] = rel_time
-                state["transport_state"] = transport_state
-                state["is_playing"] = transport_state not in [
-                    "PAUSED_PLAYBACK",
-                    "STOPPED",
-                    "NO_MEDIA_PRESENT",
-                ]
-
-                # Auto-advance logic:
-                # If we think we are playing but the device reports STOPPED/NO_MEDIA_PRESENT and position ~0,
-                # assume the track finished. Keep this separate from the normal play/pause flow so we do not
-                # overwrite queue/volume fields while a user action is in flight.
-                if was_playing:
-                    if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
-                        # Ignore STOPPED if it arrives immediately after a Play/Skip (renderer churn).
-                        time_since_start = time.time() - last_track_start_time.get(
-                            udn, 0
-                        )
-                        if time_since_start < 5.0:
-                            logger.info(
-                                f"[Player] Ignoring STOPPED state during transition (started {time_since_start:.1f}s ago)"
-                            )
-                            continue
-                        logger.info(
-                            f"[Player] Track finished detection: State={transport_state}, Expected=Playing"
-                        )
-                        # Trigger next track outside DB loop; helper opens its own connection.
-                    else:
-                        # Still playing or paused/buffering. If user paused via remote, sync is_playing to False.
-                        if "PAUSE" in transport_state:
-                            state["is_playing"] = False
-
-                        # Race Condition Fix: status-only UPDATE so we do not overwrite queue/volume changes
-                        # that might have happened via API while this UPnP poll was in flight.
-                        await db.execute(
-                            """
-                            UPDATE renderer_state
-                            SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
-                            WHERE renderer_udn = $4
-                            """,
-                            state["position_seconds"],
-                            state["transport_state"],
-                            bool(state["is_playing"]),
-                            udn,
-                        )
-                else:
-                    # Not previously playing; just persist snapshot of state.
-                    await db.execute(
-                        """
-                        UPDATE renderer_state
-                        SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
-                        WHERE renderer_udn = $4
-                        """,
-                        state["position_seconds"],
-                        state["transport_state"],
-                        bool(state["is_playing"]),
-                        udn,
-                    )
-
-                # History logging for remote playback (based on renderer state queue)
-                if (
-                    state["is_playing"]
-                    and state["current_index"] is not None
-                    and state["current_index"] >= 0
-                ):
-                    queue = state.get("queue") or []
-                    if 0 <= state["current_index"] < len(queue):
-                        track = queue[state["current_index"]]
-                        
-                        # Only check if not already logged
-                        if not track.get("logged", False):
-                            track_id = track.get("id")
-                            duration = track.get("duration_seconds") or 0
-                            
-                            # Threshold check
-                            threshold = min(30, duration * 0.2) if duration > 0 else 30
-                            
-                            if rel_time >= threshold:
-                                renderer_ip = (
-                                    upnp.renderers.get(udn, {}).get("ip")
-                                    if upnp.renderers
-                                    else None
-                                )
-                                await log_history(
-                                    db,
-                                    track_id,
-                                    client_ip=renderer_ip or "unknown",
-                                    client_id=udn,
-                                    user_id=track.get("user_id"),
-                                )
-                                
-                                # Mark logged and persist
-                                track["logged"] = True
-                                await db.execute(
-                                    "UPDATE renderer_state SET queue = $1 WHERE renderer_udn = $2",
-                                    json.dumps(_strip_art_ids(queue)),
-                                    udn,
-                                )
-
-            # Execute side effects outside DB context (avoids holding a transaction open)
-            if was_playing and transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
-                await play_next_track_internal(udn)
-                await asyncio.sleep(4)  # Give the new track a moment to start
-
-            await asyncio.sleep(1)
-
-    except asyncio.CancelledError:
-        logger.info(f"UPnP monitor for {udn} cancelled")
-    except Exception as e:
-        logger.error(f"UPnP monitor error for {udn}: {e}")
-        import traceback
-
-        traceback.print_exc()
-
-
-# --- Pydantic Models ---
-
-
-class Track(BaseModel):
-    id: int
-    title: str
-    artist: str
-    album: str
-    duration_seconds: float
-    art_sha1: Optional[str] = None
-    codec: Optional[str] = None
-    bit_depth: Optional[int] = None
-    sample_rate_hz: Optional[int] = None
-    artist_mbid: Optional[str] = None
-    album_mbid: Optional[str] = None
-    mb_release_id: Optional[str] = None
-    path: Optional[str] = None
-    album_artist: Optional[str] = None
-    track_no: Optional[int] = None
-    disc_no: Optional[int] = None
-    release_date: Optional[str] = None
-    bitrate: Optional[int] = None
-    plays: Optional[int] = None
-    logged: bool = False
-    artists: Optional[List[Dict[str, Optional[str]]]] = None
-
-
-class PlayerState(BaseModel):
-    queue: List[Track]
-    current_index: int
-    position_seconds: float
-    is_playing: bool
-    renderer: str  # UDN
-    transport_state: Optional[str] = "STOPPED"
-    volume: Optional[int] = None
-
-
-class QueueUpdate(BaseModel):
-    queue: List[Track]
-    start_index: int = 0
-
-
-class AppendQueue(BaseModel):
-    tracks: List[Track]
-
-
-class IndexUpdate(BaseModel):
-    index: int
-
-
-class ProgressUpdate(BaseModel):
-    position_seconds: float
-    is_playing: bool
-
-
-class LogPlayRequest(BaseModel):
-    track_id: int
-
-
-# --- Dependencies & Helpers ---
 
 
 async def get_client_id(x_jamarr_client_id: Optional[str] = Header(None)) -> str:
@@ -353,409 +65,6 @@ def get_client_ip(request: Request) -> str:
     if real_ip:
         return real_ip.strip()
     return request.client.host if request.client else "unknown"
-
-
-def _track_path_exists(track: Dict[str, Any]) -> bool:
-    from app.config import get_music_path
-
-    path = track.get("path")
-    if not path:
-        return False
-    abs_path = path
-    if not os.path.isabs(abs_path):
-        abs_path = os.path.join(get_music_path(), abs_path)
-    return os.path.exists(abs_path)
-
-
-# ... (skip to enrich function)
-
-
-async def _enrich_track_metadata(
-    track: Dict[str, Any], db: asyncpg.Connection
-) -> Dict[str, Any]:
-    """Ensure track dict has path, mime, and artwork; fallback to DB lookup."""
-    enriched = dict(track)
-    # Always fetch missing critical fields including artists
-    if (
-        not enriched.get("path")
-        or not enriched.get("mime")
-        or not enriched.get("art_sha1")
-        or enriched.get("artists") is None
-    ):
-        row = await db.fetchrow(
-            """
-            WITH track_artists AS (
-                SELECT 
-                    ta.track_id, 
-                    jsonb_agg(jsonb_build_object('name', a.name, 'mbid', a.mbid)) as artists
-                FROM track_artist ta
-                JOIN artist a ON ta.artist_mbid = a.mbid
-                WHERE ta.track_id = $1
-                GROUP BY ta.track_id
-            )
-            SELECT t.path, t.codec, t.artwork_id, a.sha1 as art_sha1,
-                   COALESCE(ta.artists, '[]'::jsonb) as artists
-            FROM track t
-            LEFT JOIN artwork a ON t.artwork_id = a.id
-            LEFT JOIN track_artists ta ON t.id = ta.track_id
-            WHERE t.id = $1 LIMIT 1
-            """,
-            enriched.get("id"),
-        )
-        if row:
-            if not enriched.get("path"):
-                enriched["path"] = row[0]
-            if not enriched.get("art_sha1"):
-                enriched["art_sha1"] = row[3]
-                if not enriched.get("mime"):
-                    mime, _ = mimetypes.guess_type(row[0])
-                    if not mime:
-                        ext = os.path.splitext(row[0])[1].lower()
-                        if ext == ".flac":
-                            mime = "audio/flac"
-                        elif ext == ".mp3":
-                            mime = "audio/mpeg"
-                        elif ext == ".m4a":
-                            mime = "audio/mp4"
-                        elif ext == ".wav":
-                            mime = "audio/wav"
-                        elif ext == ".ogg":
-                            mime = "audio/ogg"
-                        else:
-                            mime = "audio/flac"
-                    enriched["mime"] = mime
-            
-            if enriched.get("artists") is None:
-                artists_val = row[4]
-                if isinstance(artists_val, str):
-                    import json
-                    artists_val = json.loads(artists_val)
-                enriched["artists"] = artists_val
-
-    return enriched
-
-
-def _strip_art_ids(queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Ensure renderer_state queues never persist art_id/artwork_id."""
-    cleaned = []
-    for item in queue:
-        if not isinstance(item, dict):
-            cleaned.append(item)
-            continue
-        item.pop("art_id", None)
-        item.pop("artwork_id", None)
-        cleaned.append(item)
-    return cleaned
-
-
-async def get_active_renderer(db: asyncpg.Connection, client_id: str) -> str:
-    """Get active renderer UDN for client. Defaults to local:<client_id>."""
-    row = await db.fetchrow(
-        "SELECT active_renderer_udn FROM client_session WHERE client_id = $1", client_id
-    )
-    if row and row[0]:
-        return row[0]
-
-    # If no session found, implicitly create one for observability
-    default_udn = f"local:{client_id}"
-    await db.execute(
-        """
-        INSERT INTO client_session (client_id, active_renderer_udn, last_seen_at)
-        VALUES ($1, $2, NOW())
-        ON CONFLICT (client_id) DO NOTHING
-    """,
-        client_id,
-        default_udn,
-    )
-
-    return default_udn
-
-
-async def get_renderer_state_db(db: asyncpg.Connection, udn: str) -> Dict[str, Any]:
-    """Get state from DB for a renderer. Returns default if not found."""
-    row = await db.fetchrow(
-        """
-        SELECT queue, current_index, position_seconds, is_playing, transport_state, volume
-        FROM renderer_state
-        WHERE renderer_udn = $1
-        """,
-        udn,
-    )
-    if not row:
-        return {
-            "queue": [],
-            "current_index": -1,
-            "position_seconds": 0,
-            "is_playing": False,
-            "transport_state": "STOPPED",
-            "volume": None,
-        }
-
-    try:
-        queue = json.loads(row[0])
-        if not isinstance(queue, list):
-            queue = []
-    except Exception:
-        queue = []
-
-    for t in queue:
-        t.pop("art_id", None)
-        t.pop("artwork_id", None)
-
-    return {
-        "queue": queue,
-        "current_index": row[1],
-        "position_seconds": row[2],
-        "is_playing": bool(row[3]),
-        "transport_state": row[4] if len(row) > 4 else "STOPPED",
-        "volume": row[5] if len(row) > 5 else None,
-    }
-
-
-async def update_renderer_state_db(
-    db: asyncpg.Connection, udn: str, state: Dict[str, Any]
-):
-    """Upsert renderer state."""
-    queue_json = json.dumps(_strip_art_ids(state.get("queue", [])))
-    volume = state.get("volume")
-    await db.execute(
-        """
-        INSERT INTO renderer_state (renderer_udn, queue, current_index, position_seconds, is_playing, transport_state, volume, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-        ON CONFLICT(renderer_udn) DO UPDATE SET
-            queue = excluded.queue,
-            current_index = excluded.current_index,
-            position_seconds = excluded.position_seconds,
-            is_playing = excluded.is_playing,
-            transport_state = excluded.transport_state,
-            volume = excluded.volume,
-            updated_at = NOW()
-    """,
-        udn,
-        queue_json,
-        state.get("current_index", -1),
-        state.get("position_seconds", 0),
-        bool(state.get("is_playing")),
-        state.get("transport_state", "STOPPED"),
-        volume,
-    )
-
-
-def _reset_history_tracker(key: str):
-    if key in _history_tracker:
-        del _history_tracker[key]
-
-
-def _should_log_history(
-    key: str, track_id: int, position: float, duration: float
-) -> bool:
-    """
-    Decide if we should log history for this renderer/client and track at given position.
-    Uses a simple memory guard per key to avoid duplicate logs per track.
-    """
-    if not track_id:
-        return False
-    prev = _history_tracker.get(key)
-    if prev and prev.get("track_id") == track_id:
-        # Already logged this track for this key
-        return False
-
-    # Threshold: 30s or 20% of track, whichever is smaller
-    if duration and duration > 0:
-        threshold = min(30, duration * 0.2)
-    else:
-        threshold = 30
-
-    if position >= threshold:
-        _history_tracker[key] = {"track_id": track_id, "logged_at": time.time()}
-        return True
-    return False
-
-
-# In-memory tracker to avoid duplicate history inserts within a play session.
-# Keyed by renderer UDN (for remote) or client_id (for local).
-_history_tracker = {}
-
-
-async def log_history(
-    db: asyncpg.Connection,
-    track_id: int,
-    client_ip: str,
-    client_id: str = None,
-    user_id: int = None,
-):
-    if track_id and track_id > 0:
-        try:
-            # Guard against immediate duplicate inserts (e.g., dual reporters) within a short window.
-            existing = await db.fetchrow(
-                """
-                SELECT id, client_ip, user_id, client_id, timestamp 
-                FROM playback_history 
-                WHERE track_id = $1 
-                  AND timestamp > NOW() - INTERVAL '5 seconds'
-                  AND (client_id = $2 OR ($3::text IS NULL AND client_id IS NULL))
-                  AND (user_id = $4 OR ($5::integer IS NULL AND user_id IS NULL))
-                ORDER BY timestamp DESC
-                LIMIT 1
-                """,
-                track_id,
-                client_id,
-                client_id,
-                user_id,
-                user_id,
-            )
-            if existing:
-                (
-                    existing_id,
-                    existing_ip,
-                    existing_user_id,
-                    existing_client_id,
-                    existing_ts,
-                ) = existing
-                if (
-                    existing_ip == "127.0.0.1"
-                    and client_ip
-                    and client_ip != "127.0.0.1"
-                    and client_ip != "unknown"
-                ):
-                    logger.info(
-                        f"Refining history log {existing_id}: Updating IP to {client_ip}"
-                    )
-                    await db.execute(
-                        "UPDATE playback_history SET client_ip = $1, client_id = $2, user_id = COALESCE(user_id, $3) WHERE id = $4",
-                        client_ip,
-                        client_id,
-                        user_id,
-                        existing_id,
-                    )
-                    return
-                logger.info(
-                    f"Skipping duplicate history log for track {track_id} (recent entry exists)"
-                )
-                return
-
-            await db.execute(
-                "INSERT INTO playback_history (track_id, client_ip, client_id, user_id) VALUES ($1, $2, $3, $4)",
-                track_id,
-                client_ip,
-                client_id,
-                user_id,
-            )
-            
-            # Trigger Last.fm scrobble if user has it enabled
-            if user_id:
-                asyncio.create_task(
-                    _scrobble_to_lastfm(user_id, track_id)
-                )
-
-            # Refresh materialized view to update stats immediately
-            await db.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
-                
-        except Exception as e:
-            logger.error(f"Failed to log history: {e}")
-
-
-async def _update_now_playing_lastfm(user_id: int, track_id: int):
-    """Background task to update Now Playing on Last.fm"""
-    try:
-        from app import lastfm
-        from app.db import get_pool
-        
-        # Get our own database connection from the pool
-        pool = get_pool()
-        async with pool.acquire() as db:
-            # Check if user has Last.fm enabled
-            user_row = await db.fetchrow(
-                'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',
-                user_id
-            )
-            
-            if not user_row or not user_row['lastfm_enabled'] or not user_row['lastfm_session_key']:
-                return
-            
-            # Fetch track metadata
-            track_row = await db.fetchrow(
-                """
-                SELECT title, artist, album, duration_seconds, artist_mbid
-                FROM track
-                WHERE id = $1
-                """,
-                track_id
-            )
-            
-            if not track_row:
-                return
-            
-            # Update Now Playing on Last.fm
-            await lastfm.update_now_playing(
-                session_key=user_row['lastfm_session_key'],
-                track_info={
-                    'track': track_row['title'],
-                    'artist': track_row['artist'],
-                    'album': track_row['album'],
-                    'duration': int(track_row['duration_seconds']) if track_row['duration_seconds'] else None,
-                    'mbid': track_row['artist_mbid'],
-                }
-            )
-            
-            logger.info(f"Updated Now Playing on Last.fm for user {user_id}: {track_row['artist']} - {track_row['title']}")
-        
-    except Exception as e:
-        logger.error(f"Failed to update Now Playing on Last.fm: {e}")
-
-
-async def _scrobble_to_lastfm(user_id: int, track_id: int):
-    """Background task to scrobble a track to Last.fm"""
-    try:
-        from app import lastfm
-        from app.db import get_pool
-        import time
-        
-        # Get our own database connection from the pool
-        pool = get_pool()
-        async with pool.acquire() as db:
-            # Check if user has Last.fm enabled
-            user_row = await db.fetchrow(
-                'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',
-                user_id
-            )
-            
-            if not user_row or not user_row['lastfm_enabled'] or not user_row['lastfm_session_key']:
-                return
-            
-            # Fetch track metadata
-            track_row = await db.fetchrow(
-                """
-                SELECT title, artist, album, duration_seconds, artist_mbid
-                FROM track
-                WHERE id = $1
-                """,
-                track_id
-            )
-            
-            if not track_row:
-                return
-            
-            # Scrobble to Last.fm
-            await lastfm.scrobble_track(
-                session_key=user_row['lastfm_session_key'],
-                track_info={
-                    'track': track_row['title'],
-                    'artist': track_row['artist'],
-                    'album': track_row['album'],
-                    'duration': int(track_row['duration_seconds']) if track_row['duration_seconds'] else None,
-                    'mbid': track_row['artist_mbid'],
-                },
-                timestamp=int(time.time())
-            )
-            
-            logger.info(f"Scrobbled track {track_id} to Last.fm for user {user_id}")
-        
-    except Exception as e:
-        logger.error(f"Failed to scrobble to Last.fm: {e}")
-
-
-# --- Endpoints ---
 
 
 @router.get("/api/client-ip")
@@ -779,7 +88,7 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
                     last_start = monitor_start_times.get(udn, 0)
                     if now - last_start > 5 and not _is_monitor_starting(udn):
                         logger.info(f"[Player] Auto-restarting monitor for {udn}")
-                        _start_monitor_task(udn)
+                        start_monitor_task(udn)
 
         queue = state["queue"]
         track_ids = [
@@ -799,9 +108,6 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
             plays_map = {row["track_id"]: row["plays"] for row in plays_rows}
 
             # 2. Fetch missing Art/Path/Mime
-            # optimization: only fetch if actually missing in some tracks?
-            # For simplicity and robustness, assume state might be stale and fetch map for all.
-            # But checking first is better.
             needs_enrich = False
             for t in queue:
                 if isinstance(t, dict):
@@ -911,13 +217,13 @@ async def set_queue(
         state["transport_state"] = "PLAYING"
 
         await update_renderer_state_db(db, udn, state)
-        _reset_history_tracker(udn if not udn.startswith("local") else client_id)
+        reset_history_tracker(udn if not udn.startswith("local") else client_id)
         
         # Trigger Now Playing update for Last.fm
         if user_id and enriched_queue and state["current_index"] >= 0:
             current_track = enriched_queue[state["current_index"]]
             asyncio.create_task(
-                _update_now_playing_lastfm(user_id, current_track["id"])
+                update_now_playing_lastfm(user_id, current_track["id"])
             )
 
         # For UPnP, immediately play the selected track and restart monitor
@@ -925,8 +231,8 @@ async def set_queue(
             # pick first playable track from start_index onward
             playable_idx = None
             for idx in range(state["current_index"], len(state["queue"])):
-                candidate = await _enrich_track_metadata(state["queue"][idx], db)
-                if _track_path_exists(candidate):
+                candidate = await enrich_track_metadata(state["queue"][idx], db)
+                if track_path_exists(candidate):
                     state["queue"][idx] = candidate
                     playable_idx = idx
                     break
@@ -955,7 +261,7 @@ async def set_queue(
                     upnp.base_url = f"http://{upnp.local_ip}:{port}"
                     track = state["queue"][state["current_index"]]
                     await upnp.play_track(track["id"], track.get("path"), track)
-                    _start_monitor_task(udn)
+                    start_monitor_task(udn)
                     last_track_start_time[udn] = time.time()
                 finally:
                     _clear_monitor_starting(udn)
@@ -986,7 +292,7 @@ async def append_queue(
         state["queue"] = state["queue"] + new_tracks
 
         await update_renderer_state_db(db, udn, state)
-        _reset_history_tracker(client_id if udn.startswith("local") else udn)
+        reset_history_tracker(client_id if udn.startswith("local") else udn)
     return {"status": "ok"}
 
 
@@ -1056,7 +362,7 @@ async def reorder_queue(
                 state["transport_state"] = "STOPPED"
 
         await update_renderer_state_db(db, udn, state)
-        _reset_history_tracker(client_id if udn.startswith("local") else udn)
+        reset_history_tracker(client_id if udn.startswith("local") else udn)
 
         return {
             "status": "ok",
@@ -1087,7 +393,7 @@ async def clear_queue(client_id: str = Depends(get_client_id)):
         state["is_playing"] = False
         state["transport_state"] = "STOPPED"
         await update_renderer_state_db(db, udn, state)
-        _reset_history_tracker(client_id if udn.startswith("local") else udn)
+        reset_history_tracker(client_id if udn.startswith("local") else udn)
 
         if not udn.startswith("local:"):
             try:
@@ -1130,7 +436,7 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
         state["transport_state"] = "PLAYING"
 
         await update_renderer_state_db(db, udn, state)
-        _reset_history_tracker(client_id if udn.startswith("local") else udn)
+        reset_history_tracker(client_id if udn.startswith("local") else udn)
 
         if not udn.startswith("local:"):
             queue = state.get("queue") or []
@@ -1138,8 +444,8 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
                 # find next playable track from requested index forward
                 playable_idx = None
                 for idx in range(state["current_index"], len(queue)):
-                    candidate = await _enrich_track_metadata(queue[idx], db)
-                    if _track_path_exists(candidate):
+                    candidate = await enrich_track_metadata(queue[idx], db)
+                    if track_path_exists(candidate):
                         state["queue"][idx] = candidate
                         playable_idx = idx
                         break
@@ -1165,7 +471,7 @@ async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)
                 _mark_monitor_starting(udn)
                 try:
                     await upnp.play_track(track["id"], track.get("path"), track)
-                    _start_monitor_task(udn)
+                    start_monitor_task(udn)
                     last_track_start_time[udn] = time.time()
                 finally:
                     _clear_monitor_starting(udn)
@@ -1426,7 +732,7 @@ async def play_track(
         state["is_playing"] = True
         state["transport_state"] = "PLAYING"
         await update_renderer_state_db(db, udn, state)
-        _reset_history_tracker(udn)
+        reset_history_tracker(udn)
 
         # Stop existing monitor cleanly
         if udn in playback_monitors:
@@ -1440,7 +746,7 @@ async def play_track(
         try:
             await upnp.play_track(track["id"], track["path"], track)
             # Start fresh monitor (only for UPnP)
-            _start_monitor_task(udn)
+            start_monitor_task(udn)
             last_track_start_time[udn] = time.time()
         finally:
             _clear_monitor_starting(udn)
