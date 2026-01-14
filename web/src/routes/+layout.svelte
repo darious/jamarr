@@ -2,6 +2,7 @@
   import "../app.postcss";
   import PlayerBar from "$components/PlayerBar.svelte";
   import SearchBar from "$components/SearchBar.svelte";
+  import DownloadManager from "$components/DownloadManager.svelte";
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import {
@@ -469,6 +470,7 @@
   </main>
 
   {#if !isAuthPage}
+    <DownloadManager />
     <PlayerBar />
   {/if}
 </div>

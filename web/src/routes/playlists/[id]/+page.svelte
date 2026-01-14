@@ -17,6 +17,7 @@
     import Checkbox from "$lib/components/Checkbox.svelte";
     import TrackCard from "$lib/components/TrackCard.svelte";
     import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
+    import { downloadTracks } from "$lib/helpers/downloader";
 
     let playlist: PlaylistDetail | null = null;
     let loading = true;
@@ -152,15 +153,8 @@
         await addToQueue(queueItems as unknown as import("$api").Track[]);
     }
 
-    import { downloadTracks } from "$lib/helpers/downloader";
-
     function handleDownload() {
         if (!playlist || !playlist.tracks.length) return;
-
-        // Convert PlaylistTracks to Tracks for the helper
-        // We need to map them back to the structure the helper expects.
-        // Actually the helper expects Track objects roughly.
-        // We constructed queueItems earlier which are roughly Tracks.
 
         const tracks = playlist.tracks.map((t) => ({
             id: t.track_id,
@@ -171,17 +165,13 @@
             duration_seconds: t.duration_seconds,
             art_sha1: t.art_sha1,
             codec: t.codec,
-            bit_depth: t.bit_depth, // optional in Track
-            sample_rate_hz: t.sample_rate_hz, // optional
-            // ... other fields if needed by download helper to form filename?
-            // The helper uses 'path' to deduce filename.
+            bit_depth: t.bit_depth,
+            sample_rate_hz: t.sample_rate_hz,
         }));
 
         void downloadTracks({
             mode: "playlist",
             folderName: playlist.name,
-            // tracks need to be compatible with Track interface
-            // The map above is partial but sufficient for the downloader which uses .path and .id
             tracks: tracks as unknown as import("$api").Track[],
         });
     }
