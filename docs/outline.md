@@ -1,7 +1,7 @@
 # Jamarr - System Architecture
 
 ## Overview
-Jamarr is a web-based music controller designed to provide a rich, fast, and reliable music playback experience, primarily targeting UPnP renderers like the Naim Uniti Atom. It combines a robust Python backend for metadata management and playback control with a modern, responsive SvelteKit frontend.
+Jamarr is a web-based music controller focused on fast library browsing and reliable playback across both local streaming and UPnP renderers (e.g., Naim Uniti Atom). It combines a Python/FastAPI backend for metadata, playback control, and enrichment with a modern SvelteKit frontend.
 
 ## Core Components
 
@@ -9,17 +9,21 @@ Jamarr is a web-based music controller designed to provide a rich, fast, and rel
 The backend is the brain of the operation, responsible for:
 -   **Library Scanning**: Recursively scans the filesystem, extracts tags (mutagen), and caches metadata in PostgreSQL.
 -   **Metadata Enrichment**: Uses a v3 pipeline architecture to fetch high-quality metadata (artist bios, images, album details, external links) from MusicBrainz, Wikidata, Last.fm, Fanart.tv, Spotify, and Qobuz. See [Scanner V3 Documentation](scanner_v3.md) for details.
+-   **Playback & Streaming**: Streams local files via `/api/stream/{track_id}` and manages playback state for both local and UPnP renderers.
 -   **UPnP Control**: Acts as a Control Point, managing playback state, volume, and queue for UPnP devices.
--   **Queue Management**: Maintains the active play queue and playback state in the database (`renderer_states`) to ensure persistence and reliability even if the frontend disconnects.
--   **Tidal & Qobuz Integration**: Maps local artists/albums to Tidal and Qobuz URLs for external listening.
--   **API**: Exposes REST endpoints for the frontend.
+-   **Queue Management**: Maintains the active play queue and playback state in the database (`renderer_state`) to ensure persistence and reliability even if the frontend disconnects.
+-   **Last.fm Integration**: Syncs scrobbles, matches them to local tracks, and merges them into playback history.
+-   **Recommendations**: Generates artist/album/track recommendations from listening history and similarity data.
+-   **Charts & Scheduling**: Stores chart data and runs scheduled jobs for background maintenance.
+-   **API**: Exposes REST and streaming endpoints for the frontend.
 
 ### 2. Database (PostgreSQL)
 A PostgreSQL database serves as the single source of truth for:
 -   **Library**: Tracks, Artists, Albums, and Artwork.
 -   **State**: Current queue, active renderer, and playback position per device.
--   **History**: Log of played tracks.
--   **Search Index**: Full-text search capabilities.
+-   **History**: Local playback history, Last.fm scrobbles, and a combined history view/materialized view.
+-   **Search Index**: Full-text search and trigram indexes for fast browsing.
+-   **Auxiliary Data**: Similar artists, top tracks, charts, and scheduler tasks.
 
 The database runs in a Docker container and is accessible via CloudBeaver for administration.
 
@@ -28,7 +32,8 @@ The frontend provides a polished, app-like user experience:
 -   **Responsive UI**: Built with SvelteKit, Skeleton UI, and Tailwind CSS.
 -   **Real-time State**: Polls the backend for playback status (position, track, transport state).
 -   **Optimistic UI**: Updates the UI immediately on user actions while syncing with the backend.
--   **Visuals**: high-resolution artwork, dark mode, and smooth transitions.
+-   **Renderer Switching**: Supports local playback via `<audio>` and remote playback via UPnP renderers.
+-   **Visuals**: High-resolution artwork, themed UI, and smooth transitions.
 
 ## Key Workflows
 
@@ -39,18 +44,24 @@ The frontend provides a polished, app-like user experience:
     -   Lookup artist metadata on MusicBrainz/Spotify.
     -   Download and cache artist images.
     -   Identify Tidal links.
-4.  **Index**: Updates SQLite tables and FTS search index.
+4.  **Index**: Updates PostgreSQL tables and FTS/trigram search indexes.
 
 ### Playback & Queue
 1.  **Selection**: User clicks "Play" or "Queue" on a track/album.
 2.  **State Update**: Frontend sends the new queue to the Backend API.
-3.  **Persistence**: Backend updates `renderer_states` table.
+3.  **Persistence**: Backend updates `renderer_state` table.
 4.  **Control**:
-    -   **Local**: Frontend uses `<audio>` element to play the stream.
+    -   **Local**: Frontend uses `<audio>` with `/api/stream/{track_id}`.
     -   **UPnP**: Backend sends `SetAVTransportURI` and `Play` commands to the device.
 5.  **Monitoring**:
     -   Backend runs a background task to poll the UPnP device for position and transport state (`STOPPED`, `PLAYING`).
     -   **Auto-Advance**: When the backend detects the UPnP device has `STOPPED` (and queue has more tracks), it automatically initiates playback of the next track.
+
+### History & Recommendations
+1.  **Local History**: Backend logs playback into `playback_history`.
+2.  **Last.fm Sync**: Scrobbles are pulled, matched to local tracks, and stored in `lastfm_scrobble_match`.
+3.  **Unified View**: `combined_playback_history_mat` materializes local + Last.fm history.
+4.  **Recommendations**: API reads the combined history view to produce seed and candidate recommendations.
 
 ## Directory Structure
 
@@ -70,11 +81,13 @@ The frontend provides a polished, app-like user experience:
 │   │   │   └── stages/      # Enrichment stages
 │   │   ├── services/     # External API clients
 │   │   └── tags.py       # Tag Extraction
-│   ├── upnp/             # UPnP Manager & Control Logic
+│   ├── services/         # Playback, UPnP, and state services
+│   ├── media/            # Artwork helpers and image lookup
 │   ├── main.py           # App Entrypoint
 │   ├── db.py             # Database Models & Connection
 │   ├── auth.py           # Authentication & User Management
-│   └── tidal.py          # Tidal Integration Helper
+│   ├── charts.py         # Chart data ingestion
+│   └── lastfm.py         # Last.fm integration
 ├── web/                  # SvelteKit Frontend
 │   ├── src/
 │   │   ├── routes/       # Pages (Home, Artist, Queue, etc.)
@@ -83,7 +96,7 @@ The frontend provides a polished, app-like user experience:
 ├── cache/                # Data Directory (PostgreSQL data, cached images)
 ├── docs/                 # Documentation
 │   ├── DEV_MODE.md       # Development setup guide
-│   ├── database_schema.md # Database schema reference
+│   ├── DATABASE_SCHEMA.md # Database schema reference
 │   ├── scanner_v3.md     # V3 pipeline architecture
 │   └── outline.md        # System architecture
 ├── docker-compose.yml    # Production Docker Compose
