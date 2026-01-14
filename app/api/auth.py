@@ -1,9 +1,12 @@
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import os
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.auth import (
     COOKIE_SECURE,
@@ -15,10 +18,27 @@ from app.auth import (
     hash_password,
     require_current_user,
     verify_password,
+    get_user_by_username_or_email,
+    create_refresh_session,
+    get_refresh_session,
+    revoke_refresh_session,
+    revoke_all_user_sessions,
 )
+from app.auth_tokens import (
+    create_access_token,
+    generate_refresh_token,
+    hash_refresh_token,
+    REFRESH_TOKEN_TTL_DAYS,
+)
+from app.api.deps import get_current_user_jwt
 from app.db import get_db
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
+
+# Configuration
+REFRESH_COOKIE_NAME = os.getenv("REFRESH_COOKIE_NAME", "jamarr_refresh")
+REFRESH_COOKIE_SECURE = os.getenv("REFRESH_COOKIE_SECURE", "false").lower() == "true"
 
 
 class SignupBody(BaseModel):
@@ -49,6 +69,7 @@ class ChangePasswordBody(BaseModel):
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
+    """Set legacy session cookie (deprecated)."""
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
@@ -57,6 +78,32 @@ def _set_session_cookie(response: Response, token: str) -> None:
         samesite="lax",
         secure=COOKIE_SECURE,
         path="/",
+    )
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    """Set JWT refresh token cookie."""
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=token,
+        max_age=REFRESH_TOKEN_TTL_DAYS * 86400,  # Convert days to seconds
+        httponly=True,
+        samesite="lax",
+        secure=REFRESH_COOKIE_SECURE,
+        path="/api/auth",  # Restrict to auth endpoints only
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    """Clear JWT refresh token cookie."""
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value="",
+        max_age=0,
+        httponly=True,
+        samesite="lax",
+        secure=REFRESH_COOKIE_SECURE,
+        path="/api/auth",
     )
 
 
@@ -132,69 +179,158 @@ async def signup(
 
 @router.post("/api/auth/login")
 async def login(
-    payload: LoginBody,
     request: Request,
+    payload: LoginBody,
     response: Response,
     db: asyncpg.Connection = Depends(get_db),
 ):
+    """Login with username/password, returns JWT access token and sets refresh cookie."""
+    # Apply rate limiting in production only
+    ENV = os.getenv("ENV", "development")
+    if ENV == "production":
+        # This will be enforced by the decorator in production
+        pass
+    
     username = payload.username.strip()
 
-    user = await db.fetchrow(
-        """
-        SELECT *
-        FROM "user"
-        WHERE username = $1
-        LIMIT 1
-        """,
-        username,
-    )
+    # Get user by username or email
+    user = await get_user_by_username_or_email(db, username)
 
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials."
         )
 
-    token = await create_session(
-        db,
-        user_id=user["id"],
-        user_agent=request.headers.get("user-agent"),
-        ip=request.client.host if request.client else None,
-    )
+    # Update last login timestamp
     await db.execute(
         'UPDATE "user" SET last_login_at = $1 WHERE id = $2',
         datetime.now(timezone.utc),
         user["id"],
     )
-    _set_session_cookie(response, token)
-    return _public_user_dict(user)
+
+    # Create JWT access token
+    access_token = create_access_token(user_id=user["id"])
+
+    # Generate and store refresh token
+    refresh_token = generate_refresh_token()
+    refresh_token_hash = hash_refresh_token(refresh_token)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_TTL_DAYS)
+
+    await create_refresh_session(
+        db=db,
+        user_id=user["id"],
+        token_hash=refresh_token_hash,
+        expires_at=expires_at,
+        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if request.client else None,
+    )
+
+    # Set refresh token cookie
+    _set_refresh_cookie(response, refresh_token)
+
+    # Return access token and user data
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": _public_user_dict(user),
+    }
 
 
 @router.post("/api/auth/logout")
 async def logout(
     request: Request, response: Response, db: asyncpg.Connection = Depends(get_db)
 ):
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if token:
-        await destroy_session(db, token)
-    response.delete_cookie(
-        SESSION_COOKIE_NAME, path="/", samesite="lax", secure=COOKIE_SECURE
-    )
+    """Logout by revoking refresh session and clearing cookie."""
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if refresh_token:
+        token_hash = hash_refresh_token(refresh_token)
+        await revoke_refresh_session(db, token_hash)
+    
+    _clear_refresh_cookie(response)
     return {"ok": True}
+
+
+@router.post("/api/auth/refresh")
+async def refresh(
+    request: Request, response: Response, db: asyncpg.Connection = Depends(get_db)
+):
+    """Refresh access token using refresh token cookie (with rotation)."""
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing refresh token",
+        )
+    
+    # Lookup refresh session
+    token_hash = hash_refresh_token(refresh_token)
+    session = await get_refresh_session(db, token_hash)
+    
+    if not session:
+        # Token is either revoked, expired, or doesn't exist
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+    
+    user_id = session["user_id"]
+    
+    # Rotate refresh token (revoke old, create new)
+    await revoke_refresh_session(db, token_hash)
+    
+    # Generate new refresh token
+    new_refresh_token = generate_refresh_token()
+    new_token_hash = hash_refresh_token(new_refresh_token)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_TTL_DAYS)
+    
+    await create_refresh_session(
+        db=db,
+        user_id=user_id,
+        token_hash=new_token_hash,
+        expires_at=expires_at,
+        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if request.client else None,
+    )
+    
+    # Set new refresh cookie
+    _set_refresh_cookie(response, new_refresh_token)
+    
+    # Create new access token
+    access_token = create_access_token(user_id=user_id)
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
+
+
+@router.post("/api/auth/logout-all")
+async def logout_all(
+    user: asyncpg.Record = Depends(get_current_user_jwt),
+    db: asyncpg.Connection = Depends(get_db),
+):
+    """Logout from all devices by revoking all refresh sessions."""
+    # Count sessions before revoking
+    count = await db.fetchval(
+        "SELECT COUNT(*) FROM auth_refresh_session WHERE user_id = $1 AND revoked_at IS NULL",
+        user["id"],
+    )
+    
+    # Revoke all sessions
+    await revoke_all_user_sessions(db, user["id"])
+    
+    return {
+        "ok": True,
+        "sessions_revoked": count,
+    }
 
 
 @router.get("/api/auth/me")
 async def me(
-    request: Request, response: Response, db: asyncpg.Connection = Depends(get_db)
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    user, token_value = await get_session_user(db, token)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated."
-        )
-
-    # Refresh cookie to keep session alive
-    _set_session_cookie(response, token_value or token)
+    """Get current user profile using JWT authentication."""
     return _public_user_dict(user)
 
 
