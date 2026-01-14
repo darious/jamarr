@@ -63,6 +63,7 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
         existing = {row["tablename"] for row in table_rows}
         tables = [
             "session",
+            "auth_refresh_session",
             "client_session",
             "renderer_state",
             "playback_history",
@@ -140,3 +141,26 @@ async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
     response = await client.post("/api/auth/signup", json=user_data)
     assert response.status_code == 200, "Signup failed after user deletion"
     return response.cookies["jamarr_session"]
+
+
+@pytest.fixture
+async def test_user(db: asyncpg.Connection):
+    """Create a test user for JWT authentication tests."""
+    from app.auth import hash_password
+    
+    # Delete existing test user if it exists (for test isolation)
+    await db.execute('DELETE FROM "user" WHERE username = $1', "testuser_jwt")
+    
+    user = await db.fetchrow(
+        """
+        INSERT INTO "user" (username, email, password_hash, display_name, created_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        RETURNING *
+        """,
+        "testuser_jwt",
+        "testjwt@example.com",
+        hash_password("password123"),
+        "Test JWT User",
+    )
+    yield user
+    # Cleanup handled by db fixture truncation

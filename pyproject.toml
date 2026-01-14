@@ -25,6 +25,8 @@ dependencies = [
     "rapidfuzz",
     "pylast>=7.0.1",
     "croniter",
+    "python-jose[cryptography]",
+    "slowapi",
 ]
 
 
