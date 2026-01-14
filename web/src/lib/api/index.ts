@@ -100,7 +100,7 @@ export interface Album {
     peak_chart_position?: number;
     label?: string;
     external_links?: { type: string; url: string }[];
-    artists?: { name: string; mbid?: string }[];
+    artists?: { name: string; mbid?: string; sort_name?: string }[];
     listens?: number;
 }
 
@@ -127,7 +127,7 @@ export interface Track {
     album_mbid?: string | null;
     popularity?: number;
     plays?: number;
-    artists?: { name: string; mbid?: string }[];
+    artists?: { name: string; mbid?: string; sort_name?: string }[];
 }
 
 export interface User {
