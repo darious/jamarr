@@ -690,12 +690,20 @@ async def play_track(
             if 0 <= state["current_index"] < len(queue):
                 current_track = queue[state["current_index"]]
 
-        # If the same track is already playing, just resume if paused
         if (
             current_track
             and current_track.get("id") == track["id"]
             and state.get("is_playing")
         ):
+            logger.info(f"play_track: Track {track_id} already playing. checking monitor...")
+            # Ensure monitor is running if it died
+            if udn not in playback_monitors or playback_monitors[udn].done():
+                logger.info(f"Restarting monitor for active track {track_id}")
+                start_monitor_task(udn)
+                last_track_start_time[udn] = time.time()
+            else:
+                 logger.info(f"play_track: Monitor already running for {udn}")
+            
             logger.info(
                 f"Track {track_id} is already playing, ignoring duplicate play request"
             )
@@ -712,6 +720,11 @@ async def play_track(
             state["is_playing"] = True
             state["transport_state"] = "PLAYING"
             await update_renderer_state_db(db, udn, state)
+            
+            # Start monitor
+            start_monitor_task(udn)
+            last_track_start_time[udn] = time.time()
+            
             return {"status": "resumed", "renderer": udn}
 
         # Different track or no track playing - start new playback
@@ -862,10 +875,26 @@ async def seek_track(data: dict, client_id: str = Depends(get_client_id)):
 # Re-expose Debug/Manual Added endpoints
 @router.get("/api/player/debug")
 async def debug_info():
+    monitors_status = {}
+    for udn, task in playback_monitors.items():
+        monitors_status[udn] = {
+            "done": task.done(),
+            "cancelled": task.cancelled(),
+        }
+        if task.done() and not task.cancelled():
+            try:
+                task.result() # check for exception
+                monitors_status[udn]["result"] = "success"
+            except Exception as e:
+                monitors_status[udn]["error"] = str(e)
+
     return {
         "log": upnp.debug_log,
         "renderers": upnp.renderers,
+        "dmr_devices_keys": list(upnp.dmr_devices.keys()),
         "local_ip": upnp.local_ip,
+        "monitors": monitors_status,
+        "monitor_start_times": monitor_start_times,
     }
 
 

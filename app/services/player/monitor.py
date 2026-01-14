@@ -47,7 +47,7 @@ async def monitor_upnp_playback(udn: str):
     upnp = UPnPManager.get_instance()
 
     # Grace period: Wait for device to react to Play command before polling
-    # This prevents detecting "STOPPED" immediately after a manual Play/Skip.
+    logger.info(f"[Player] Monitor {udn}: Task started, waiting 3s grace period...")
     await asyncio.sleep(3)
 
     was_playing = False  # Initialize to prevent UnboundLocalError
@@ -56,8 +56,10 @@ async def monitor_upnp_playback(udn: str):
         while True:
             # 1. Fetch position & transport from UPnP
             try:
+                logger.info(f"[Player] Monitor {udn}: Polling...")
                 rel_time, _ = await upnp.get_position(udn)
                 transport_state = await upnp.get_transport_info(udn)
+                logger.info(f"[Player] Monitor {udn}: Got pos={rel_time}, state={transport_state}")
                 consecutive_errors = 0  # Reset on success
             except Exception as e:
                 consecutive_errors += 1
