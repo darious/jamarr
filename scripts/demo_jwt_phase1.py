@@ -65,7 +65,7 @@ async def demo():
         
         # Verify access token
         claims = verify_access_token(access_token)
-        print(f"✅ Token verified successfully!")
+        print("✅ Token verified successfully!")
         print(f"   User ID from token: {claims['sub']}")
         print(f"   Issuer: {claims['iss']}")
         print(f"   Audience: {claims['aud']}")
@@ -142,7 +142,7 @@ async def demo():
         # Try to retrieve revoked session
         revoked_session = await get_refresh_session(db, token_hash)
         if revoked_session is None:
-            print(f"✅ Revoked session correctly returns None")
+            print("✅ Revoked session correctly returns None")
         print()
 
         # 5. Cleanup Demo

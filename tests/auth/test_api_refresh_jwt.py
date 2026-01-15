@@ -45,7 +45,7 @@ async def test_refresh_rotates_token(client: AsyncClient, test_user, db):
     initial_refresh = login_response.cookies["jamarr_refresh"]
     
     # Count active sessions before refresh
-    count_before = await db.fetchval(
+    await db.fetchval(
         "SELECT COUNT(*) FROM auth_refresh_session WHERE user_id = $1 AND revoked_at IS NULL",
         test_user["id"]
     )

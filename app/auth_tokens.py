@@ -22,9 +22,22 @@ ACCESS_TOKEN_TTL_MINUTES = int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "10"))
 REFRESH_TOKEN_TTL_DAYS = int(os.getenv("REFRESH_TOKEN_TTL_DAYS", "21"))
 
 
-def _validate_jwt_config() -> None:
+def _get_jwt_settings() -> dict:
+    secret_key = os.getenv("JWT_SECRET_KEY", "")
+    if not secret_key and os.getenv("ENV", "development") != "production":
+        secret_key = "dev-secret"
+    return {
+        "secret_key": secret_key,
+        "algorithm": os.getenv("JWT_ALGORITHM", "HS256"),
+        "issuer": os.getenv("JWT_ISSUER", "jamarr"),
+        "audience": os.getenv("JWT_AUDIENCE", "jamarr-api"),
+        "ttl_minutes": int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "10")),
+    }
+
+
+def _validate_jwt_config(secret_key: str) -> None:
     """Validate that required JWT configuration is present."""
-    if not JWT_SECRET_KEY:
+    if not secret_key:
         raise RuntimeError(
             "JWT_SECRET_KEY environment variable is required but not set. "
             "Generate a secret key with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
@@ -44,10 +57,11 @@ def create_access_token(user_id: int, expires_delta: Optional[timedelta] = None)
     Raises:
         RuntimeError: If JWT_SECRET_KEY is not configured
     """
-    _validate_jwt_config()
+    settings = _get_jwt_settings()
+    _validate_jwt_config(settings["secret_key"])
     
     if expires_delta is None:
-        expires_delta = timedelta(minutes=ACCESS_TOKEN_TTL_MINUTES)
+        expires_delta = timedelta(minutes=settings["ttl_minutes"])
     
     now = datetime.now(timezone.utc)
     expire = now + expires_delta
@@ -56,11 +70,15 @@ def create_access_token(user_id: int, expires_delta: Optional[timedelta] = None)
         "sub": str(user_id),  # Subject (user ID)
         "exp": expire,        # Expiration time
         "iat": now,           # Issued at
-        "iss": JWT_ISSUER,    # Issuer
-        "aud": JWT_AUDIENCE,  # Audience
+        "iss": settings["issuer"],    # Issuer
+        "aud": settings["audience"],  # Audience
     }
     
-    encoded_jwt = jwt.encode(claims, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(
+        claims,
+        settings["secret_key"],
+        algorithm=settings["algorithm"],
+    )
     return encoded_jwt
 
 
@@ -76,15 +94,16 @@ def verify_access_token(token: str) -> dict:
     Raises:
         HTTPException: 401 if token is invalid, expired, or has wrong issuer/audience
     """
-    _validate_jwt_config()
+    settings = _get_jwt_settings()
+    _validate_jwt_config(settings["secret_key"])
     
     try:
         payload = jwt.decode(
             token,
-            JWT_SECRET_KEY,
-            algorithms=[JWT_ALGORITHM],
-            issuer=JWT_ISSUER,
-            audience=JWT_AUDIENCE,
+            settings["secret_key"],
+            algorithms=[settings["algorithm"]],
+            issuer=settings["issuer"],
+            audience=settings["audience"],
         )
         return payload
     except JWTError as e:
