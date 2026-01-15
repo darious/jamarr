@@ -7,6 +7,13 @@ CI=${CI:-false}
 FRONTEND_COMPOSE_FILE="docker-compose.ci.yml"
 FRONTEND_SERVICE="jamarr_web_ci"
 
+SVELTE_PASS=0
+SVELTE_FAIL=0
+CSS_PASS=0
+CSS_FAIL=0
+PYTHON_PASS=0
+PYTHON_FAIL=0
+
 install_frontend_deps() {
     local install_cmd="npm install"
     if [[ "$CI" == "true" ]]; then
@@ -28,8 +35,10 @@ run_svelte() {
     echo "🔍 Running Svelte Check..."
     if docker compose -f "${FRONTEND_COMPOSE_FILE}" run --rm "${FRONTEND_SERVICE}" npm run check; then
         echo "✅ Svelte Check Passed"
+        SVELTE_PASS=$((SVELTE_PASS + 1))
     else
         echo "❌ Svelte Check Failed"
+        SVELTE_FAIL=$((SVELTE_FAIL + 1))
         return 1
     fi
 }
@@ -38,8 +47,10 @@ run_css() {
     echo "🔍 Running CSS Lint..."
     if docker compose -f "${FRONTEND_COMPOSE_FILE}" run --rm "${FRONTEND_SERVICE}" npm run lint:css; then
         echo "✅ CSS Lint Passed"
+        CSS_PASS=$((CSS_PASS + 1))
     else
         echo "❌ CSS Lint Failed"
+        CSS_FAIL=$((CSS_FAIL + 1))
         return 1
     fi
 }
@@ -48,8 +59,10 @@ run_python() {
     echo "🔍 Running Python Check (ruff)..."
     if uv run ruff check .; then
         echo "✅ Python Check Passed"
+        PYTHON_PASS=$((PYTHON_PASS + 1))
     else
         echo "❌ Python Check Failed"
+        PYTHON_FAIL=$((PYTHON_FAIL + 1))
         return 1
     fi
 }
@@ -73,5 +86,11 @@ else
     echo ""
     run_python || EXIT_CODE=1
 fi
+
+echo ""
+echo "📋 Lint Summary"
+echo "Svelte: pass ${SVELTE_PASS} fail ${SVELTE_FAIL}"
+echo "CSS: pass ${CSS_PASS} fail ${CSS_FAIL}"
+echo "Python: pass ${PYTHON_PASS} fail ${PYTHON_FAIL}"
 
 exit $EXIT_CODE

@@ -12,10 +12,15 @@ from app.auth import (
     hash_password,
     verify_password,
     get_user_by_username_or_email,
+    create_session,
+    destroy_session,
     create_refresh_session,
     get_refresh_session,
     revoke_refresh_session,
     revoke_all_user_sessions,
+    COOKIE_SECURE,
+    SESSION_COOKIE_NAME,
+    SESSION_TTL_SECONDS,
 )
 from app.auth_tokens import (
     create_access_token,
@@ -71,6 +76,18 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         samesite="lax",
         secure=REFRESH_COOKIE_SECURE,
         path="/api",
+    )
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        path="/",
     )
 
 
@@ -162,11 +179,20 @@ async def signup(
     )
 
     _set_refresh_cookie(response, refresh_token)
+    session_token = await create_session(
+        db=db,
+        user_id=user["id"],
+        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if request.client else None,
+    )
+    _set_session_cookie(response, session_token)
 
+    user_data = _public_user_dict(user)
     return {
+        **user_data,
         "access_token": access_token,
         "token_type": "bearer",
-        "user": _public_user_dict(user),
+        "user": user_data,
     }
 
 
@@ -220,12 +246,21 @@ async def login(
 
     # Set refresh token cookie
     _set_refresh_cookie(response, refresh_token)
+    session_token = await create_session(
+        db=db,
+        user_id=user["id"],
+        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if request.client else None,
+    )
+    _set_session_cookie(response, session_token)
 
     # Return access token and user data
+    user_data = _public_user_dict(user)
     return {
+        **user_data,
         "access_token": access_token,
         "token_type": "bearer",
-        "user": _public_user_dict(user),
+        "user": user_data,
     }
 
 
@@ -238,6 +273,10 @@ async def logout(
     if refresh_token:
         token_hash = hash_refresh_token(refresh_token)
         await revoke_refresh_session(db, token_hash)
+
+    session_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if session_token:
+        await destroy_session(db, session_token)
     
     _clear_refresh_cookie(response)
     return {"ok": True}

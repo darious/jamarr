@@ -66,85 +66,88 @@
 
   // Don't seed auth state here - wait for client-side initialization
 
-  onMount(async () => {
-    // Check actual current path, not reactive variable
-    const currentPath = window.location.pathname;
-    const onAuthPage = currentPath.startsWith("/login") || currentPath.startsWith("/signup");
-    
-    console.log('[Layout] onMount started, currentPath:', currentPath, 'onAuthPage:', onAuthPage);
+  onMount(() => {
+    let rendererPollInterval: ReturnType<typeof setInterval> | undefined;
+    const init = async () => {
+      // Check actual current path, not reactive variable
+      const currentPath = window.location.pathname;
+      const onAuthPage = currentPath.startsWith("/login") || currentPath.startsWith("/signup");
 
-    // If on auth page, don't show loading
-    if (onAuthPage) {
-      console.log('[Layout] On auth page, skipping auth check');
+      console.log('[Layout] onMount started, currentPath:', currentPath, 'onAuthPage:', onAuthPage);
+
+      // If on auth page, don't show loading
+      if (onAuthPage) {
+        console.log('[Layout] On auth page, skipping auth check');
+        authLoading = false;
+        return;
+      }
+
+      console.log('[Layout] Starting auth initialization...');
+      // Initialize JWT auth on client-side (try to refresh token)
+      const initResult = await initializeAuth().catch((e) => {
+        console.error('[Layout] initializeAuth error:', e);
+        return false;
+      });
+      console.log('[Layout] initializeAuth result:', initResult);
+
+      // Now hydrate user after auth is initialized
+      console.log('[Layout] Hydrating user...');
+      const hydratedUser = await hydrateUser().catch((e) => {
+        console.error('[Layout] hydrateUser error:', e);
+        return null;
+      });
+      console.log('[Layout] Hydrated user:', hydratedUser ? 'SUCCESS' : 'FAILED');
+
+      // If no user and not on auth page, redirect to login
+      if (!hydratedUser && !onAuthPage) {
+        console.log('[Layout] No user found, redirecting to login');
+        authLoading = false;
+        goto("/login");
+        return;
+      }
+
+      console.log('[Layout] Auth complete, showing content');
+      // Auth complete, show content
       authLoading = false;
-      return;
-    }
 
-    console.log('[Layout] Starting auth initialization...');
-    // Initialize JWT auth on client-side (try to refresh token)
-    const initResult = await initializeAuth().catch((e) => {
-      console.error('[Layout] initializeAuth error:', e);
-      return false;
-    });
-    console.log('[Layout] initializeAuth result:', initResult);
+      // Subscribe first to get immediate state (including default 'local' renderer)
+      unsub = playerState.subscribe((state) => {
+        rendererList = state.renderers || [];
+        activeRenderer = state.renderer || "local";
+      });
 
-    // Now hydrate user after auth is initialized
-    console.log('[Layout] Hydrating user...');
-    const hydratedUser = await hydrateUser().catch((e) => {
-      console.error('[Layout] hydrateUser error:', e);
-      return null;
-    });
-    console.log('[Layout] Hydrated user:', hydratedUser ? 'SUCCESS' : 'FAILED');
-    
-    // If no user and not on auth page, redirect to login
-    if (!hydratedUser && !onAuthPage) {
-      console.log('[Layout] No user found, redirecting to login');
-      authLoading = false;
-      goto("/login");
-      return;
-    }
-
-    console.log('[Layout] Auth complete, showing content');
-    // Auth complete, show content
-    authLoading = false;
-
-    // Subscribe first to get immediate state (including default 'local' renderer)
-
-    unsub = playerState.subscribe((state) => {
-
-      rendererList = state.renderers || [];
-      activeRenderer = state.renderer || "local";
-    });
-
-    unsubUser = currentUser.subscribe((value) => (user = value));
-    unsubAuthChecked = isAuthChecked.subscribe(
-      (value) => (authChecked = value),
-    );
-
-
-    try {
-      await loadQueueFromServer();
-    } catch (e) {
-      console.error("[Layout] loadQueueFromServer failed:", e);
-    }
-
-
-    // Trigger refresh without awaiting the full 5s discovery if we don't want to block anything else
-    // But since subscription is active, store updates will just propagate.
-    // Use force=false to get immediate cached results (background scan runs on backend)
-    refreshRenderers(false).catch((e) =>
-      console.error("[Layout] refreshRenderers failed:", e),
-    );
-
-    // Poll for new renderers every 10 seconds
-    const rendererPollInterval = setInterval(() => {
-      refreshRenderers(false).catch((e) =>
-        console.error("[Layout] Periodic refreshRenderers failed:", e),
+      unsubUser = currentUser.subscribe((value) => (user = value));
+      unsubAuthChecked = isAuthChecked.subscribe(
+        (value) => (authChecked = value),
       );
-    }, 10000);
+
+      try {
+        await loadQueueFromServer();
+      } catch (e) {
+        console.error("[Layout] loadQueueFromServer failed:", e);
+      }
+
+      // Trigger refresh without awaiting the full 5s discovery if we don't want to block anything else
+      // But since subscription is active, store updates will just propagate.
+      // Use force=false to get immediate cached results (background scan runs on backend)
+      refreshRenderers(false).catch((e) =>
+        console.error("[Layout] refreshRenderers failed:", e),
+      );
+
+      // Poll for new renderers every 10 seconds
+      rendererPollInterval = setInterval(() => {
+        refreshRenderers(false).catch((e) =>
+          console.error("[Layout] Periodic refreshRenderers failed:", e),
+        );
+      }, 10000);
+    };
+
+    init();
 
     return () => {
-      clearInterval(rendererPollInterval);
+      if (rendererPollInterval) {
+        clearInterval(rendererPollInterval);
+      }
     };
   });
 

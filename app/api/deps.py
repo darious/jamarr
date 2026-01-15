@@ -2,15 +2,16 @@
 from typing import Optional
 
 import asyncpg
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 
-from app.auth import get_user_by_id
+from app.auth import SESSION_COOKIE_NAME, get_session_user, get_user_by_id
 from app.auth_tokens import verify_access_token
 from app.db import get_db
 
 
 async def get_current_user_jwt(
     authorization: Optional[str] = Header(None),
+    request: Request = None,
     db: asyncpg.Connection = Depends(get_db),
 ) -> asyncpg.Record:
     """Dependency to require JWT authentication.
@@ -29,6 +30,18 @@ async def get_current_user_jwt(
         HTTPException: 401 if token is missing, invalid, or expired
     """
     if not authorization:
+        if request is not None:
+            token = request.cookies.get(SESSION_COOKIE_NAME)
+            user, _ = await get_session_user(db, token)
+            if user:
+                if not user.get("is_active", True):
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="User account is inactive",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+                return user
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authorization header",
@@ -72,6 +85,7 @@ async def get_current_user_jwt(
 
 async def get_optional_user_jwt(
     authorization: Optional[str] = Header(None),
+    request: Request = None,
     db: asyncpg.Connection = Depends(get_db),
 ) -> Optional[asyncpg.Record]:
     """Optional JWT authentication dependency.
@@ -87,9 +101,15 @@ async def get_optional_user_jwt(
         User record if valid token provided, None otherwise
     """
     if not authorization:
-        return None
+        if request is None:
+            return None
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+        user, _ = await get_session_user(db, token)
+        if user and not user.get("is_active", True):
+            return None
+        return user
     
     try:
-        return await get_current_user_jwt(authorization, db)
+        return await get_current_user_jwt(authorization, request, db)
     except HTTPException:
         return None

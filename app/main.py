@@ -1,5 +1,7 @@
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
+import os
+
+from fastapi import FastAPI
 from app.db import init_db, close_db
 
 
@@ -28,7 +30,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Configure rate limiting (disabled in test/dev)
-import os
 ENV = os.getenv("ENV", "development")
 
 if ENV == "production":
