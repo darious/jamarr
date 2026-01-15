@@ -4,9 +4,9 @@ import asyncpg
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
-from app.api.deps import get_current_user_jwt, get_optional_user_jwt
+from app.api.deps import get_current_user_jwt
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
 
 # --- Models ---
 
@@ -118,14 +118,12 @@ async def create_playlist(
 async def list_playlists(
     user_id: Optional[int] = None, 
     db: asyncpg.Connection = Depends(get_db),
-    current_user: Optional[asyncpg.Record] = Depends(get_optional_user_jwt),
+    current_user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     # If user_id not provided, list current user's playlists
     target_user_id = user_id
     if target_user_id is None:
-        if not current_user:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        target_user_id = current_user['id']
+        target_user_id = current_user["id"]
     # Fetch all user's playlists + public playlists from others (future proofing)
     # For now, just user's playlists as per spec "user-scoped" but with public flag structure ready
     query = """
@@ -185,7 +183,7 @@ async def list_playlists(
 async def list_playlists_for_artist(
     artist_mbid: str,
     db: asyncpg.Connection = Depends(get_db),
-    current_user: Optional[asyncpg.Record] = Depends(get_optional_user_jwt),
+    current_user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     params = [artist_mbid]
     visibility_clause = "p.is_public = TRUE"
@@ -253,10 +251,10 @@ async def list_playlists_for_artist(
 async def get_playlist(
     playlist_id: int,
     db: asyncpg.Connection = Depends(get_db),
-    current_user: Optional[asyncpg.Record] = Depends(get_optional_user_jwt),
+    current_user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     # Optional auth for checking visibility
-    current_user_id = current_user["id"] if current_user else None
+    current_user_id = current_user["id"]
     # Get metadata
     p_query = """
         SELECT id, user_id, name, description, is_public, updated_at

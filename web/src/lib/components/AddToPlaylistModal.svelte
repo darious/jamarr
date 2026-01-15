@@ -1,6 +1,6 @@
 <script lang="ts">
     import { fade, scale } from "svelte/transition";
-    import { createEventDispatcher, onMount } from "svelte";
+    import { createEventDispatcher } from "svelte";
     import {
         fetchPlaylists,
         createPlaylist,
@@ -24,6 +24,8 @@
 
     let playlists: Playlist[] = [];
     let loading = true;
+    let hasLoaded = false;
+    let loadingPromise: Promise<void> | null = null;
     let searchTerm = "";
     let creatingNew = false;
     let newPlaylistName = "";
@@ -32,14 +34,17 @@
         p.name.toLowerCase().includes(searchTerm.toLowerCase()),
     );
 
-    onMount(async () => {
-        loadPlaylists();
-    });
+    $: if (visible && !hasLoaded && !loadingPromise) {
+        loadingPromise = loadPlaylists().finally(() => {
+            loadingPromise = null;
+        });
+    }
 
     async function loadPlaylists() {
         loading = true;
         try {
             playlists = await fetchPlaylists();
+            hasLoaded = true;
         } catch (e) {
             console.error(e);
         } finally {

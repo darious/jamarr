@@ -90,7 +90,7 @@ export async function refreshRenderers(force: boolean = false) {
 
     try {
 
-        const res = await fetch(`/api/renderers?refresh=${force}`, {
+        const res = await fetchWithAuth(`/api/renderers?refresh=${force}`, {
             headers: { 'X-Jamarr-Client-Id': getClientId() }
         });
 
@@ -148,7 +148,7 @@ async function getClientIp(): Promise<string | null> {
 
     try {
         // Try to get IP from our own backend endpoint
-        const res = await fetch('/api/client-ip', { headers: { 'X-Jamarr-Client-Id': getClientId() } });
+        const res = await fetchWithAuth('/api/client-ip', { headers: { 'X-Jamarr-Client-Id': getClientId() } });
         if (res.ok) {
             const data = await res.json();
             cachedClientIp = data.ip;

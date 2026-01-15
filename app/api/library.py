@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.db import get_db, optimize_db
+from app.api.deps import get_current_user_jwt
 import asyncpg
 from typing import Optional
 
@@ -12,7 +13,7 @@ import logging
 
 logger = logging.getLogger("api.library")
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
 
 
 def sha1_to_hex(sha1_value):
@@ -117,18 +118,18 @@ async def get_artists(
                 a.sort_name,
                 a.bio,
                 ar.sha1 as art_sha1,
-                COALESCE(ac.primary_album_count, 0) as primary_album_count,
-                COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count
+                COALESCE(ac.primary_count, 0) as primary_album_count,
+                COALESCE(ac.appears_count, 0) as appears_on_album_count
             FROM artist a
             LEFT JOIN artwork ar ON a.artwork_id = ar.id
-            LEFT JOIN (
+            -- Lateral join calculates counts ONLY for the artists returned by the main query
+            LEFT JOIN LATERAL (
                 SELECT 
-                    artist_mbid,
-                    COUNT(DISTINCT CASE WHEN type = 'primary' THEN album_mbid END) as primary_album_count,
-                    COUNT(DISTINCT CASE WHEN type = 'contributor' THEN album_mbid END) as appears_on_album_count
+                    COUNT(DISTINCT album_mbid) FILTER (WHERE type = 'primary') as primary_count,
+                    COUNT(DISTINCT album_mbid) FILTER (WHERE type = 'contributor') as appears_count
                 FROM artist_album
-                GROUP BY artist_mbid
-            ) ac ON ac.artist_mbid = a.mbid
+                WHERE artist_mbid = a.mbid
+            ) ac ON TRUE
             WHERE a.name IS NOT NULL
         """
         params = []
@@ -162,39 +163,42 @@ async def get_artists(
             ar.sha1 as art_sha1,
             a.bio,
             a.sort_name,
-            MAX(CASE WHEN el.type = 'homepage' THEN el.url END) as homepage,
-            MAX(CASE WHEN el.type = 'spotify' THEN el.url END) as spotify_url,
-            MAX(CASE WHEN el.type = 'wikipedia' THEN el.url END) as wikipedia_url,
-            MAX(CASE WHEN el.type = 'qobuz' THEN el.url END) as qobuz_url,
-            MAX(CASE WHEN el.type = 'musicbrainz' THEN el.url END) as musicbrainz_url,
-            MAX(CASE WHEN el.type = 'tidal' THEN el.url END) as tidal_url,
-            MAX(CASE WHEN el.type = 'lastfm' THEN el.url END) as lastfm_url,
-            MAX(CASE WHEN el.type = 'discogs' THEN el.url END) as discogs_url,
-            COALESCE(ac.primary_album_count, 0) as primary_album_count,
-            COALESCE(ac.appears_on_album_count, 0) as appears_on_album_count,
+            -- Pivot links inside a single sub-select for efficiency
+            el.links->>'homepage' as homepage,
+            el.links->>'spotify' as spotify_url,
+            el.links->>'wikipedia' as wikipedia_url,
+            el.links->>'qobuz' as qobuz_url,
+            el.links->>'musicbrainz' as musicbrainz_url,
+            el.links->>'tidal' as tidal_url,
+            el.links->>'lastfm' as lastfm_url,
+            el.links->>'discogs' as discogs_url,
+            COALESCE(ac.primary_count, 0) as primary_album_count,
+            COALESCE(ac.appears_count, 0) as appears_on_album_count,
             COALESCE(lp.listens, 0) as listens
         FROM artist a
         LEFT JOIN artwork ar ON a.artwork_id = ar.id
-        LEFT JOIN external_link el ON a.mbid = el.entity_id AND el.entity_type = 'artist'
-        LEFT JOIN (
+        -- 1. Pivot External Links using JSONB for cleanliness and speed
+        LEFT JOIN LATERAL (
+            SELECT jsonb_object_agg(type, url) as links
+            FROM external_link
+            WHERE entity_id = a.mbid AND entity_type = 'artist'
+        ) el ON TRUE
+        -- 2. Lateral Album Counts (Reusing the optimization from before)
+        LEFT JOIN LATERAL (
             SELECT 
-                artist_mbid,
-                COUNT(DISTINCT CASE WHEN type = 'primary' THEN album_mbid END) as primary_album_count,
-                COUNT(DISTINCT CASE WHEN type = 'contributor' THEN album_mbid END) as appears_on_album_count
-                FROM artist_album
-                GROUP BY artist_mbid
-        ) ac ON ac.artist_mbid = a.mbid
-        LEFT JOIN (
-            SELECT ta.artist_mbid, COUNT(DISTINCT source_id) as listens
-            FROM combined_playback_history_mat h
-            JOIN track_artist ta ON ta.track_id = h.track_id
-            GROUP BY ta.artist_mbid
-        ) lp ON lp.artist_mbid = a.mbid
-        WHERE a.name IS NOT NULL 
-          AND (
-              EXISTS (SELECT 1 FROM track_artist ta WHERE ta.artist_mbid = a.mbid)
-              OR EXISTS (SELECT 1 FROM artist_album aa WHERE aa.artist_mbid = a.mbid)
-          )
+                COUNT(DISTINCT album_mbid) FILTER (WHERE type = 'primary') as primary_count,
+                COUNT(DISTINCT album_mbid) FILTER (WHERE type = 'contributor') as appears_count
+            FROM artist_album
+            WHERE artist_mbid = a.mbid
+        ) ac ON TRUE
+        -- 3. Lateral Playback History (Massive performance gain here)
+        LEFT JOIN LATERAL (
+            SELECT COUNT(h.source_id) as listens
+            FROM track_artist ta
+            JOIN combined_playback_history_mat h ON h.track_id = ta.track_id
+            WHERE ta.artist_mbid = a.mbid
+        ) lp ON TRUE
+        WHERE a.name IS NOT NULL
     """
 
     params = []
@@ -218,7 +222,6 @@ async def get_artists(
             param_num += 1
 
     query += (
-        " GROUP BY a.mbid, a.name, a.image_url, a.artwork_id, ar.sha1, a.bio, a.sort_name, ac.primary_album_count, ac.appears_on_album_count, lp.listens"
         " ORDER BY LOWER(a.sort_name), a.sort_name"
     )
 
@@ -329,7 +332,6 @@ async def get_artists(
                 GROUP BY t.id, t.title, t.album, t.release_date, t.duration_seconds,
                          t.codec, t.bit_depth, t.sample_rate_hz, a.sha1, t.release_mbid
                 ORDER BY plays DESC
-                LIMIT 10
             """
             l_rows = await db.fetch(listened_query, mbid_val)
             artist_data["most_listened"] = [
@@ -471,69 +473,72 @@ async def get_albums(
 
     # Unified Query rooted in artist_album
     query = """
+        WITH filtered_albums AS (
+            -- Get only the albums we actually need first
+            SELECT aa.album_mbid, aa.type, aa.artist_mbid
+            FROM artist_album aa
+            WHERE ($1::text IS NULL OR aa.artist_mbid = $1)
+            AND ($2::text IS NULL OR aa.album_mbid = $2)
+        )
         SELECT
             al.title as album,
             al.release_date,
-            al.release_date as year, -- Alias for frontend compatibility
+            al.release_date as year,
             al.release_type,
             al.description,
             al.peak_chart_position,
-            aa.album_mbid as album_mbid,
-            aa.album_mbid as mb_release_id,
-            
-            -- Dynamic Type Logic
-            MAX(CASE 
-                WHEN $1::text IS NOT NULL THEN
-                    CASE WHEN aa.type = 'contributor' THEN 'appears_on' ELSE 'main' END
-                ELSE 'main'
-            END) as type,
-            
-            -- Track Aggregates (from track table)
-            COUNT(t.id) as track_count,
-            SUM(t.duration_seconds) as total_duration,
-            MAX(CASE WHEN t.bit_depth > 16 OR t.sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
-            MAX(t.label) as label,
-            
-            -- Display Artist Name (from track tags)
-            COALESCE(MAX(t.album_artist), MAX(t.artist)) as artist_name,
-
-            -- Multi-Artist Links (Subquery)
-            (
-                SELECT jsonb_agg(DISTINCT jsonb_build_object('name', a2.name, 'mbid', a2.mbid, 'sort_name', a2.sort_name))
-                FROM artist_album aa2
-                JOIN artist a2 ON aa2.artist_mbid = a2.mbid
-                WHERE aa2.album_mbid = aa.album_mbid AND aa2.type = 'primary'
-            ) as artists,
-
-            -- Art
-            COALESCE(MAX(art.sha1), MAX(tart.sha1)) as art_sha1,
-
-            -- Links
-            COALESCE(
-                jsonb_agg(DISTINCT jsonb_build_object('type', el.type, 'url', el.url)) FILTER (WHERE el.url IS NOT NULL),
-                '[]'::jsonb
-            ) as external_links,
-            COALESCE(lp.listens, 0) as listens
-
-        FROM artist_album aa
-        JOIN album al ON aa.album_mbid = al.mbid
-        LEFT JOIN track t ON t.release_mbid = aa.album_mbid
-        LEFT JOIN artwork art ON al.artwork_id = art.id
-        LEFT JOIN artwork tart ON t.artwork_id = tart.id
-        LEFT JOIN external_link el ON el.entity_type = 'album' AND (el.entity_id = al.release_group_mbid OR el.entity_id = t.release_group_mbid)
+            fa.album_mbid,
+            fa.album_mbid as mb_release_id,
+            CASE 
+                WHEN $1 IS NOT NULL AND fa.type = 'contributor' THEN 'appears_on' 
+                ELSE 'main' 
+            END as type,
+            tr.track_count,
+            tr.total_duration,
+            tr.is_hires,
+            tr.label,
+            tr.artist_name,
+            ma.artists,
+            art.sha1 AS art_sha1,
+            lk.external_links,
+            ls.listens
+        FROM filtered_albums fa
+        JOIN album al ON fa.album_mbid = al.mbid
+        -- Use LATERAL for track stats (avoids scanning the whole track table)
+        LEFT JOIN LATERAL (
+            SELECT 
+            COUNT(*) as track_count,
+            SUM(duration_seconds) as total_duration,
+            MAX(CASE WHEN bit_depth > 16 OR sample_rate_hz > 44100 THEN 1 ELSE 0 END) as is_hires,
+            MAX(label) as label,
+            COALESCE(MAX(album_artist), MAX(artist)) as artist_name
+            FROM track
+            WHERE release_mbid = fa.album_mbid
+        ) tr ON TRUE
+        -- Multi-Artist Links
         LEFT JOIN (
-            SELECT t.release_mbid as album_mbid, COUNT(DISTINCT h.source_id) as listens
-            FROM combined_playback_history_mat h
-            JOIN track t ON t.id = h.track_id
-            GROUP BY t.release_mbid
-        ) lp ON lp.album_mbid = aa.album_mbid
-
-        WHERE 
-            ($1::text IS NULL OR aa.artist_mbid = $1)
-            AND ($2::text IS NULL OR aa.album_mbid = $2)
-
-        GROUP BY aa.album_mbid, aa.type, al.mbid, lp.listens
-        ORDER BY al.release_date DESC
+            SELECT
+            aa2.album_mbid,
+            jsonb_agg(DISTINCT jsonb_build_object('name', ar2.name, 'mbid', ar2.mbid, 'sort_name', ar2.sort_name)) AS artists
+            FROM artist_album aa2
+            JOIN artist ar2 ON aa2.artist_mbid = ar2.mbid
+            WHERE aa2.type = 'primary'
+            GROUP BY 1
+        ) ma ON al.mbid = ma.album_mbid
+        LEFT JOIN artwork art ON al.artwork_id = art.id
+        -- Only aggregate links for the relevant albums
+        LEFT JOIN LATERAL (
+            SELECT jsonb_agg(DISTINCT jsonb_build_object('type', type, 'url', url)) AS external_links
+            FROM external_link
+            WHERE entity_id = al.release_group_mbid AND entity_type = 'album'
+        ) lk ON TRUE
+        -- Listen count
+        LEFT JOIN (
+            SELECT lt.release_mbid, COUNT(*) AS listens
+            FROM track lt
+            JOIN combined_playback_history_mat h ON lt.id = h.track_id
+            GROUP BY 1
+        ) ls ON al.mbid = ls.release_mbid;
     """
     
     # Execute

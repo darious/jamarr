@@ -27,18 +27,18 @@ async def history_data(db):
     await db.execute("REFRESH MATERIALIZED VIEW combined_playback_history_mat")
 
 @pytest.mark.asyncio
-async def test_history_pagination(client: AsyncClient, db, history_data):
+async def test_history_pagination(auth_client: AsyncClient, db, history_data):
     # Default: limit 20
     # We must widen range because default last 7 days truncates our 30-item dataset
     date_from = (datetime.now() - timedelta(days=60)).date().isoformat()
     date_to = datetime.now().date().isoformat()
-    response = await client.get(f"/api/history/tracks?from={date_from}&to={date_to}")
+    response = await auth_client.get(f"/api/history/tracks?from={date_from}&to={date_to}")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 20
     
     # Page 2: should have remaining 10 items (total 30)
-    response = await client.get(
+    response = await auth_client.get(
         f"/api/history/tracks?from={date_from}&to={date_to}&page=2"
     )
     assert response.status_code == 200
@@ -46,7 +46,7 @@ async def test_history_pagination(client: AsyncClient, db, history_data):
     assert len(data) == 10
     
     # Explicit limit
-    response = await client.get(
+    response = await auth_client.get(
         f"/api/history/tracks?from={date_from}&to={date_to}&limit=5"
     )
     assert response.status_code == 200
@@ -54,7 +54,7 @@ async def test_history_pagination(client: AsyncClient, db, history_data):
     assert len(data) == 5
 
 @pytest.mark.asyncio
-async def test_history_days_filter(client: AsyncClient, db, history_data):
+async def test_history_days_filter(auth_client: AsyncClient, db, history_data):
     # Filter last 7 days (including today) -> should account for roughly 7-8 entries 
     # depending on exact timing, but let's check it filters *some* out
     # 7 days ago timestamp logic in backend uses: timestamp > NOW - 7 days.
@@ -63,7 +63,7 @@ async def test_history_days_filter(client: AsyncClient, db, history_data):
     
     date_from = (datetime.now() - timedelta(days=6)).date().isoformat()
     date_to = datetime.now().date().isoformat()
-    response = await client.get(f"/api/history/tracks?from={date_from}&to={date_to}")
+    response = await auth_client.get(f"/api/history/tracks?from={date_from}&to={date_to}")
     assert response.status_code == 200
     data = response.json()
     

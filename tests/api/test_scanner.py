@@ -3,7 +3,7 @@ from httpx import AsyncClient
 from unittest.mock import MagicMock
 
 @pytest.mark.asyncio
-async def test_scan_endpoints(client: AsyncClient, db):
+async def test_scan_endpoints(auth_client: AsyncClient, db):
     # Mock ScanManager to avoid conflicts and background tasks
     from unittest.mock import AsyncMock, patch
     
@@ -18,12 +18,12 @@ async def test_scan_endpoints(client: AsyncClient, db):
         mock_instance.get_music_path = MagicMock(return_value="/app/music")
         
         # 1. Trigger Filesystem Scan
-        response = await client.post("/api/library/scan", json={"type": "filesystem", "path": "/app/music"})
+        response = await auth_client.post("/api/library/scan", json={"type": "filesystem", "path": "/app/music"})
         assert response.status_code == 200
         assert response.json()["message"] == "Filesystem scan started"
         
         # 2. Trigger Metadata Scan
-        response = await client.post("/api/library/scan", json={"type": "metadata", "path": "/app/music"})
+        response = await auth_client.post("/api/library/scan", json={"type": "metadata", "path": "/app/music"})
         assert response.status_code == 200
         assert response.json()["message"] == "Metadata update started"
     
@@ -37,12 +37,12 @@ async def test_scan_endpoints(client: AsyncClient, db):
     # The patch above patches 'app.api.scan.ScanManager'.
     
     # 3. Status
-    response = await client.get("/api/library/status")
+    response = await auth_client.get("/api/library/status")
     # Without mock, it returns real status (which is fine if we stopped scans)
     assert response.status_code == 200
     
     # 4. Cancel
-    response = await client.post("/api/library/cancel")
+    response = await auth_client.post("/api/library/cancel")
     assert response.status_code == 200
 
 

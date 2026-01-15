@@ -661,7 +661,9 @@ async def sync_scrobbles_for_user(
 
 
 @router.get("/api/lastfm/events")
-async def lastfm_events():
+async def lastfm_events(
+    user: asyncpg.Record = Depends(get_current_user_jwt),
+):
     manager = LastfmSyncManager.get_instance()
 
     async def event_generator():

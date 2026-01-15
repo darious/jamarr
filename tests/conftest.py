@@ -1,4 +1,5 @@
 import pytest
+import warnings
 import os
 import asyncpg
 from typing import AsyncGenerator
@@ -12,6 +13,13 @@ DB_PORT = int(os.getenv("DB_PORT", "8110"))
 DB_USER = os.getenv("DB_USER", "jamarr")
 DB_PASS = os.getenv("DB_PASS", "jamarr")
 DB_NAME = os.getenv("DB_NAME", "jamarr")
+
+warnings.filterwarnings(
+    "ignore",
+    message=".*iscoroutinefunction.*",
+    category=DeprecationWarning,
+    module=r"slowapi\..*",
+)
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -109,7 +117,7 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
 @pytest.fixture
 async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
-    """Helper to create a user and log in, returning a session token."""
+    """Helper to create a user and log in, returning an access token."""
     user_data = {
         "username": "testuser",
         "email": "test@example.com",
@@ -121,7 +129,7 @@ async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
     response = await client.post("/api/auth/signup", json=user_data)
     
     if response.status_code == 200:
-        return response.cookies["jamarr_session"]
+        return response.json()["access_token"]
 
     # 2. If Signup Failed (User Exists), Try Login
     response = await client.post("/api/auth/login", json={
@@ -130,7 +138,7 @@ async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
     })
     
     if response.status_code == 200:
-        return response.cookies["jamarr_session"]
+        return response.json()["access_token"]
         
     # 3. If Login Failed (Stale/Wrong Password), Force Delete and Retry
     # We must use the DB connection to nuke the user since we can't login
@@ -140,7 +148,20 @@ async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
     # Retry Signup
     response = await client.post("/api/auth/signup", json=user_data)
     assert response.status_code == 200, "Signup failed after user deletion"
-    return response.cookies["jamarr_session"]
+    return response.json()["access_token"]
+
+
+@pytest.fixture
+async def auth_headers(auth_token: str) -> dict:
+    return {"Authorization": f"Bearer {auth_token}"}
+
+
+@pytest.fixture
+async def auth_client(client: AsyncClient, auth_headers: dict) -> AsyncGenerator[AsyncClient, None]:
+    client.headers.update(auth_headers)
+    yield client
+    for key in auth_headers:
+        client.headers.pop(key, None)
 
 
 @pytest.fixture

@@ -20,6 +20,8 @@ JWT_ISSUER = os.getenv("JWT_ISSUER", "jamarr")
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "jamarr-api")
 ACCESS_TOKEN_TTL_MINUTES = int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "10"))
 REFRESH_TOKEN_TTL_DAYS = int(os.getenv("REFRESH_TOKEN_TTL_DAYS", "21"))
+STREAM_TOKEN_TTL_SECONDS = int(os.getenv("STREAM_TOKEN_TTL_SECONDS", "300"))
+STREAM_TOKEN_AUDIENCE = os.getenv("STREAM_TOKEN_AUDIENCE", "jamarr-stream")
 
 
 def _get_jwt_settings() -> dict:
@@ -32,6 +34,19 @@ def _get_jwt_settings() -> dict:
         "issuer": os.getenv("JWT_ISSUER", "jamarr"),
         "audience": os.getenv("JWT_AUDIENCE", "jamarr-api"),
         "ttl_minutes": int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "10")),
+    }
+
+
+def _get_stream_jwt_settings() -> dict:
+    secret_key = os.getenv("JWT_SECRET_KEY", "")
+    if not secret_key and os.getenv("ENV", "development") != "production":
+        secret_key = "dev-secret"
+    return {
+        "secret_key": secret_key,
+        "algorithm": os.getenv("JWT_ALGORITHM", "HS256"),
+        "issuer": os.getenv("JWT_ISSUER", "jamarr"),
+        "audience": os.getenv("STREAM_TOKEN_AUDIENCE", "jamarr-stream"),
+        "ttl_seconds": int(os.getenv("STREAM_TOKEN_TTL_SECONDS", "300")),
     }
 
 
@@ -72,6 +87,7 @@ def create_access_token(user_id: int, expires_delta: Optional[timedelta] = None)
         "iat": now,           # Issued at
         "iss": settings["issuer"],    # Issuer
         "aud": settings["audience"],  # Audience
+        "roles": ["user"],
     }
     
     encoded_jwt = jwt.encode(
@@ -80,6 +96,72 @@ def create_access_token(user_id: int, expires_delta: Optional[timedelta] = None)
         algorithm=settings["algorithm"],
     )
     return encoded_jwt
+
+
+def create_stream_token(
+    track_id: int,
+    user_id: Optional[int] = None,
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """Create a short-lived stream token bound to a specific track."""
+    settings = _get_stream_jwt_settings()
+    _validate_jwt_config(settings["secret_key"])
+
+    if expires_delta is None:
+        expires_delta = timedelta(seconds=settings["ttl_seconds"])
+
+    now = datetime.now(timezone.utc)
+    expire = now + expires_delta
+
+    claims = {
+        "sub": "stream",
+        "exp": expire,
+        "iat": now,
+        "iss": settings["issuer"],
+        "aud": settings["audience"],
+        "track_id": track_id,
+    }
+    if user_id is not None:
+        claims["user_id"] = user_id
+
+    return jwt.encode(
+        claims,
+        settings["secret_key"],
+        algorithm=settings["algorithm"],
+    )
+
+
+def verify_stream_token(token: str, track_id: int) -> dict:
+    """Verify a stream token and ensure it matches the requested track."""
+    settings = _get_stream_jwt_settings()
+    _validate_jwt_config(settings["secret_key"])
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings["secret_key"],
+            algorithms=[settings["algorithm"]],
+            issuer=settings["issuer"],
+            audience=settings["audience"],
+        )
+    except JWTError as e:
+        detail = "Invalid stream token"
+        if "expired" in str(e).lower():
+            detail = "Stream token has expired"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if payload.get("track_id") != track_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Stream token does not match track",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return payload
 
 
 def verify_access_token(token: str) -> dict:

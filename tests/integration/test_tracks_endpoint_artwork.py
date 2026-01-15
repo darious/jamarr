@@ -1,7 +1,7 @@
 import pytest
 
 @pytest.mark.asyncio
-async def test_tracks_endpoint_returns_artwork(client, db):
+async def test_tracks_endpoint_returns_artwork(auth_client, db):
     """
     Verify that /api/tracks endpoint returns art_sha1.
     """
@@ -34,7 +34,7 @@ async def test_tracks_endpoint_returns_artwork(client, db):
     )
 
     # 2. Execute Request (Query by Album to avoid complex artist SQL filter issues)
-    response = await client.get("/api/tracks?album=Debug%20Album")
+    response = await auth_client.get("/api/tracks?album=Debug%20Album")
     assert response.status_code == 200
     data = response.json()
     

@@ -13,9 +13,9 @@ async def player_data(db):
     """)
 
 @pytest.mark.asyncio
-async def test_player_state_initial(client: AsyncClient, db):
+async def test_player_state_initial(auth_client: AsyncClient, db):
     # Initial state should be empty/stopped
-    response = await client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
+    response = await auth_client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
     assert response.status_code == 200
     data = response.json()
     assert data["queue"] == []
@@ -23,19 +23,19 @@ async def test_player_state_initial(client: AsyncClient, db):
     assert "local:test-client" in data["renderer"]
 
 @pytest.mark.asyncio
-async def test_set_queue(client: AsyncClient, db, player_data):
+async def test_set_queue(auth_client: AsyncClient, db, player_data):
     # Set queue
     track1 = {"id": 10, "title": "Song A", "artist": "Artist A", "path": "/music/t1.flac", "duration_seconds": 200, "album": "Album A"}
     track2 = {"id": 11, "title": "Song B", "artist": "Artist A", "path": "/music/t2.flac", "duration_seconds": 200, "album": "Album A"}
     
-    response = await client.post("/api/player/queue", 
+    response = await auth_client.post("/api/player/queue", 
         json={"queue": [track1, track2], "start_index": 0},
         headers={"X-Jamarr-Client-Id": "test-client"}
     )
     assert response.status_code == 200, response.text
     
     # Verify State
-    response = await client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
+    response = await auth_client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
     data = response.json()
     assert len(data["queue"]) == 2
     assert data["current_index"] == 0
@@ -44,54 +44,54 @@ async def test_set_queue(client: AsyncClient, db, player_data):
     # But database state should be updated initially.
 
 @pytest.mark.asyncio
-async def test_append_queue(client: AsyncClient, db, player_data):
+async def test_append_queue(auth_client: AsyncClient, db, player_data):
     # Setup initial queue
     track1 = {"id": 10, "title": "Song A", "artist": "Artist A", "path": "/music/t1.flac", "duration_seconds": 200, "album": "Album A"}
-    await client.post("/api/player/queue", 
+    await auth_client.post("/api/player/queue", 
         json={"queue": [track1], "start_index": 0},
         headers={"X-Jamarr-Client-Id": "test-client"}
     )
     
     # Append
     track3 = {"id": 12, "title": "Song C", "artist": "Artist B", "path": "/music/t3.flac", "duration_seconds": 300, "album": "Album B"}
-    response = await client.post("/api/player/queue/append",
+    response = await auth_client.post("/api/player/queue/append",
         json={"tracks": [track3]},
         headers={"X-Jamarr-Client-Id": "test-client"}
     )
     assert response.status_code == 200
     
     # Verify
-    response = await client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
+    response = await auth_client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
     data = response.json()
     assert len(data["queue"]) == 2
     assert data["queue"][1]["title"] == "Song C"
 
 @pytest.mark.asyncio
-async def test_set_index(client: AsyncClient, db, player_data):
+async def test_set_index(auth_client: AsyncClient, db, player_data):
     # Setup queue with multiple items
     track1 = {"id": 10, "title": "Song A", "artist": "Artist A", "path": "/music/t1.flac", "duration_seconds": 200, "album": "Album A"}
     track2 = {"id": 11, "title": "Song B", "artist": "Artist A", "path": "/music/t2.flac", "duration_seconds": 200, "album": "Album A"}
-    await client.post("/api/player/queue", 
+    await auth_client.post("/api/player/queue", 
         json={"queue": [track1, track2], "start_index": 0},
         headers={"X-Jamarr-Client-Id": "test-client"}
     )
     
     # Skip to next
-    response = await client.post("/api/player/index",
+    response = await auth_client.post("/api/player/index",
         json={"index": 1},
         headers={"X-Jamarr-Client-Id": "test-client"}
     )
     assert response.status_code == 200
     
     # Verify
-    response = await client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
+    response = await auth_client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
     data = response.json()
     assert data["current_index"] == 1
 
 @pytest.mark.asyncio
-async def test_history(client: AsyncClient, db, player_data):
+async def test_history(auth_client: AsyncClient, db, player_data):
     # Retrieve History (empty)
-    response = await client.get("/api/history/tracks")
+    response = await auth_client.get("/api/history/tracks")
     assert response.status_code == 200
     assert response.json() == []
     
@@ -102,66 +102,66 @@ async def test_history(client: AsyncClient, db, player_data):
     """)
     await db.execute("REFRESH MATERIALIZED VIEW combined_playback_history_mat")
     
-    response = await client.get("/api/history/tracks")
+    response = await auth_client.get("/api/history/tracks")
     data = response.json()
     assert len(data) == 1
     assert data[0]["track"]["id"] == 10
     
     # Stats
-    response = await client.get("/api/history/stats")
+    response = await auth_client.get("/api/history/stats")
     data = response.json()
     assert len(data["tracks"]) == 1
     assert data["tracks"][0]["plays"] == 1
 
 @pytest.mark.asyncio
-async def test_transport_controls(client: AsyncClient, db, player_data):
+async def test_transport_controls(auth_client: AsyncClient, db, player_data):
     headers = {"X-Jamarr-Client-Id": "test-client"}
     
     # 1. Volume
-    response = await client.post("/api/player/volume", json={"percent": 50}, headers=headers)
+    response = await auth_client.post("/api/player/volume", json={"percent": 50}, headers=headers)
     assert response.status_code == 200, response.text
     
     # 2. Seek
-    response = await client.post("/api/player/seek", json={"seconds": 30}, headers=headers)
+    response = await auth_client.post("/api/player/seek", json={"seconds": 30}, headers=headers)
     assert response.status_code == 200
     
     # 3. Pause
-    response = await client.post("/api/player/pause", headers=headers)
+    response = await auth_client.post("/api/player/pause", headers=headers)
     assert response.status_code == 200
     
     # 4. Resume
-    response = await client.post("/api/player/resume", headers=headers)
+    response = await auth_client.post("/api/player/resume", headers=headers)
     assert response.status_code == 200
     
     # 5. Play (requires queue)
     # Set queue first
     track1 = {"id": 10, "title": "Song A", "artist": "Artist A", "path": "/music/t1.flac", "duration_seconds": 200, "album": "Album A"}
-    await client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
+    await auth_client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
     
-    response = await client.post("/api/player/play", json={"track_id": 10}, headers=headers)
+    response = await auth_client.post("/api/player/play", json={"track_id": 10}, headers=headers)
     assert response.status_code == 200
 
 @pytest.mark.asyncio
-async def test_log_play_legacy(client: AsyncClient, db, player_data):
+async def test_log_play_legacy(auth_client: AsyncClient, db, player_data):
     """Test legacy log-play endpoint (now a no-op but returns 200)."""
-    response = await client.post("/api/player/log-play", 
+    response = await auth_client.post("/api/player/log-play", 
         json={"track_id": 10, "timestamp": "2023-01-01T12:00:00"},
         headers={"X-Jamarr-Client-Id": "test-client"}
     )
     assert response.status_code == 200
 
 @pytest.mark.asyncio
-async def test_progress_logs_history(client: AsyncClient, db, player_data):
+async def test_progress_logs_history(auth_client: AsyncClient, db, player_data):
     """Test that progress updates trigger history logging."""
     headers = {"X-Jamarr-Client-Id": "test-client"}
     
     # Setup Queue
     track1 = {"id": 10, "title": "Song A", "artist": "Artist A", "path": "/music/t1.flac", "duration_seconds": 200, "album": "Album A"}
-    await client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
+    await auth_client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
     
     # Send Progress update > threshold (threshold is min(30, 20% of 200 = 40)) -> 30s
     # Sending 35 seconds should trigger log
-    response = await client.post("/api/player/progress", 
+    response = await auth_client.post("/api/player/progress", 
         json={"position_seconds": 35, "is_playing": True},
         headers=headers
     )
@@ -173,18 +173,18 @@ async def test_progress_logs_history(client: AsyncClient, db, player_data):
 
     # Verify automatic materialized view refresh via API
     # The stats endpoint should now reflect the new play without manual refresh
-    response = await client.get("/api/history/stats")
+    response = await auth_client.get("/api/history/stats")
     stats = response.json()
     assert len(stats["tracks"]) == 1
     assert stats["tracks"][0]["plays"] == 1
 
     # Verify state persistence (logged flag)
-    response = await client.get("/api/player/state", headers=headers)
+    response = await auth_client.get("/api/player/state", headers=headers)
     state = response.json()
     assert state['queue'][0]['logged'] is True
 
     # Send another progress update, should NOT log again
-    response = await client.post("/api/player/progress", 
+    response = await auth_client.post("/api/player/progress", 
         json={"position_seconds": 40, "is_playing": True},
         headers=headers
     )
@@ -194,8 +194,8 @@ async def test_progress_logs_history(client: AsyncClient, db, player_data):
     assert len(rows) == 1
 
 @pytest.mark.asyncio
-async def test_renderers(client: AsyncClient, db):
-    response = await client.get("/api/renderers")
+async def test_renderers(auth_client: AsyncClient, db):
+    response = await auth_client.get("/api/renderers")
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, list)
@@ -206,7 +206,7 @@ async def test_renderers(client: AsyncClient, db):
         assert "type" in renderer
 
 @pytest.mark.asyncio
-async def test_queue_artwork(client: AsyncClient, db):
+async def test_queue_artwork(auth_client: AsyncClient, db):
     # Insert artwork
     await db.execute("INSERT INTO artwork (id, sha1, path_on_disk) VALUES (900, '999999', '/tmp/art.jpg')")
     # Insert track with artwork
@@ -218,26 +218,26 @@ async def test_queue_artwork(client: AsyncClient, db):
     track = {"id": 20, "title": "Art Song", "artist": "Art Artist", "path": "/music/art.flac", "duration_seconds": 100, "album": "Art Album", "art_sha1": "999999"}
     
     # Set Queue
-    await client.post("/api/player/queue", 
+    await auth_client.post("/api/player/queue", 
         json={"queue": [track], "start_index": 0},
         headers={"X-Jamarr-Client-Id": "test-client"}
     )
     
     # Check State
-    response = await client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
+    response = await auth_client.get("/api/player/state", headers={"X-Jamarr-Client-Id": "test-client"})
     data = response.json()
     q_track = data["queue"][0]
     assert q_track["art_sha1"] == "999999"
 
 @pytest.mark.asyncio
-async def test_clear_queue_stops_playback(client: AsyncClient, db, player_data):
+async def test_clear_queue_stops_playback(auth_client: AsyncClient, db, player_data):
     headers = {"X-Jamarr-Client-Id": "test-client"}
     track1 = {"id": 10, "title": "Song A", "artist": "Artist A", "path": "/music/t1.flac", "duration_seconds": 200, "album": "Album A"}
     track2 = {"id": 11, "title": "Song B", "artist": "Artist A", "path": "/music/t2.flac", "duration_seconds": 200, "album": "Album A"}
 
-    await client.post("/api/player/queue", json={"queue": [track1, track2], "start_index": 0}, headers=headers)
+    await auth_client.post("/api/player/queue", json={"queue": [track1, track2], "start_index": 0}, headers=headers)
 
-    resp = await client.post("/api/player/queue/clear", headers=headers)
+    resp = await auth_client.post("/api/player/queue/clear", headers=headers)
     assert resp.status_code == 200, resp.text
     cleared = resp.json()["state"]
     assert cleared["queue"] == []
@@ -246,7 +246,7 @@ async def test_clear_queue_stops_playback(client: AsyncClient, db, player_data):
     assert cleared["transport_state"] == "STOPPED"
 
     # Verify persisted state
-    state_resp = await client.get("/api/player/state", headers=headers)
+    state_resp = await auth_client.get("/api/player/state", headers=headers)
     state = state_resp.json()
     assert state["queue"] == []
     assert state["current_index"] == -1
@@ -255,17 +255,17 @@ async def test_clear_queue_stops_playback(client: AsyncClient, db, player_data):
 
 
 @pytest.mark.asyncio
-async def test_reorder_queue_preserves_current_track(client: AsyncClient, db, player_data):
+async def test_reorder_queue_preserves_current_track(auth_client: AsyncClient, db, player_data):
     headers = {"X-Jamarr-Client-Id": "test-client"}
     track1 = {"id": 10, "title": "Song A", "artist": "Artist A", "path": "/music/t1.flac", "duration_seconds": 200, "album": "Album A"}
     track2 = {"id": 11, "title": "Song B", "artist": "Artist A", "path": "/music/t2.flac", "duration_seconds": 200, "album": "Album A"}
     track3 = {"id": 12, "title": "Song C", "artist": "Artist B", "path": "/music/t3.flac", "duration_seconds": 300, "album": "Album B"}
 
     # set queue and play second track
-    await client.post("/api/player/queue", json={"queue": [track1, track2, track3], "start_index": 1}, headers=headers)
+    await auth_client.post("/api/player/queue", json={"queue": [track1, track2, track3], "start_index": 1}, headers=headers)
 
     # reorder: move last to front
-    resp = await client.post("/api/player/queue/reorder", json={"queue": [track3, track1, track2]}, headers=headers)
+    resp = await auth_client.post("/api/player/queue/reorder", json={"queue": [track3, track1, track2]}, headers=headers)
     assert resp.status_code == 200, resp.text
     data = resp.json()["state"]
     assert [t["id"] for t in data["queue"]] == [12, 10, 11]
@@ -273,26 +273,26 @@ async def test_reorder_queue_preserves_current_track(client: AsyncClient, db, pl
     assert data["current_index"] == 2
 
     # persisted state
-    state_resp = await client.get("/api/player/state", headers=headers)
+    state_resp = await auth_client.get("/api/player/state", headers=headers)
     state = state_resp.json()
     assert [t["id"] for t in state["queue"]] == [12, 10, 11]
     assert state["current_index"] == 2
 
 
 @pytest.mark.asyncio
-async def test_set_renderer_persists_session(client: AsyncClient, db):
-    """Ensure renderer selection succeeds and stores client session mapping."""
+async def test_set_renderer_persists_session(auth_client: AsyncClient, db):
+    """Ensure renderer selection succeeds and stores auth_client session mapping."""
     headers = {"X-Jamarr-Client-Id": "renderer-test"}
     udn = "uuid:6be59c1-eebb-41d6-9f70-b25a08e60797"
 
-    resp = await client.post("/api/player/renderer", json={"udn": udn}, headers=headers)
+    resp = await auth_client.post("/api/player/renderer", json={"udn": udn}, headers=headers)
     assert resp.status_code == 200, resp.text
     assert resp.json()["active"] == udn
     row = await db.fetchrow("SELECT active_renderer_udn FROM client_session WHERE client_id=$1", "renderer-test")
     assert row and row["active_renderer_udn"] == udn
 
 @pytest.mark.asyncio
-async def test_history_grouping(client: AsyncClient, db, auth_token):
+async def test_history_grouping(auth_client: AsyncClient, db, auth_token):
     # Create artist first
     import uuid
     artist_mbid = str(uuid.uuid4())
@@ -327,7 +327,7 @@ async def test_history_grouping(client: AsyncClient, db, auth_token):
         )
     await db.execute("REFRESH MATERIALIZED VIEW combined_playback_history_mat")
         
-    response = await client.get("/api/history/stats")
+    response = await auth_client.get("/api/history/stats")
     stats = response.json()
     
     # Expect 1 Artist entry ("Main") with 2 plays
@@ -343,7 +343,7 @@ async def test_history_grouping(client: AsyncClient, db, auth_token):
     assert albums[0]["plays"] == 2
 
 @pytest.mark.asyncio
-async def test_history_stats_mine_scope(client: AsyncClient, db, player_data, auth_token):
+async def test_history_stats_mine_scope(auth_client: AsyncClient, db, player_data, auth_token):
     # Get user id from generated token
     user = await db.fetchrow("SELECT id FROM \"user\" WHERE username = $1", "testuser")
     assert user is not None
@@ -357,8 +357,7 @@ async def test_history_stats_mine_scope(client: AsyncClient, db, player_data, au
     await db.execute("REFRESH MATERIALIZED VIEW combined_playback_history_mat")
     
     # Request with scope=mine
-    client.cookies = {"jamarr_session": auth_token}
-    response = await client.get("/api/history/stats?scope=mine")
+    response = await auth_client.get("/api/history/stats?scope=mine")
     assert response.status_code == 200
     data = response.json()
     assert len(data["tracks"]) >= 1
@@ -366,7 +365,7 @@ async def test_history_stats_mine_scope(client: AsyncClient, db, player_data, au
 
 
 @pytest.mark.asyncio
-async def test_scrobble_triggers_on_history_log(client: AsyncClient, db, player_data, auth_token):
+async def test_scrobble_triggers_on_history_log(auth_client: AsyncClient, db, player_data, auth_token):
     """Test that logging history triggers Last.fm scrobble for enabled users."""
     from unittest.mock import patch, AsyncMock
     
@@ -393,7 +392,6 @@ async def test_scrobble_triggers_on_history_log(client: AsyncClient, db, player_
     with patch('app.lastfm.scrobble_track', new_callable=AsyncMock) as mock_scrobble:
         # Setup queue and trigger progress to log history
         headers = {"X-Jamarr-Client-Id": "test-client"}
-        client.cookies = {"jamarr_session": auth_token}
         
         track1 = {
             "id": 10,
@@ -405,10 +403,10 @@ async def test_scrobble_triggers_on_history_log(client: AsyncClient, db, player_
             "user_id": user_id
         }
         
-        await client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
+        await auth_client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
         
         # Send progress to trigger history log (and scrobble)
-        await client.post("/api/player/progress", 
+        await auth_client.post("/api/player/progress", 
             json={"position_seconds": 35, "is_playing": True},
             headers=headers
         )
@@ -426,7 +424,7 @@ async def test_scrobble_triggers_on_history_log(client: AsyncClient, db, player_
 
 
 @pytest.mark.asyncio
-async def test_scrobble_skipped_when_disabled(client: AsyncClient, db, player_data, auth_token):
+async def test_scrobble_skipped_when_disabled(auth_client: AsyncClient, db, player_data, auth_token):
     """Test that scrobbling is skipped when Last.fm is disabled."""
     from unittest.mock import patch, AsyncMock
     
@@ -452,7 +450,6 @@ async def test_scrobble_skipped_when_disabled(client: AsyncClient, db, player_da
     # Mock Last.fm scrobble function
     with patch('app.lastfm.scrobble_track', new_callable=AsyncMock) as mock_scrobble:
         headers = {"X-Jamarr-Client-Id": "test-client"}
-        client.cookies = {"jamarr_session": auth_token}
         
         track1 = {
             "id": 10,
@@ -464,8 +461,8 @@ async def test_scrobble_skipped_when_disabled(client: AsyncClient, db, player_da
             "user_id": user_id
         }
         
-        await client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
-        await client.post("/api/player/progress", 
+        await auth_client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
+        await auth_client.post("/api/player/progress", 
             json={"position_seconds": 35, "is_playing": True},
             headers=headers
         )
@@ -478,7 +475,7 @@ async def test_scrobble_skipped_when_disabled(client: AsyncClient, db, player_da
 
 
 @pytest.mark.asyncio
-async def test_scrobble_skipped_without_session_key(client: AsyncClient, db, player_data, auth_token):
+async def test_scrobble_skipped_without_session_key(auth_client: AsyncClient, db, player_data, auth_token):
     """Test that scrobbling is skipped when user has no session key."""
     from unittest.mock import patch, AsyncMock
     
@@ -491,7 +488,6 @@ async def test_scrobble_skipped_without_session_key(client: AsyncClient, db, pla
     # Mock Last.fm scrobble function
     with patch('app.lastfm.scrobble_track', new_callable=AsyncMock) as mock_scrobble:
         headers = {"X-Jamarr-Client-Id": "test-client"}
-        client.cookies = {"jamarr_session": auth_token}
         
         track1 = {
             "id": 10,
@@ -503,8 +499,8 @@ async def test_scrobble_skipped_without_session_key(client: AsyncClient, db, pla
             "user_id": user_id
         }
         
-        await client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
-        await client.post("/api/player/progress", 
+        await auth_client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
+        await auth_client.post("/api/player/progress", 
             json={"position_seconds": 35, "is_playing": True},
             headers=headers
         )

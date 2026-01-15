@@ -99,10 +99,9 @@ async def recommendation_data(db, auth_token):
 
 
 @pytest.mark.asyncio
-async def test_get_seeds_basic(client: AsyncClient, db, recommendation_data, auth_token):
+async def test_get_seeds_basic(auth_client: AsyncClient, db, recommendation_data, auth_token):
     """Test that seeds endpoint returns artists from playback history."""
-    client.cookies = {"jamarr_session": auth_token}
-    response = await client.get("/api/recommendations/seeds?days=7")
+    response = await auth_client.get("/api/recommendations/seeds?days=7")
     assert response.status_code == 200
     
     seeds = response.json()
@@ -111,10 +110,9 @@ async def test_get_seeds_basic(client: AsyncClient, db, recommendation_data, aut
 
 
 @pytest.mark.asyncio
-async def test_get_recommended_artists(client: AsyncClient, db, recommendation_data, auth_token):
+async def test_get_recommended_artists(auth_client: AsyncClient, db, recommendation_data, auth_token):
     """Test that artist recommendations are returned."""
-    client.cookies = {"jamarr_session": auth_token}
-    response = await client.get("/api/recommendations/artists?days=7")
+    response = await auth_client.get("/api/recommendations/artists?days=7")
     assert response.status_code == 200
     
     artists = response.json()

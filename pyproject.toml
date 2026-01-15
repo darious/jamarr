@@ -50,4 +50,5 @@ markers = [
 filterwarnings = [
     # Ignore harmless pycares event loop cleanup warning
     "ignore::pytest.PytestUnraisableExceptionWarning:_pytest.unraisableexception",
+    "ignore:.*iscoroutinefunction.*:DeprecationWarning:slowapi\\.extension",
 ]

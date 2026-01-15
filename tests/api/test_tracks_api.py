@@ -11,7 +11,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_get_tracks_by_artist(client, db):
+async def test_get_tracks_by_artist(auth_client, db):
     """
     Test that /api/tracks?artist=X returns tracks with artwork fields.
     
@@ -53,7 +53,7 @@ async def test_get_tracks_by_artist(client, db):
     )
     
     # Test 1: Query by artist name (this was crashing before the fix)
-    response = await client.get(f"/api/tracks?artist={artist_name}")
+    response = await auth_client.get(f"/api/tracks?artist={artist_name}")
     assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
     
     tracks = response.json()
@@ -70,7 +70,7 @@ async def test_get_tracks_by_artist(client, db):
 
 
 @pytest.mark.asyncio
-async def test_get_tracks_by_album(client, db):
+async def test_get_tracks_by_album(auth_client, db):
     """
     Test that /api/tracks?album=X returns tracks with artwork.
     """
@@ -92,7 +92,7 @@ async def test_get_tracks_by_album(client, db):
     """, track_id, album_name, artwork_id)
     
     # Query by album
-    response = await client.get(f"/api/tracks?album={album_name}")
+    response = await auth_client.get(f"/api/tracks?album={album_name}")
     assert response.status_code == 200
     
     tracks = response.json()
@@ -104,7 +104,7 @@ async def test_get_tracks_by_album(client, db):
 
 
 @pytest.mark.asyncio
-async def test_get_tracks_with_special_characters_in_artist_name(client, db):
+async def test_get_tracks_with_special_characters_in_artist_name(auth_client, db):
     """
     Test that artist names with special characters don't cause SQL errors.
     
@@ -133,7 +133,7 @@ async def test_get_tracks_with_special_characters_in_artist_name(client, db):
     )
     
     # This should not crash with SQL syntax error
-    response = await client.get(f"/api/tracks?artist={artist_name}")
+    response = await auth_client.get(f"/api/tracks?artist={artist_name}")
     assert response.status_code == 200
     
     tracks = response.json()
@@ -142,7 +142,7 @@ async def test_get_tracks_with_special_characters_in_artist_name(client, db):
 
 
 @pytest.mark.asyncio
-async def test_tracks_response_excludes_quick_hash_and_maps_release_ids(client, db):
+async def test_tracks_response_excludes_quick_hash_and_maps_release_ids(auth_client, db):
     """
     Ensure /api/tracks does not include quick_hash (binary column) and exposes
     release IDs via mb_release_id/mb_release_group_id aliases.
@@ -171,7 +171,7 @@ async def test_tracks_response_excludes_quick_hash_and_maps_release_ids(client, 
         track_id, artist_mbid
     )
 
-    response = await client.get(f"/api/tracks?artist={artist_name}")
+    response = await auth_client.get(f"/api/tracks?artist={artist_name}")
     assert response.status_code == 200
 
     tracks = response.json()

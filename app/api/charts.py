@@ -1,12 +1,17 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.charts import refresh_chart_task
 from app.db import get_pool
+from app.api.deps import get_current_user_jwt
 
-router = APIRouter(prefix="/charts", tags=["charts"])
+router = APIRouter(
+    prefix="/charts",
+    tags=["charts"],
+    dependencies=[Depends(get_current_user_jwt)],
+)
 
 class ChartAlbum(BaseModel):
     position: int
@@ -82,6 +87,6 @@ async def get_chart():
         return results
 
 @router.post("/refresh")
-async def refresh_chart(background_tasks: BackgroundTasks):
-    background_tasks.add_task(refresh_chart_task)
-    return {"status": "refreshing_started"}
+async def refresh_chart():
+    await refresh_chart_task()
+    return {"status": "refreshed"}

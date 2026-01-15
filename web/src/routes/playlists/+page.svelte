@@ -5,6 +5,7 @@
         fetchPlaylists,
         createPlaylist,
         getPlaylist,
+        getArtUrl,
         type Playlist,
     } from "$lib/api";
     import { goto } from "$app/navigation";
@@ -202,8 +203,8 @@
         }
     }
 
-    function getArtUrl(sha1: string, size: number = 300) {
-        return `/api/art/file/${sha1}?max_size=${size}`;
+    function getPlaylistArtUrl(sha1: string, size: number = 300) {
+        return getArtUrl(sha1, size);
     }
 </script>
 
@@ -323,7 +324,7 @@
                                     <div class="grid grid-cols-2 h-full w-full">
                                         {#each p.thumbnails.slice(0, 4) as thumb}
                                             <img
-                                                src={getArtUrl(thumb, 100)}
+                                                src={getPlaylistArtUrl(thumb, 300)}
                                                 alt=""
                                                 class="w-full h-full object-cover"
                                                 loading="lazy"
@@ -333,7 +334,7 @@
                                     </div>
                                 {:else}
                                     <img
-                                        src={getArtUrl(p.thumbnails[0], 300)}
+                                        src={getPlaylistArtUrl(p.thumbnails[0], 600)}
                                         alt={p.name}
                                         class="w-full h-full object-cover"
                                         loading="lazy"

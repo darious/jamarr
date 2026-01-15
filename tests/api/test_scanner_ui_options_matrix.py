@@ -95,7 +95,7 @@ def strip_none(d: Dict) -> Dict:
 
 
 @pytest.mark.asyncio
-async def test_scanner_ui_option_matrix_exhaustive(client: AsyncClient, db):
+async def test_scanner_ui_option_matrix_exhaustive(auth_client: AsyncClient, db):
     """
     Exercise every combination of UI toggles to ensure the API routes the request
     to the correct ScanManager method with the exact payload we expect.
@@ -149,7 +149,7 @@ async def test_scanner_ui_option_matrix_exhaustive(client: AsyncClient, db):
 
             for task in tasks:
                 payload = strip_none(task)
-                resp = await client.post("/api/library/scan", json=payload)
+                resp = await auth_client.post("/api/library/scan", json=payload)
                 assert resp.status_code == 200, f"Failed combo {state} -> {payload}"
 
             expected_full = sum(1 for t in tasks if t["type"] == "full")

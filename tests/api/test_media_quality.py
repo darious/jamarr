@@ -59,8 +59,8 @@ async def seed_data(db: asyncpg.Connection):
 
 
 @pytest.mark.asyncio
-async def test_media_quality_summary(client: AsyncClient, seed_data):
-    response = await client.get("/api/media-quality/summary")
+async def test_media_quality_summary(auth_client: AsyncClient, seed_data):
+    response = await auth_client.get("/api/media-quality/summary")
     assert response.status_code == 200
     data = response.json()
     
@@ -89,36 +89,36 @@ async def test_media_quality_summary(client: AsyncClient, seed_data):
     assert alb_stats["link_stats"]["musicbrainz"] == 1  # rg1 has a link
 
 @pytest.mark.asyncio
-async def test_media_quality_items(client: AsyncClient, seed_data):
+async def test_media_quality_items(auth_client: AsyncClient, seed_data):
     # Test valid query - should return 2 release groups
-    response = await client.get("/api/media-quality/items?category=album&filter_type=total")
+    response = await auth_client.get("/api/media-quality/items?category=album&filter_type=total")
     assert response.status_code == 200
     items = response.json()
     assert len(items) == 2  # 2 unique release groups
     
     # Test missing artwork - should return rg2
-    response = await client.get("/api/media-quality/items?category=album&filter_type=artwork&filter_value=missing")
+    response = await auth_client.get("/api/media-quality/items?category=album&filter_type=artwork&filter_value=missing")
     assert response.status_code == 200
     items = response.json()
     assert len(items) == 1
     assert items[0]["mbid"] == "rg2"  # release_group_mbid
     
     # Test with artwork - should return rg1
-    response = await client.get("/api/media-quality/items?category=album&filter_type=artwork&filter_value=present")
+    response = await auth_client.get("/api/media-quality/items?category=album&filter_type=artwork&filter_value=present")
     assert response.status_code == 200
     items = response.json()
     assert len(items) == 1
     assert items[0]["mbid"] == "rg1"  # release_group_mbid
 
     # Test source fanart (for artists)
-    response = await client.get("/api/media-quality/items?category=artist&filter_type=source&filter_value=Fanart")
+    response = await auth_client.get("/api/media-quality/items?category=artist&filter_type=source&filter_value=Fanart")
     assert response.status_code == 200
     items = response.json()
     assert len(items) == 1
     assert items[0]["mbid"] == "artist2"
     
     # Test primary artists
-    response = await client.get("/api/media-quality/items?category=primary&filter_type=total")
+    response = await auth_client.get("/api/media-quality/items?category=primary&filter_type=total")
     assert response.status_code == 200
     items = response.json()
     assert len(items) == 1

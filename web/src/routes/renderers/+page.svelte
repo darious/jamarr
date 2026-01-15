@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { triggerScan } from "$lib/api";
+    import { fetchWithAuth, triggerScan } from "$lib/api";
     import TabButton from "$lib/components/TabButton.svelte";
 
     let renderers: any[] = [];
@@ -15,7 +15,7 @@
             const url = refresh
                 ? "/api/renderers?refresh=true"
                 : "/api/renderers";
-            const res = await fetch(url);
+            const res = await fetchWithAuth(url);
             if (!res.ok) throw new Error("Failed to fetch renderers");
             renderers = await res.json();
         } catch (e) {
@@ -54,7 +54,7 @@
 
     async function checkScanStatus() {
         try {
-            const res = await fetch("/api/scan-status");
+            const res = await fetchWithAuth("/api/scan-status");
             const data = await res.json();
             if (data.is_scanning) {
                 isScanning = true;
@@ -80,7 +80,7 @@
 
         pollInterval = setInterval(async () => {
             try {
-                const res = await fetch("/api/scan-status");
+                const res = await fetchWithAuth("/api/scan-status");
                 const data = await res.json();
                 isScanning = data.is_scanning;
                 scanStatus = data.message;
