@@ -205,15 +205,31 @@ class UPnPDeviceControl:
             await dmr.async_seek_rel_time(target)
             self.manager.log(f"Seeked to {target}")
 
-    async def set_volume(self, volume: int):
+    async def set_volume(self, volume: int) -> None:
         """Set volume (0-100)."""
         if not self.manager.active_renderer:
-            return
+            raise ValueError("No active renderer set")
 
         dmr = self.manager.dmr_devices.get(self.manager.active_renderer)
-        if dmr:
-            await dmr.async_set_volume(volume)
+        if not dmr:
+            raise ValueError(f"DMR device not found for {self.manager.active_renderer}")
+
+        try:
+            # Convert from 0-100 to 0.0-1.0 range
+            volume_level = volume / 100.0
+            await dmr.async_set_volume_level(volume_level)
             self.manager.log(f"Volume set to {volume}")
+            return
+        except (UpnpError, AttributeError) as exc:
+            logger.debug("async_set_volume_level failed for %s: %s, trying direct action", self.manager.active_renderer, exc)
+
+        # Fallback to direct action call
+        action = dmr._action("RenderingControl", "SetVolume")
+        if not action:
+            raise UpnpError("RenderingControl/SetVolume action not found")
+
+        await action.async_call(InstanceID=0, Channel="Master", DesiredVolume=volume)
+        self.manager.log(f"Volume set to {volume} via RenderingControl")
 
     async def get_position(self, udn: Optional[str] = None):
         """Get current playback position in seconds."""

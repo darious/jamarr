@@ -1,9 +1,9 @@
 from typing import Any, List
 
 import asyncpg
-from fastapi import APIRouter, Depends, Request, Response, Query
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 
-from app.auth import get_session_user
+from app.api.deps import get_optional_user_jwt
 from app.db import get_db
 from app.api.library import sha1_to_hex
 
@@ -23,17 +23,12 @@ async def get_playback_history(
     date_to: str | None = Query(None, alias="to"),
     page: int = 1,
     limit: int = 20,
-    request: Request = None,
+    current_user: asyncpg.Record | None = Depends(get_optional_user_jwt),
 ):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     async for db in get_db():
-        user_row, _ = (
-            await get_session_user(db, request.cookies.get("jamarr_session"))
-            if request
-            else (None, None)
-        )
         from datetime import date, timedelta
 
         today = date.today()
@@ -55,9 +50,11 @@ async def get_playback_history(
         ]
         params_list = [from_date, to_date]
 
-        if scope == "mine" and user_row:
+        if scope == "mine":
+            if not current_user:
+                raise HTTPException(status_code=401, detail="Not authenticated")
             where_clauses.append(f"h.user_id = ${len(params_list) + 1}")
-            params_list.append(user_row["id"])
+            params_list.append(current_user["id"])
 
         if source != "all":
             where_clauses.append(f"h.source = ${len(params_list) + 1}")
@@ -148,7 +145,6 @@ async def get_playback_history(
 @router.get("/api/history/stats")
 async def get_playback_history_stats(
     response: Response,
-    request: Request,
     scope: str = "all",
     source: str = "all",
     artist_mbid: str | None = None,
@@ -156,13 +152,13 @@ async def get_playback_history_stats(
     track_id: int | None = None,
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
+    current_user: asyncpg.Record | None = Depends(get_optional_user_jwt),
 ):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
 
     async for db in get_db():
-        user_row, _ = await get_session_user(db, request.cookies.get("jamarr_session"))
         from datetime import date, timedelta
 
         today = date.today()
@@ -183,9 +179,11 @@ async def get_playback_history_stats(
             "h.played_at < ($2::date + INTERVAL '1 day')",
         ]
         params: List[Any] = [from_date, to_date]
-        if scope == "mine" and user_row:
+        if scope == "mine":
+            if not current_user:
+                raise HTTPException(status_code=401, detail="Not authenticated")
             where_clauses.append(f"h.user_id = ${len(params) + 1}")
-            params.append(user_row["id"])
+            params.append(current_user["id"])
         if source != "all":
             where_clauses.append(f"h.source = ${len(params) + 1}")
             params.append(source)
