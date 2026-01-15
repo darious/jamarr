@@ -12,6 +12,7 @@
     reorderQueue,
   } from "$stores/player";
   import VolumeControl from "$components/VolumeControl.svelte";
+  import { getArtUrl } from "$lib/api";
   import TrackCard from "$components/TrackCard.svelte";
   import ArtistLinks from "$components/ArtistLinks.svelte";
   import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
@@ -58,8 +59,8 @@
     if (!track) return "/assets/logo.png";
     if (track.art_sha1) {
       return size > 0
-        ? `/api/art/file/${track.art_sha1}?max_size=${size}`
-        : `/api/art/file/${track.art_sha1}`;
+        ? getArtUrl(track.art_sha1, size)
+        : getArtUrl(track.art_sha1);
     }
     return "/assets/logo.png";
   };
@@ -307,7 +308,7 @@
         >
           <img
             class="absolute inset-0 w-full h-full object-cover"
-            src={getArt($playerState.queue[$playerState.current_index], 600)}
+            src={getArt($playerState.queue[$playerState.current_index])}
             alt={$playerState.queue[$playerState.current_index]?.title || "Art"}
           />
           <!-- Inner shadow for depth -->

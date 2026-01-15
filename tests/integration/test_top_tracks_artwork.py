@@ -1,7 +1,7 @@
 import pytest
 
 @pytest.mark.asyncio
-async def test_top_tracks_have_artwork(client, db):
+async def test_top_tracks_have_artwork(auth_client, db):
     """
     Verify that top tracks endpoint returns artwork SHA1.
     """
@@ -49,7 +49,7 @@ async def test_top_tracks_have_artwork(client, db):
     """, artist_mbid, track_id)
 
     # 2. Execute Request
-    response = await client.get(f"/api/artists?mbid={artist_mbid}")
+    response = await auth_client.get(f"/api/artists?mbid={artist_mbid}")
     assert response.status_code == 200
     data = response.json()[0]
     

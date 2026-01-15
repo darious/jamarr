@@ -2,7 +2,7 @@
 import pytest
 
 @pytest.mark.asyncio
-async def test_get_tracks_returns_artists_list(client, db):
+async def test_get_tracks_returns_artists_list(auth_client, db):
     """
     Test that /api/tracks returns a list of artist objects for each track.
     
@@ -46,7 +46,7 @@ async def test_get_tracks_returns_artists_list(client, db):
     )
     
     # Query
-    response = await client.get("/api/tracks?album=Test Album")
+    response = await auth_client.get("/api/tracks?album=Test Album")
     assert response.status_code == 200
     
     tracks = response.json()

@@ -114,6 +114,10 @@ export function setupTokenRefresh() {
  * Attempts to refresh token if refresh cookie exists
  */
 export async function initializeAuth(fetchImpl: typeof fetch = fetch): Promise<boolean> {
+    if (getAccessToken()) {
+        setupTokenRefresh();
+        return true;
+    }
     const success = await refreshAccessToken(fetchImpl);
     if (success) {
         setupTokenRefresh();

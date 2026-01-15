@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Artist } from "$lib/api";
+  import { getArtUrl } from "$lib/api";
   import { goto } from "$app/navigation";
   import TabButton from "$lib/components/TabButton.svelte";
 
@@ -120,7 +121,7 @@
                 <div class="h-[300px] w-[300px] overflow-hidden rounded-xl">
                 <img
                   src={artist.art_sha1
-                    ? `/art/file/${artist.art_sha1}?max_size=300`
+                    ? getArtUrl(artist.art_sha1, 300)
                     : "/assets/default-artist-placeholder.svg"}
                   alt={artist.name}
                   class="h-full w-full rounded-2xl object-cover transition-transform duration-200 group-hover:scale-[1.03]"

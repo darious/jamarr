@@ -143,6 +143,22 @@ export interface User {
     last_login?: string | null;
 }
 
+export function withAccessToken(url: string): string {
+    const token = getAccessToken();
+    if (!token || url.includes("access_token=")) return url;
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}access_token=${encodeURIComponent(token)}`;
+}
+
+export function getArtUrl(sha1: string | null | undefined, size?: number): string {
+    if (!sha1) return "";
+    let url = `/api/art/file/${sha1}`;
+    if (size) {
+        url += `?max_size=${size}`;
+    }
+    return url;
+}
+
 /**
  * Helper function to make authenticated API requests with JWT
  * Automatically adds Authorization header and handles token refresh on 401
@@ -152,8 +168,15 @@ export async function fetchWithAuth(
     options: RequestInit = {},
     fetchImpl: typeof fetch = fetch
 ): Promise<Response> {
-    const token = getAccessToken();
+    let token = getAccessToken();
     const headers = new Headers(options.headers);
+
+    if (!token) {
+        const refreshed = await refreshAccessToken(fetchImpl);
+        if (refreshed) {
+            token = getAccessToken();
+        }
+    }
 
     if (token) {
         headers.set('Authorization', `Bearer ${token}`);
@@ -185,7 +208,7 @@ export async function fetchWithAuth(
 }
 
 export async function fetchArtists(
-    fetchFn: any = fetch,
+    fetchFn: any = fetchWithAuth,
     options: { limit?: number; offset?: number; name?: string; mbid?: string, startsWith?: string } = {}
 ): Promise<Artist[]> {
     const params = new URLSearchParams();
@@ -200,13 +223,13 @@ export async function fetchArtists(
     return await res.json();
 }
 
-export async function fetchArtistIndex(fetchFn: any = fetch): Promise<string[]> {
+export async function fetchArtistIndex(fetchFn: any = fetchWithAuth): Promise<string[]> {
     const res = await fetchFn('/api/artists/index');
     if (!res.ok) throw new Error('Failed to fetch artist index');
     return await res.json();
 }
 
-export async function fetchAlbums(params: { artist?: string; artistMbid?: string; albumMbid?: string } = {}, fetchFn: any = fetch): Promise<Album[]> {
+export async function fetchAlbums(params: { artist?: string; artistMbid?: string; albumMbid?: string } = {}, fetchFn: any = fetchWithAuth): Promise<Album[]> {
     let url = '/api/albums';
     const query = new URLSearchParams();
 
@@ -230,7 +253,7 @@ export async function fetchAlbums(params: { artist?: string; artistMbid?: string
     return await res.json();
 }
 
-export async function fetchTracks(params: { album?: string, artist?: string, albumMbid?: string } = {}, fetchFn: any = fetch): Promise<Track[]> {
+export async function fetchTracks(params: { album?: string, artist?: string, albumMbid?: string } = {}, fetchFn: any = fetchWithAuth): Promise<Track[]> {
     // Note: Backend expects 'album' name as string, not ID.
     // The frontend route is /album/[artist]/[album], so we pass the album name.
     let url = '/api/tracks?';
@@ -244,8 +267,15 @@ export async function fetchTracks(params: { album?: string, artist?: string, alb
     return await res.json();
 }
 
+export async function getStreamUrl(trackId: number): Promise<string> {
+    const res = await fetchWithAuth(`/api/stream-url/${trackId}`);
+    if (!res.ok) throw new Error('Failed to fetch stream URL');
+    const data = await res.json();
+    return data.url;
+}
+
 export async function triggerScan(forceRescan: boolean = false): Promise<void> {
-    const res = await fetch('/api/library/scan', {
+    const res = await fetchWithAuth('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'filesystem', force: forceRescan })
@@ -254,7 +284,7 @@ export async function triggerScan(forceRescan: boolean = false): Promise<void> {
 }
 
 export async function triggerFilesystemScan(opts: { force?: boolean; path?: string } = {}): Promise<void> {
-    const res = await fetch('/api/library/scan', {
+    const res = await fetchWithAuth('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'filesystem', force: Boolean(opts.force), path: opts.path || null })
@@ -264,7 +294,7 @@ export async function triggerFilesystemScan(opts: { force?: boolean; path?: stri
 
 
 export async function refreshArtistMetadata(artistName: string): Promise<void> {
-    const res = await fetch('/api/library/scan', {
+    const res = await fetchWithAuth('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'metadata', artist_filter: artistName })
@@ -293,7 +323,7 @@ export type MetadataOptions = {
 
 export async function triggerMetadataScan(opts: MetadataOptions & { path?: string } = {} as any): Promise<void> {
     const path = opts.path;
-    const res = await fetch('/api/library/scan', {
+    const res = await fetchWithAuth('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -317,13 +347,13 @@ export async function triggerMetadataScan(opts: MetadataOptions & { path?: strin
 }
 
 export async function cancelScan(): Promise<void> {
-    const res = await fetch('/api/library/cancel', { method: 'POST' });
+    const res = await fetchWithAuth('/api/library/cancel', { method: 'POST' });
     if (!res.ok) throw new Error('Failed to cancel scan');
 }
 
 export async function triggerFullScan(opts: { force?: boolean; path?: string } & MetadataOptions): Promise<void> {
     const path = opts?.path;
-    const res = await fetch('/api/library/scan', {
+    const res = await fetchWithAuth('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -348,7 +378,7 @@ export async function triggerFullScan(opts: { force?: boolean; path?: string } &
 }
 
 export async function triggerPrune(): Promise<void> {
-    const res = await fetch('/api/library/scan', {
+    const res = await fetchWithAuth('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'prune' })
@@ -357,7 +387,7 @@ export async function triggerPrune(): Promise<void> {
 }
 
 export async function triggerOptimize(): Promise<void> {
-    const res = await fetch('/api/library/optimize', {
+    const res = await fetchWithAuth('/api/library/optimize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
     });
@@ -365,31 +395,31 @@ export async function triggerOptimize(): Promise<void> {
 }
 
 
-export async function fetchNewReleases(fetchFn: any = fetch): Promise<Album[]> {
+export async function fetchNewReleases(fetchFn: any = fetchWithAuth): Promise<Album[]> {
     const res = await fetchFn('/api/home/new-releases');
     if (!res.ok) throw new Error('Failed to fetch new releases');
     return await res.json();
 }
 
-export async function fetchRecentlyAddedAlbums(fetchFn: any = fetch): Promise<Album[]> {
+export async function fetchRecentlyAddedAlbums(fetchFn: any = fetchWithAuth): Promise<Album[]> {
     const res = await fetchFn('/api/home/recently-added-albums');
     if (!res.ok) throw new Error('Failed to fetch recently added albums');
     return await res.json();
 }
 
-export async function fetchRecentlyPlayedAlbums(fetchFn: any = fetch): Promise<Album[]> {
+export async function fetchRecentlyPlayedAlbums(fetchFn: any = fetchWithAuth): Promise<Album[]> {
     const res = await fetchFn('/api/history/albums');
     if (!res.ok) throw new Error('Failed to fetch recently played albums');
     return await res.json();
 }
 
-export async function fetchRecentlyPlayedArtists(fetchFn: any = fetch): Promise<Artist[]> {
+export async function fetchRecentlyPlayedArtists(fetchFn: any = fetchWithAuth): Promise<Artist[]> {
     const res = await fetchFn('/api/history/artists');
     if (!res.ok) throw new Error('Failed to fetch recently played artists');
     return await res.json();
 }
 
-export async function fetchDiscoverArtists(fetchFn: any = fetch): Promise<Artist[]> {
+export async function fetchDiscoverArtists(fetchFn: any = fetchWithAuth): Promise<Artist[]> {
     const res = await fetchFn('/api/home/discover-artists');
     if (!res.ok) throw new Error('Failed to fetch discover artists');
     return await res.json();
@@ -403,14 +433,14 @@ export interface MissingAlbum {
     musicbrainz_url: string | null;
 }
 
-export async function fetchMissingAlbums(mbid: string, fetchFn: any = fetch): Promise<MissingAlbum[]> {
+export async function fetchMissingAlbums(mbid: string, fetchFn: any = fetchWithAuth): Promise<MissingAlbum[]> {
     const res = await fetchFn(`/api/artists/${mbid}/missing`);
     if (!res.ok) throw new Error('Failed to fetch missing albums');
     return await res.json();
 }
 
 export async function triggerMissingAlbumsScan(mbid?: string, artistName?: string, path?: string): Promise<void> {
-    const res = await fetch('/api/library/scan', {
+    const res = await fetchWithAuth('/api/library/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -425,7 +455,7 @@ export async function triggerMissingAlbumsScan(mbid?: string, artistName?: strin
 
 
 export async function triggerPearlarrDownload(mbid: string): Promise<void> {
-    const res = await fetch('/api/download/pearlarr', {
+    const res = await fetchWithAuth('/api/download/pearlarr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mbid })
@@ -476,29 +506,15 @@ export async function logout(): Promise<void> {
 }
 
 export async function fetchCurrentUser(fetchFn: any = fetch): Promise<User | null> {
-    const token = getAccessToken();
-    if (!token) return null;
-
-    const res = await fetchFn('/api/auth/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-
-    if (res.status === 401) {
-        // Try to refresh token
-        const refreshed = await refreshAccessToken();
+    if (!getAccessToken()) {
+        const refreshed = await refreshAccessToken(fetchFn);
         if (!refreshed) return null;
-
-        // Retry with new token
-        const newToken = getAccessToken();
-        if (!newToken) return null;
-
-        const retryRes = await fetchFn('/api/auth/me', {
-            headers: { 'Authorization': `Bearer ${newToken}` }
-        });
-        if (!retryRes.ok) return null;
-        return await retryRes.json();
     }
 
+    const res = await fetchWithAuth('/api/auth/me', {}, fetchFn);
+    if (res.status === 401) {
+        return null;
+    }
     if (!res.ok) throw new Error('Failed to fetch current user');
     return await res.json();
 }
@@ -579,12 +595,12 @@ export async function fetchMediaQualityItems(
     search.append('filter_type', filterType);
     if (filterValue) search.append('filter_value', filterValue);
 
-    const res = await fetch(`/api/media-quality/items?${search.toString()}`);
+    const res = await fetchWithAuth(`/api/media-quality/items?${search.toString()}`);
     if (!res.ok) throw new Error('Failed to fetch media quality items');
     return await res.json();
 }
 
-export async function fetchMediaQualitySummary(fetchFn: any = fetch): Promise<MediaQualitySummary> {
+export async function fetchMediaQualitySummary(fetchFn: any = fetchWithAuth): Promise<MediaQualitySummary> {
     const res = await fetchFn('/api/media-quality/summary');
     if (!res.ok) throw new Error('Failed to fetch media quality summary');
     return await res.json();
@@ -715,14 +731,14 @@ export interface ChartAlbum {
     musicbrainz_url?: string;
 }
 
-export async function fetchChart(fetchFn: any = fetch): Promise<ChartAlbum[]> {
+export async function fetchChart(fetchFn: any = fetchWithAuth): Promise<ChartAlbum[]> {
     const res = await fetchFn('/api/charts');
     if (!res.ok) throw new Error('Failed to fetch chart');
     return await res.json();
 }
 
 export async function refreshChart(): Promise<void> {
-    const res = await fetch('/api/charts/refresh', { method: 'POST' });
+    const res = await fetchWithAuth('/api/charts/refresh', { method: 'POST' });
     if (!res.ok) throw new Error('Failed to refresh chart');
 }
 

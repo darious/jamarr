@@ -6,6 +6,8 @@
     triggerMissingAlbumsScan,
     triggerMetadataScan,
     triggerPearlarrDownload,
+    getArtUrl,
+    getPlaylist,
   } from "$lib/api";
   import { goto, invalidateAll } from "$app/navigation";
   import IconButton from "$components/IconButton.svelte";
@@ -15,6 +17,7 @@
   import ColorThief from "colorthief";
   import Tabs from "$lib/components/Tabs.svelte";
   import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
+  import { downloadTracks } from "$lib/helpers/downloader";
 
   let showPlaylistModal = false;
   let selectedTrackIds: number[] = [];
@@ -155,9 +158,9 @@
   // Extract accent color
   $: if (browser && artist) {
     const bgUrl = artist.background_sha1
-      ? `/art/file/${artist.background_sha1}`
+      ? getArtUrl(artist.background_sha1, 600)
       : artist.art_sha1
-        ? `/art/file/${artist.art_sha1}`
+        ? getArtUrl(artist.art_sha1, 300)
         : null;
 
     if (bgUrl) {
@@ -203,8 +206,8 @@
       .toUpperCase();
   };
 
-  const getArtUrl = (sha1: string) => {
-    return `/api/art/file/${sha1}`;
+  const getArtistArtUrl = (sha1: string) => {
+    return getArtUrl(sha1, 300);
   };
 
   $: displayedTopTracks = (() => {
@@ -332,8 +335,8 @@
           art_sha1: t.art_sha1 || null,
           codec: t.codec || null,
           bitrate: null,
-          sample_rate_hz: t.sample_rate_hz || null,
-          bit_depth: t.bit_depth || null,
+          sample_rate_hz: null,
+          bit_depth: null,
           plays: t.plays ?? undefined,
         };
       }
@@ -517,6 +520,37 @@
     if (ids.length) openPlaylistModal(ids);
   }
 
+  async function playAllMostListened() {
+    const playableTracks: Track[] = displayedMostListened
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (playableTracks.length > 0) {
+      await setQueue(playableTracks, 0);
+    }
+  }
+
+  async function queueAllMostListened() {
+    const playableTracks: Track[] = displayedMostListened
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (playableTracks.length > 0) {
+      await addToQueue(playableTracks);
+    }
+  }
+
+  async function openPlaylistModalForMostListened() {
+    const ids = displayedMostListened
+      .map((t) => t.id)
+      .filter((id) => id && id > 0) as number[];
+    if (ids.length) openPlaylistModal(ids);
+  }
+
   async function playAllSingles() {
     const allSingleTracks: Track[] = [];
     for (const single of displayedSingles) {
@@ -551,13 +585,46 @@
     if (ids.length) openPlaylistModal(ids);
   }
 
+  function downloadAllSingles() {
+    const allSingleTracks: Track[] = [];
+    for (const single of displayedSingles) {
+      if (single.tracksToPlay?.length) allSingleTracks.push(...single.tracksToPlay);
+    }
+    if (!allSingleTracks.length) return;
+    const artistName = artist?.sort_name || artist?.name || data.name;
+    void downloadTracks({ mode: "numbered_album", folderName: artistName, subFolderName: "zz_hits", tracks: allSingleTracks });
+  }
+
+  function downloadAllMostListened() {
+    const playableTracks: Track[] = displayedMostListened
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (!playableTracks.length) return;
+    const artistName = artist?.sort_name || artist?.name || data.name;
+    void downloadTracks({ mode: "numbered_album", folderName: artistName, subFolderName: "zz_scrobbles", tracks: playableTracks });
+  }
+
+  function downloadAllTopTracks() {
+    const playableTracks: Track[] = displayedTopTracks
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (!playableTracks.length) return;
+    const artistName = artist?.sort_name || artist?.name || data.name;
+    void downloadTracks({ mode: "numbered_album", folderName: artistName, subFolderName: "zz_scrobbles", tracks: playableTracks });
+  }
+
   async function playAlbum(album: Album) {
     const albumTracks = tracks.filter((t) => t.album === album.album);
     if (albumTracks.length) {
       await setQueue(albumTracks, 0);
     } else {
-      const albumId =
-        album.mb_release_id;
+      const albumId = album.mb_release_id;
       if (albumId) {
         goto(`/album/${albumId}`);
       } else {
@@ -584,6 +651,38 @@
     const track = tracks.find((t) => t.id === trackId);
     if (track) {
       await addToQueue([track]);
+    }
+  }
+
+  async function playPlaylist(e: MouseEvent, playlistId: number) {
+    e.stopPropagation();
+    try {
+      const playlist = await getPlaylist(playlistId);
+      if (playlist && playlist.tracks.length > 0) {
+        const queueItems = playlist.tracks.map((t) => ({
+          ...t,
+          id: t.track_id,
+        }));
+        await setQueue(queueItems as unknown as Track[], 0);
+      }
+    } catch (error) {
+      console.error("Failed to play playlist:", error);
+    }
+  }
+
+  async function queuePlaylist(e: MouseEvent, playlistId: number) {
+    e.stopPropagation();
+    try {
+      const playlist = await getPlaylist(playlistId);
+      if (playlist && playlist.tracks.length > 0) {
+        const queueItems = playlist.tracks.map((t) => ({
+          ...t,
+          id: t.track_id,
+        }));
+        await addToQueue(queueItems as unknown as Track[]);
+      }
+    } catch (error) {
+      console.error("Failed to queue playlist:", error);
     }
   }
 
@@ -686,9 +785,9 @@
       class="absolute inset-0 bg-cover bg-center blur-[100px] opacity-30 scale-110 saturate-[1.5]"
       style={`background-image:url('${
         artist?.background_sha1
-          ? `/art/file/${artist.background_sha1}`
+          ? getArtUrl(artist.background_sha1, 600)
           : artist?.art_sha1
-            ? `/art/file/${artist.art_sha1}`
+            ? getArtUrl(artist.art_sha1, 300)
             : "/assets/default-artist-placeholder.svg"
       }')`}
     ></div>
@@ -711,9 +810,9 @@
         class="absolute inset-0 bg-cover bg-top transition-transform duration-1000 scale-105 group-hover:scale-100"
         style={`background-image:url('${
           artist?.background_sha1
-            ? `/art/file/${artist.background_sha1}`
+            ? getArtUrl(artist.background_sha1)
             : artist?.art_sha1
-              ? `/art/file/${artist.art_sha1}`
+              ? getArtUrl(artist.art_sha1)
               : "/assets/default-artist-placeholder.svg"
         }');`}
       >
@@ -799,9 +898,7 @@
                 >
                   {#if sim.art_sha1}
                     <img
-                      src={sim.art_sha1
-                        ? `/art/file/${sim.art_sha1}`
-                        : ""}
+                      src={sim.art_sha1 ? getArtUrl(sim.art_sha1, 300) : ""}
                       class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
                       alt={sim.name}
                     />
@@ -894,19 +991,18 @@
             <div
               class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
             >
-              {#each displayedAlbums as album (album.album + album.artist_name)}
+              {#each displayedAlbums as album, index (album.mb_release_id ?? `${album.album}-${album.artist_name}-${index}`)}
                 <article class="group flex flex-col gap-4">
                   <button
                     class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-105"
                     on:click={() => {
-                      const albumId =
-                        album.mb_release_id;
+                      const albumId = album.mb_release_id;
                       if (albumId) goto(`/album/${albumId}`);
                     }}
                   >
                     <img
                       src={album.art_sha1
-                        ? `/art/file/${album.art_sha1}`
+                        ? getArtUrl(album.art_sha1, 600)
                         : "/assets/default-album-placeholder.svg"}
                       alt={album.album}
                       class="h-full w-full object-cover"
@@ -975,19 +1071,23 @@
           {/if}
         {:else if activeTab === "playlists"}
           {#if playlists.length > 0}
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+            <div
+              class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6"
+            >
               {#each playlists as p (p.id)}
                 <div
                   class="group relative block surface-glass-panel rounded-xl overflow-hidden hover:bg-surface-2 transition-all duration-300 hover:scale-105 hover:z-10 hover:shadow-xl"
                 >
-                  <div class="aspect-square w-full bg-surface-3 relative transition-transform duration-300">
+                  <div
+                    class="aspect-square w-full bg-surface-3 relative transition-transform duration-300"
+                  >
                     <a href="/playlists/{p.id}" class="block w-full h-full">
                       {#if p.thumbnails && p.thumbnails.length > 0}
                         {#if p.thumbnails.length >= 4}
                           <div class="grid grid-cols-2 h-full w-full">
                             {#each p.thumbnails.slice(0, 4) as thumb}
                               <img
-                                src={getArtUrl(thumb)}
+                                src={getArtistArtUrl(thumb)}
                                 alt=""
                                 class="w-full h-full object-cover"
                                 loading="lazy"
@@ -996,7 +1096,7 @@
                           </div>
                         {:else}
                           <img
-                            src={getArtUrl(p.thumbnails[0])}
+                            src={getArtUrl(p.thumbnails[0], 600)}
                             alt={p.name}
                             class="w-full h-full object-cover"
                             loading="lazy"
@@ -1042,6 +1142,45 @@
                         </div>
                       {/if}
                     </a>
+
+                    <!-- Hover Overlay -->
+                    <div
+                      class="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
+                    >
+                      <div
+                        class="pointer-events-auto flex items-center gap-3 text-white"
+                      >
+                        <IconButton
+                          variant="primary"
+                          title="Play"
+                          onClick={(e) => playPlaylist(e, p.id)}
+                          stopPropagation={true}
+                          className="shadow-lg transition-all"
+                        >
+                          <svg
+                            class="h-6 w-6 ml-0.5"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                          >
+                        </IconButton>
+                        <IconButton
+                          variant="primary"
+                          title="Add to Queue"
+                          onClick={(e) => queuePlaylist(e, p.id)}
+                          stopPropagation={true}
+                          className="shadow-lg transition-all"
+                        >
+                          <svg
+                            class="h-6 w-6"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"
+                            ><path
+                              d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                            /></svg
+                          >
+                        </IconButton>
+                      </div>
+                    </div>
                   </div>
 
                   <div class="p-4">
@@ -1053,7 +1192,9 @@
                       </div>
                     </a>
                     <div class="text-muted text-xs mt-1">
-                      {p.track_count} tracks • {p.is_public ? "Shared" : "Private"}
+                      {p.track_count} tracks • {p.is_public
+                        ? "Shared"
+                        : "Private"}
                     </div>
                   </div>
                 </div>
@@ -1459,7 +1600,7 @@
           </button>
 
           <!-- Track Actions (only show for track tabs) -->
-          {#if activeTab === "top_tracks" || activeTab === "singles_list"}
+          {#if activeTab === "top_tracks" || activeTab === "singles_list" || activeTab === "most_listened"}
             <div class="mt-6 pt-6 border-t border-subtle">
               <h3
                 class="text-xs font-semibold text-muted uppercase tracking-wider mb-3"
@@ -1471,7 +1612,9 @@
                   class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
                   on:click={activeTab === "top_tracks"
                     ? playAllTopTracks
-                    : playAllSingles}
+                    : activeTab === "most_listened"
+                      ? playAllMostListened
+                      : playAllSingles}
                 >
                   <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M8 5v14l11-7z" />
@@ -1482,7 +1625,9 @@
                   class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
                   on:click={activeTab === "top_tracks"
                     ? queueAllTopTracks
-                    : queueAllSingles}
+                    : activeTab === "most_listened"
+                      ? queueAllMostListened
+                      : queueAllSingles}
                 >
                   <svg
                     class="w-4 h-4"
@@ -1503,7 +1648,9 @@
                   class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
                   on:click={activeTab === "top_tracks"
                     ? openPlaylistModalForTopTracks
-                    : openPlaylistModalForSingles}
+                    : activeTab === "most_listened"
+                      ? openPlaylistModalForMostListened
+                      : openPlaylistModalForSingles}
                 >
                   <svg
                     class="w-4 h-4"
@@ -1520,6 +1667,27 @@
                   </svg>
                   Add to Playlist
                 </button>
+                {#if activeTab === "singles_list" || activeTab === "most_listened" || activeTab === "top_tracks"}
+                  <button
+                    class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
+                    on:click={activeTab === "most_listened" ? downloadAllMostListened : activeTab === "top_tracks" ? downloadAllTopTracks : downloadAllSingles}
+                  >
+                    <svg
+                      class="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                      />
+                    </svg>
+                    Download
+                  </button>
+                {/if}
               </div>
             </div>
           {/if}

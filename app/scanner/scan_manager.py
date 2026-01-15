@@ -332,11 +332,11 @@ class ScanManager:
             await warm_dns_cache()
             
             scanned_mbids = {m[0] for m in artist_mbids if m[0]}
-            if path and not scanned_mbids:
-                scanned_mbids = await self.scanner.get_artists_in_path(path) or set()
-            is_partial = False 
+            is_partial = False
             if path and os.path.abspath(path) != os.path.abspath(get_music_path()):
                 is_partial = True
+            if is_partial and not scanned_mbids:
+                scanned_mbids = await self.scanner.get_artists_in_path(path) or set()
                 
             filter_mbids = scanned_mbids
             

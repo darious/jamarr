@@ -1,14 +1,18 @@
 import { redirect } from '@sveltejs/kit';
-import { fetchTracks } from '$api';
+import { fetchTracks, fetchWithAuth } from '$api';
 import type { PageLoad } from './$types';
+
+export const ssr = false;
 
 export const load: PageLoad = async ({ params, fetch }) => {
     const { artist, album } = params;
+    const authFetch = (input: RequestInfo | URL, init?: RequestInit) =>
+        fetchWithAuth(String(input), init, fetch);
 
     try {
         // Legacy route: /album/[artist]/[album]
         // Fetch tracks to find the album MBID
-        const tracks = await fetchTracks({ artist, album }, fetch);
+        const tracks = await fetchTracks({ artist, album }, authFetch);
 
         if (tracks.length > 0) {
             // Prefer release id when available

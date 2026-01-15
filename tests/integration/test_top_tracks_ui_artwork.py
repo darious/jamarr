@@ -9,7 +9,7 @@ This test verifies:
 import pytest
 
 @pytest.mark.asyncio
-async def test_top_tracks_ui_artwork_flow(client, db):
+async def test_top_tracks_ui_artwork_flow(auth_client, db):
     """
     Replicate the exact UI flow:
     1. Fetch artist with top_tracks (which have local_track_id)
@@ -53,7 +53,7 @@ async def test_top_tracks_ui_artwork_flow(client, db):
     """, artist_mbid, track_id)
     
     # Step 1: Fetch artist (like the UI does)
-    artist_response = await client.get(f"/api/artists?mbid={artist_mbid}")
+    artist_response = await auth_client.get(f"/api/artists?mbid={artist_mbid}")
     assert artist_response.status_code == 200
     artists = artist_response.json()
     assert len(artists) == 1
@@ -74,7 +74,7 @@ async def test_top_tracks_ui_artwork_flow(client, db):
     assert top_track["art_sha1"] == artwork_sha1
     
     # Step 2: Fetch tracks (like the UI does) - query by album to avoid SQL bug
-    tracks_response = await client.get("/api/tracks?album=Test UI Album")
+    tracks_response = await auth_client.get("/api/tracks?album=Test UI Album")
     assert tracks_response.status_code == 200
     tracks = tracks_response.json()
     assert len(tracks) > 0

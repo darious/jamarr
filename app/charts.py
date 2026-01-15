@@ -15,10 +15,6 @@ from app.config import get_musicbrainz_root_url
 logger = logging.getLogger(__name__)
 
 CHART_URL = "https://www.officialcharts.com/charts/albums-chart/"
-MB_API_URL = get_musicbrainz_root_url()
-# In the script it was http://REDACTED_IP:5000, I should probably check config or use a reliable one.
-# For now, I'll default to public API but respect a config if I had one. 
-# actually, let's look at config.py to see if we have an MB Server.
 
 @dataclass
 class ChartEntry:
@@ -245,9 +241,11 @@ async def enrich_entries(entries: List[ChartEntry]):
     # Limit enrichment to top 100 to save time/API limits
     # User-Agent matching scripts/chart.py exactly is crucial for the Official Charts API
     headers = {"User-Agent": "jamarr-chart/1.0 (+https://www.officialcharts.com/)"}
-    
+
+    needs_enrichment = list(entries)
+
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers=headers) as client:
-        
+
         # Phase 1: Populate Catalog Numbers
         # Many chart entries have an info_url that returns JSON details when requested with Accept: application/json
         sem_cat = asyncio.Semaphore(10) # Restored to 10 as per script
@@ -265,19 +263,21 @@ async def enrich_entries(entries: List[ChartEntry]):
                         entry.catalog_number = _normalize_space(str(data.get("catNo", "")))
                 except Exception as e:
                     logger.debug(f"Failed to fetch catalog number for {entry.title}: {e}")
-        
-        await asyncio.gather(*(fetch_cat(e) for e in entries))
 
-        # Phase 2: MB Lookup
+        await asyncio.gather(*(fetch_cat(e) for e in needs_enrichment))
+
+        # Phase 2: MB Lookup — track best Album and best non-Album separately;
+        # prefer Album, fall back to other types (e.g. EP) only if no Album matches.
         sem_mb = asyncio.Semaphore(10) # Local MB can handle more
         async def fetch_mb(entry: ChartEntry):
             queries = _build_mb_queries(entry.artist, entry.title, entry.catalog_number)
             if not queries:
-                 logger.debug(f"No queries generated for {entry.title} - {entry.artist}")
+                 logger.warning(f"Chart enrich: no queries generated for '{entry.title}' - '{entry.artist}'")
                  return
-                 
+
             async with sem_mb:
-                best = None
+                best_album = None
+                best_other = None
                 for query in queries:
                     try:
                         params = {"query": query, "fmt": "json", "limit": 25}
@@ -285,27 +285,96 @@ async def enrich_entries(entries: List[ChartEntry]):
                         if resp.status_code == 200:
                             data = resp.json()
                             for candidate in data.get("releases", []):
-                                if not _is_album_release(candidate):
-                                    continue
+                                rg = candidate.get("release-group") or {}
+                                primary_type = (rg.get("primary-type") or "").lower()
                                 score = _score_candidate(entry, candidate)
-                                if best is None or score > best["score"]:
-                                    best = {
-                                        "score": score,
-                                        "id": candidate.get("id", ""),
-                                        "rg_id": (candidate.get("release-group") or {}).get("id", ""),
-                                    }
+                                hit = {
+                                    "score": score,
+                                    "id": candidate.get("id", ""),
+                                    "rg_id": rg.get("id", ""),
+                                }
+                                if primary_type == "album" or not primary_type:
+                                    if best_album is None or score > best_album["score"]:
+                                        best_album = hit
+                                else:
+                                    if best_other is None or score > best_other["score"]:
+                                        best_other = hit
                     except Exception as e:
-                        logger.warning(f"Error searching MB for {entry.title} ({query}): {e}")
+                        logger.warning(f"Chart enrich: MB error for '{entry.title}' ({query}): {e}")
                         continue
-                
-                if best and best["score"] > 60:
+
+                # Prefer album, but let a clearly-better non-album (EP/Single) win when
+                # it scores noticeably higher (exact title match beating a near-miss album).
+                album_score = best_album["score"] if best_album else 0
+                other_score = best_other["score"] if best_other else 0
+                if best_other and other_score >= 75 and other_score >= album_score + 3:
+                    best = best_other
+                elif best_album and album_score > 60:
+                    best = best_album
+                elif best_other and other_score > 75:
+                    best = best_other
+                else:
+                    best = None
+                if best:
                      entry.release_mbid = best["id"]
                      entry.release_group_mbid = best["rg_id"]
                      entry.confidence = best["score"]
-                else:
-                    logger.debug(f"No high confidence match for {entry.title} (Best: {best})")
 
-        await asyncio.gather(*(fetch_mb(e) for e in entries))
+        await asyncio.gather(*(fetch_mb(e) for e in needs_enrichment))
+
+        # Phase 3: Release-group search fallback for entries still unmatched
+        still_unmatched = [e for e in needs_enrichment if not e.release_group_mbid]
+        if still_unmatched:
+            logger.info(f"Chart enrich: {len(still_unmatched)} entries unmatched after release search, trying release-group search")
+
+            async def fetch_rg(entry: ChartEntry):
+                rg_queries = _build_rg_queries(entry.artist, entry.title)
+                async with sem_mb:
+                    best_album = None
+                    best_other = None
+                    for query in rg_queries:
+                        try:
+                            params = {"query": query, "fmt": "json", "limit": 25}
+                            resp = await client.get(f"{MB_API_URL}/ws/2/release-group/", params=params)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                for rg in data.get("release-groups", []):
+                                    ptype = (rg.get("primary-type") or "").lower()
+                                    score = _score_rg_candidate(entry, rg)
+                                    hit = {"score": score, "rg_id": rg.get("id", "")}
+                                    if ptype == "album" or not ptype:
+                                        if best_album is None or score > best_album["score"]:
+                                            best_album = hit
+                                    else:
+                                        if best_other is None or score > best_other["score"]:
+                                            best_other = hit
+                        except Exception as e:
+                            logger.warning(f"Chart enrich: RG search error for '{entry.title}' ({query}): {e}")
+                            continue
+
+                    album_score = best_album["score"] if best_album else 0
+                    other_score = best_other["score"] if best_other else 0
+                    if best_other and other_score >= 75 and other_score >= album_score + 3:
+                        best = best_other
+                    elif best_album and album_score > 60:
+                        best = best_album
+                    elif best_other and other_score > 75:
+                        best = best_other
+                    else:
+                        best = None
+
+                    if best:
+                        entry.release_group_mbid = best["rg_id"]
+                        entry.confidence = best["score"]
+                        logger.info(f"Chart enrich: RG fallback matched '{entry.title}' - '{entry.artist}' (score={best['score']})")
+                    else:
+                        logger.warning(
+                            f"Chart enrich: no match for '{entry.title}' - '{entry.artist}' "
+                            f"(best album={best_album['score'] if best_album else 'none'}, "
+                            f"best other={best_other['score'] if best_other else 'none'})"
+                        )
+
+            await asyncio.gather(*(fetch_rg(e) for e in still_unmatched))
 
 def _normalize_space(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
@@ -429,6 +498,11 @@ def _barcode_candidates(catno: str) -> List[str]:
         return [f"0{digits}"]
     return []
 
+def _escape_lucene(text: str) -> str:
+    """Escape special Lucene characters in a quoted-string context."""
+    return text.replace('"', '\\"')
+
+
 def _build_mb_queries(artist: str, title: str, catno: str) -> List[str]:
     artist_variants = generate_artist_variants(artist)
     title_variants = generate_title_variants(title, artist)
@@ -437,11 +511,21 @@ def _build_mb_queries(artist: str, title: str, catno: str) -> List[str]:
     barcodes = _barcode_candidates(catno)
     for barcode in barcodes:
         # High priority: exact barcode + fuzzy artist
-        queries.append(f'barcode:"{barcode}" AND artist:"{artist_variants[0]}"')
+        queries.append(f'barcode:"{barcode}" AND artist:"{_escape_lucene(artist_variants[0])}"')
 
+    # Phase 1: quoted-phrase queries (most precise)
     for artist_variant in artist_variants:
         for title_variant in title_variants:
-            queries.append(f'release:"{title_variant}" AND artist:"{artist_variant}"')
+            queries.append(
+                f'release:"{_escape_lucene(title_variant)}" AND artist:"{_escape_lucene(artist_variant)}"'
+            )
+
+    # Phase 2: unquoted token queries as fallback (broader, handles ALL-CAPS and punct differences)
+    # Only add the primary title/artist pair to avoid combinatorial explosion
+    primary_title = re.sub(r"[^\w\s]", " ", title_variants[0]).strip()
+    primary_artist = re.sub(r"[^\w\s]", " ", artist_variants[0]).strip()
+    if primary_title and primary_artist:
+        queries.append(f"release:{primary_title.lower()} AND artist:{primary_artist.lower()}")
 
     return list(dict.fromkeys(queries))
 
@@ -475,7 +559,7 @@ def _score_candidate(entry: ChartEntry, candidate: dict) -> int:
              score += 10
              
     country = candidate.get("country")
-    if country in {"GB", "XW"}:
+    if country in {"GB", "XW", "XE", "EU"}:
         score += 5
         
     if (candidate.get("status") or "").lower() == "official":
@@ -483,41 +567,94 @@ def _score_candidate(entry: ChartEntry, candidate: dict) -> int:
 
     return min(score, 100)
 
-def _is_album_release(candidate: dict) -> bool:
-    rg = candidate.get("release-group") or {}
-    primary_type = (rg.get("primary-type") or "").lower()
-    if primary_type:
-        return primary_type == "album"
-    return True
+def _build_rg_queries(artist: str, title: str) -> List[str]:
+    """Build Lucene queries for the release-group search endpoint."""
+    artist_variants = generate_artist_variants(artist)
+    title_variants = generate_title_variants(title, artist)
+    queries = []
+
+    for artist_variant in artist_variants:
+        for title_variant in title_variants:
+            queries.append(
+                f'releasegroup:"{_escape_lucene(title_variant)}" AND artist:"{_escape_lucene(artist_variant)}"'
+            )
+
+    # Unquoted token fallback
+    primary_title = re.sub(r"[^\w\s]", " ", title_variants[0]).strip()
+    primary_artist = re.sub(r"[^\w\s]", " ", artist_variants[0]).strip()
+    if primary_title and primary_artist:
+        queries.append(f"releasegroup:{primary_title.lower()} AND artist:{primary_artist.lower()}")
+
+    return list(dict.fromkeys(queries))
+
+
+def _score_rg_candidate(entry: ChartEntry, rg: dict) -> int:
+    """Score a release-group candidate against a chart entry."""
+    title = rg.get("title") or ""
+    artist_credit = rg.get("artist-credit") or []
+    artist_names = []
+    for item in artist_credit:
+        if isinstance(item, dict):
+            artist = item.get("artist") or {}
+            name = artist.get("name") or item.get("name")
+            if name:
+                artist_names.append(name)
+    artist = " ".join(artist_names)
+
+    score_title = fuzz.token_set_ratio(
+        _normalize_for_scoring(entry.title),
+        _normalize_for_scoring(title),
+    )
+    score_artist = fuzz.token_set_ratio(
+        _normalize_for_scoring(entry.artist),
+        _normalize_for_scoring(artist),
+    )
+
+    score = int((score_title * 0.6) + (score_artist * 0.3))
+
+    ptype = (rg.get("primary-type") or "").lower()
+    if ptype == "album":
+        score += 5
+
+    return min(score, 100)
+
 
 async def update_chart_db(entries: List[ChartEntry]):
     pool = get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            # Clear old chart
             await conn.execute("DELETE FROM chart_album")
-            
-            # Insert new
+
             for e in entries:
                 try:
                     pos_val = int(e.position)
                 except ValueError:
-                    # Should not happen for valid chart entries in Top 100
                     continue
-                    
+
                 await conn.execute("""
-                    INSERT INTO chart_album 
+                    INSERT INTO chart_album
                     (position, title, artist, last_week, peak, weeks, status, release_mbid, release_group_mbid)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                """, pos_val, e.title, e.artist, e.last_week, e.peak, e.weeks, e.status, e.release_mbid, e.release_group_mbid)
-    
+                """, pos_val, e.title, e.artist, e.last_week, e.peak, e.weeks, e.status,
+                     e.release_mbid or "", e.release_group_mbid or "")
+
     logger.info(f"Updated chart with {len(entries)} entries")
 
 async def refresh_chart_task():
     scraper = ChartScraper()
     try:
         entries = await scraper.fetch_chart()
+        logger.info(f"Chart refresh: scraped {len(entries)} entries")
+
         await enrich_entries(entries)
+
+        unmatched = [e for e in entries if not e.release_group_mbid]
+        if unmatched:
+            logger.warning(
+                f"Chart refresh: {len(unmatched)} entries have no MBID after all enrichment: "
+                + ", ".join(f"'{e.title}'" for e in unmatched)
+            )
+
         await update_chart_db(entries)
     finally:
         await scraper.close()

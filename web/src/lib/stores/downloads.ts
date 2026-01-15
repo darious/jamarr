@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store';
 
 export type DownloadStatus = 'pending' | 'downloading' | 'completed' | 'error' | 'cancelled';
-export type DownloadMode = 'album' | 'playlist';
+export type DownloadMode = 'album' | 'playlist' | 'numbered_album';
 
 export interface DownloadJob {
     id: string;

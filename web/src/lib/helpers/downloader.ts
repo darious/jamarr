@@ -1,4 +1,5 @@
 import type { Track } from "$lib/api";
+import { getStreamUrl } from "$lib/api";
 import { downloadStore, type DownloadMode, type DownloadJob } from "$stores/downloads";
 
 
@@ -59,7 +60,8 @@ async function downloadSingleFile(task: DownloadTask) {
     try {
         if (signal.aborted) throw new Error('Aborted');
 
-        const response = await fetch(`/api/stream/${track.id}`, { signal });
+        const url = await getStreamUrl(track.id);
+        const response = await fetch(url, { signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         if (!response.body) throw new Error('No body');
 
@@ -159,6 +161,7 @@ export async function downloadTracks(options: DownloadOptions) {
             const playlistsHandle = await rootHandle.getDirectoryHandle("Playlists", { create: true });
             folderHandle = await playlistsHandle.getDirectoryHandle(sanitizeFilename(options.folderName), { create: true });
         }
+        // numbered_album: same folder structure as album, but files are numbered
 
         let targetHandle = folderHandle;
         if (options.subFolderName) {
@@ -189,7 +192,7 @@ export async function downloadTracks(options: DownloadOptions) {
         // Queue all files
         options.tracks.forEach((track, index) => {
             let filename = track.path.split('/').pop() || `track-${track.id}.mp3`;
-            if (options.mode === 'playlist') {
+            if (options.mode === 'playlist' || options.mode === 'numbered_album') {
                 const digits = total > 99 ? 3 : 2;
                 const position = (index + 1).toString().padStart(digits, '0');
                 filename = `${position} ${filename}`;
@@ -218,6 +221,9 @@ export async function downloadTracks(options: DownloadOptions) {
 
 
 function sanitizeFilename(name: string): string {
-    return name.replace(/[/\\?%*:|"<>]/g, '-');
+    return name
+        .replace(/[\x00-\x1f\x7f]/g, '')      // strip control characters & null bytes
+        .replace(/[/\\?%*:|"<>]/g, '-')         // replace illegal path chars
+        .replace(/^[\s.]+|[\s.]+$/g, '')         // trim leading/trailing dots and spaces
+        || 'unnamed';                             // fallback if result is empty
 }
-

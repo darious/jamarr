@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends
 from typing import List, Optional
 from pydantic import BaseModel
 from app.db import get_db
+from app.api.deps import get_current_user_jwt
 import asyncpg
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
 
 
 class SearchResultArtist(BaseModel):

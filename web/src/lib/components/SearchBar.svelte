@@ -1,6 +1,7 @@
 <script lang="ts">
     import { goto } from "$app/navigation";
     import { onMount } from "svelte";
+    import { fetchWithAuth, getArtUrl } from "$lib/api";
     import { fade, slide } from "svelte/transition";
     import AddToPlaylistModal from "$lib/components/AddToPlaylistModal.svelte";
     import IconButton from "$lib/components/IconButton.svelte";
@@ -54,7 +55,7 @@
         }
         timer = setTimeout(async () => {
             try {
-                const res = await fetch(
+                const res = await fetchWithAuth(
                     `/api/search?q=${encodeURIComponent(query)}`,
                 );
                 if (res.ok) {
@@ -171,7 +172,7 @@
                         >
                             {#if artist.art_sha1}
                                 <img
-                                    src={`/art/file/${artist.art_sha1}?max_size=100`}
+                                    src={getArtUrl(artist.art_sha1, 100)}
                                     class="h-8 w-8 rounded-full object-cover"
                                     alt=""
                                 />
@@ -232,7 +233,7 @@
                                 {#if album.art_sha1}
                                     <img
                                         src={album.art_sha1
-                                            ? `/art/file/${album.art_sha1}?max_size=100`
+                                            ? getArtUrl(album.art_sha1, 100)
                                             : ""}
                                         alt=""
                                         class="h-full w-full object-cover"
@@ -304,7 +305,7 @@
                                 {#if track.art_sha1}
                                     <img
                                         src={track.art_sha1
-                                            ? `/art/file/${track.art_sha1}?max_size=100`
+                                            ? getArtUrl(track.art_sha1, 100)
                                             : ""}
                                         alt=""
                                         class="h-full w-full object-cover"

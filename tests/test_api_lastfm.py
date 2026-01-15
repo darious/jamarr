@@ -8,7 +8,7 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_lastfm_status_not_connected(client: AsyncClient, db, auth_token):
+async def test_lastfm_status_not_connected(auth_client: AsyncClient, db, auth_token):
     """Test status endpoint when Last.fm not connected."""
     await db.execute(
         """
@@ -22,7 +22,7 @@ async def test_lastfm_status_not_connected(client: AsyncClient, db, auth_token):
         "testuser",
     )
     # Get status
-    response = await client.get("/api/lastfm/status")
+    response = await auth_client.get("/api/lastfm/status")
     assert response.status_code == 200
     
     data = response.json()
@@ -32,7 +32,7 @@ async def test_lastfm_status_not_connected(client: AsyncClient, db, auth_token):
 
 
 @pytest.mark.asyncio
-async def test_lastfm_status_connected(client: AsyncClient, db, auth_token):
+async def test_lastfm_status_connected(auth_client: AsyncClient, db, auth_token):
     """Test status endpoint when Last.fm is connected."""
     # Setup: Add Last.fm credentials to user
     await db.execute(
@@ -50,7 +50,7 @@ async def test_lastfm_status_connected(client: AsyncClient, db, auth_token):
     )
     
     # Get status
-    response = await client.get("/api/lastfm/status")
+    response = await auth_client.get("/api/lastfm/status")
     assert response.status_code == 200
     
     data = response.json()
@@ -60,12 +60,12 @@ async def test_lastfm_status_connected(client: AsyncClient, db, auth_token):
 
 @pytest.mark.asyncio
 @patch('app.lastfm.get_auth_url')
-async def test_lastfm_auth_start(mock_get_auth_url, client: AsyncClient, db, auth_token):
+async def test_lastfm_auth_start(mock_get_auth_url, auth_client: AsyncClient, db, auth_token):
     """Test starting Last.fm authentication."""
     mock_get_auth_url.return_value = "https://www.last.fm/api/auth?token=abc123"
     
     # Start auth
-    response = await client.get("/api/lastfm/auth/start")
+    response = await auth_client.get("/api/lastfm/auth/start")
     assert response.status_code == 200
     
     data = response.json()
@@ -75,12 +75,12 @@ async def test_lastfm_auth_start(mock_get_auth_url, client: AsyncClient, db, aut
 
 @pytest.mark.asyncio
 @patch('app.lastfm.get_session_key')
-async def test_lastfm_callback_success(mock_get_session_key, client: AsyncClient, db, auth_token):
+async def test_lastfm_callback_success(mock_get_session_key, auth_client: AsyncClient, db, auth_token):
     """Test successful Last.fm callback."""
     mock_get_session_key.return_value = ("session_key_123", "lastfm_user")
     
     # Callback
-    response = await client.get("/api/lastfm/callback?token=test_token", follow_redirects=False)
+    response = await auth_client.get("/api/lastfm/callback?token=test_token", follow_redirects=False)
     assert response.status_code == 302
     assert "/settings/user?lastfm=connected" in response.headers["location"]
     
@@ -94,7 +94,7 @@ async def test_lastfm_callback_success(mock_get_session_key, client: AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_lastfm_disconnect(client: AsyncClient, db, auth_token):
+async def test_lastfm_disconnect(auth_client: AsyncClient, db, auth_token):
     """Test disconnecting Last.fm account."""
     # Setup: Add Last.fm credentials
     await db.execute(
@@ -112,7 +112,7 @@ async def test_lastfm_disconnect(client: AsyncClient, db, auth_token):
     )
     
     # Disconnect
-    response = await client.post("/api/lastfm/disconnect")
+    response = await auth_client.post("/api/lastfm/disconnect")
     assert response.status_code == 200
     assert response.json()["ok"] is True
     
@@ -127,7 +127,7 @@ async def test_lastfm_disconnect(client: AsyncClient, db, auth_token):
 
 
 @pytest.mark.asyncio
-async def test_lastfm_toggle(client: AsyncClient, db, auth_token):
+async def test_lastfm_toggle(auth_client: AsyncClient, db, auth_token):
     """Test toggling Last.fm scrobbling."""
     # Setup: Add Last.fm credentials
     await db.execute(
@@ -145,7 +145,7 @@ async def test_lastfm_toggle(client: AsyncClient, db, auth_token):
     )
     
     # Toggle off
-    response = await client.post("/api/lastfm/toggle", json={"enabled": False})
+    response = await auth_client.post("/api/lastfm/toggle", json={"enabled": False})
     assert response.status_code == 200
     assert response.json()["enabled"] is False
     
@@ -157,13 +157,13 @@ async def test_lastfm_toggle(client: AsyncClient, db, auth_token):
     assert user["lastfm_enabled"] is False
     
     # Toggle back on
-    response = await client.post("/api/lastfm/toggle", json={"enabled": True})
+    response = await auth_client.post("/api/lastfm/toggle", json={"enabled": True})
     assert response.status_code == 200
     assert response.json()["enabled"] is True
 
 
 @pytest.mark.asyncio
-async def test_lastfm_toggle_without_connection(client: AsyncClient, db, auth_token):
+async def test_lastfm_toggle_without_connection(auth_client: AsyncClient, db, auth_token):
     """Test toggling when Last.fm not connected should fail."""
     await db.execute(
         """
@@ -177,7 +177,7 @@ async def test_lastfm_toggle_without_connection(client: AsyncClient, db, auth_to
         "testuser",
     )
     # Try to toggle
-    response = await client.post("/api/lastfm/toggle", json={"enabled": True})
+    response = await auth_client.post("/api/lastfm/toggle", json={"enabled": True})
     assert response.status_code == 400
     assert "not connected" in response.json()["detail"].lower()
 

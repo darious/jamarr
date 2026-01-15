@@ -7,6 +7,7 @@
     import { setQueue, addToQueue } from "$stores/player";
     import {
         fetchTracks,
+        getArtUrl,
         type SeedArtist,
         type RecommendedArtist,
         type RecommendedAlbum,
@@ -192,7 +193,7 @@
                         >
                             <img
                                 src={seed.art_sha1
-                                    ? `/art/file/${seed.art_sha1}?max_size=300`
+                                    ? getArtUrl(seed.art_sha1, 300)
                                     : "/assets/default-artist-placeholder.svg"}
                                 alt={seed.name}
                                 class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
@@ -234,7 +235,7 @@
                             >
                                 <img
                                     src={artist.art_sha1
-                                        ? `/art/file/${artist.art_sha1}?max_size=300`
+                                        ? getArtUrl(artist.art_sha1, 300)
                                         : "/assets/default-artist-placeholder.svg"}
                                     alt={artist.name}
                                     class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
@@ -284,7 +285,7 @@
                         >
                             <img
                                 src={album.art_sha1
-                                    ? `/art/file/${album.art_sha1}?max_size=300`
+                                    ? getArtUrl(album.art_sha1, 300)
                                     : "/assets/default-album-placeholder.svg"}
                                 alt={album.title}
                                 class="h-full w-full object-cover"
