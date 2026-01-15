@@ -894,7 +894,7 @@
             <div
               class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
             >
-              {#each displayedAlbums as album (album.album + album.artist_name)}
+              {#each displayedAlbums as album, index (album.mb_release_id ?? `${album.album}-${album.artist_name}-${index}`)}
                 <article class="group flex flex-col gap-4">
                   <button
                     class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-105"
