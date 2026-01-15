@@ -5,6 +5,7 @@
   import {
     changePassword,
     updateProfile,
+    updatePreferences,
     getLastfmStatus,
     startLastfmAuth,
     disconnectLastfm,
@@ -74,19 +75,7 @@
     try {
       if (mode === "system") return; // Not supporting system persistence yet for this simple toggle
 
-      const response = await fetch("/api/auth/preferences", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          theme_mode: mode,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to update theme mode");
-      }
-
+      await updatePreferences({ theme_mode: mode });
       setThemeMode(mode);
       selectedMode = mode;
     } catch (e: any) {
@@ -185,19 +174,9 @@
     accentMessage = "";
     accentError = "";
     try {
-      const response = await fetch("/api/auth/preferences", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          accent_color: accentColors.find((c) => c.name === accent)?.color,
-        }),
+      await updatePreferences({
+        accent_color: accentColors.find((c) => c.name === accent)?.color,
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to update accent color");
-      }
-
       themeAccent.set(accent);
       selectedAccent = accent;
       accentMessage = "Accent color updated.";

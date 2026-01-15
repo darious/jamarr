@@ -9,6 +9,7 @@
     isAuthChecked,
     setUser,
   } from "$stores/user";
+  import { setAccessToken, setupTokenRefresh } from "$lib/stores/auth";
 
   let username = "";
   let email = "";
@@ -42,13 +43,24 @@
     loading = true;
     error = "";
     try {
-      const createdUser = await signup({
+      // Create account and receive tokens
+      const signupResponse = await signup({
         username,
         email,
         password,
         display_name: displayName || undefined,
       });
-      setUser(createdUser);
+
+      // Store access token
+      setAccessToken(signupResponse.access_token);
+
+      // Update user store
+      setUser(signupResponse.user);
+
+      // Setup automatic token refresh
+      setupTokenRefresh();
+
+      // Redirect to home
       goto("/");
     } catch (e: any) {
       error = e?.message || "Sign up failed.";

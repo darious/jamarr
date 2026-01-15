@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from app.db import get_db
 import asyncpg
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
-from app.auth import require_current_user
+from app.api.deps import get_current_user_jwt, get_optional_user_jwt
 
 router = APIRouter()
 
@@ -65,10 +65,9 @@ class PlaylistTrack(BaseModel):
 @router.post("/api/playlists", response_model=Playlist)
 async def create_playlist(
     playlist: PlaylistCreate, 
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    user, _ = await require_current_user(request, db)
     user_id = user['id']
     
     # Validate track IDs if provided
@@ -117,17 +116,11 @@ async def create_playlist(
 
 @router.get("/api/playlists", response_model=List[dict])
 async def list_playlists(
-    request: Request,
     user_id: Optional[int] = None, 
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db),
+    current_user: Optional[asyncpg.Record] = Depends(get_optional_user_jwt),
 ):
     # If user_id not provided, list current user's playlists
-    current_user = None
-    try:
-        current_user, _ = await require_current_user(request, db)
-    except HTTPException:
-        pass # Unauthenticated is allowed for public playlists if implemented that way, but here we likely want "my playlists"
-
     target_user_id = user_id
     if target_user_id is None:
         if not current_user:
@@ -191,15 +184,9 @@ async def list_playlists(
 @router.get("/api/artists/{artist_mbid}/playlists", response_model=List[dict])
 async def list_playlists_for_artist(
     artist_mbid: str,
-    request: Request,
     db: asyncpg.Connection = Depends(get_db),
+    current_user: Optional[asyncpg.Record] = Depends(get_optional_user_jwt),
 ):
-    current_user = None
-    try:
-        current_user, _ = await require_current_user(request, db)
-    except HTTPException:
-        pass
-
     params = [artist_mbid]
     visibility_clause = "p.is_public = TRUE"
     if current_user:
@@ -265,16 +252,11 @@ async def list_playlists_for_artist(
 @router.get("/api/playlists/{playlist_id}", response_model=dict)
 async def get_playlist(
     playlist_id: int,
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db),
+    current_user: Optional[asyncpg.Record] = Depends(get_optional_user_jwt),
 ):
     # Optional auth for checking visibility
-    current_user_id = None
-    try:
-        user, _ = await require_current_user(request, db)
-        current_user_id = user['id']
-    except Exception:
-        pass
+    current_user_id = current_user["id"] if current_user else None
     # Get metadata
     p_query = """
         SELECT id, user_id, name, description, is_public, updated_at
@@ -356,10 +338,9 @@ async def get_playlist(
 async def update_playlist(
     playlist_id: int,
     updates: PlaylistUpdate,
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    user, _ = await require_current_user(request, db)
     user_id = user['id']
     # Verify owner
     check_q = "SELECT user_id FROM playlist WHERE id = $1"
@@ -404,10 +385,9 @@ async def update_playlist(
 @router.delete("/api/playlists/{playlist_id}")
 async def delete_playlist(
     playlist_id: int,
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    user, _ = await require_current_user(request, db)
     user_id = user['id']
     check_q = "SELECT user_id FROM playlist WHERE id = $1"
     row = await db.fetchrow(check_q, playlist_id)
@@ -423,10 +403,9 @@ async def delete_playlist(
 async def add_tracks(
     playlist_id: int,
     payload: PlaylistTrackAdd,
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    user, _ = await require_current_user(request, db)
     user_id = user['id']
     # Verify owner
     check_q = "SELECT user_id FROM playlist WHERE id = $1"
@@ -462,10 +441,9 @@ async def add_tracks(
 async def remove_track(
     playlist_id: int,
     playlist_track_id: int,
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    user, _ = await require_current_user(request, db)
     user_id = user['id']
     # Verify owner
     check_q = "SELECT user_id FROM playlist WHERE id = $1"
@@ -492,10 +470,9 @@ async def remove_track(
 async def reorder_tracks(
     playlist_id: int,
     payload: PlaylistReorder,
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db)
+    db: asyncpg.Connection = Depends(get_db),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    user, _ = await require_current_user(request, db)
     user_id = user['id']
     # Payload is list of playlist_track_ids in NEW order.
     

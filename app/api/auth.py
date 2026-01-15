@@ -9,14 +9,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.auth import (
-    COOKIE_SECURE,
-    SESSION_COOKIE_NAME,
-    SESSION_TTL_SECONDS,
-    create_session,
-    destroy_session,
-    get_session_user,
     hash_password,
-    require_current_user,
     verify_password,
     get_user_by_username_or_email,
     create_refresh_session,
@@ -68,19 +61,6 @@ class ChangePasswordBody(BaseModel):
     new_password: str
 
 
-def _set_session_cookie(response: Response, token: str) -> None:
-    """Set legacy session cookie (deprecated)."""
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        max_age=SESSION_TTL_SECONDS,
-        httponly=True,
-        samesite="lax",
-        secure=COOKIE_SECURE,
-        path="/",
-    )
-
-
 def _set_refresh_cookie(response: Response, token: str) -> None:
     """Set JWT refresh token cookie."""
     response.set_cookie(
@@ -90,7 +70,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         httponly=True,
         samesite="lax",
         secure=REFRESH_COOKIE_SECURE,
-        path="/api/auth",  # Restrict to auth endpoints only
+        path="/api",
     )
 
 
@@ -103,7 +83,7 @@ def _clear_refresh_cookie(response: Response) -> None:
         httponly=True,
         samesite="lax",
         secure=REFRESH_COOKIE_SECURE,
-        path="/api/auth",
+        path="/api",
     )
 
 
@@ -167,14 +147,27 @@ async def signup(
         payload.display_name.strip() if payload.display_name else None,
     )
 
-    token = await create_session(
-        db,
+    access_token = create_access_token(user_id=user["id"])
+    refresh_token = generate_refresh_token()
+    refresh_token_hash = hash_refresh_token(refresh_token)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_TTL_DAYS)
+
+    await create_refresh_session(
+        db=db,
         user_id=user["id"],
+        token_hash=refresh_token_hash,
+        expires_at=expires_at,
         user_agent=request.headers.get("user-agent"),
         ip=request.client.host if request.client else None,
     )
-    _set_session_cookie(response, token)
-    return _public_user_dict(user)
+
+    _set_refresh_cookie(response, refresh_token)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": _public_user_dict(user),
+    }
 
 
 @router.post("/api/auth/login")
@@ -337,11 +330,9 @@ async def me(
 @router.put("/api/auth/profile")
 async def update_profile(
     payload: UpdateProfileBody,
-    request: Request,
-    response: Response,
+    user: asyncpg.Record = Depends(get_current_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
 ):
-    user, token = await require_current_user(request, db)
     email = payload.email.strip()
     display_name = (
         payload.display_name.strip() if payload.display_name else user["display_name"]
@@ -364,7 +355,6 @@ async def update_profile(
         display_name,
         user["id"],
     )
-    _set_session_cookie(response, token)
     updated_user = await db.fetchrow(
         'SELECT * FROM "user" WHERE id = $1',
         user["id"],
@@ -375,11 +365,10 @@ async def update_profile(
 @router.post("/api/auth/password")
 async def change_password(
     payload: ChangePasswordBody,
-    request: Request,
     response: Response,
+    user: asyncpg.Record = Depends(get_current_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
 ):
-    user, token = await require_current_user(request, db)
     _validate_password(payload.new_password)
 
     if not verify_password(payload.current_password, user["password_hash"]):
@@ -396,21 +385,20 @@ async def change_password(
     )
     # Invalidate other sessions but keep current one
     await db.execute(
-        "DELETE FROM session WHERE user_id = $1 AND token != $2", user["id"], token
+        "DELETE FROM auth_refresh_session WHERE user_id = $1 AND revoked_at IS NULL",
+        user["id"],
     )
-    _set_session_cookie(response, token)
+    _clear_refresh_cookie(response)
     return {"ok": True}
 
 
 @router.patch("/api/auth/preferences")
 async def update_preferences(
     payload: UpdatePreferencesBody,
-    request: Request,
-    response: Response,
+    user: asyncpg.Record = Depends(get_current_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
 ):
     """Update user preferences (accent color, theme mode)"""
-    user, token = await require_current_user(request, db)
     
     updates = []
     values = []
@@ -441,8 +429,6 @@ async def update_preferences(
             f'UPDATE "user" SET {", ".join(updates)} WHERE id = ${len(values)}',
             *values
         )
-    
-    _set_session_cookie(response, token)
     updated_user = await db.fetchrow(
         'SELECT * FROM "user" WHERE id = $1',
         user["id"],

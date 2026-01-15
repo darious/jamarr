@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import type { Track } from '$api';
+import { fetchWithAuth } from '$lib/api';
 
 export interface Renderer {
     udn: string;
@@ -126,7 +127,7 @@ export async function refreshRenderers(force: boolean = false) {
 
 export async function setRenderer(udn: string) {
     try {
-        const res = await fetch('/api/player/renderer', {
+        const res = await fetchWithAuth('/api/player/renderer', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ udn })
@@ -163,7 +164,7 @@ async function getClientIp(): Promise<string | null> {
 export async function loadQueueFromServer() {
 
     try {
-        const res = await fetch('/api/player/state', {
+        const res = await fetchWithAuth('/api/player/state', {
             headers: { 'X-Jamarr-Client-Id': getClientId() }
         });
 
@@ -202,7 +203,7 @@ export async function setQueue(tracks: Track[], startIndex: number = 0) {
 
         const hostname = window.location.hostname;
         const client_ip = await getClientIp();
-        const res = await fetch('/api/player/queue', {
+        const res = await fetchWithAuth('/api/player/queue', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ queue: tracks, start_index: startIndex, hostname, client_ip })
@@ -228,7 +229,7 @@ export async function addToQueue(tracks: Track[]) {
 
     try {
 
-        const res = await fetch('/api/player/queue/append', {
+        const res = await fetchWithAuth('/api/player/queue/append', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ tracks })
@@ -280,7 +281,7 @@ export async function reorderQueue(arg1: Track[] | number, arg2?: number) {
     const current = get(playerState);
     const currentTrackId = current.queue[current.current_index]?.id;
     try {
-        const res = await fetch('/api/player/queue/reorder', {
+        const res = await fetchWithAuth('/api/player/queue/reorder', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ queue: newQueue })
@@ -311,7 +312,7 @@ export async function reorderQueue(arg1: Track[] | number, arg2?: number) {
 export async function clearQueue(stopPlayback: boolean = true) {
 
     try {
-        const res = await fetch('/api/player/queue/clear', {
+        const res = await fetchWithAuth('/api/player/queue/clear', {
             method: 'POST',
             headers: getHeaders()
         });
@@ -345,7 +346,7 @@ export async function playFromQueue(index: number) {
     try {
         const hostname = window.location.hostname;
         const client_ip = await getClientIp();
-        const res = await fetch('/api/player/index', {
+        const res = await fetchWithAuth('/api/player/index', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ index, hostname, client_ip })
@@ -437,7 +438,7 @@ export async function updateProgress(seconds: number, isPlaying: boolean) {
 
 
     try {
-        const res = await fetch('/api/player/progress', {
+        const res = await fetchWithAuth('/api/player/progress', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ position_seconds: seconds, is_playing: isPlaying })
@@ -461,7 +462,7 @@ async function playCurrentTrack() {
     if (!track) {
         console.warn('[playCurrentTrack] Track not in frontend queue, fetching from server');
         try {
-            const res = await fetch('/api/player/state', {
+            const res = await fetchWithAuth('/api/player/state', {
                 headers: getHeaders()
             });
             if (res.ok) {
@@ -487,7 +488,7 @@ async function playCurrentTrack() {
 
     try {
 
-        const res = await fetch('/api/player/play', {
+        const res = await fetchWithAuth('/api/player/play', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ track_id: track.id })
@@ -515,7 +516,7 @@ async function playCurrentTrack() {
 
 export async function setVolume(percent: number) {
     try {
-        await fetch('/api/player/volume', {
+        await fetchWithAuth('/api/player/volume', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ percent })
@@ -543,7 +544,7 @@ export async function pause() {
     }
 
     try {
-        await fetch('/api/player/pause', {
+        await fetchWithAuth('/api/player/pause', {
             method: 'POST',
             headers: getHeaders()
         });
@@ -563,7 +564,7 @@ export async function resume() {
     }
 
     try {
-        await fetch('/api/player/resume', {
+        await fetchWithAuth('/api/player/resume', {
             method: 'POST',
             headers: getHeaders()
         });
@@ -583,7 +584,7 @@ export async function seek(seconds: number) {
     }
 
     try {
-        await fetch('/api/player/seek', {
+        await fetchWithAuth('/api/player/seek', {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify({ seconds })

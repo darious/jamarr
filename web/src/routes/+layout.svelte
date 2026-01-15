@@ -19,6 +19,7 @@
     isAuthChecked,
     setUser,
   } from "$stores/user";
+  import { initializeAuth } from "$lib/stores/auth";
   import { page } from "$app/stores";
   import { themeAccent, themeMode } from "$stores/theme";
 
@@ -39,6 +40,7 @@
   let authChecked = false;
   let isAuthPage = false;
   let activeRendererItem: any = null;
+  let authLoading = true;  // Add loading state
 
   const DEFAULT_RENDERER_ICON = "/assets/icon-renderer.svg";
   const LOCAL_RENDERER_ICON = "/assets/icon-browser.svg";
@@ -62,11 +64,49 @@
     $page.url.pathname.startsWith("/signup");
   $: activeRendererItem = rendererList.find((r) => r.udn === activeRenderer);
 
-  // Seed auth state from server load to avoid a logged-out flash
-  setUser(user);
-  isAuthChecked.set(true);
+  // Don't seed auth state here - wait for client-side initialization
 
   onMount(async () => {
+    // Check actual current path, not reactive variable
+    const currentPath = window.location.pathname;
+    const onAuthPage = currentPath.startsWith("/login") || currentPath.startsWith("/signup");
+    
+    console.log('[Layout] onMount started, currentPath:', currentPath, 'onAuthPage:', onAuthPage);
+
+    // If on auth page, don't show loading
+    if (onAuthPage) {
+      console.log('[Layout] On auth page, skipping auth check');
+      authLoading = false;
+      return;
+    }
+
+    console.log('[Layout] Starting auth initialization...');
+    // Initialize JWT auth on client-side (try to refresh token)
+    const initResult = await initializeAuth().catch((e) => {
+      console.error('[Layout] initializeAuth error:', e);
+      return false;
+    });
+    console.log('[Layout] initializeAuth result:', initResult);
+
+    // Now hydrate user after auth is initialized
+    console.log('[Layout] Hydrating user...');
+    const hydratedUser = await hydrateUser().catch((e) => {
+      console.error('[Layout] hydrateUser error:', e);
+      return null;
+    });
+    console.log('[Layout] Hydrated user:', hydratedUser ? 'SUCCESS' : 'FAILED');
+    
+    // If no user and not on auth page, redirect to login
+    if (!hydratedUser && !onAuthPage) {
+      console.log('[Layout] No user found, redirecting to login');
+      authLoading = false;
+      goto("/login");
+      return;
+    }
+
+    console.log('[Layout] Auth complete, showing content');
+    // Auth complete, show content
+    authLoading = false;
 
     // Subscribe first to get immediate state (including default 'local' renderer)
 
@@ -80,10 +120,6 @@
     unsubAuthChecked = isAuthChecked.subscribe(
       (value) => (authChecked = value),
     );
-    // If server didn't provide a user, hydrate from the API on the client
-    if (!user) {
-      hydrateUser().catch((e) => console.error("Failed to hydrate user", e));
-    }
 
 
     try {
@@ -99,6 +135,17 @@
     refreshRenderers(false).catch((e) =>
       console.error("[Layout] refreshRenderers failed:", e),
     );
+
+    // Poll for new renderers every 10 seconds
+    const rendererPollInterval = setInterval(() => {
+      refreshRenderers(false).catch((e) =>
+        console.error("[Layout] Periodic refreshRenderers failed:", e),
+      );
+    }, 10000);
+
+    return () => {
+      clearInterval(rendererPollInterval);
+    };
   });
 
   onDestroy(() => {
@@ -181,6 +228,15 @@
 
 <svelte:window on:click={handleWindowClick} />
 
+<!-- Show loading state while checking auth -->
+{#if authLoading && !isAuthPage}
+  <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-surface-50/70 to-black">
+    <div class="text-center">
+      <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-primary mx-auto mb-4"></div>
+      <p class="text-muted">Loading...</p>
+    </div>
+  </div>
+{:else}
 <div class="min-h-screen text-default">
   {#if !isAuthPage}
     <header
@@ -469,8 +525,9 @@
     <slot />
   </main>
 
-  {#if !isAuthPage}
+  {#if !isAuthPage && user}
     <DownloadManager />
     <PlayerBar />
   {/if}
 </div>
+{/if}
