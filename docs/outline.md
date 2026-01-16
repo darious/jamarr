@@ -9,7 +9,7 @@ Jamarr is a web-based music controller focused on fast library browsing and reli
 The backend is the brain of the operation, responsible for:
 -   **Library Scanning**: Recursively scans the filesystem, extracts tags (mutagen), and caches metadata in PostgreSQL.
 -   **Metadata Enrichment**: Uses a v3 pipeline architecture to fetch high-quality metadata (artist bios, images, album details, external links) from MusicBrainz, Wikidata, Last.fm, Fanart.tv, Spotify, and Qobuz. See [Scanner V3 Documentation](scanner_v3.md) for details.
--   **Playback & Streaming**: Streams local files via `/api/stream/{track_id}` and manages playback state for both local and UPnP renderers.
+-   **Playback & Streaming**: Issues short-lived stream URLs via `/api/stream-url/{track_id}` and streams local files from `/api/stream/{track_id}?token=...` while managing playback state for both local and UPnP renderers.
 -   **UPnP Control**: Acts as a Control Point, managing playback state, volume, and queue for UPnP devices.
 -   **Queue Management**: Maintains the active play queue and playback state in the database (`renderer_state`) to ensure persistence and reliability even if the frontend disconnects.
 -   **Last.fm Integration**: Syncs scrobbles, matches them to local tracks, and merges them into playback history.
@@ -34,6 +34,7 @@ The frontend provides a polished, app-like user experience:
 -   **Optimistic UI**: Updates the UI immediately on user actions while syncing with the backend.
 -   **Renderer Switching**: Supports local playback via `<audio>` and remote playback via UPnP renderers.
 -   **Visuals**: High-resolution artwork, themed UI, and smooth transitions.
+-   **Artwork Access**: Artwork loads from authenticated `/api/art/*` endpoints with an access token.
 
 ## Key Workflows
 
@@ -51,7 +52,7 @@ The frontend provides a polished, app-like user experience:
 2.  **State Update**: Frontend sends the new queue to the Backend API.
 3.  **Persistence**: Backend updates `renderer_state` table.
 4.  **Control**:
-    -   **Local**: Frontend uses `<audio>` with `/api/stream/{track_id}`.
+    -   **Local**: Frontend requests `/api/stream-url/{track_id}` and then uses `<audio>` with `/api/stream/{track_id}?token=...`.
     -   **UPnP**: Backend sends `SetAVTransportURI` and `Play` commands to the device.
 5.  **Monitoring**:
     -   Backend runs a background task to poll the UPnP device for position and transport state (`STOPPED`, `PLAYING`).

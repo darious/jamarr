@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.db import get_db, optimize_db
+from app.api.deps import get_current_user_jwt
 import asyncpg
 from typing import Optional
 
@@ -12,7 +13,7 @@ import logging
 
 logger = logging.getLogger("api.library")
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
 
 
 def sha1_to_hex(sha1_value):

@@ -1,4 +1,5 @@
 import {
+    fetchWithAuth,
     fetchNewReleases,
     fetchRecentlyAddedAlbums,
     fetchRecentlyPlayedAlbums,
@@ -7,6 +8,8 @@ import {
 } from '$lib/api';
 
 export async function load({ fetch }) {
+    const authFetch = (input: RequestInfo | URL, init?: RequestInit) =>
+        fetchWithAuth(String(input), init, fetch);
     const [
         newReleases,
         recentlyAddedAlbums,
@@ -14,11 +17,11 @@ export async function load({ fetch }) {
         recentlyPlayedArtists,
         discoverArtists
     ] = await Promise.all([
-        fetchNewReleases(fetch),
-        fetchRecentlyAddedAlbums(fetch),
-        fetchRecentlyPlayedAlbums(fetch),
-        fetchRecentlyPlayedArtists(fetch),
-        fetchDiscoverArtists(fetch)
+        fetchNewReleases(authFetch),
+        fetchRecentlyAddedAlbums(authFetch),
+        fetchRecentlyPlayedAlbums(authFetch),
+        fetchRecentlyPlayedArtists(authFetch),
+        fetchDiscoverArtists(authFetch)
     ]);
 
     return {

@@ -6,6 +6,7 @@
   import IconButton from "$lib/components/IconButton.svelte";
   import TabButton from "$lib/components/TabButton.svelte";
   import HistoryChart from "$lib/components/HistoryChart.svelte";
+  import { getArtUrl } from "$lib/api";
   let showScopeMenu = false;
   let showSourceMenu = false;
   let showRangeMenu = false;
@@ -1094,7 +1095,7 @@
                   >
                     <img
                       src={artist.art_sha1
-                        ? `/api/art/file/${artist.art_sha1}?max_size=50`
+                        ? getArtUrl(artist.art_sha1, 50)
                         : "/assets/logo.png"}
                       alt={artist.artist}
                       class="h-full w-full object-cover"
@@ -1129,7 +1130,7 @@
                   >
                     <img
                       src={album.art_sha1
-                        ? `/api/art/file/${album.art_sha1}?max_size=50`
+                        ? getArtUrl(album.art_sha1, 50)
                         : "/assets/logo.png"}
                       alt={album.album}
                       class="h-full w-full object-cover"
@@ -1174,7 +1175,7 @@
                   >
                     <img
                       src={track.art_sha1
-                        ? `/api/art/file/${track.art_sha1}?max_size=50`
+                        ? getArtUrl(track.art_sha1, 50)
                         : "/assets/logo.png"}
                       alt={track.title}
                       class="h-full w-full object-cover"
@@ -1221,7 +1222,7 @@
             >
               <img
                 src={entry.track.art_sha1
-                  ? `/api/art/file/${entry.track.art_sha1}?max_size=60`
+                  ? getArtUrl(entry.track.art_sha1, 60)
                   : "/assets/logo.png"}
                 alt="Art"
                 class="h-full w-full object-cover"

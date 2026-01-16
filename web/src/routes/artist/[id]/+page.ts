@@ -1,11 +1,13 @@
 import type { Album, Artist, Playlist } from '$api';
-import { fetchAlbums, fetchArtists, fetchArtistPlaylists } from '$api';
+import { fetchAlbums, fetchArtists, fetchArtistPlaylists, fetchWithAuth } from '$api';
 import type { PageLoad } from './$types';
 
 import { redirect } from '@sveltejs/kit';
 
 export const load: PageLoad = async ({ params, fetch }) => {
   const mbidOrName = params.id;
+  const authFetch = (input: RequestInfo | URL, init?: RequestInit) =>
+    fetchWithAuth(String(input), init, fetch);
 
   // Simple UUID check (8-4-4-4-12 hex digits)
   const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(mbidOrName);
@@ -15,7 +17,7 @@ export const load: PageLoad = async ({ params, fetch }) => {
   if (!isUUID) {
     // Assume it's a legacy name-based URL
     try {
-      const fetchedArtists = await fetchArtists(fetch, { name: mbidOrName });
+      const fetchedArtists = await fetchArtists(authFetch, { name: mbidOrName });
       if (fetchedArtists.length > 0 && fetchedArtists[0].mbid) {
         throw redirect(308, `/artist/${fetchedArtists[0].mbid}`);
       }
@@ -30,7 +32,7 @@ export const load: PageLoad = async ({ params, fetch }) => {
   // Fetch specific artist by MBID
   let artists: Artist[] = [];
   try {
-    const fetchedArtists = await fetchArtists(fetch, { mbid });
+    const fetchedArtists = await fetchArtists(authFetch, { mbid });
     if (fetchedArtists.length > 0) {
       artists = [fetchedArtists[0]];
     }
@@ -45,14 +47,14 @@ export const load: PageLoad = async ({ params, fetch }) => {
   let albums: Album[] = [];
   try {
     // Now we can fetch albums specifically for this artist MBID
-    albums = await fetchAlbums({ artistMbid: mbid }, fetch);
+    albums = await fetchAlbums({ artistMbid: mbid }, authFetch);
   } catch (e) {
     console.error('Failed to fetch albums', e);
   }
 
   let playlists: Playlist[] = [];
   try {
-    playlists = await fetchArtistPlaylists(mbid, fetch);
+    playlists = await fetchArtistPlaylists(mbid, authFetch);
   } catch (e) {
     console.error('Failed to fetch artist playlists', e);
   }

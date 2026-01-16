@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { playerState, playFromQueue, reorderQueue } from "$stores/player";
+  import { getArtUrl } from "$lib/api";
   import AddToPlaylistModal from "$lib/components/AddToPlaylistModal.svelte";
   import TrackCard from "$lib/components/TrackCard.svelte";
 
@@ -195,7 +196,7 @@
         >
           <img
             src={dragTrack.art_sha1
-              ? `/api/art/file/${dragTrack.art_sha1}?max_size=120`
+              ? getArtUrl(dragTrack.art_sha1, 120)
               : "/assets/default-album-placeholder.svg"}
             alt={dragTrack.title || "Artwork"}
             class="h-full w-full object-cover"

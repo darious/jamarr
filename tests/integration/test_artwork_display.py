@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 
 @pytest.mark.asyncio
-async def test_homepage_new_releases_artwork(client: AsyncClient, db, auth_token):
+async def test_homepage_new_releases_artwork(auth_client: AsyncClient, db, auth_token):
     """
     Verify that get_new_releases returns art_sha1 
     when the database is correctly populated.
@@ -35,8 +35,7 @@ async def test_homepage_new_releases_artwork(client: AsyncClient, db, auth_token
     # Note: Requires auth? library.py endpoints usually depend on get_current_user depending on router.
     # checking router... api/library.py often is authenticated. passing auth_token cookie.
     
-    client.cookies = {"jamarr_session": auth_token}
-    response = await client.get("/api/home/new-releases")
+    response = await auth_client.get("/api/home/new-releases")
     assert response.status_code == 200
     data = response.json()
     
@@ -137,7 +136,7 @@ async def test_artwork_extraction_logic():
     print("\nVerified MP4 extraction logic")
 
 @pytest.mark.asyncio
-async def test_artwork_serving(client: AsyncClient, db, auth_token):
+async def test_artwork_serving(auth_client: AsyncClient, db, auth_token):
     """
     Test valid serving of artwork via /api/art/file/{sha1}.
     Ensures that extensionless cache files are served with correct Content-Type (e.g. image/jpeg).
@@ -169,9 +168,7 @@ async def test_artwork_serving(client: AsyncClient, db, auth_token):
     """, sha1, cache_path, len(data))
     
     # 3. Request Image
-    client.cookies = {"jamarr_session": auth_token}
-    
-    response = await client.get(f"/api/art/file/{sha1}")
+    response = await auth_client.get(f"/api/art/file/{sha1}")
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
     assert len(response.content) > 0
@@ -189,7 +186,7 @@ async def test_artwork_serving(client: AsyncClient, db, auth_token):
     pass
 
 @pytest.mark.asyncio
-async def test_artwork_serving_fallback(client: AsyncClient, db, auth_token):
+async def test_artwork_serving_fallback(auth_client: AsyncClient, db, auth_token):
     """
     Test serving of 'corrupt' or un-openable image data.
     Verifies that the API handles it (either 200 with fallback or error)
@@ -215,15 +212,13 @@ async def test_artwork_serving_fallback(client: AsyncClient, db, auth_token):
     """, sha1, cache_path, len(data))
     
     # 3. Request Image
-    client.cookies = {"jamarr_session": auth_token}
-    
-    response = await client.get(f"/api/art/file/{sha1}")
+    response = await auth_client.get(f"/api/art/file/{sha1}")
     
     ct = response.headers.get("content-type")
     assert ct == "image/jpeg", f"Expected image/jpeg, got {ct}"
 
 @pytest.mark.asyncio
-async def test_artwork_serving_null_mime(client: AsyncClient, db, auth_token):
+async def test_artwork_serving_null_mime(auth_client: AsyncClient, db, auth_token):
     """
     Test serving when MIME is NULL in DB.
     The API should try to sniff or default to a usable image type, 
@@ -255,9 +250,7 @@ async def test_artwork_serving_null_mime(client: AsyncClient, db, auth_token):
     """, sha1, cache_path, len(data))
     
     # 3. Request Image
-    client.cookies = {"jamarr_session": auth_token}
-    
-    response = await client.get(f"/api/art/file/{sha1}")
+    response = await auth_client.get(f"/api/art/file/{sha1}")
     
     ct = response.headers.get("content-type")
     print(f"Null-Mime Content-Type: {ct}")
@@ -270,7 +263,7 @@ async def test_artwork_serving_null_mime(client: AsyncClient, db, auth_token):
     assert ct == "image/jpeg", f"Expected image/jpeg, got {ct}"
 
 @pytest.mark.asyncio
-async def test_artwork_sha1_serving(client: AsyncClient, db, auth_token):
+async def test_artwork_sha1_serving(auth_client: AsyncClient, db, auth_token):
     """
     Test serving via SHA1 endpoint /api/art/file/{sha1}.
     This endpoint was previously missed in the fixes.
@@ -290,10 +283,8 @@ async def test_artwork_sha1_serving(client: AsyncClient, db, auth_token):
         ON CONFLICT (sha1) DO NOTHING
     """, sha1, cache_path, len(data))
     
-    client.cookies = {"jamarr_session": auth_token}
-    
     # Request via SHA1 endpoint
-    response = await client.get(f"/api/art/file/{sha1}")
+    response = await auth_client.get(f"/api/art/file/{sha1}")
     
     assert response.status_code == 200
     ct = response.headers.get("content-type")

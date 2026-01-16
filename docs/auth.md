@@ -37,17 +37,11 @@ The goals are:
 
 ---
 
-## 1.5 Current Jamarr auth (today)
+## 1.5 Legacy Jamarr auth (removed)
 
-Jamarr currently uses **cookie-backed sessions**:
-
-- A random session token is stored in the `session` table.
-- The browser receives a `jamarr_session` **HttpOnly cookie**.
-- The session uses **sliding expiration** (default 30 days).
-- Endpoints live under `/api/auth/*` (see `app/api/auth.py`).
-
-This is stable for same-origin browser usage but makes non-browser clients harder and
-does not support short-lived access tokens or rotation.
+Jamarr previously used **cookie-backed sessions** via a `jamarr_session` cookie.
+That legacy path is now removed and ignored; only JWT access tokens + refresh cookies
+are accepted for `/api/*` endpoints.
 
 ---
 
@@ -118,6 +112,7 @@ Recommended endpoints:
 4. On API 401:
    - attempt `/api/auth/refresh` once, then retry the request.
    - if refresh fails, redirect to login.
+5. For endpoints that cannot send headers (EventSource, `<img>`), append `access_token=<jwt>` as a query param.
 
 ### 4.3 Script / curl flow
 
@@ -125,6 +120,17 @@ Recommended endpoints:
 - Send `Authorization: Bearer …` for API calls.
 - On expiry:
   - re-login.
+
+Example:
+```bash
+# Login
+curl -s -X POST http://localhost:8111/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"secret"}' | jq -r .access_token
+
+# Use the access token
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8111/api/artists
+```
 
 ---
 
@@ -144,7 +150,7 @@ Access token (JWT) should include:
 - `iat`: issued-at
 - `iss`: issuer (e.g., `jamarr`)
 - `aud`: audience (e.g., `jamarr-api`)
-- `roles` or `scopes` (optional but recommended early)
+- `roles` or `scopes` (recommended early; Jamarr now includes a single `user` role)
 
 ### 5.3 Refresh token storage (DB)
 
@@ -309,8 +315,8 @@ Spin up app + test DB, then validate:
   - works within TTL
   - fails after expiry
   - cannot be used for different `track_id`
- - legacy session cookie ignored:
-   - requests relying only on `jamarr_session` are rejected
+- legacy session cookie ignored:
+  - requests relying only on `jamarr_session` are rejected
 
 ### 8.3 Security regression tests (cheap but valuable)
 - Ensure refresh cookie flags differ between dev/prod:
@@ -367,19 +373,19 @@ User settings endpoint:
 
 ## 11. “Definition of done” checklist
 
-- [ ] Access JWT auth required for all non-public `/api/*` endpoints
-- [ ] Refresh token rotation implemented + stored hashed in DB
-- [ ] Refresh delivered via HttpOnly cookie for browser clients
-- [ ] Refresh reuse hard-fails (revoked token reuse returns 401)
-- [ ] `/api/auth/me` validates only; never refreshes
-- [ ] `/api/auth/logout-all` revokes all refresh sessions
-- [ ] Dev vs prod cookie flags correctly set via environment
-- [ ] Streaming uses short-lived stream tokens (or alternative explicitly chosen)
-- [ ] Stream tokens bound to `track_id` (and optionally `user_id`)
-- [ ] Login rate-limited
-- [ ] Integration tests cover login/refresh/logout + 401/403 behaviour
-- [ ] Legacy `jamarr_session` cookies ignored for auth
-- [ ] Docs updated with how to use curl/scripts (login + bearer token)
+- [x] Access JWT auth required for all non-public `/api/*` endpoints
+- [x] Refresh token rotation implemented + stored hashed in DB
+- [x] Refresh delivered via HttpOnly cookie for browser clients
+- [x] Refresh reuse hard-fails (revoked token reuse returns 401)
+- [x] `/api/auth/me` validates only; never refreshes
+- [x] `/api/auth/logout-all` revokes all refresh sessions
+- [x] Dev vs prod cookie flags correctly set via environment
+- [x] Streaming uses short-lived stream tokens
+- [x] Stream tokens bound to `track_id` (and optionally `user_id`)
+- [x] Login rate-limited
+- [x] Integration tests cover login/refresh/logout + 401/403 behaviour
+- [x] Legacy `jamarr_session` cookies ignored for auth
+- [x] Docs updated with how to use curl/scripts (login + bearer token)
 
 ---
 

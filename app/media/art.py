@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from app.db import get_db
 import os
 import io
+from email.utils import parsedate_to_datetime, formatdate
+from datetime import timezone
 
 
 def _build_test_art_bytes():
@@ -69,9 +71,35 @@ def _snap_size(size: int) -> int:
             return s
     return ALLOWED_SIZES[-1]
 
+def _build_cache_headers(stat_result: os.stat_result, etag: str) -> dict:
+    return {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": etag,
+        "Last-Modified": formatdate(stat_result.st_mtime, usegmt=True),
+    }
+
+
+def _is_not_modified(request: Request, etag: str, stat_result: os.stat_result) -> bool:
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match and if_none_match.strip() == etag:
+        return True
+
+    if_modified_since = request.headers.get("if-modified-since")
+    if if_modified_since:
+        try:
+            parsed = parsedate_to_datetime(if_modified_since)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if stat_result.st_mtime <= parsed.timestamp():
+                return True
+        except Exception:
+            pass
+
+    return False
+
 
 @router.get("/art/file/{sha1}")
-async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
+async def get_artwork_by_sha1(sha1: str, request: Request, max_size: int = 0):
     # Lookup type to build path
     async for db in get_db():
         row = await db.fetchrow(
@@ -95,10 +123,12 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
 
             # Serve from cache if exists
             if os.path.exists(resized_path):
+                stat_result = os.stat(resized_path)
+                etag = f'W/"{sha1}-{int(stat_result.st_mtime)}-{stat_result.st_size}"'
+                if _is_not_modified(request, etag, stat_result):
+                    return Response(status_code=304, headers=_build_cache_headers(stat_result, etag))
                 response = FileResponse(resized_path, media_type="image/jpeg")
-                response.headers["Cache-Control"] = (
-                    "public, max-age=31536000, immutable"
-                )
+                response.headers.update(_build_cache_headers(stat_result, etag))
                 return response
 
             # Create if missing
@@ -140,10 +170,12 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
                     # Save to cache
                     img.save(resized_path, format="JPEG", quality=85, optimize=True)
 
+                    stat_result = os.stat(resized_path)
+                    etag = f'W/"{sha1}-{int(stat_result.st_mtime)}-{stat_result.st_size}"'
+                    if _is_not_modified(request, etag, stat_result):
+                        return Response(status_code=304, headers=_build_cache_headers(stat_result, etag))
                     response = FileResponse(resized_path, media_type="image/jpeg")
-                    response.headers["Cache-Control"] = (
-                        "public, max-age=31536000, immutable"
-                    )
+                    response.headers.update(_build_cache_headers(stat_result, etag))
                     return response
             except Exception:
                 # Fallback to original file on error
@@ -166,15 +198,19 @@ async def get_artwork_by_sha1(sha1: str, max_size: int = 0):
             except Exception:
                 pass
 
+        stat_result = os.stat(original_path)
+        etag = f'W/"{sha1}-{int(stat_result.st_mtime)}-{stat_result.st_size}"'
+        if _is_not_modified(request, etag, stat_result):
+            return Response(status_code=304, headers=_build_cache_headers(stat_result, etag))
         response = FileResponse(original_path, media_type=mime)
-        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        response.headers.update(_build_cache_headers(stat_result, etag))
         return response
 
     raise HTTPException(status_code=500, detail="Database error")
 
 
 @router.get("/art/renderer/{udn}")
-async def get_renderer_icon(udn: str, max_size: int = 0):
+async def get_renderer_icon(udn: str, request: Request, max_size: int = 0):
     async for db in get_db():
         row = await db.fetchrow(
             """
@@ -190,4 +226,4 @@ async def get_renderer_icon(udn: str, max_size: int = 0):
         if not row:
             raise HTTPException(status_code=404, detail="Renderer icon not found")
 
-        return await get_artwork_by_sha1(row["sha1"], max_size=max_size)
+        return await get_artwork_by_sha1(row["sha1"], max_size=max_size, request=request)

@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy, afterUpdate } from "svelte";
     import {
+        fetchWithAuth,
         triggerFilesystemScan,
         triggerMetadataScan,
         triggerFullScan,
@@ -11,6 +12,7 @@
         triggerOptimize,
         syncLastfmScrobbles,
     } from "$lib/api";
+    import { getAccessToken, refreshAccessToken } from "$lib/stores/auth";
     import TabButton from "$lib/components/TabButton.svelte";
     import Checkbox from "$lib/components/Checkbox.svelte";
 
@@ -94,8 +96,12 @@
     let lastfmEventSource: EventSource | undefined;
 
     onMount(async () => {
+        await refreshAccessToken();
+        const token = getAccessToken();
+        const tokenParam = token ? `?access_token=${encodeURIComponent(token)}` : "";
+
         // Connect to SSE
-        eventSource = new EventSource("/api/library/events");
+        eventSource = new EventSource(`/api/library/events${tokenParam}`);
 
         eventSource.onopen = () => {
             addLog("Connected to scan server.");
@@ -118,7 +124,7 @@
         };
 
         // Connect to Last.fm SSE
-        lastfmEventSource = new EventSource("/api/lastfm/events");
+        lastfmEventSource = new EventSource(`/api/lastfm/events${tokenParam}`);
 
         lastfmEventSource.onmessage = (event) => {
             try {
@@ -142,7 +148,7 @@
 
         // Get initial status
         try {
-            const res = await fetch("/api/library/status");
+            const res = await fetchWithAuth("/api/library/status");
             if (res.ok) {
                 const data = await res.json();
                 status = data.status;
