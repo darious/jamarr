@@ -1,16 +1,41 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from app.db import get_db
+from app.api.deps import get_current_user_jwt, get_optional_user_jwt
+from app.auth_tokens import create_stream_token, verify_stream_token
 import asyncpg
 import os
+from typing import Optional
 
 router = APIRouter()
 
 import mimetypes  # noqa: E402
 
 
+@router.get("/api/stream-url/{track_id}")
+async def get_stream_url(
+    track_id: int,
+    user: asyncpg.Record = Depends(get_current_user_jwt),
+    db: asyncpg.Connection = Depends(get_db),
+):
+    exists = await db.fetchval("SELECT 1 FROM track WHERE id = $1", track_id)
+    if not exists:
+        raise HTTPException(status_code=404, detail="Track not found")
+    token = create_stream_token(track_id=track_id, user_id=user["id"])
+    return {"url": f"/api/stream/{track_id}?token={token}"}
+
+
 @router.api_route("/api/stream/{track_id}", methods=["GET", "HEAD"])
-async def stream_track(track_id: int, db: asyncpg.Connection = Depends(get_db)):
+async def stream_track(
+    track_id: int,
+    token: Optional[str] = None,
+    user: Optional[asyncpg.Record] = Depends(get_optional_user_jwt),
+    db: asyncpg.Connection = Depends(get_db),
+):
+    if token:
+        verify_stream_token(token, track_id)
+    elif not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     row = await db.fetchrow("SELECT path FROM track WHERE id = $1", track_id)
     if not row:
         raise HTTPException(status_code=404, detail="Track not found")

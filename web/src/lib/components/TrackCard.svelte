@@ -2,6 +2,7 @@
     import { goto } from "$app/navigation";
     import IconButton from "$components/IconButton.svelte";
     import ArtistLinks from "$components/ArtistLinks.svelte";
+    import { getArtUrl } from "$lib/api";
 
     // Core track data
     export let track: {
@@ -96,7 +97,7 @@
     }
 
     function getArtworkUrl(): string {
-        if (artwork?.sha1) return `/art/file/${artwork.sha1}?max_size=100`;
+        if (artwork?.sha1) return getArtUrl(artwork.sha1, 100);
         return "/assets/default-album-placeholder.svg";
     }
 

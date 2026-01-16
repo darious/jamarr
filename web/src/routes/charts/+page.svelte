@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { ChartAlbum } from "$api";
+    import type { ChartAlbum } from "$api";
+    import { getArtUrl } from "$api";
   import { refreshChart, triggerPearlarrDownload, fetchTracks } from "$api";
   import { goto, invalidateAll } from "$app/navigation";
   import { setQueue, addToQueue } from "$stores/player";
@@ -196,7 +197,7 @@
         >
           {#if entry.in_library && entry.art_sha1}
             <img
-              src="/api/art/file/{entry.art_sha1}?max_size=300"
+              src={getArtUrl(entry.art_sha1, 300)}
               alt={title}
               class="w-full h-full object-cover"
               loading="lazy"

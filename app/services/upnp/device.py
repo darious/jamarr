@@ -2,6 +2,7 @@ import logging
 import html
 from typing import Dict, Any, Optional, Set
 from async_upnp_client.exceptions import UpnpError
+from app.auth_tokens import create_stream_token
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +74,12 @@ class UPnPDeviceControl:
         if not dmr:
             raise ValueError(f"DMR device not found for {self.manager.active_renderer}")
 
-        # Build media URL
-        media_url = f"{self.manager.base_url}/api/stream/{track_id}"
+        # Build media URL with a short-lived stream token
+        stream_token = create_stream_token(track_id, user_id=metadata.get("user_id"))
+        media_url = (
+            f"{self.manager.base_url}/api/stream/{track_id}"
+            f"?token={stream_token}"
+        )
 
         # Get MIME type from metadata
         mime_type = metadata.get("mime", "audio/flac")

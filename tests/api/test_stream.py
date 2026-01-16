@@ -1,5 +1,6 @@
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
+from app.main import app
 import os
 
 @pytest.fixture
@@ -31,9 +32,9 @@ async def stream_data(db):
 
 
 @pytest.mark.asyncio
-async def test_stream_full_content(client: AsyncClient, db, stream_data):
+async def test_stream_full_content(auth_client: AsyncClient, db, stream_data):
     # Test getting the full file
-    response = await client.get("/api/stream/999")
+    response = await auth_client.get("/api/stream/999")
     assert response.status_code == 200
     assert response.headers["content-type"] in ["audio/mpeg", "audio/mp3", "application/octet-stream"]
     assert response.headers["content-length"] == "1000"
@@ -42,10 +43,10 @@ async def test_stream_full_content(client: AsyncClient, db, stream_data):
 
 
 @pytest.mark.asyncio
-async def test_stream_range_request(client: AsyncClient, db, stream_data):
+async def test_stream_range_request(auth_client: AsyncClient, db, stream_data):
     # Test Range request: bytes=0-499 (First 500 bytes)
     headers = {"Range": "bytes=0-499"}
-    response = await client.get("/api/stream/999", headers=headers)
+    response = await auth_client.get("/api/stream/999", headers=headers)
     
     assert response.status_code == 206 # Partial Content
     assert response.headers["content-length"] == "500"
@@ -55,29 +56,44 @@ async def test_stream_range_request(client: AsyncClient, db, stream_data):
 
     # Test Range request: bytes=500- (Last 500 bytes)
     headers = {"Range": "bytes=500-"}
-    response = await client.get("/api/stream/999", headers=headers)
+    response = await auth_client.get("/api/stream/999", headers=headers)
     assert response.status_code == 206
     assert response.headers["content-length"] == "500"
     assert "bytes 500-999/1000" in response.headers["content-range"]
 
 @pytest.mark.asyncio
-async def test_stream_head_request(client: AsyncClient, db, stream_data):
+async def test_stream_head_request(auth_client: AsyncClient, db, stream_data):
     # Test HEAD request (metadata only)
-    response = await client.head("/api/stream/999")
+    response = await auth_client.head("/api/stream/999")
     assert response.status_code == 200
     assert response.headers["content-length"] == "1000"
     assert response.headers["accept-ranges"] == "bytes"
 
 @pytest.mark.asyncio
-async def test_stream_not_found(client: AsyncClient, db):
-    response = await client.get("/api/stream/999999")
+async def test_stream_not_found(auth_client: AsyncClient, db):
+    response = await auth_client.get("/api/stream/999999")
     assert response.status_code == 404
 
 @pytest.mark.asyncio
-async def test_stream_invalid_range(client: AsyncClient, db, stream_data):
+async def test_stream_invalid_range(auth_client: AsyncClient, db, stream_data):
     # Range outside of file
     headers = {"Range": "bytes=2000-3000"}
-    response = await client.get("/api/stream/999", headers=headers)
+    response = await auth_client.get("/api/stream/999", headers=headers)
     # Standard behavior for satisfiable range is 416, but some frameworks default to sending full file or 200.
     # We expect 416 Range Not Satisfiable
     assert response.status_code == 416
+
+
+@pytest.mark.asyncio
+async def test_stream_url_token_access(client: AsyncClient, auth_client: AsyncClient, db, stream_data):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as unauth_client:
+        unauth_response = await unauth_client.get("/api/stream-url/999")
+        assert unauth_response.status_code == 401
+
+    response = await auth_client.get("/api/stream-url/999")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["url"].startswith("/api/stream/999?token=")
+
+    token_response = await client.get(data["url"])
+    assert token_response.status_code == 200

@@ -1,4 +1,5 @@
 import type { Track } from "$lib/api";
+import { getStreamUrl } from "$lib/api";
 import { downloadStore, type DownloadMode, type DownloadJob } from "$stores/downloads";
 
 
@@ -59,7 +60,8 @@ async function downloadSingleFile(task: DownloadTask) {
     try {
         if (signal.aborted) throw new Error('Aborted');
 
-        const response = await fetch(`/api/stream/${track.id}`, { signal });
+        const url = await getStreamUrl(track.id);
+        const response = await fetch(url, { signal });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         if (!response.body) throw new Error('No body');
 
@@ -220,4 +222,3 @@ export async function downloadTracks(options: DownloadOptions) {
 function sanitizeFilename(name: string): string {
     return name.replace(/[/\\?%*:|"<>]/g, '-');
 }
-

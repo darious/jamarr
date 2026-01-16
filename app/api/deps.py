@@ -4,7 +4,7 @@ from typing import Optional
 import asyncpg
 from fastapi import Depends, Header, HTTPException, Request, status
 
-from app.auth import SESSION_COOKIE_NAME, get_session_user, get_user_by_id
+from app.auth import get_user_by_id
 from app.auth_tokens import verify_access_token
 from app.db import get_db
 
@@ -29,19 +29,12 @@ async def get_current_user_jwt(
     Raises:
         HTTPException: 401 if token is missing, invalid, or expired
     """
-    if not authorization:
-        if request is not None:
-            token = request.cookies.get(SESSION_COOKIE_NAME)
-            user, _ = await get_session_user(db, token)
-            if user:
-                if not user.get("is_active", True):
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="User account is inactive",
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
-                return user
+    if not authorization and request is not None:
+        token = request.query_params.get("access_token")
+        if token:
+            authorization = f"Bearer {token}"
 
+    if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authorization header",
@@ -100,14 +93,13 @@ async def get_optional_user_jwt(
     Returns:
         User record if valid token provided, None otherwise
     """
+    if not authorization and request is not None:
+        token = request.query_params.get("access_token")
+        if token:
+            authorization = f"Bearer {token}"
+
     if not authorization:
-        if request is None:
-            return None
-        token = request.cookies.get(SESSION_COOKIE_NAME)
-        user, _ = await get_session_user(db, token)
-        if user and not user.get("is_active", True):
-            return None
-        return user
+        return None
     
     try:
         return await get_current_user_jwt(authorization, request, db)

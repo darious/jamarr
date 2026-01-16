@@ -6,6 +6,7 @@
     triggerMissingAlbumsScan,
     triggerMetadataScan,
     triggerPearlarrDownload,
+    getArtUrl,
   } from "$lib/api";
   import { goto, invalidateAll } from "$app/navigation";
   import IconButton from "$components/IconButton.svelte";
@@ -155,9 +156,9 @@
   // Extract accent color
   $: if (browser && artist) {
     const bgUrl = artist.background_sha1
-      ? `/art/file/${artist.background_sha1}`
+      ? getArtUrl(artist.background_sha1, 600)
       : artist.art_sha1
-        ? `/art/file/${artist.art_sha1}`
+        ? getArtUrl(artist.art_sha1, 300)
         : null;
 
     if (bgUrl) {
@@ -203,8 +204,8 @@
       .toUpperCase();
   };
 
-  const getArtUrl = (sha1: string) => {
-    return `/api/art/file/${sha1}`;
+  const getArtistArtUrl = (sha1: string) => {
+    return getArtUrl(sha1, 300);
   };
 
   $: displayedTopTracks = (() => {
@@ -686,9 +687,9 @@
       class="absolute inset-0 bg-cover bg-center blur-[100px] opacity-30 scale-110 saturate-[1.5]"
       style={`background-image:url('${
         artist?.background_sha1
-          ? `/art/file/${artist.background_sha1}`
+          ? getArtUrl(artist.background_sha1, 600)
           : artist?.art_sha1
-            ? `/art/file/${artist.art_sha1}`
+            ? getArtUrl(artist.art_sha1, 300)
             : "/assets/default-artist-placeholder.svg"
       }')`}
     ></div>
@@ -711,9 +712,9 @@
         class="absolute inset-0 bg-cover bg-top transition-transform duration-1000 scale-105 group-hover:scale-100"
         style={`background-image:url('${
           artist?.background_sha1
-            ? `/art/file/${artist.background_sha1}`
+            ? getArtUrl(artist.background_sha1, 600)
             : artist?.art_sha1
-              ? `/art/file/${artist.art_sha1}`
+              ? getArtUrl(artist.art_sha1, 300)
               : "/assets/default-artist-placeholder.svg"
         }');`}
       >
@@ -800,7 +801,7 @@
                   {#if sim.art_sha1}
                     <img
                       src={sim.art_sha1
-                        ? `/art/file/${sim.art_sha1}`
+                        ? getArtUrl(sim.art_sha1, 300)
                         : ""}
                       class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
                       alt={sim.name}
@@ -906,7 +907,7 @@
                   >
                     <img
                       src={album.art_sha1
-                        ? `/art/file/${album.art_sha1}`
+                        ? getArtUrl(album.art_sha1, 300)
                         : "/assets/default-album-placeholder.svg"}
                       alt={album.album}
                       class="h-full w-full object-cover"
@@ -987,7 +988,7 @@
                           <div class="grid grid-cols-2 h-full w-full">
                             {#each p.thumbnails.slice(0, 4) as thumb}
                               <img
-                                src={getArtUrl(thumb)}
+                                src={getArtistArtUrl(thumb)}
                                 alt=""
                                 class="w-full h-full object-cover"
                                 loading="lazy"
@@ -996,7 +997,7 @@
                           </div>
                         {:else}
                           <img
-                            src={getArtUrl(p.thumbnails[0])}
+                            src={getArtistArtUrl(p.thumbnails[0])}
                             alt={p.name}
                             class="w-full h-full object-cover"
                             loading="lazy"

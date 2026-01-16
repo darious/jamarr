@@ -7,6 +7,7 @@
         deletePlaylist,
         removeTrackFromPlaylist,
         reorderPlaylist,
+        getArtUrl,
         type PlaylistDetail,
         type PlaylistTrack,
     } from "$lib/api";
@@ -295,8 +296,8 @@
         return `${m}:${s.toString().padStart(2, "0")}`;
     }
 
-    function getArtUrl(sha1: string) {
-        return `/api/art/file/${sha1}`;
+    function getTrackArt(sha1: string, size: number = 100) {
+        return getArtUrl(sha1, size);
     }
 </script>
 
@@ -331,7 +332,7 @@
                             <div class="grid grid-cols-2 h-full w-full">
                                 {#each playlist.thumbnails.slice(0, 4) as thumb}
                                     <img
-                                        src={getArtUrl(thumb)}
+                                        src={getTrackArt(thumb, 300)}
                                         class="w-full h-full object-cover"
                                         alt="Playlist thumbnail"
                                     />
@@ -339,7 +340,7 @@
                             </div>
                         {:else}
                             <img
-                                src={getArtUrl(playlist.thumbnails[0])}
+                                src={getTrackArt(playlist.thumbnails[0], 300)}
                                 class="w-full h-full object-cover"
                                 alt={playlist.name}
                             />

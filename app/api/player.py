@@ -8,7 +8,7 @@ from typing import Optional
 import asyncpg
 from app.db import get_db
 from app.upnp import UPnPManager
-from app.api.deps import get_optional_user_jwt
+from app.api.deps import get_current_user_jwt
 
 from app.models.player import (
     PlayerState,
@@ -43,7 +43,7 @@ from app.services.player.monitor import (
     _is_monitor_starting,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
 logger = logging.getLogger(__name__)
 upnp = UPnPManager.get_instance()
 
@@ -196,12 +196,12 @@ async def set_queue(
     update: QueueUpdate,
     request: Request,
     client_id: str = Depends(get_client_id),
-    user: asyncpg.Record | None = Depends(get_optional_user_jwt),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
         state = await get_renderer_state_db(db, udn)
-        user_id = user["id"] if user else None
+        user_id = user["id"]
 
         enriched_queue = []
         for t in update.queue:
@@ -222,7 +222,7 @@ async def set_queue(
         reset_history_tracker(udn if not udn.startswith("local") else client_id)
         
         # Trigger Now Playing update for Last.fm
-        if user_id and enriched_queue and state["current_index"] >= 0:
+        if enriched_queue and state["current_index"] >= 0:
             current_track = enriched_queue[state["current_index"]]
             asyncio.create_task(
                 update_now_playing_lastfm(user_id, current_track["id"])
@@ -280,18 +280,17 @@ async def append_queue(
     update: AppendQueue,
     request: Request,
     client_id: str = Depends(get_client_id),
-    user: asyncpg.Record | None = Depends(get_optional_user_jwt),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
         state = await get_renderer_state_db(db, udn)
-        user_id = user["id"] if user else None
+        user_id = user["id"]
 
         new_tracks = []
         for t in update.tracks:
             track_dict = t.model_dump()
-            if user_id is not None:
-                track_dict["user_id"] = user_id
+            track_dict["user_id"] = user_id
             new_tracks.append(track_dict)
         state["queue"] = state["queue"] + new_tracks
 
@@ -511,12 +510,12 @@ async def update_progress(
     update: ProgressUpdate,
     request: Request,
     client_id: str = Depends(get_client_id),
-    user: asyncpg.Record | None = Depends(get_optional_user_jwt),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
         client_ip = get_client_ip(request)
-        user_id = user["id"] if user else None
+        user_id = user["id"]
         if udn.startswith("local:"):
             state = await get_renderer_state_db(db, udn)
             state["position_seconds"] = update.position_seconds
@@ -536,9 +535,7 @@ async def update_progress(
                         
                         if update.position_seconds >= threshold:
                             # Log it
-                            effective_user_id = (
-                                user_id if user_id is not None else track.get("user_id")
-                            )
+                            effective_user_id = user_id or track.get("user_id")
                             try:
                                 await log_history(
                                     db,
@@ -614,7 +611,7 @@ async def play_track(
     request: Request,
     client_id: str = Depends(get_client_id),
     db: asyncpg.Connection = Depends(get_db),
-    user: asyncpg.Record | None = Depends(get_optional_user_jwt),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     track_id = data.get("track_id")
     if not track_id:
@@ -675,8 +672,7 @@ async def play_track(
         else:
             mime = "audio/flac"
     track["mime"] = mime
-    if user_row:
-        track["user_id"] = user_row["id"]
+    track["user_id"] = user_row["id"]
 
     is_local = udn.startswith("local:") or udn == "local"
 

@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 import json
 
 from app.scanner.scan_manager import ScanManager
+from app.api.deps import get_current_user_jwt
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
 
 
 class ScanRequest(BaseModel):

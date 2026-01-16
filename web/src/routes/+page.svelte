@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { Album, Artist } from "../lib/api";
-    import { fetchTracks } from "../lib/api";
+    import { fetchTracks, getArtUrl } from "../lib/api";
     import { setQueue, addToQueue } from "../lib/stores/player";
     import IconButton from "$components/IconButton.svelte";
 
@@ -83,7 +83,7 @@
                         >
                             <img
                                 src={album.art_sha1
-                                    ? `/art/file/${album.art_sha1}?max_size=300`
+                                    ? getArtUrl(album.art_sha1, 300)
                                     : "/assets/default-album-placeholder.svg"}
                                 alt={album.album}
                                 class="h-full w-full object-cover"
@@ -188,7 +188,7 @@
                         >
                             <img
                                 src={album.art_sha1
-                                    ? `/art/file/${album.art_sha1}?max_size=300`
+                                    ? getArtUrl(album.art_sha1, 300)
                                     : "/assets/default-album-placeholder.svg"}
                                 alt={album.album}
                                 class="h-full w-full object-cover"
@@ -289,7 +289,7 @@
                         >
                             <img
                                 src={album.art_sha1
-                                    ? `/art/file/${album.art_sha1}`
+                                    ? getArtUrl(album.art_sha1, 300)
                                     : "/assets/default-album-placeholder.svg"}
                                 alt={album.album}
                                 class="h-full w-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
@@ -393,7 +393,7 @@
                         >
                             <img
                                 src={artist.art_sha1
-                                    ? `/art/file/${artist.art_sha1}?max_size=300`
+                                    ? getArtUrl(artist.art_sha1, 300)
                                     : "/assets/default-artist-placeholder.svg"}
                                 alt={artist.name}
                                 class="h-full w-full object-cover"
@@ -438,7 +438,7 @@
                         >
                             <img
                                 src={artist.art_sha1
-                                    ? `/art/file/${artist.art_sha1}`
+                                    ? getArtUrl(artist.art_sha1, 300)
                                     : "/assets/default-artist-placeholder.svg"}
                                 alt={artist.name}
                                 class="h-full w-full object-cover transition-all duration-500"

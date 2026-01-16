@@ -1,14 +1,14 @@
 from typing import Any, List
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Response, Query
+from fastapi import APIRouter, Depends, Response, Query
 
-from app.api.deps import get_optional_user_jwt
+from app.api.deps import get_current_user_jwt
 from app.db import get_db
 from app.api.library import sha1_to_hex
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
 
 
 @router.get("/api/history/tracks")
@@ -23,7 +23,7 @@ async def get_playback_history(
     date_to: str | None = Query(None, alias="to"),
     page: int = 1,
     limit: int = 20,
-    current_user: asyncpg.Record | None = Depends(get_optional_user_jwt),
+    current_user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
@@ -51,8 +51,6 @@ async def get_playback_history(
         params_list = [from_date, to_date]
 
         if scope == "mine":
-            if not current_user:
-                raise HTTPException(status_code=401, detail="Not authenticated")
             where_clauses.append(f"h.user_id = ${len(params_list) + 1}")
             params_list.append(current_user["id"])
 
@@ -152,7 +150,7 @@ async def get_playback_history_stats(
     track_id: int | None = None,
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
-    current_user: asyncpg.Record | None = Depends(get_optional_user_jwt),
+    current_user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
@@ -180,8 +178,6 @@ async def get_playback_history_stats(
         ]
         params: List[Any] = [from_date, to_date]
         if scope == "mine":
-            if not current_user:
-                raise HTTPException(status_code=401, detail="Not authenticated")
             where_clauses.append(f"h.user_id = ${len(params) + 1}")
             params.append(current_user["id"])
         if source != "all":

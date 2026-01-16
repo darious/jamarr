@@ -69,9 +69,9 @@ async def search_data(db):
 
 
 @pytest.mark.asyncio
-async def test_search(client: AsyncClient, db, search_data):
+async def test_search(auth_client: AsyncClient, db, search_data):
     # 1. Search existing
-    response = await client.get("/api/search", params={"q": "Searchable"})
+    response = await auth_client.get("/api/search", params={"q": "Searchable"})
     assert response.status_code == 200
     data = response.json()
     assert len(data["tracks"]) >= 1
@@ -79,23 +79,23 @@ async def test_search(client: AsyncClient, db, search_data):
     assert track["title"] == "Searchable Song"
     
     # 2. Search artist
-    response = await client.get("/api/search", params={"q": "Search Artist"})
+    response = await auth_client.get("/api/search", params={"q": "Search Artist"})
     data = response.json()
     assert len(data["artists"]) >= 1
     assert data["artists"][0]["name"] == "Search Artist"
     
     # 3. Search Album (explicitly via Album table now)
-    response = await client.get("/api/search", params={"q": "Search Album"})
+    response = await auth_client.get("/api/search", params={"q": "Search Album"})
     data = response.json()
     assert len(data["albums"]) >= 1
     assert data["albums"][0]["title"] == "Search Album"
     assert data["albums"][0]["artist"] == "Search Artist"
 
 @pytest.mark.asyncio
-async def test_search_duplicate_albums(client: AsyncClient, db, search_data):
+async def test_search_duplicate_albums(auth_client: AsyncClient, db, search_data):
     # Search for "Compilation"
     # Should return ONE album entry, despite two artists
-    response = await client.get("/api/search", params={"q": "Compilation"})
+    response = await auth_client.get("/api/search", params={"q": "Compilation"})
     assert response.status_code == 200
     data = response.json()
     
@@ -105,11 +105,11 @@ async def test_search_duplicate_albums(client: AsyncClient, db, search_data):
     assert comp_albums[0]["artist"] in ["Artist A", "Artist B"]
 
 @pytest.mark.asyncio
-async def test_search_ranking_fix(client: AsyncClient, db, search_data):
+async def test_search_ranking_fix(auth_client: AsyncClient, db, search_data):
     # Search "Now Music"
     # Should find the album "Now That's What I Call Music" AT THE TOP
     # Because "Now" is in the title, whereas "Music Box" misses "Now".
-    response = await client.get("/api/search", params={"q": "Now Music"})
+    response = await auth_client.get("/api/search", params={"q": "Now Music"})
     assert response.status_code == 200
     data = response.json()
     
@@ -120,13 +120,13 @@ async def test_search_ranking_fix(client: AsyncClient, db, search_data):
     assert first["title"] == "Now That's What I Call Music"
 
 @pytest.mark.asyncio
-async def test_search_limits(client: AsyncClient, db):
+async def test_search_limits(auth_client: AsyncClient, db):
     # Clear and insert 25 artists matching "LimitTest"
     await db.execute("DELETE FROM artist WHERE name LIKE 'LimitTest%'")
     for i in range(25):
         await db.execute(f"INSERT INTO artist (mbid, name) VALUES ('l{i}', 'LimitTest {i}')")
         
-    response = await client.get("/api/search", params={"q": "LimitTest"})
+    response = await auth_client.get("/api/search", params={"q": "LimitTest"})
     data = response.json()
     
     # Should be limited to 20 (new limit) instead of 5

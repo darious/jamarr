@@ -15,7 +15,7 @@
     shuffleQueue,
     toggleRepeat,
   } from "$stores/player";
-  import { fetchWithAuth } from "$lib/api";
+  import { fetchWithAuth, getStreamUrl, getArtUrl } from "$lib/api";
   import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
   import VolumeControl from "$components/VolumeControl.svelte";
   import QueueDrawer from "$components/QueueDrawer.svelte";
@@ -192,93 +192,101 @@
     // Flag to prevent timeupdate from overwriting store with 0 during restore
     let isRestoringPosition = false;
 
-    window.addEventListener("jamarr:play-local", (e: CustomEvent) => {
-
-      const track = e.detail;
+    const playLocalTrack = async (track: any) => {
 
       // Relaxed check: Accept "local" or "local:..."
       if (!$playerState.renderer.includes("local")) return;
 
-      if (audio) {
-
-
-        // Check if we're switching to a different track
-        const currentSrc = audio.src;
-        const newSrc = `/api/stream/${track.id}`;
-        
-        // Fix: isSameTrack check can be tricky with full URLs. 
-        // We know we are changing tracks if the IDs don't match or src is different.
-        // But for "reload" scenario, src might be empty or same.
-        const isSameTrack = currentSrc.includes(newSrc);
-
-        // Prevent timeupdate from syncing 0 to store while we setup
-        isRestoringPosition = true;
-
-        const savedPosition = $playerState.position_seconds || 0;
-        const isColdStart = !currentSrc || currentSrc === window.location.href; 
-        
-        // Define restoration logic to run once metadata is loaded
-        const onLoadedMetadata = () => {
-
-             
-             // Check if we should restore
-             if ((isSameTrack || isColdStart) && savedPosition > 0) {
-
-                // Wrap in try-catch as setting currentTime can sometimes throw if not ready
-                try {
-                    audio.currentTime = savedPosition;
-                } catch (e) {
-                    console.error("[PlayerBar] Failed to set currentTime:", e);
-                }
-             } else {
-
-                // We do NOT reset store here, because we want only 'timeupdate' to drive the store
-                // efficiently, and we don't want to flash 0 if we can avoid it, 
-                // but for a new track starting at 0 is correct.
-                audio.currentTime = 0;
-                playerState.update((s) => ({ ...s, position_seconds: 0 }));
-             }
-
-             // Allow updates again after a short delay
-             setTimeout(() => {
-                isRestoringPosition = false;
-             }, 200);
-        };
-
-        // Attach one-time listener BUT also check if readyState is already enough
-        // readyState >= 1 means HAVE_METADATA
-        if (audio.readyState >= 1) {
-
-             onLoadedMetadata();
-        } else {
-             audio.addEventListener("loadedmetadata", onLoadedMetadata, { once: true });
-             
-             // FAIL-SAFE: If loadedmetadata never fires (e.g. network stall), clear the flag eventually
-             setTimeout(() => {
-                 if (isRestoringPosition) {
-                     console.warn("[PlayerBar] loadedmetadata timed out, clearing isRestoringPosition flag");
-                     isRestoringPosition = false;
-                 }
-             }, 2000);
-        }
-
-        audio.src = newSrc;
-
-        // Force Playback immediately - User action (click) initiated this chain
-        audio
-          .play()
-          .then(() => {
-
-            isPlaying = true;
-            playerState.update((s) => ({ ...s, is_playing: true }));
-          })
-          .catch((e) => {
-            console.warn("[PlayerBar] Auto-play blocked or failed:", e.message);
-            // Don't revert state to false, let user try again if needed
-          });
-      } else {
+      if (!audio) {
         console.error("[PlayerBar] Audio element not found!");
+        return;
       }
+
+      // Check if we're switching to a different track
+      const currentSrc = audio.src;
+      let newSrc = `/api/stream/${track.id}`;
+      try {
+        newSrc = await getStreamUrl(track.id);
+      } catch (e) {
+        console.error("[PlayerBar] Failed to fetch stream URL:", e);
+        return;
+      }
+      
+      // Fix: isSameTrack check can be tricky with full URLs. 
+      // We know we are changing tracks if the IDs don't match or src is different.
+      // But for "reload" scenario, src might be empty or same.
+      const isSameTrack = currentSrc.includes(`/api/stream/${track.id}`);
+
+      // Prevent timeupdate from syncing 0 to store while we setup
+      isRestoringPosition = true;
+
+      const savedPosition = $playerState.position_seconds || 0;
+      const isColdStart = !currentSrc || currentSrc === window.location.href; 
+      
+      // Define restoration logic to run once metadata is loaded
+      const onLoadedMetadata = () => {
+
+           
+           // Check if we should restore
+           if ((isSameTrack || isColdStart) && savedPosition > 0) {
+
+              // Wrap in try-catch as setting currentTime can sometimes throw if not ready
+              try {
+                  audio.currentTime = savedPosition;
+              } catch (e) {
+                  console.error("[PlayerBar] Failed to set currentTime:", e);
+              }
+           } else {
+
+              // We do NOT reset store here, because we want only 'timeupdate' to drive the store
+              // efficiently, and we don't want to flash 0 if we can avoid it, 
+              // but for a new track starting at 0 is correct.
+              audio.currentTime = 0;
+              playerState.update((s) => ({ ...s, position_seconds: 0 }));
+           }
+
+           // Allow updates again after a short delay
+           setTimeout(() => {
+              isRestoringPosition = false;
+           }, 200);
+      };
+
+      // Attach one-time listener BUT also check if readyState is already enough
+      // readyState >= 1 means HAVE_METADATA
+      if (audio.readyState >= 1) {
+
+           onLoadedMetadata();
+      } else {
+           audio.addEventListener("loadedmetadata", onLoadedMetadata, { once: true });
+           
+           // FAIL-SAFE: If loadedmetadata never fires (e.g. network stall), clear the flag eventually
+           setTimeout(() => {
+               if (isRestoringPosition) {
+                   console.warn("[PlayerBar] loadedmetadata timed out, clearing isRestoringPosition flag");
+                   isRestoringPosition = false;
+               }
+           }, 2000);
+      }
+
+      audio.src = newSrc;
+
+      // Force Playback immediately - User action (click) initiated this chain
+      audio
+        .play()
+        .then(() => {
+
+          isPlaying = true;
+          playerState.update((s) => ({ ...s, is_playing: true }));
+        })
+        .catch((e) => {
+          console.warn("[PlayerBar] Auto-play blocked or failed:", e.message);
+          // Don't revert state to false, let user try again if needed
+        });
+    };
+
+    window.addEventListener("jamarr:play-local", (e: CustomEvent) => {
+      const track = e.detail;
+      void playLocalTrack(track);
     });
 
     window.addEventListener("jamarr:seek", (e: CustomEvent) => {
@@ -538,7 +546,7 @@
         >
           <img
             src={currentTrack.art_sha1
-              ? `/api/art/file/${currentTrack.art_sha1}?max_size=60`
+              ? getArtUrl(currentTrack.art_sha1, 60)
               : "/assets/logo.png"}
             alt="Art"
             class="h-full w-full object-cover"
