@@ -7,6 +7,7 @@
     triggerMetadataScan,
     triggerPearlarrDownload,
     getArtUrl,
+    getPlaylist,
   } from "$lib/api";
   import { goto, invalidateAll } from "$app/navigation";
   import IconButton from "$components/IconButton.svelte";
@@ -333,8 +334,8 @@
           art_sha1: t.art_sha1 || null,
           codec: t.codec || null,
           bitrate: null,
-          sample_rate_hz: t.sample_rate_hz || null,
-          bit_depth: t.bit_depth || null,
+          sample_rate_hz: null,
+          bit_depth: null,
           plays: t.plays ?? undefined,
         };
       }
@@ -588,8 +589,7 @@
     if (albumTracks.length) {
       await setQueue(albumTracks, 0);
     } else {
-      const albumId =
-        album.mb_release_id;
+      const albumId = album.mb_release_id;
       if (albumId) {
         goto(`/album/${albumId}`);
       } else {
@@ -616,6 +616,38 @@
     const track = tracks.find((t) => t.id === trackId);
     if (track) {
       await addToQueue([track]);
+    }
+  }
+
+  async function playPlaylist(e: MouseEvent, playlistId: number) {
+    e.stopPropagation();
+    try {
+      const playlist = await getPlaylist(playlistId);
+      if (playlist && playlist.tracks.length > 0) {
+        const queueItems = playlist.tracks.map((t) => ({
+          ...t,
+          id: t.track_id,
+        }));
+        await setQueue(queueItems as unknown as Track[], 0);
+      }
+    } catch (error) {
+      console.error("Failed to play playlist:", error);
+    }
+  }
+
+  async function queuePlaylist(e: MouseEvent, playlistId: number) {
+    e.stopPropagation();
+    try {
+      const playlist = await getPlaylist(playlistId);
+      if (playlist && playlist.tracks.length > 0) {
+        const queueItems = playlist.tracks.map((t) => ({
+          ...t,
+          id: t.track_id,
+        }));
+        await addToQueue(queueItems as unknown as Track[]);
+      }
+    } catch (error) {
+      console.error("Failed to queue playlist:", error);
     }
   }
 
@@ -831,9 +863,7 @@
                 >
                   {#if sim.art_sha1}
                     <img
-                      src={sim.art_sha1
-                        ? getArtUrl(sim.art_sha1, 300)
-                        : ""}
+                      src={sim.art_sha1 ? getArtUrl(sim.art_sha1, 300) : ""}
                       class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
                       alt={sim.name}
                     />
@@ -931,8 +961,7 @@
                   <button
                     class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-105"
                     on:click={() => {
-                      const albumId =
-                        album.mb_release_id;
+                      const albumId = album.mb_release_id;
                       if (albumId) goto(`/album/${albumId}`);
                     }}
                   >
@@ -1007,12 +1036,16 @@
           {/if}
         {:else if activeTab === "playlists"}
           {#if playlists.length > 0}
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+            <div
+              class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6"
+            >
               {#each playlists as p (p.id)}
                 <div
                   class="group relative block surface-glass-panel rounded-xl overflow-hidden hover:bg-surface-2 transition-all duration-300 hover:scale-105 hover:z-10 hover:shadow-xl"
                 >
-                  <div class="aspect-square w-full bg-surface-3 relative transition-transform duration-300">
+                  <div
+                    class="aspect-square w-full bg-surface-3 relative transition-transform duration-300"
+                  >
                     <a href="/playlists/{p.id}" class="block w-full h-full">
                       {#if p.thumbnails && p.thumbnails.length > 0}
                         {#if p.thumbnails.length >= 4}
@@ -1074,6 +1107,45 @@
                         </div>
                       {/if}
                     </a>
+
+                    <!-- Hover Overlay -->
+                    <div
+                      class="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 flex items-center justify-center gap-3 z-10 pointer-events-none"
+                    >
+                      <div
+                        class="pointer-events-auto flex items-center gap-3 text-white"
+                      >
+                        <IconButton
+                          variant="primary"
+                          title="Play"
+                          onClick={(e) => playPlaylist(e, p.id)}
+                          stopPropagation={true}
+                          className="shadow-lg transition-all"
+                        >
+                          <svg
+                            class="h-6 w-6 ml-0.5"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg
+                          >
+                        </IconButton>
+                        <IconButton
+                          variant="primary"
+                          title="Add to Queue"
+                          onClick={(e) => queuePlaylist(e, p.id)}
+                          stopPropagation={true}
+                          className="shadow-lg transition-all"
+                        >
+                          <svg
+                            class="h-6 w-6"
+                            fill="currentColor"
+                            viewBox="0 0 24 24"
+                            ><path
+                              d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+                            /></svg
+                          >
+                        </IconButton>
+                      </div>
+                    </div>
                   </div>
 
                   <div class="p-4">
@@ -1085,7 +1157,9 @@
                       </div>
                     </a>
                     <div class="text-muted text-xs mt-1">
-                      {p.track_count} tracks • {p.is_public ? "Shared" : "Private"}
+                      {p.track_count} tracks • {p.is_public
+                        ? "Shared"
+                        : "Private"}
                     </div>
                   </div>
                 </div>
