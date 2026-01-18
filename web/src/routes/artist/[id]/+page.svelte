@@ -518,6 +518,37 @@
     if (ids.length) openPlaylistModal(ids);
   }
 
+  async function playAllMostListened() {
+    const playableTracks: Track[] = displayedMostListened
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (playableTracks.length > 0) {
+      await setQueue(playableTracks, 0);
+    }
+  }
+
+  async function queueAllMostListened() {
+    const playableTracks: Track[] = displayedMostListened
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (playableTracks.length > 0) {
+      await addToQueue(playableTracks);
+    }
+  }
+
+  async function openPlaylistModalForMostListened() {
+    const ids = displayedMostListened
+      .map((t) => t.id)
+      .filter((id) => id && id > 0) as number[];
+    if (ids.length) openPlaylistModal(ids);
+  }
+
   async function playAllSingles() {
     const allSingleTracks: Track[] = [];
     for (const single of displayedSingles) {
@@ -1460,7 +1491,7 @@
           </button>
 
           <!-- Track Actions (only show for track tabs) -->
-          {#if activeTab === "top_tracks" || activeTab === "singles_list"}
+          {#if activeTab === "top_tracks" || activeTab === "singles_list" || activeTab === "most_listened"}
             <div class="mt-6 pt-6 border-t border-subtle">
               <h3
                 class="text-xs font-semibold text-muted uppercase tracking-wider mb-3"
@@ -1472,7 +1503,9 @@
                   class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
                   on:click={activeTab === "top_tracks"
                     ? playAllTopTracks
-                    : playAllSingles}
+                    : activeTab === "most_listened"
+                      ? playAllMostListened
+                      : playAllSingles}
                 >
                   <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M8 5v14l11-7z" />
@@ -1483,7 +1516,9 @@
                   class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
                   on:click={activeTab === "top_tracks"
                     ? queueAllTopTracks
-                    : queueAllSingles}
+                    : activeTab === "most_listened"
+                      ? queueAllMostListened
+                      : queueAllSingles}
                 >
                   <svg
                     class="w-4 h-4"
@@ -1504,7 +1539,9 @@
                   class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
                   on:click={activeTab === "top_tracks"
                     ? openPlaylistModalForTopTracks
-                    : openPlaylistModalForSingles}
+                    : activeTab === "most_listened"
+                      ? openPlaylistModalForMostListened
+                      : openPlaylistModalForSingles}
                 >
                   <svg
                     class="w-4 h-4"

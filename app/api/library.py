@@ -332,7 +332,6 @@ async def get_artists(
                 GROUP BY t.id, t.title, t.album, t.release_date, t.duration_seconds,
                          t.codec, t.bit_depth, t.sample_rate_hz, a.sha1, t.release_mbid
                 ORDER BY plays DESC
-                LIMIT 10
             """
             l_rows = await db.fetch(listened_query, mbid_val)
             artist_data["most_listened"] = [
