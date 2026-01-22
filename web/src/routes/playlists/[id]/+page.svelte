@@ -103,6 +103,31 @@
         }
     }
 
+    // Helper to convert PlaylistTrack to Track format
+    function toTrack(t: PlaylistTrack) {
+        return {
+            id: t.track_id,
+            title: t.title,
+            artist: t.artist,
+            album: t.album,
+            duration_seconds: t.duration_seconds,
+            path: t.path,
+            art_sha1: t.art_sha1,
+            codec: t.codec,
+            bit_depth: t.bit_depth,
+            sample_rate_hz: t.sample_rate_hz,
+            artist_mbid: t.artist_mbid,
+            album_mbid: t.album_mbid,
+            mb_release_id: t.mb_release_id,
+        } as unknown as import("$api").Track;
+    }
+
+    // Play a single track
+    function playTrack(track: PlaylistTrack) {
+        void setQueue([toTrack(track)], 0);
+    }
+
+    // Play entire playlist
     async function handlePlay(e?: MouseEvent) {
         if (e) {
             e.preventDefault();
@@ -110,48 +135,19 @@
         }
         if (!playlist || !playlist.tracks.length) return;
 
-        // Convert to queue items
-        const queueItems = playlist.tracks.map((t) => ({
-            id: t.track_id,
-            title: t.title,
-            artist: t.artist,
-            album: t.album,
-            duration_seconds: t.duration_seconds,
-            path: t.path,
-            art_sha1: t.art_sha1,
-            codec: t.codec,
-            bit_depth: t.bit_depth,
-            sample_rate_hz: t.sample_rate_hz,
-            artist_mbid: t.artist_mbid,
-            album_mbid: t.album_mbid,
-            mb_release_id: t.mb_release_id,
-        }));
-
-        await setQueue(queueItems as unknown as import("$api").Track[], 0);
+        const queueItems = playlist.tracks.map(toTrack);
+        await setQueue(queueItems, 0);
     }
 
+    // Add entire playlist to queue
     async function handleAddToQueue(e?: MouseEvent) {
         if (e) {
             e.preventDefault();
             e.stopPropagation();
         }
         if (!playlist || !playlist.tracks.length) return;
-        const queueItems = playlist.tracks.map((t) => ({
-            id: t.track_id,
-            title: t.title,
-            artist: t.artist,
-            album: t.album,
-            duration_seconds: t.duration_seconds,
-            path: t.path,
-            art_sha1: t.art_sha1,
-            codec: t.codec,
-            bit_depth: t.bit_depth,
-            sample_rate_hz: t.sample_rate_hz,
-            artist_mbid: t.artist_mbid,
-            album_mbid: t.album_mbid,
-            mb_release_id: t.mb_release_id,
-        }));
-        await addToQueue(queueItems as unknown as import("$api").Track[]);
+        const queueItems = playlist.tracks.map(toTrack);
+        await addToQueue(queueItems);
     }
 
     function handleDownload() {
@@ -599,12 +595,12 @@
                             showArtist={true}
                             showTechDetails={true}
                             isDragging={draggingIndex === index}
-                            onPlay={() => handlePlay()}
-                            onQueue={() => handleAddToQueue()}
+                            onPlay={() => playTrack(track)}
+                            onQueue={() => addToQueue([toTrack(track)])}
                             onAddToPlaylist={() =>
                                 handleAddToPlaylistInternal(track.track_id)}
                             onRemove={() => removeTrack(track)}
-                            onClick={() => handlePlay()}
+                            onClick={() => playTrack(track)}
                         />
                     </div>
                 {/each}
