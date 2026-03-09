@@ -308,7 +308,7 @@
         >
           <img
             class="absolute inset-0 w-full h-full object-cover"
-            src={getArt($playerState.queue[$playerState.current_index], 600)}
+            src={getArt($playerState.queue[$playerState.current_index])}
             alt={$playerState.queue[$playerState.current_index]?.title || "Art"}
           />
           <!-- Inner shadow for depth -->

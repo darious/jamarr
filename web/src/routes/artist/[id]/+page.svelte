@@ -775,9 +775,9 @@
         class="absolute inset-0 bg-cover bg-top transition-transform duration-1000 scale-105 group-hover:scale-100"
         style={`background-image:url('${
           artist?.background_sha1
-            ? getArtUrl(artist.background_sha1, 600)
+            ? getArtUrl(artist.background_sha1)
             : artist?.art_sha1
-              ? getArtUrl(artist.art_sha1, 300)
+              ? getArtUrl(artist.art_sha1)
               : "/assets/default-artist-placeholder.svg"
         }');`}
       >
@@ -967,7 +967,7 @@
                   >
                     <img
                       src={album.art_sha1
-                        ? getArtUrl(album.art_sha1, 300)
+                        ? getArtUrl(album.art_sha1, 600)
                         : "/assets/default-album-placeholder.svg"}
                       alt={album.album}
                       class="h-full w-full object-cover"
@@ -1061,7 +1061,7 @@
                           </div>
                         {:else}
                           <img
-                            src={getArtistArtUrl(p.thumbnails[0])}
+                            src={getArtUrl(p.thumbnails[0], 600)}
                             alt={p.name}
                             class="w-full h-full object-cover"
                             loading="lazy"

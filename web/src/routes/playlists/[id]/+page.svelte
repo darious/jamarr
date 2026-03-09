@@ -336,7 +336,7 @@
                             </div>
                         {:else}
                             <img
-                                src={getTrackArt(playlist.thumbnails[0], 300)}
+                                src={getTrackArt(playlist.thumbnails[0], 600)}
                                 class="w-full h-full object-cover"
                                 alt={playlist.name}
                             />
