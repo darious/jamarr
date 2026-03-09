@@ -26,9 +26,9 @@
 
   // Reactive album art URL - recalculates when data changes
   $: albumArtUrl = (() => {
-    if (data.albumMeta?.art_sha1) return getArtUrl(data.albumMeta.art_sha1, 600);
+    if (data.albumMeta?.art_sha1) return getArtUrl(data.albumMeta.art_sha1);
     const withArt = data.tracks.find((t) => t.art_sha1);
-    if (withArt?.art_sha1) return getArtUrl(withArt.art_sha1, 600);
+    if (withArt?.art_sha1) return getArtUrl(withArt.art_sha1);
     return "/assets/default-album-placeholder.svg";
   })();
 

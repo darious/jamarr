@@ -324,7 +324,7 @@
                                     <div class="grid grid-cols-2 h-full w-full">
                                         {#each p.thumbnails.slice(0, 4) as thumb}
                                             <img
-                                                src={getPlaylistArtUrl(thumb, 100)}
+                                                src={getPlaylistArtUrl(thumb, 300)}
                                                 alt=""
                                                 class="w-full h-full object-cover"
                                                 loading="lazy"
@@ -334,7 +334,7 @@
                                     </div>
                                 {:else}
                                     <img
-                                        src={getPlaylistArtUrl(p.thumbnails[0], 300)}
+                                        src={getPlaylistArtUrl(p.thumbnails[0], 600)}
                                         alt={p.name}
                                         class="w-full h-full object-cover"
                                         loading="lazy"
