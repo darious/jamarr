@@ -161,6 +161,7 @@ export async function downloadTracks(options: DownloadOptions) {
             const playlistsHandle = await rootHandle.getDirectoryHandle("Playlists", { create: true });
             folderHandle = await playlistsHandle.getDirectoryHandle(sanitizeFilename(options.folderName), { create: true });
         }
+        // numbered_album: same folder structure as album, but files are numbered
 
         let targetHandle = folderHandle;
         if (options.subFolderName) {
@@ -191,7 +192,7 @@ export async function downloadTracks(options: DownloadOptions) {
         // Queue all files
         options.tracks.forEach((track, index) => {
             let filename = track.path.split('/').pop() || `track-${track.id}.mp3`;
-            if (options.mode === 'playlist') {
+            if (options.mode === 'playlist' || options.mode === 'numbered_album') {
                 const digits = total > 99 ? 3 : 2;
                 const position = (index + 1).toString().padStart(digits, '0');
                 filename = `${position} ${filename}`;

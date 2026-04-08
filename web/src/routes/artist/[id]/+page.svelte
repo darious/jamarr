@@ -592,7 +592,7 @@
     }
     if (!allSingleTracks.length) return;
     const artistName = artist?.sort_name || artist?.name || data.name;
-    void downloadTracks({ mode: "playlist", folderName: artistName, subFolderName: "zz_hits", tracks: allSingleTracks });
+    void downloadTracks({ mode: "numbered_album", folderName: artistName, subFolderName: "zz_hits", tracks: allSingleTracks });
   }
 
   function downloadAllMostListened() {
@@ -604,7 +604,19 @@
       .filter((t): t is Track => Boolean(t));
     if (!playableTracks.length) return;
     const artistName = artist?.sort_name || artist?.name || data.name;
-    void downloadTracks({ mode: "playlist", folderName: artistName, subFolderName: "zz_scrobbles", tracks: playableTracks });
+    void downloadTracks({ mode: "numbered_album", folderName: artistName, subFolderName: "zz_scrobbles", tracks: playableTracks });
+  }
+
+  function downloadAllTopTracks() {
+    const playableTracks: Track[] = displayedTopTracks
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (!playableTracks.length) return;
+    const artistName = artist?.sort_name || artist?.name || data.name;
+    void downloadTracks({ mode: "numbered_album", folderName: artistName, subFolderName: "zz_scrobbles", tracks: playableTracks });
   }
 
   async function playAlbum(album: Album) {
@@ -1655,10 +1667,10 @@
                   </svg>
                   Add to Playlist
                 </button>
-                {#if activeTab === "singles_list" || activeTab === "most_listened"}
+                {#if activeTab === "singles_list" || activeTab === "most_listened" || activeTab === "top_tracks"}
                   <button
                     class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
-                    on:click={activeTab === "most_listened" ? downloadAllMostListened : downloadAllSingles}
+                    on:click={activeTab === "most_listened" ? downloadAllMostListened : activeTab === "top_tracks" ? downloadAllTopTracks : downloadAllSingles}
                   >
                     <svg
                       class="w-4 h-4"
