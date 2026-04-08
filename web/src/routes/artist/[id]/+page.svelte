@@ -17,6 +17,7 @@
   import ColorThief from "colorthief";
   import Tabs from "$lib/components/Tabs.svelte";
   import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
+  import { downloadTracks } from "$lib/helpers/downloader";
 
   let showPlaylistModal = false;
   let selectedTrackIds: number[] = [];
@@ -582,6 +583,28 @@
       }
     }
     if (ids.length) openPlaylistModal(ids);
+  }
+
+  function downloadAllSingles() {
+    const allSingleTracks: Track[] = [];
+    for (const single of displayedSingles) {
+      if (single.tracksToPlay?.length) allSingleTracks.push(...single.tracksToPlay);
+    }
+    if (!allSingleTracks.length) return;
+    const artistName = artist?.sort_name || artist?.name || data.name;
+    void downloadTracks({ mode: "playlist", folderName: artistName, subFolderName: "zz_hits", tracks: allSingleTracks });
+  }
+
+  function downloadAllMostListened() {
+    const playableTracks: Track[] = displayedMostListened
+      .map((t) => {
+        if (!t.id || t.id <= 0) return null;
+        return tracks.find((lt) => lt.id === t.id) || t;
+      })
+      .filter((t): t is Track => Boolean(t));
+    if (!playableTracks.length) return;
+    const artistName = artist?.sort_name || artist?.name || data.name;
+    void downloadTracks({ mode: "playlist", folderName: artistName, subFolderName: "zz_scrobbles", tracks: playableTracks });
   }
 
   async function playAlbum(album: Album) {
@@ -1632,6 +1655,27 @@
                   </svg>
                   Add to Playlist
                 </button>
+                {#if activeTab === "singles_list" || activeTab === "most_listened"}
+                  <button
+                    class="w-full px-3 py-2 text-left text-sm text-default hover:text-primary transition-all border-b border-transparent hover:border-accent flex items-center gap-2 font-normal"
+                    on:click={activeTab === "most_listened" ? downloadAllMostListened : downloadAllSingles}
+                  >
+                    <svg
+                      class="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                      />
+                    </svg>
+                    Download
+                  </button>
+                {/if}
               </div>
             </div>
           {/if}
