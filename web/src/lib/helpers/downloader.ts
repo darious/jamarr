@@ -220,5 +220,9 @@ export async function downloadTracks(options: DownloadOptions) {
 
 
 function sanitizeFilename(name: string): string {
-    return name.replace(/[/\\?%*:|"<>]/g, '-');
+    return name
+        .replace(/[\x00-\x1f\x7f]/g, '')      // strip control characters & null bytes
+        .replace(/[/\\?%*:|"<>]/g, '-')         // replace illegal path chars
+        .replace(/^[\s.]+|[\s.]+$/g, '')         // trim leading/trailing dots and spaces
+        || 'unnamed';                             // fallback if result is empty
 }
