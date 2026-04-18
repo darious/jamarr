@@ -15,12 +15,10 @@
     refreshing = true;
     try {
       await refreshChart();
-      setTimeout(() => {
-        invalidateAll();
-        refreshing = false;
-      }, 5000);
+      await invalidateAll();
     } catch (e) {
       console.error(e);
+    } finally {
       refreshing = false;
     }
   }

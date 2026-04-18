@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.charts import refresh_chart_task
@@ -87,6 +87,6 @@ async def get_chart():
         return results
 
 @router.post("/refresh")
-async def refresh_chart(background_tasks: BackgroundTasks):
-    background_tasks.add_task(refresh_chart_task)
-    return {"status": "refreshing_started"}
+async def refresh_chart():
+    await refresh_chart_task()
+    return {"status": "refreshed"}
