@@ -14,15 +14,38 @@
     clearQueue,
     shuffleQueue,
     toggleRepeat,
+    advanceIndexLocal,
+    computeNextTrackToArm,
   } from "$stores/player";
   import { fetchWithAuth, getStreamUrl, getArtUrl } from "$lib/api";
   import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
   import VolumeControl from "$components/VolumeControl.svelte";
   import QueueDrawer from "$components/QueueDrawer.svelte";
   import ArtistLinks from "$components/ArtistLinks.svelte";
-  import { onMount } from "svelte";
+  import {
+    registerActionHandlers,
+    clearAll as clearMediaSession,
+    setMetadata as setMediaSessionMetadata,
+    setPlaybackState as setMediaSessionPlaybackState,
+    setPositionState as setMediaSessionPositionState,
+  } from "$lib/media-session";
+  import { onMount, onDestroy } from "svelte";
 
-  let audio: HTMLAudioElement;
+  // Two audio elements so we can pre-arm the next track while the current
+  // one is playing. On `ended`, we synchronously call .play() on the
+  // already-loaded standby element — this preserves the user-activation
+  // context Chrome Android requires to start new audio while the screen
+  // is locked. A single element forces a new src + play() call after
+  // activation has expired, which silently rejects.
+  let audioA: HTMLAudioElement;
+  let audioB: HTMLAudioElement;
+  let activeIsA = true;
+  // `audio` always points to the currently playing element. All legacy
+  // code below continues to act on `audio`, unchanged.
+  $: audio = activeIsA ? audioA : audioB;
+  $: standbyAudio = activeIsA ? audioB : audioA;
+  let armedTrackId: number | null = null;
+  let armingInFlight = false;
   let isPlaying = false;
   let currentTrack: any = null;
   let progress = 0;
@@ -98,13 +121,310 @@
   */
 
   let lastUpdateTime = 0; // Track last time we sent progress to server
+  // Pre-emptive swap guard: ensure we only swap once per track. Reset
+  // on every track change.
+  let preEmptiveSwapDone = false;
+  // Set briefly while a fresh src is being loaded; suppresses
+  // timeupdate driving the store with the old element's stale position.
+  let isRestoringPosition = false;
+  // How close to the natural end of the active track we trigger the
+  // pre-emptive swap. Must be large enough to cover one timeupdate
+  // tick (~250ms in Chrome) plus small clock jitter.
+  const PRE_EMPTIVE_SWAP_LEAD_SECONDS = 0.5;
 
   // Reset logged flag when track ID actually changes
   $: if (currentTrack && currentTrack.id !== lastLoggedTrackId) {
     hasLoggedCurrentTrack = false;
     lastLoggedTrackId = currentTrack.id;
     lastUpdateTime = 0; // Reset progress reporting timer
+    preEmptiveSwapDone = false;
+  }
 
+  // Register OS media session action handlers eagerly, BEFORE the
+  // reactive metadata block below runs. Android Chrome uses the set
+  // of registered handlers to decide which lock-screen controls to
+  // expose; if handlers are registered after metadata, the lock
+  // screen may only show play/pause.
+  if (typeof window !== "undefined") {
+    registerActionHandlers({
+      onPlay: () => {
+        if ($playerState.renderer.startsWith("local")) {
+          if (audio && audio.paused) {
+            audio
+              .play()
+              .catch((e) => console.error("[PlayerBar] MS play failed:", e));
+          }
+        } else {
+          resume();
+        }
+      },
+      onPause: () => {
+        if ($playerState.renderer.startsWith("local")) {
+          if (audio && !audio.paused) {
+            audio.pause();
+          }
+        } else {
+          pause();
+        }
+      },
+      onNext: () => void next(),
+      onPrevious: () => void previous(),
+      onSeekTo: (seconds: number) => {
+        if ($playerState.renderer.startsWith("local") && audio) {
+          audio.currentTime = seconds;
+          progress = seconds;
+          updateProgress(seconds, !audio.paused);
+        } else {
+          seek(seconds);
+        }
+      },
+      onStop: () => {
+        if ($playerState.renderer.startsWith("local") && audio) {
+          audio.pause();
+          audio.currentTime = 0;
+        } else {
+          pause();
+        }
+      },
+    });
+  }
+
+  // Keep OS media session in sync with current track.
+  // On Android/iOS this is what prevents background throttling from killing
+  // the "ended -> next track" handler when the screen locks.
+  $: setMediaSessionMetadata(currentTrack);
+  $: setMediaSessionPlaybackState(isPlaying, !!currentTrack);
+
+  let lastPositionReportAt = 0;
+
+  // Keep volume in lockstep on both audio elements (bind:volume only
+  // fires on audioA). Without this the pre-armed track plays at default
+  // volume after a swap.
+  $: if (audioB && typeof volume === "number" && !isNaN(volume)) {
+    try {
+      audioB.volume = volume;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Pre-arm: load the next track's stream URL into the standby audio
+  // element so that when the current track ends, we only need to call
+  // .play() (no async fetch, no src change) which preserves the user
+  // activation context Chrome Android requires for background playback.
+  async function armNextTrack() {
+    if (armingInFlight) return;
+    if (!standbyAudio) return;
+    if (!$playerState.renderer.startsWith("local")) {
+      // For UPnP the backend drives advancement; nothing to arm.
+      armedTrackId = null;
+      return;
+    }
+    const target = computeNextTrackToArm(
+      $playerState.queue,
+      $playerState.current_index,
+      $playerState.repeatMode,
+    );
+    if (!target || !target.track) {
+      armedTrackId = null;
+      // Clear stale standby src so a subsequent swap can't revive it.
+      try {
+        standbyAudio.removeAttribute("src");
+        standbyAudio.load();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    if (armedTrackId === target.track.id) return;
+
+    armingInFlight = true;
+    try {
+      const url = await getStreamUrl(target.track.id);
+      // The user may have skipped while we were awaiting: re-check.
+      const stillWanted = computeNextTrackToArm(
+        $playerState.queue,
+        $playerState.current_index,
+        $playerState.repeatMode,
+      );
+      if (!stillWanted || stillWanted.track.id !== target.track.id) {
+        armedTrackId = null;
+        return;
+      }
+      standbyAudio.src = url;
+      standbyAudio.preload = "auto";
+      try {
+        standbyAudio.load();
+      } catch {
+        /* ignore */
+      }
+      armedTrackId = target.track.id;
+    } catch (e) {
+      console.warn("[PlayerBar] armNextTrack failed:", e);
+      armedTrackId = null;
+    } finally {
+      armingInFlight = false;
+    }
+  }
+
+  // Re-arm whenever the current track, queue, or repeat mode changes.
+  let lastArmedForTrackId: number | null = null;
+  $: if (
+    currentTrack &&
+    (currentTrack.id !== lastArmedForTrackId ||
+      $playerState.repeatMode !== undefined)
+  ) {
+    lastArmedForTrackId = currentTrack.id;
+    // Debounce via microtask so reactive storms (reorder, play, etc.)
+    // only trigger one armNext call.
+    void Promise.resolve().then(() => armNextTrack());
+  }
+
+  // Swap the currently active audio element with the pre-armed standby.
+  // SYNC play() must happen before any await so the browser keeps the
+  // user-activation chain alive across the track boundary.
+  // Returns true if a swap was performed.
+  function swapToArmedNext(stopOldImmediately: boolean): boolean {
+    const target = computeNextTrackToArm(
+      $playerState.queue,
+      $playerState.current_index,
+      $playerState.repeatMode,
+    );
+    const canSwap =
+      !!target &&
+      !!standbyAudio &&
+      !!standbyAudio.src &&
+      armedTrackId === target.track.id;
+    if (!canSwap || !target) return false;
+
+    const oldEl = audio;
+
+    // SYNC play() — must happen before any await/yield.
+    const playPromise = standbyAudio.play();
+
+    // Swap pointers immediately so the active audio reference updates.
+    activeIsA = !activeIsA;
+    armedTrackId = null;
+
+    // Optimistic store update so the UI reflects the new track instantly.
+    playerState.update((s) => ({
+      ...s,
+      current_index: target.index,
+      position_seconds: 0,
+      is_playing: true,
+    }));
+    isPlaying = true;
+
+    if (stopOldImmediately) {
+      try {
+        oldEl.pause();
+        oldEl.currentTime = 0;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    Promise.resolve(playPromise)
+      .catch((e) => {
+        console.warn("[PlayerBar] Swap play() rejected, falling back:", e);
+        void next();
+      })
+      .finally(() => {
+        // Stop the old element (after a brief overlap if we left it
+        // running). Keeping audio uninterrupted across the swap is what
+        // prevents the tab from being suspended on locked Android.
+        if (!stopOldImmediately) {
+          try {
+            oldEl.pause();
+            oldEl.currentTime = 0;
+          } catch {
+            /* ignore */
+          }
+        }
+        // Tell the backend about the advance (no re-play).
+        void advanceIndexLocal(target.index);
+        // Arm the track after this one.
+        void armNextTrack();
+      });
+
+    return true;
+  }
+
+  // Shared timeupdate handler. Attached to BOTH audio elements (because
+  // either may be the active one after a swap) — we ignore events from
+  // whichever element isn't currently the active `audio`.
+  function handleTimeUpdate(ev: Event) {
+    const el = ev.currentTarget as HTMLAudioElement;
+    if (el !== audio) return;
+    if (isRestoringPosition) return;
+
+    const oldProgress = progress;
+    progress = el.currentTime;
+    duration = el.duration;
+    playerState.update((s) => ({
+      ...s,
+      position_seconds: progress,
+      is_playing: !el.paused,
+    }));
+
+    void oldProgress; // retained for future delta logic
+
+    checkPlayThreshold();
+
+    if (
+      currentTrack &&
+      Math.floor(el.currentTime) - lastUpdateTime >= 5
+    ) {
+      updateProgress(el.currentTime, !el.paused);
+      lastUpdateTime = Math.floor(el.currentTime);
+    }
+
+    const nowMs =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (currentTrack && el.duration && nowMs - lastPositionReportAt > 500) {
+      setMediaSessionPositionState(el.currentTime, el.duration, 1);
+      lastPositionReportAt = nowMs;
+    }
+
+    // Pre-emptive swap: switch to the standby element BEFORE the
+    // natural end of this track. Critical for locked-screen Android:
+    // the active element never fires `ended`, so the tab stays in
+    // "actively playing media" state for the entire transition and
+    // the new audio inherits the existing media activation context.
+    if (
+      !preEmptiveSwapDone &&
+      el.duration > 0 &&
+      el.currentTime >= el.duration - PRE_EMPTIVE_SWAP_LEAD_SECONDS &&
+      armedTrackId !== null &&
+      standbyAudio &&
+      standbyAudio.src
+    ) {
+      preEmptiveSwapDone = true;
+      // stopOldImmediately=false: let the old element keep playing for
+      // its remaining ~0.5s so the OS sees uninterrupted audio output.
+      const swapped = swapToArmedNext(false);
+      if (!swapped) {
+        // Re-allow another attempt if the swap was rejected (e.g.
+        // armed track no longer matches because user reordered).
+        preEmptiveSwapDone = false;
+      }
+    }
+  }
+
+  // Fires when the currently active audio element ends. This is the
+  // FALLBACK path — under normal locked-screen conditions, the
+  // pre-emptive swap in timeupdate runs first and `ended` never fires
+  // for the active element. We keep this for cold edge cases (track
+  // shorter than swap window, duration unknown, fast-forward to end).
+  function handleActiveEnded(ev: Event) {
+    const endedEl = ev.currentTarget as HTMLAudioElement;
+    // Ignore stale listeners firing on the (now-standby) element.
+    if (endedEl !== audio) return;
+
+    if (!swapToArmedNext(true)) {
+      // No pre-armed track or swap impossible — legacy path.
+      void next();
+    }
   }
 
   // Auto-resume playback when queue is loaded (reactive)
@@ -174,7 +494,6 @@
 
   onMount(() => {
 
-
     // Initial Volume Sync: Capture browser-restored volume
     if (audio) {
       // Only update store if it has NOT been initialized yet (null)
@@ -188,9 +507,6 @@
         }));
       }
     }
-
-    // Flag to prevent timeupdate from overwriting store with 0 during restore
-    let isRestoringPosition = false;
 
     const playLocalTrack = async (track: any) => {
 
@@ -317,50 +633,18 @@
       updateProgress(audio.currentTime, true);
     });
 
-    if (audio) {
-
-      let timeupdateCount = 0;
-      audio.addEventListener("timeupdate", () => {
-        if (isRestoringPosition) {
-             return;
-        }
-        timeupdateCount++;
-        const oldProgress = progress;
-        progress = audio.currentTime;
-        duration = audio.duration;
-        // Keep shared store in sync for overlays/UI
-        playerState.update((s) => ({
-          ...s,
-          position_seconds: progress,
-          is_playing: !audio.paused,
-        }));
-
-        // Log every 5 seconds to avoid spam
-        if (
-          Math.floor(audio.currentTime) % 5 === 0 &&
-          Math.floor(audio.currentTime) !== Math.floor(oldProgress)
-        ) {
-
-        }
-
-        checkPlayThreshold(); // Check if we should log to history
-
-        // Update server with progress every 5 seconds
-        if (
-          currentTrack &&
-          Math.floor(audio.currentTime) - lastUpdateTime >= 5
-        ) {
-
-          updateProgress(audio.currentTime, !audio.paused);
-          lastUpdateTime = Math.floor(audio.currentTime);
-        }
-      });
-      audio.addEventListener("ended", () => {
-
-        next();
-      });
+    // Attach timeupdate + ended to BOTH audio elements. After a swap,
+    // `audio` reactively points to the other element; the handlers
+    // each early-return if their event source isn't currently active.
+    if (audioA) {
+      audioA.addEventListener("timeupdate", handleTimeUpdate);
+      audioA.addEventListener("ended", handleActiveEnded);
     } else {
-      console.error("[PlayerBar] Audio element not found in onMount!");
+      console.error("[PlayerBar] audioA element not found in onMount!");
+    }
+    if (audioB) {
+      audioB.addEventListener("timeupdate", handleTimeUpdate);
+      audioB.addEventListener("ended", handleActiveEnded);
     }
 
     // Polling for remote playback
@@ -378,6 +662,19 @@
           if (res.ok) {
             const state = await res.json();
             progress = state.position_seconds;
+
+            // Update OS media session position (throttled to ~2/sec).
+            const nowMs =
+              typeof performance !== "undefined" ? performance.now() : Date.now();
+            const remoteDuration = currentTrack?.duration_seconds || 0;
+            if (
+              currentTrack &&
+              remoteDuration &&
+              nowMs - lastPositionReportAt > 500
+            ) {
+              setMediaSessionPositionState(progress, remoteDuration, 1);
+              lastPositionReportAt = nowMs;
+            }
 
             // Sync Store (Queue, Index, IsPlaying)
             // This ensures if backend auto-advanced, we reflect it
@@ -444,6 +741,10 @@
     }, 1000);
 
     return () => clearInterval(interval);
+  });
+
+  onDestroy(() => {
+    clearMediaSession();
   });
 
   function togglePlay() {
@@ -808,7 +1109,8 @@
     </div>
   </div>
 
-  <audio bind:this={audio} bind:volume></audio>
+  <audio bind:this={audioA} bind:volume preload="auto"></audio>
+  <audio bind:this={audioB} preload="auto"></audio>
 </div>
 
 <QueueDrawer
