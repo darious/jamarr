@@ -107,7 +107,7 @@
 </script>
 
 <div
-    class="mx-auto flex w-full max-w-[1700px] flex-col gap-10 px-8 py-10 pb-32"
+    class="mx-auto flex w-full max-w-[1700px] flex-col gap-8 px-4 py-6 pb-32 md:gap-10 md:px-8 md:py-10"
 >
     <!-- Header Controls -->
     <div
@@ -122,13 +122,13 @@
             </p>
         </div>
 
-        <div class="flex items-center gap-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
             <div
-                class="flex items-center gap-2 bg-surface-2 rounded-lg p-1 border border-subtle"
+                class="flex items-center gap-2 overflow-x-auto rounded-xl border border-subtle bg-surface-2 p-1"
             >
                 {#each daysOptions as option}
                     <button
-                        class="px-3 py-1.5 text-sm rounded-md transition-all {days ===
+                        class="whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-all {days ===
                         option.value
                             ? 'bg-accent text-white shadow-sm'
                             : 'text-muted hover:text-default hover:bg-surface-3'}"
@@ -161,7 +161,7 @@
     {#if seeds.length > 0}
         <section class="space-y-4">
             <h2
-                class="text-xl font-semibold text-default flex items-center gap-2"
+                class="flex items-center gap-2 text-lg font-semibold text-default md:text-xl"
             >
                 <svg
                     class="w-5 h-5 text-accent"
@@ -178,8 +178,30 @@
                 </svg>
                 Based on your recent listening...
             </h2>
+            <div class="grid grid-cols-3 gap-3 sm:grid-cols-4 md:hidden">
+                {#each seeds as seed}
+                    <a
+                        href="/artist/{seed.mbid}"
+                        class="flex min-w-0 flex-col items-center gap-2 rounded-2xl border border-subtle bg-surface-2/60 px-2 py-3 text-center"
+                        title="Impact Score: {seed.score.toFixed(1)}"
+                    >
+                        <div class="relative h-20 w-20 overflow-hidden rounded-full border border-subtle shadow-md">
+                            <img
+                                src={seed.art_sha1
+                                    ? getArtUrl(seed.art_sha1, 300)
+                                    : "/assets/default-artist-placeholder.svg"}
+                                alt={seed.name}
+                                class="h-full w-full object-cover"
+                                loading="lazy"
+                            />
+                        </div>
+                        <span class="w-full truncate text-xs text-default">{seed.name}</span>
+                        <span class="text-[10px] text-subtle">{seed.play_count} plays</span>
+                    </a>
+                {/each}
+            </div>
             <div
-                class="flex gap-4 overflow-x-auto py-4 -mx-8 px-8 scrollbar-thin scroll-pl-8"
+                class="hidden gap-4 overflow-x-auto py-4 -mx-8 px-8 scrollbar-thin scroll-pl-8 md:flex"
                 on:wheel={handleScroll}
             >
                 {#each seeds as seed}
@@ -217,11 +239,44 @@
     <!-- Recommended Artists -->
     {#if artists.length > 0}
         <section class="space-y-4">
-            <h2 class="text-2xl font-semibold text-default">
+            <h2 class="text-xl font-semibold text-default md:text-2xl">
                 Artists you might like
             </h2>
+            <div class="grid grid-cols-2 gap-4 md:hidden">
+                {#each artists as artist}
+                    <a
+                        href="/artist/{artist.mbid}"
+                        class="group relative flex min-w-0 flex-col items-center rounded-2xl border border-subtle bg-surface-2/50 p-3 text-center"
+                    >
+                        <div class="relative mb-3 h-28 w-28">
+                            <div class="h-full w-full overflow-hidden rounded-full bg-surface-3 shadow-lg">
+                                <img
+                                    src={artist.art_sha1
+                                        ? getArtUrl(artist.art_sha1, 300)
+                                        : "/assets/default-artist-placeholder.svg"}
+                                    alt={artist.name}
+                                    class="h-full w-full object-cover"
+                                    loading="lazy"
+                                />
+                            </div>
+                            <div
+                                class="absolute -bottom-1 -right-1 rounded-full border border-subtle bg-surface-1 px-2 py-1 text-[10px] text-subtle shadow-sm"
+                                title="Recommended by {artist.support_count} similar artists"
+                            >
+                                +{artist.support_count}
+                            </div>
+                        </div>
+                        <h3 class="mb-1 w-full truncate text-sm font-semibold text-default">
+                            {artist.name}
+                        </h3>
+                        <p class="line-clamp-2 text-xs text-subtle">
+                            Similar to {artist.similar_to.join(", ")}
+                        </p>
+                    </a>
+                {/each}
+            </div>
             <div
-                class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
+                class="hidden gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin md:flex"
                 on:wheel={handleScroll}
             >
                 {#each artists as artist}
@@ -269,11 +324,45 @@
     <!-- Recommended Albums -->
     {#if albums.length > 0}
         <section class="space-y-4">
-            <h2 class="text-2xl font-semibold text-default">
+            <h2 class="text-xl font-semibold text-default md:text-2xl">
                 Albums you might have missed
             </h2>
+            <div class="grid grid-cols-2 gap-4 md:hidden">
+                {#each albums as album}
+                    <div class="group relative min-w-0">
+                        <div class="relative aspect-square w-full overflow-hidden rounded-xl bg-surface-2 shadow-lg">
+                            <img
+                                src={album.art_sha1
+                                    ? getArtUrl(album.art_sha1, 300)
+                                    : "/assets/default-album-placeholder.svg"}
+                                alt={album.title}
+                                class="h-full w-full object-cover"
+                                loading="lazy"
+                            />
+                            <a href="/album/{album.mbid}" class="absolute inset-0 z-0" aria-label="View Album"></a>
+                            <div class="absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2 bg-gradient-to-t from-black/85 via-black/30 to-transparent p-3">
+                                <IconButton variant="primary" size="sm" title="Play Album" onClick={() => playAlbum(album)} stopPropagation={true}>
+                                    <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                                </IconButton>
+                                <IconButton variant="outline" size="sm" title="Add to Queue" onClick={() => queueAlbum(album)} stopPropagation={true} className="border-white/30 bg-black/30 text-white">
+                                    <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg>
+                                </IconButton>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <a href="/album/{album.mbid}" class="block truncate text-sm font-medium leading-tight text-default hover:underline" title={album.title}>
+                                {album.title}
+                            </a>
+                            <a href="/artist/{album.artist_mbid}" class="block truncate text-xs text-muted hover:underline" title={album.artist}>
+                                {album.artist}
+                            </a>
+                            <p class="mt-0.5 text-[11px] text-subtle">{album.year || ""}</p>
+                        </div>
+                    </div>
+                {/each}
+            </div>
             <div
-                class="flex gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin"
+                class="hidden gap-6 overflow-x-auto py-6 -mx-8 px-8 scroll-pl-8 snap-x snap-mandatory flex-nowrap scrollbar-thin md:flex"
                 on:wheel={handleScroll}
             >
                 {#each albums as album}
@@ -364,11 +453,11 @@
     <!-- Recommended Tracks -->
     {#if tracks.length > 0}
         <section class="space-y-4">
-            <div class="flex items-center justify-between">
-                <h2 class="text-2xl font-semibold text-default">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h2 class="text-xl font-semibold text-default md:text-2xl">
                     Recommended Tracks
                 </h2>
-                <div class="flex items-center gap-2">
+                <div class="grid grid-cols-2 gap-2 sm:flex sm:items-center">
                     <button
                         class="btn btn-primary btn-sm gap-2"
                         on:click={playAllTracks}

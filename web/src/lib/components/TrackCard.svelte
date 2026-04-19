@@ -117,7 +117,7 @@
         ? "grid-cols-[auto,auto,1fr,auto]"
         : "grid-cols-[auto,1fr,auto]";
 
-    $: containerClass = `w-full grid ${gridCols} items-center gap-4 px-3 py-2 rounded-xl hover:bg-surface-2 group transition-colors text-left border relative cursor-pointer
+    $: containerClass = `w-full grid ${gridCols} items-center gap-2 px-2 py-2 rounded-xl hover:bg-surface-2 group transition-colors text-left border relative cursor-pointer sm:gap-4 sm:px-3
         ${isCurrentlyPlaying ? "bg-accent/10 border-accent border-2 shadow-[0_0_20px_var(--accent-glow)]" : "border-transparent hover:border-subtle"}
         ${isDragging ? "opacity-30 grayscale" : ""}`;
 
@@ -153,7 +153,7 @@
     {/if}
     <!-- Index -->
     {#if showIndex && index !== undefined}
-        <span class="w-8 text-center text-sm text-subtle font-mono"
+        <span class="w-6 text-center text-xs text-subtle font-mono sm:w-8 sm:text-sm"
             >{index}</span
         >
     {/if}
@@ -161,7 +161,7 @@
     <!-- Artwork (84px - 50% larger than 56px) -->
     {#if showArtwork}
         <div
-            class="relative w-[84px] h-[84px] rounded overflow-hidden bg-surface-800 shadow-lg flex-shrink-0"
+            class="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded bg-surface-800 shadow-lg sm:h-[84px] sm:w-[84px]"
         >
             <img
                 src={getArtworkUrl()}
@@ -188,7 +188,7 @@
         <!-- Row 1: Track Title -->
         <a
             href={getAlbumUrl()}
-            class={`truncate text-base font-semibold block transition-colors ${isDisabled ? "text-subtle line-through cursor-default" : "text-default hover:text-primary-500 hover:underline cursor-pointer"}`}
+            class={`block truncate text-sm font-semibold transition-colors sm:text-base ${isDisabled ? "text-subtle line-through cursor-default" : "text-default hover:text-primary-500 hover:underline cursor-pointer"}`}
             on:click|preventDefault|stopPropagation={(e) => {
                 const url = getAlbumUrl();
                 if (url && url !== "#") {
@@ -202,7 +202,7 @@
 
         <!-- Row 2: Artist -->
         {#if showArtist}
-            <div class="text-sm text-muted leading-tight truncate">
+            <div class="truncate text-xs leading-tight text-muted sm:text-sm">
                 <ArtistLinks
                     {artists}
                     {artist}
@@ -216,7 +216,7 @@
         <!-- Row 3: Album · Year -->
         {#if (showAlbum && album) || (showPopularity && track.popularity)}
             <div
-                class="flex items-center gap-1.5 text-sm text-subtle leading-tight truncate"
+                class="flex items-center gap-1.5 truncate text-xs leading-tight text-subtle sm:text-sm"
             >
                 {#if showAlbum && album}
                     <a
@@ -252,15 +252,15 @@
     </div>
 
     <!-- Right Column: Duration, Tech Details, Actions -->
-    <div class="flex items-center gap-6 ml-auto">
+    <div class="ml-auto flex items-center gap-2 sm:gap-6">
         <!-- Duration & Tech Details -->
         <div class="flex flex-col items-end gap-0.5 text-right">
-            <span class="text-sm text-subtle tabular-nums font-mono">
+            <span class="text-xs text-subtle tabular-nums font-mono sm:text-sm">
                 {formatDuration(track.duration_seconds)}
             </span>
             {#if showTechDetails}
                 <div
-                    class="flex items-center gap-2 text-xs text-subtle uppercase tracking-wider font-medium min-h-[16px]"
+                    class="hidden min-h-[16px] items-center gap-2 text-xs font-medium uppercase tracking-wider text-subtle sm:flex"
                 >
                     {#if track.plays && track.plays > 0}
                         {#if track.id > 0}
@@ -345,7 +345,7 @@
         <!-- Action Buttons -->
         {#if !isDisabled && (onPlay || onQueue || onAddToPlaylist)}
             <div
-                class="flex items-center gap-1 opacity-30 group-hover:opacity-100 transition-opacity"
+                class="flex items-center gap-1 opacity-100 transition-opacity sm:opacity-30 sm:group-hover:opacity-100"
             >
                 {#if onPlay}
                     <IconButton

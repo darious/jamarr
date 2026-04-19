@@ -13,6 +13,15 @@
   let scopeMenuContainer: HTMLElement | null = null;
   let sourceMenuContainer: HTMLElement | null = null;
   let rangeMenuContainer: HTMLElement | null = null;
+  const rangeOptions = [
+    { value: "last7", label: "Last 7 days" },
+    { value: "last30", label: "Last 30 days" },
+    { value: "last90", label: "Last 90 days" },
+    { value: "last180", label: "Last 180 days" },
+    { value: "last365", label: "Last 365 days" },
+    { value: "all", label: "All time" },
+    { value: "custom", label: "Custom" },
+  ];
 
   export let data: {
     history: Array<{
@@ -646,7 +655,7 @@
 </div>
 
 <section
-  class="relative z-10 mx-auto flex w-[calc(100vw-50px)] flex-col gap-8 px-2 py-10"
+  class="relative z-10 mx-auto flex w-full max-w-[1700px] flex-col gap-8 px-4 py-6 md:w-[calc(100vw-50px)] md:px-2 md:py-10"
 >
   <div
     class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
@@ -708,7 +717,7 @@
         </div>
       {/if}
     </div>
-    <div class="flex items-center gap-4">
+    <div class="hidden items-center gap-4 md:flex">
       <div class="relative" bind:this={scopeMenuContainer}>
         <button
           class="px-4 py-2 text-sm font-normal text-muted hover:text-default transition-all border-b-2 border-transparent hover:border-accent min-w-[200px] justify-between flex items-center gap-2"
@@ -1054,8 +1063,111 @@
     </div>
   </div>
 
+  <div class="grid grid-cols-1 gap-3 md:hidden">
+    <div class="grid grid-cols-2 gap-3">
+      <label class="min-w-0">
+        <span class="mb-1 block text-[11px] uppercase tracking-widest text-subtle">
+          Scope
+        </span>
+        <select
+          class="w-full rounded-xl border border-subtle bg-surface-2 px-3 py-3 text-sm text-default"
+          bind:value={scope}
+          on:change={(e) =>
+            switchScope((e.currentTarget as HTMLSelectElement).value)}
+        >
+          <option value="mine">My History</option>
+          <option value="all">All History</option>
+        </select>
+      </label>
+
+      <label class="min-w-0">
+        <span class="mb-1 block text-[11px] uppercase tracking-widest text-subtle">
+          Source
+        </span>
+        <select
+          class="w-full rounded-xl border border-subtle bg-surface-2 px-3 py-3 text-sm text-default"
+          bind:value={source}
+          on:change={(e) =>
+            switchSource((e.currentTarget as HTMLSelectElement).value)}
+        >
+          <option value="all">All Sources</option>
+          <option value="local">Local Only</option>
+          <option value="lastfm">Last.fm Only</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="rounded-2xl border border-subtle bg-surface-2/70 p-3 backdrop-blur-sm">
+      <div class="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <div class="text-[11px] uppercase tracking-widest text-subtle">Range</div>
+          <div class="text-sm font-medium text-default">
+            {getRangeLabel(data.range, data.dateFrom, data.dateTo)}
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" on:click={() => invalidateAll()} title="Refresh History">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            class="h-4 w-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+            />
+          </svg>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        {#each rangeOptions as option}
+          <button
+            class={`rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+              range === option.value || pendingRange === option.value
+                ? "border border-accent/40 bg-accent/15 text-default"
+                : "border border-subtle bg-surface-3/50 text-muted hover:text-default"
+            }`}
+            on:click={() => {
+              if (option.value === "custom") {
+                pendingRange = "custom";
+              } else {
+                switchRange(option.value, true);
+              }
+            }}
+          >
+            {option.label}
+          </button>
+        {/each}
+      </div>
+
+      {#if range === "custom" || pendingRange === "custom"}
+        <div class="mt-3 grid grid-cols-1 gap-2">
+          <input
+            type="date"
+            class="w-full rounded-xl border border-subtle bg-transparent px-3 py-3 text-sm text-default"
+            value={pendingFrom}
+            on:change={updatePendingFrom}
+          />
+          <input
+            type="date"
+            class="w-full rounded-xl border border-subtle bg-transparent px-3 py-3 text-sm text-default"
+            value={pendingTo}
+            on:change={updatePendingTo}
+          />
+          <button class="btn btn-primary btn-sm justify-start" on:click={applyRange}>
+            Apply custom range
+          </button>
+        </div>
+      {/if}
+    </div>
+  </div>
+
   <!-- Stats -->
-  <div class="grid gap-6 lg:grid-cols-[35%_1fr] items-stretch">
+  <div class="grid gap-6 items-stretch lg:grid-cols-[35%_1fr]">
     <div class="glass-panel p-6 flex flex-col h-full">
       <div class="flex items-center justify-between">
         <div>
@@ -1072,13 +1184,13 @@
       {#if chartRows.length === 0}
         <p class="text-muted text-sm mt-4">No data.</p>
       {:else}
-        <div class="mt-4 h-[500px]">
+        <div class="mt-4 h-[320px] md:h-[500px]">
           <HistoryChart rows={chartRows} />
         </div>
       {/if}
     </div>
 
-    <div class="grid gap-6 lg:grid-cols-3">
+    <div class="grid gap-4 md:gap-6 lg:grid-cols-3">
       <div
         class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur h-full"
       >
@@ -1214,11 +1326,11 @@
       {:else}
         {#each data.history as entry}
           <div
-            class="group flex items-center gap-4 px-4 py-3 hover:bg-surface-2 transition-colors"
+            class="group flex items-start gap-3 px-3 py-3 transition-colors hover:bg-surface-2 sm:items-center sm:gap-4 sm:px-4"
           >
             <!-- Artwork -->
             <div
-              class="h-14 w-14 flex-shrink-0 rounded bg-surface-3 overflow-hidden relative"
+              class="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded bg-surface-3 sm:h-14 sm:w-14"
             >
               <img
                 src={entry.track.art_sha1
@@ -1250,15 +1362,13 @@
             </div>
 
             <!-- Track Info -->
-            <div class="flex-1 min-w-0">
+            <div class="min-w-0 flex-1">
               <p
                 class="truncate text-sm font-semibold text-default group-hover:text-default"
               >
                 {entry.track.title}
               </p>
-              <div
-                class="flex items-center gap-2 text-xs text-muted mt-0.5 flex-wrap"
-              >
+              <div class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">
                 <a
                   href={`/artist/${encodeURIComponent(entry.track.artist)}`}
                   class="hover:text-default hover:underline"
@@ -1283,6 +1393,8 @@
                     {entry.track.album}
                   </a>
                 {/if}
+                <span class="text-subtle">•</span>
+                <span>{formatTime(entry.track.duration_seconds)}</span>
                 {#if entry.track.codec}
                   <span class="text-subtle">•</span>
                   <span class="uppercase">{entry.track.codec}</span>
@@ -1296,10 +1408,26 @@
                   </span>
                 {/if}
               </div>
+              <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-subtle md:hidden">
+                {#if entry.source === "lastfm"}
+                  <img
+                    src="/assets/logo-lastfm.png"
+                    alt="Last.fm"
+                    class="h-4 w-4 opacity-90"
+                  />
+                {/if}
+                <span>{formatTimestamp(entry.timestamp)}</span>
+                <span class="text-subtle">•</span>
+                {#if entry.user}
+                  <span>{entry.user.display_name || entry.user.username}</span>
+                {:else}
+                  <span>Unknown user</span>
+                {/if}
+              </div>
             </div>
 
             <!-- Timestamp & Client Info -->
-            <div class="flex items-center gap-4">
+            <div class="hidden items-center gap-4 md:flex">
               <div class="flex flex-col items-end gap-1 text-xs text-muted">
                 <div class="flex items-center gap-2">
                   {#if entry.source === "lastfm"}

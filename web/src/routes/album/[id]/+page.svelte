@@ -179,15 +179,15 @@
 </div>
 
 <div class="relative z-10 w-full min-h-screen pb-20">
-  <div class="max-w-[1700px] mx-auto px-6 md:px-12 pt-12 md:pt-20">
+  <div class="max-w-[1700px] mx-auto px-4 pt-6 md:px-12 md:pt-20">
     <div
-      class="grid lg:grid-cols-[500px,1fr] xl:grid-cols-[600px,1fr] gap-16 items-start"
+      class="grid items-start gap-8 lg:grid-cols-[500px,1fr] lg:gap-16 xl:grid-cols-[600px,1fr]"
     >
       <!-- Left Column: Hero (Fixed-ish feel) -->
-      <div class="flex flex-col gap-8 sticky top-20">
+      <div class="flex flex-col gap-6 lg:sticky lg:top-20 lg:gap-8">
         <!-- Artwork -->
         <div
-          class="w-full aspect-square rounded shadow-2xl overflow-hidden relative group transition-transform duration-500 hover:scale-105"
+          class="relative mx-auto aspect-square w-full max-w-[420px] overflow-hidden rounded-2xl shadow-2xl transition-transform duration-500 hover:scale-105 lg:max-w-none lg:rounded"
         >
           <img
             src={albumArtUrl}
@@ -197,7 +197,7 @@
 
           <!-- Hover Controls -->
           <div
-            class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4"
+            class="absolute inset-0 flex items-end justify-center gap-3 bg-gradient-to-t from-black/85 via-black/15 to-transparent p-4 opacity-100 transition-opacity lg:items-center lg:bg-black/35 lg:p-0 lg:opacity-0 group-hover:opacity-100"
           >
             <IconButton variant="primary" title="Play Album" onClick={playAll}>
               <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
@@ -229,11 +229,11 @@
         <div class="space-y-4">
           <div>
             <h1
-              class="text-4xl md:text-5xl font-bold tracking-tight text-default leading-tight"
+              class="text-3xl font-bold tracking-tight text-default leading-tight sm:text-4xl md:text-5xl"
             >
               {data.album}
             </h1>
-            <div class="mt-2 text-2xl font-medium text-muted">
+            <div class="mt-2 text-lg font-medium text-muted sm:text-xl md:text-2xl">
               {#if data.albumMeta?.artists && data.albumMeta.artists.length > 0}
                 {#each data.albumMeta.artists as artist, i}
                   <button
@@ -388,7 +388,7 @@
       </div>
 
       <!-- Right Column: Tracklist -->
-      <div class="flex-1 pt-4 pb-20 max-w-3xl">
+      <div class="flex-1 max-w-3xl pb-20 pt-2 lg:pt-4">
         {#if data.tracks.length === 0}
           <div
             class="p-10 text-center text-muted bg-surface-2 rounded-xl border border-subtle"
@@ -401,7 +401,7 @@
               <div class="space-y-2">
                 {#if groupedTracks.length > 1}
                   <div
-                    class="flex items-center justify-between px-4 pb-2 border-b border-subtle mb-4 sticky top-[80px] z-20 backdrop-blur-md bg-surface-1/60 py-3 -mx-4 md:mx-0 md:rounded-t-lg"
+                    class="sticky z-20 -mx-2 mb-4 flex items-center justify-between border-b border-subtle bg-surface-1/75 px-3 py-3 backdrop-blur-md top-[64px] sm:-mx-4 sm:px-4 md:mx-0 md:rounded-t-lg md:top-[80px]"
                   >
                     <div class="flex items-center gap-3">
                       <img

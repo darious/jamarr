@@ -104,9 +104,9 @@
     }
 </script>
 
-<div class="container mx-auto max-w-5xl px-6 py-8">
-    <div class="mb-8 flex items-center justify-between">
-        <h1 class="text-3xl font-bold">Network Renderers</h1>
+<div class="container mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
+    <div class="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
+        <h1 class="text-2xl font-bold sm:text-3xl">Network Renderers</h1>
         <TabButton onClick={startScan} disabled={loading || isScanning}>
             {#if loading || isScanning}
                 Scanning...
@@ -153,10 +153,10 @@
     <div class="grid gap-4 grid-cols-1">
         {#each renderers as r}
             <div
-                class="relative rounded-xl border border-subtle bg-surface-2 p-6 shadow-lg"
+                class="relative rounded-xl border border-subtle bg-surface-2 p-4 shadow-lg sm:p-6"
             >
-                <div class="absolute right-5 top-5">
-                    <div class="h-16 w-16 rounded-xl bg-surface-3/70 p-2 shadow-inner">
+                <div class="absolute right-4 top-4 sm:right-5 sm:top-5">
+                    <div class="h-12 w-12 rounded-xl bg-surface-3/70 p-2 shadow-inner sm:h-16 sm:w-16">
                         <img
                             class="h-full w-full rounded-md object-contain"
                             src={getRendererIcon(r)}
@@ -169,13 +169,13 @@
                         />
                     </div>
                 </div>
-                <div class="mb-4 flex items-center gap-4">
+                <div class="mb-4 flex items-center gap-3 sm:gap-4 pr-12 sm:pr-20">
                     <div
-                        class="flex h-12 w-12 items-center justify-center rounded-full bg-primary-500/20 text-primary-400"
+                        class="flex h-10 w-10 items-center justify-center rounded-full bg-primary-500/20 text-primary-400 sm:h-12 sm:w-12"
                     >
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
-                            class="h-6 w-6"
+                            class="h-5 w-5 sm:h-6 sm:w-6"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -190,7 +190,7 @@
                     </div>
                     <div class="flex-1">
                         <h3
-                            class="font-bold text-lg leading-tight text-default"
+                            class="font-bold text-base leading-tight text-default sm:text-lg"
                         >
                             {r.name}
                         </h3>
@@ -205,7 +205,7 @@
                     {#if r.manufacturer || r.model_name}
                         <div class="mb-4 space-y-1 border-t border-subtle pt-4">
                             {#if r.manufacturer}
-                                <div class="flex justify-between text-sm">
+                                <div class="flex flex-col gap-1 text-sm sm:flex-row sm:justify-between">
                                     <span class="text-subtle">Manufacturer</span
                                     >
                                     <span class="text-muted"
@@ -214,7 +214,7 @@
                                 </div>
                             {/if}
                             {#if r.model_name}
-                                <div class="flex justify-between text-sm">
+                                <div class="flex flex-col gap-1 text-sm sm:flex-row sm:justify-between">
                                     <span class="text-subtle">Model</span>
                                     <span class="text-muted"
                                         >{r.model_name}</span
@@ -222,7 +222,7 @@
                                 </div>
                             {/if}
                             {#if r.model_number}
-                                <div class="flex justify-between text-sm">
+                                <div class="flex flex-col gap-1 text-sm sm:flex-row sm:justify-between">
                                     <span class="text-subtle">Model #</span>
                                     <span class="text-muted font-mono text-xs"
                                         >{r.model_number}</span
@@ -230,7 +230,7 @@
                                 </div>
                             {/if}
                             {#if r.serial_number}
-                                <div class="flex justify-between text-sm">
+                                <div class="flex flex-col gap-1 text-sm sm:flex-row sm:justify-between">
                                     <span class="text-subtle">Serial</span>
                                     <span class="text-muted font-mono text-xs"
                                         >{r.serial_number}</span
@@ -238,7 +238,7 @@
                                 </div>
                             {/if}
                             {#if r.firmware_version}
-                                <div class="flex justify-between text-sm">
+                                <div class="flex flex-col gap-1 text-sm sm:flex-row sm:justify-between">
                                     <span class="text-subtle">Firmware</span>
                                     <span class="text-muted font-mono text-xs"
                                         >{r.firmware_version}</span

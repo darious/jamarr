@@ -25,8 +25,8 @@ export interface PlayerState {
 }
 
 export const playerState = writable<PlayerState>({
-    renderers: [{ udn: 'local', name: 'This Device (Web Browser)', type: 'local' }],
-    renderer: 'local',
+    renderers: [],
+    renderer: '',
     queue: [],
     current_index: -1,
     is_playing: false,
@@ -115,7 +115,13 @@ export async function refreshRenderers(force: boolean = false) {
                 return r;
             });
 
-            playerState.update(s => ({ ...s, renderers: finalRenderers }));
+            playerState.update(s => {
+                const currentRenderer =
+                    s.renderer && finalRenderers.some((r: Renderer) => r.udn === s.renderer)
+                        ? s.renderer
+                        : `local:${myId}`;
+                return { ...s, renderers: finalRenderers, renderer: currentRenderer };
+            });
 
         } else {
             console.error('[refreshRenderers] Response not OK:', res.status, res.statusText);
@@ -133,7 +139,10 @@ export async function setRenderer(udn: string) {
             body: JSON.stringify({ udn })
         });
         if (res.ok) {
-            playerState.update(s => ({ ...s, renderer: udn }));
+            const data = await res.json();
+            const active = data.active || udn;
+            playerState.update(s => ({ ...s, renderer: active }));
+            await loadQueueFromServer();
         }
     } catch (e) {
         console.error('Failed to set renderer', e);
