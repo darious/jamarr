@@ -226,8 +226,7 @@
   ></div>
 
   <div
-    class="fixed right-4 z-[60] w-[720px] max-w-[92vw] rounded-2xl border border-white/10 bg-black/80 backdrop-blur-2xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col"
-    style="top: 86px; bottom: 96px;"
+    class="fixed inset-x-0 bottom-0 top-[72px] z-[60] flex flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-black/90 shadow-2xl shadow-black/50 backdrop-blur-2xl md:inset-x-auto md:right-4 md:top-[86px] md:bottom-[96px] md:w-[720px] md:max-w-[92vw] md:rounded-2xl"
     role="dialog"
     aria-modal="true"
     aria-label="Playback queue"
@@ -311,7 +310,7 @@
       </div>
     {:else}
       <div
-        class="flex-1 overflow-y-auto px-3 py-2 scrollbar-hide"
+        class="flex-1 overflow-y-auto px-2 py-2 md:px-3 scrollbar-hide"
         role="list"
         bind:this={scrollContainer}
         on:dragover={handleDragOverContainer}

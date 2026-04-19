@@ -208,18 +208,18 @@
     }
 </script>
 
-<div class="container mx-auto px-6 py-8">
-    <div class="flex items-center justify-between mb-8">
-        <h1 class="text-3xl font-bold font-display">Playlists</h1>
+<div class="container mx-auto px-4 py-6 md:px-6 md:py-8">
+    <div class="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
+        <h1 class="text-2xl font-bold font-display sm:text-3xl">Playlists</h1>
 
-        <div class="flex items-center gap-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
             <div class="relative">
                 <TabButton
                     onClick={() => {
                         showSortDropdown = !showSortDropdown;
                     }}
                     active={showSortDropdown}
-                    className="min-w-[160px] justify-between flex items-center gap-2"
+                    className="w-full sm:min-w-[160px] justify-between flex items-center gap-2"
                 >
                     <span>
                         {sortBy === "updated" ? "Last Updated" : "Name (A-Z)"}
@@ -306,7 +306,7 @@
         </div>
     {:else}
         <div
-            class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6"
+            class="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 xl:gap-6"
         >
             {#each sortedPlaylists as p (p.id)}
                 <div

@@ -694,6 +694,7 @@
   // Local state for tabs
   let activeTab = "album"; // Default, will update via reactive statement
   let isBioExpanded = false;
+  let showSectionPicker = false;
 
   // Reactive tab items
   // Release Tabs (Left Side)
@@ -773,6 +774,13 @@
     else if (trackTabs.length > 0) activeTab = trackTabs[0].value;
     else if (missingAlbums.length > 0) activeTab = "missing_albums";
   }
+
+  $: activeTabLabel =
+    allTabs.find((t) => t.value === activeTab)?.label || "Choose section";
+
+  $: isTrackTab = ["top_tracks", "most_listened", "singles_list"].includes(
+    activeTab,
+  );
 </script>
 
 <div
@@ -796,7 +804,7 @@
 
   <!-- Hero Banner -->
   <div
-    class="relative w-full h-[60vh] min-h-[500px] overflow-hidden group z-10"
+    class="relative z-10 w-full min-h-[320px] overflow-hidden group h-[42vh] sm:h-[48vh] md:h-[60vh] md:min-h-[500px]"
   >
     <!-- Background Image Layers -->
 
@@ -829,15 +837,15 @@
     ></div>
 
     <!-- Hero Content -->
-    <div class="absolute inset-0 flex items-end px-6 md:px-12 xl:px-16 pb-12">
+    <div class="absolute inset-0 flex items-end px-4 pb-8 md:px-12 md:pb-12 xl:px-16">
       <div class="w-full space-y-2">
         <h1
-          class="text-6xl md:text-8xl lg:text-9xl font-bold tracking-tight text-white drop-shadow-2xl"
+          class="text-4xl font-bold tracking-tight text-white drop-shadow-2xl sm:text-5xl md:text-8xl lg:text-9xl"
         >
           {artist?.name ?? data.name}
         </h1>
         {#if artist?.genres?.length}
-          <div class="flex flex-wrap gap-2 text-white/60 font-medium text-lg">
+          <div class="flex flex-wrap gap-2 text-sm font-medium text-white/70 sm:text-base md:text-lg">
             {artist.genres.map((g) => g.name).join(" · ")}
           </div>
         {/if}
@@ -846,7 +854,7 @@
   </div>
 
   <main
-    class="relative z-10 w-full px-6 md:px-12 xl:px-16 mt-8 grid grid-cols-1 lg:grid-cols-[1fr_clamp(280px,22vw,360px)] gap-12 lg:gap-16 pb-20"
+    class="relative z-10 mt-6 grid w-full grid-cols-1 gap-8 px-4 pb-20 md:mt-8 md:px-12 lg:grid-cols-[1fr_clamp(280px,22vw,360px)] lg:gap-16 xl:px-16"
   >
     <!-- Left Column: Main Content -->
     <div class="space-y-8 min-w-0">
@@ -855,7 +863,7 @@
         <section>
           <div class="relative group">
             <p
-              class={`text-lg md:text-xl leading-relaxed text-default/90 font-medium max-w-4xl transition-all duration-500 ${
+              class={`max-w-4xl text-base font-medium leading-relaxed text-default/90 transition-all duration-500 sm:text-lg md:text-xl ${
                 isBioExpanded ? "" : "line-clamp-3"
               }`}
             >
@@ -877,11 +885,11 @@
       {#if displayedSimilarArtists.length > 0}
         <section>
           <h3
-            class="text-xs font-bold text-muted uppercase tracking-widest mb-6"
+            class="mb-6 text-xs font-bold uppercase tracking-widest text-muted hidden lg:block"
           >
             Similar Artists
           </h3>
-          <div class="flex flex-wrap gap-4">
+          <div class="hidden flex-wrap gap-4 lg:flex">
             {#each displayedSimilarArtists.slice(0, 10) as sim}
               <button
                 class="group w-24 text-center space-y-2"
@@ -924,15 +932,166 @@
       {#if allTabs.length > 0}
         <!-- Tabs Header -->
         <div class="relative" style="margin-bottom: 24px !important;">
+          <div class="lg:hidden space-y-4">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              <button
+                class="flex w-full items-center justify-between rounded-2xl border border-subtle bg-surface-2/70 px-4 py-3 text-left backdrop-blur-sm"
+                on:click={() => (showSectionPicker = !showSectionPicker)}
+                aria-expanded={showSectionPicker}
+                aria-label="Choose artist section"
+              >
+                <span class="min-w-0">
+                  <span class="block text-[11px] uppercase tracking-widest text-subtle">
+                    Viewing
+                  </span>
+                  <span class="block truncate text-sm font-semibold text-default">
+                    {activeTabLabel}
+                  </span>
+                </span>
+                <svg
+                  class={`h-4 w-4 text-muted transition-transform ${showSectionPicker ? "rotate-180" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+
+              {#if isTrackTab}
+                <div class="rounded-2xl border border-accent/30 bg-accent/10 px-3 py-2 text-center text-xs font-medium text-default">
+                  Track tools ready
+                </div>
+              {/if}
+            </div>
+
+            {#if showSectionPicker}
+              <div class="rounded-2xl border border-subtle bg-surface-2/80 p-2 backdrop-blur-sm">
+                <div class="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                  {#each allTabs as tab}
+                    <button
+                      class={`rounded-xl px-3 py-3 text-left text-sm transition-colors ${
+                        activeTab === tab.value
+                          ? "border border-accent/40 bg-accent/15 text-default"
+                          : "border border-transparent text-muted hover:bg-surface-3 hover:text-default"
+                      }`}
+                      on:click={() => {
+                        activeTab = tab.value;
+                        showSectionPicker = false;
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            {#if isTrackTab}
+              <div class="rounded-2xl border border-subtle bg-surface-2/70 p-3 backdrop-blur-sm">
+                <div class="mb-3 text-[11px] font-semibold uppercase tracking-widest text-subtle">
+                  Track Actions
+                </div>
+                <div class="flex flex-col gap-2">
+                  <button
+                    class="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left text-sm font-medium text-default transition-all hover:border-accent hover:bg-surface-3"
+                    on:click={activeTab === "top_tracks"
+                      ? playAllTopTracks
+                      : activeTab === "most_listened"
+                        ? playAllMostListened
+                        : playAllSingles}
+                  >
+                    <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    Play All
+                  </button>
+                  <button
+                    class="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left text-sm font-medium text-default transition-all hover:border-accent hover:bg-surface-3"
+                    on:click={activeTab === "top_tracks"
+                      ? queueAllTopTracks
+                      : activeTab === "most_listened"
+                        ? queueAllMostListened
+                        : queueAllSingles}
+                  >
+                    <svg
+                      class="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 4v16m8-8H4"
+                      />
+                    </svg>
+                    Add All to Queue
+                  </button>
+                  <button
+                    class="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left text-sm font-medium text-default transition-all hover:border-accent hover:bg-surface-3"
+                    on:click={activeTab === "top_tracks"
+                      ? openPlaylistModalForTopTracks
+                      : activeTab === "most_listened"
+                        ? openPlaylistModalForMostListened
+                        : openPlaylistModalForSingles}
+                  >
+                    <svg
+                      class="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                      />
+                    </svg>
+                    Playlist
+                  </button>
+                  <button
+                    class="flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left text-sm font-medium text-default transition-all hover:border-accent hover:bg-surface-3"
+                    on:click={activeTab === "most_listened"
+                      ? downloadAllMostListened
+                      : activeTab === "top_tracks"
+                        ? downloadAllTopTracks
+                        : downloadAllSingles}
+                  >
+                    <svg
+                      class="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                      />
+                    </svg>
+                    Download
+                  </button>
+                </div>
+              </div>
+            {/if}
+          </div>
+
           <div
-            class="flex flex-wrap items-center gap-8 border-b border-subtle pb-0"
+            class="hidden flex-wrap items-center gap-8 border-b border-subtle pb-0 lg:flex"
           >
             <!-- Left Group: Releases -->
-            <div class="relative">
-              <div class="flex gap-4">
+            <div class="relative min-w-0 overflow-x-auto overflow-y-hidden scrollbar-hide">
+              <div class="flex min-w-max gap-4">
                 {#each releaseTabs as tab}
                   <button
-                    class={`relative px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
+                    class={`relative whitespace-nowrap px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
                       activeTab === tab.value
                         ? "text-default border-accent"
                         : "text-muted border-transparent hover:text-default hover:border-accent"
@@ -949,10 +1108,10 @@
             <div class="flex-1"></div>
 
             {#if missingAlbums.length > 0}
-              <div class="relative">
-                <div class="flex gap-4">
+              <div class="relative min-w-0 overflow-x-auto overflow-y-hidden scrollbar-hide">
+                <div class="flex min-w-max gap-4">
                   <button
-                    class={`relative px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
+                    class={`relative whitespace-nowrap px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
                       activeTab === "missing_albums"
                         ? "text-default border-accent"
                         : "text-muted border-transparent hover:text-default hover:border-accent"
@@ -966,11 +1125,11 @@
             {/if}
 
             <!-- Right Group: Tracks -->
-            <div class="relative">
-              <div class="flex gap-4">
+            <div class="relative min-w-0 overflow-x-auto overflow-y-hidden scrollbar-hide">
+              <div class="flex min-w-max gap-4">
                 {#each trackTabs as tab}
                   <button
-                    class={`relative px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
+                    class={`relative whitespace-nowrap px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
                       activeTab === tab.value
                         ? "text-default border-accent"
                         : "text-muted border-transparent hover:text-default hover:border-accent"
@@ -989,10 +1148,10 @@
         {#if ["album", "ep", "single", "compilation", "live", "appears_on"].includes(activeTab)}
           {#if displayedAlbums.length > 0}
             <div
-              class="grid gap-8 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+              class="grid grid-cols-2 gap-4 sm:gap-6 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 xl:gap-8"
             >
               {#each displayedAlbums as album, index (album.mb_release_id ?? `${album.album}-${album.artist_name}-${index}`)}
-                <article class="group flex flex-col gap-4">
+                <article class="group flex flex-col gap-3 sm:gap-4">
                   <button
                     class="relative aspect-square overflow-hidden rounded-lg shadow-2xl bg-surface-800 transition-transform duration-300 hover:scale-105"
                     on:click={() => {
@@ -1050,12 +1209,12 @@
                   </button>
                   <div class="space-y-1">
                     <h3
-                      class="text-base font-bold text-default leading-tight line-clamp-2 group-hover:text-primary-400 transition-colors"
+                      class="line-clamp-2 text-sm font-bold leading-tight text-default transition-colors group-hover:text-primary-400 sm:text-base"
                       title={album.album}
                     >
                       {album.album}
                     </h3>
-                    <p class="text-sm text-muted font-medium">
+                    <p class="text-xs font-medium text-muted sm:text-sm">
                       {#if activeTab === "appears_on"}
                         {album.artist_name}
                         <span class="mx-1 opacity-50">•</span>
@@ -1313,6 +1472,7 @@
           <div
             class="glass-surface rounded-2xl overflow-hidden border border-subtle bg-surface-2 backdrop-blur-xl"
           >
+            <div class="overflow-x-auto">
             <table class="w-full text-left text-sm whitespace-nowrap">
               <thead
                 class="uppercase tracking-wider border-b border-subtle text-muted text-xs bg-surface-3"
@@ -1368,13 +1528,60 @@
                 {/each}
               </tbody>
             </table>
+            </div>
           </div>
         {/if}
+      {/if}
+
+      {#if displayedSimilarArtists.length > 0}
+        <section class="lg:hidden">
+          <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-muted">
+            Similar Artists
+          </h3>
+          <div class="grid grid-cols-3 gap-3 sm:grid-cols-4">
+            {#each displayedSimilarArtists.slice(0, 8) as sim}
+              <button
+                class="group text-center space-y-2"
+                on:click|stopPropagation={() => {
+                  if (sim.in_library && sim.mbid) {
+                    goto(`/artist/${sim.mbid}`);
+                  } else if (sim.external_url) {
+                    window.open(sim.external_url, "_blank");
+                  }
+                }}
+              >
+                <div class="relative aspect-square overflow-hidden rounded-full bg-surface-2 ring-1 ring-subtle shadow-lg">
+                  {#if sim.art_sha1}
+                    <img
+                      src={sim.art_sha1 ? getArtUrl(sim.art_sha1, 300) : ""}
+                      class="h-full w-full object-cover"
+                      alt={sim.name}
+                    />
+                  {:else}
+                    <div
+                      class="flex h-full w-full items-center justify-center bg-surface-3 text-xs font-bold text-muted"
+                    >
+                      {getInitials(sim.name)}
+                    </div>
+                  {/if}
+                </div>
+                <p class="truncate text-[11px] font-medium text-muted">
+                  {sim.name}
+                </p>
+              </button>
+            {/each}
+          </div>
+        </section>
       {/if}
     </div>
 
     <!-- Right Column: Info Rail -->
-    <aside class="space-y-10 h-fit lg:sticky lg:top-8">
+    <aside class="h-fit space-y-8 rounded-2xl border border-subtle bg-surface-2/35 p-4 backdrop-blur-sm sm:p-5 lg:sticky lg:top-8 lg:space-y-10 lg:border-0 lg:bg-transparent lg:p-0">
+      {#if message}
+        <div class="rounded-xl border border-subtle bg-surface-3/70 px-3 py-3 text-sm text-muted">
+          {message}
+        </div>
+      {/if}
       <!-- Library Status -->
       <div class="space-y-4">
         <h3 class="text-xs font-bold text-subtle uppercase tracking-widest">
@@ -1405,7 +1612,72 @@
       </div>
 
       <!-- External Links -->
-      <div class="space-y-4">
+      <details class="rounded-xl border border-subtle bg-surface-3/40 p-3 lg:hidden">
+        <summary class="cursor-pointer list-none text-xs font-bold uppercase tracking-widest text-muted">
+          Links
+        </summary>
+        <div class="mt-4 flex flex-col gap-4 items-start">
+          {#if artist?.homepage}
+            <a
+              href={artist.homepage}
+              target="_blank"
+              class="flex items-center gap-3 text-default hover:text-primary transition-colors group"
+            >
+              <svg
+                class="h-5 w-5 opacity-70 group-hover:opacity-100"
+                fill="currentColor"
+                viewBox="0 0 24 24"
+                ><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" /></svg
+              >
+              <span class="text-sm font-medium">Homepage</span>
+            </a>
+          {/if}
+          {#if artist?.spotify_url}
+            <a href={artist.spotify_url} target="_blank" class="flex items-center gap-3 text-default hover:text-primary transition-colors group">
+              <img src="/assets/logo-spotify.svg" class="w-5 h-5 opacity-70 group-hover:opacity-100" alt="Spotify" />
+              <span class="text-sm font-medium">Spotify</span>
+            </a>
+          {/if}
+          {#if artist?.musicbrainz_url}
+            <a href={artist.musicbrainz_url} target="_blank" class="flex items-center gap-3 text-default hover:text-primary transition-colors group">
+              <img src="/assets/logo-musicbrainz.svg" class="w-5 h-5 opacity-70 group-hover:opacity-100" alt="MB" />
+              <span class="text-sm font-medium">MusicBrainz</span>
+            </a>
+          {/if}
+          {#if artist?.wikipedia_url}
+            <a href={artist.wikipedia_url} target="_blank" class="flex items-center gap-3 text-default hover:text-primary transition-colors group">
+              <img src="/assets/logo-wikipedia.svg" class="w-5 h-5 opacity-70 group-hover:opacity-100 invert" alt="Wiki" />
+              <span class="text-sm font-medium">Wikipedia</span>
+            </a>
+          {/if}
+          {#if artist?.tidal_url}
+            <a href={artist.tidal_url} target="_blank" class="flex items-center gap-3 text-default hover:text-primary transition-colors group">
+              <img src="/assets/logo-tidal.png" class="w-5 h-5 opacity-70 group-hover:opacity-100" alt="Tidal" />
+              <span class="text-sm font-medium">Tidal</span>
+            </a>
+          {/if}
+          {#if artist?.qobuz_url}
+            <a href={artist.qobuz_url} target="_blank" class="flex items-center gap-3 text-default hover:text-primary transition-colors group">
+              <img src="/assets/logo-qobuz.png" class="w-5 h-5 opacity-70 group-hover:opacity-100" alt="Qobuz" />
+              <span class="text-sm font-medium">Qobuz</span>
+            </a>
+          {/if}
+          {#if artist?.lastfm_url}
+            <a href={artist.lastfm_url} target="_blank" class="flex items-center gap-3 text-default hover:text-primary transition-colors group">
+              <img src="/assets/logo-lastfm.png" class="w-5 h-5 opacity-70 group-hover:opacity-100" alt="Last.fm" />
+              <span class="text-sm font-medium">Last.fm</span>
+            </a>
+          {/if}
+          {#if artist?.discogs_url}
+            <a href={artist.discogs_url} target="_blank" class="flex items-center gap-3 text-default hover:text-primary transition-colors group">
+              <img src="/assets/logo-discogs.svg" class="w-5 h-5 opacity-70 group-hover:opacity-100 invert" alt="Discogs" />
+              <span class="text-sm font-medium">Discogs</span>
+            </a>
+          {/if}
+        </div>
+      </details>
+
+      <div class="hidden space-y-4 lg:block">
         <h3 class="text-xs font-bold text-muted uppercase tracking-widest">
           Links
         </h3>
@@ -1600,8 +1872,8 @@
           </button>
 
           <!-- Track Actions (only show for track tabs) -->
-          {#if activeTab === "top_tracks" || activeTab === "singles_list" || activeTab === "most_listened"}
-            <div class="mt-6 pt-6 border-t border-subtle">
+          {#if isTrackTab}
+            <div class="mt-6 hidden border-t border-subtle pt-6 lg:block">
               <h3
                 class="text-xs font-semibold text-muted uppercase tracking-wider mb-3"
               >

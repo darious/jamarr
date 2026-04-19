@@ -34,6 +34,8 @@
   let settingsContainer: HTMLElement;
   let showRenderers = false;
   let renderersContainer: HTMLElement;
+  let showMobileMenu = false;
+  let showMobileSearch = false;
   let scanMessage = "";
   let isScanning = false;
   let user = data?.user || null;
@@ -41,6 +43,15 @@
   let isAuthPage = false;
   let activeRendererItem: any = null;
   let authLoading = true;  // Add loading state
+  let renderersLoading = false;
+
+  const navItems = [
+    { href: "/artists", label: "Artists", active: (pathname: string) => pathname.startsWith("/artists") || pathname.startsWith("/artist/") },
+    { href: "/charts", label: "Chart", active: (pathname: string) => pathname.startsWith("/charts") || pathname.startsWith("/album/") },
+    { href: "/discovery", label: "Discovery", active: (pathname: string) => pathname.startsWith("/discovery") },
+    { href: "/playlists", label: "Playlists", active: (pathname: string) => pathname.startsWith("/playlists") },
+    { href: "/history", label: "History", active: (pathname: string) => pathname.startsWith("/history") },
+  ];
 
   const DEFAULT_RENDERER_ICON = "/assets/icon-renderer.svg";
   const LOCAL_RENDERER_ICON = "/assets/icon-browser.svg";
@@ -63,6 +74,10 @@
     $page.url.pathname.startsWith("/login") ||
     $page.url.pathname.startsWith("/signup");
   $: activeRendererItem = rendererList.find((r) => r.udn === activeRenderer);
+  $: if (isAuthPage) {
+    showMobileMenu = false;
+    showMobileSearch = false;
+  }
 
   // Don't seed auth state here - wait for client-side initialization
 
@@ -113,7 +128,7 @@
       // Subscribe first to get immediate state (including default 'local' renderer)
       unsub = playerState.subscribe((state) => {
         rendererList = state.renderers || [];
-        activeRenderer = state.renderer || "local";
+        activeRenderer = state.renderer || "";
       });
 
       unsubUser = currentUser.subscribe((value) => (user = value));
@@ -159,7 +174,12 @@
 
   const changeRenderer = async (udn: string) => {
     activeRenderer = udn;
-    await setRenderer(udn);
+    renderersLoading = true;
+    try {
+      await setRenderer(udn);
+    } finally {
+      renderersLoading = false;
+    }
   };
 
   async function scanLibrary() {
@@ -246,7 +266,7 @@
       class="sticky top-0 z-30 border-b border-white/5 bg-gradient-to-r from-black/70 via-surface-50/80 to-black/70 backdrop-blur-xl"
     >
       <div
-        class="mx-auto flex w-full max-w-[1700px] items-center justify-between px-6 py-3"
+        class="mx-auto hidden w-full max-w-[1700px] items-center justify-between px-6 py-3 md:flex"
       >
         <a href="/" class="flex items-center">
           <img
@@ -256,14 +276,15 @@
           />
         </a>
 
-        <div class="flex-1 flex justify-center">
-          <SearchBar />
+        <div class="flex-1 flex justify-center px-4">
+          <SearchBar className="mx-4" />
         </div>
 
         <div class="flex items-center gap-3">
           <div class="relative" bind:this={renderersContainer}>
             <button
-              class="px-4 py-2 text-sm font-normal text-muted hover:text-default transition-all border-b-2 border-transparent hover:border-accent min-w-[200px] justify-between flex items-center gap-2"
+              class="px-4 py-2 text-sm font-normal text-muted hover:text-default transition-all border-b-2 border-transparent hover:border-accent min-w-[200px] justify-between flex items-center gap-2 disabled:opacity-50"
+              disabled={renderersLoading}
               on:click={() => {
                 showRenderers = !showRenderers;
                 if (showRenderers) {
@@ -290,7 +311,7 @@
                 </span>
               </span>
               <svg
-                class="h-4 w-4 opacity-50"
+                class={`h-4 w-4 opacity-50 ${renderersLoading ? "animate-pulse" : ""}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -314,6 +335,7 @@
                       renderer.udn
                         ? 'text-default border-accent'
                         : ''}"
+                      disabled={renderersLoading}
                       on:click={() => {
                         changeRenderer(renderer.udn);
                         showRenderers = false;
@@ -354,48 +376,18 @@
             {/if}
           </div>
           <nav class="flex items-center gap-2 text-sm text-muted">
-            <a
-              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
-                $page.url.pathname.startsWith("/artists") ||
-                $page.url.pathname.startsWith("/artist/")
-                  ? "text-default border-accent"
-                  : "text-muted border-transparent hover:text-default hover:border-accent"
-              }`}
-              href="/artists">Artists</a
-            >
-            <a
-              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
-                $page.url.pathname.startsWith("/charts") ||
-                $page.url.pathname.startsWith("/album/")
-                  ? "text-default border-accent"
-                  : "text-muted border-transparent hover:text-default hover:border-accent"
-              }`}
-              href="/charts">Chart</a
-            >
-            <a
-              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
-                $page.url.pathname.startsWith("/discovery")
-                  ? "text-default border-accent"
-                  : "text-muted border-transparent hover:text-default hover:border-accent"
-              }`}
-              href="/discovery">Discovery</a
-            >
-            <a
-              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
-                $page.url.pathname.startsWith("/playlists")
-                  ? "text-default border-accent"
-                  : "text-muted border-transparent hover:text-default hover:border-accent"
-              }`}
-              href="/playlists">Playlists</a
-            >
-            <a
-              class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
-                $page.url.pathname.startsWith("/history")
-                  ? "text-default border-accent"
-                  : "text-muted border-transparent hover:text-default hover:border-accent"
-              }`}
-              href="/history">History</a
-            >
+            {#each navItems as item}
+              <a
+                class={`px-4 py-2 text-sm font-normal transition-all border-b-2 ${
+                  item.active($page.url.pathname)
+                    ? "text-default border-accent"
+                    : "text-muted border-transparent hover:text-default hover:border-accent"
+                }`}
+                href={item.href}
+              >
+                {item.label}
+              </a>
+            {/each}
           </nav>
           {#if !user && authChecked}
             <div class="hidden md:flex items-center gap-2">
@@ -521,7 +513,181 @@
           </div>
         </div>
       </div>
+
+      <div class="mx-auto flex w-full max-w-[1700px] flex-col px-4 py-3 md:hidden">
+        <div class="flex items-center justify-between gap-3">
+          <a href="/" class="flex min-w-0 items-center">
+            <img
+              src="/assets/logo.png"
+              alt="Jamarr"
+              class="h-12 w-auto object-contain"
+            />
+          </a>
+
+          <div class="flex items-center gap-2">
+            <button
+              class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-muted transition-colors hover:text-default"
+              aria-label="Search"
+              on:click={() => {
+                showMobileSearch = true;
+                showMobileMenu = false;
+              }}
+            >
+              <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
+            <button
+              class="inline-flex min-w-[120px] items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-muted transition-colors hover:text-default disabled:opacity-50"
+              disabled={renderersLoading}
+              aria-label="Select Renderer"
+              on:click={() => {
+                showRenderers = !showRenderers;
+                showMobileMenu = false;
+                if (showRenderers) {
+                  refreshRenderers(false).catch((e) =>
+                    console.error("[Layout] refreshRenderers failed:", e),
+                  );
+                }
+              }}
+            >
+              <img
+                class="h-6 w-6 rounded-sm object-contain"
+                src={getRendererIcon(activeRendererItem)}
+                alt=""
+                loading="lazy"
+                on:error={(e) => {
+                  (e.currentTarget as HTMLImageElement).src =
+                    getRendererFallback(activeRendererItem);
+                }}
+              />
+              <span class="max-w-[72px] truncate text-left">
+                {activeRendererItem?.name || "Player"}
+              </span>
+            </button>
+            <button
+              class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-muted transition-colors hover:text-default"
+              aria-label="Menu"
+              on:click={() => {
+                showMobileMenu = !showMobileMenu;
+                showMobileSearch = false;
+                showRenderers = false;
+              }}
+            >
+              <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={showMobileMenu ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"} />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {#if showRenderers}
+          <div class="mt-3 rounded-2xl border border-subtle surface-glass-panel shadow-xl">
+            <div class="max-h-80 overflow-y-auto p-2 space-y-1">
+              {#each rendererList as renderer}
+                <button
+                  class="flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-sm transition-all hover:bg-white/5 {activeRenderer === renderer.udn ? 'text-default border border-accent/40 bg-accent/10' : 'text-muted border border-transparent'}"
+                  disabled={renderersLoading}
+                  on:click={() => {
+                    changeRenderer(renderer.udn);
+                    showRenderers = false;
+                  }}
+                >
+                  <span class="flex min-w-0 items-center gap-3">
+                    <img
+                      class="h-8 w-8 rounded-sm object-contain"
+                      src={getRendererIcon(renderer)}
+                      alt=""
+                      loading="lazy"
+                      on:error={(e) => {
+                        (e.currentTarget as HTMLImageElement).src =
+                          getRendererFallback(renderer);
+                      }}
+                    />
+                    <span class="truncate">{renderer.name}</span>
+                  </span>
+                  {#if activeRenderer === renderer.udn}
+                    <svg class="h-4 w-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if showMobileMenu}
+          <div class="mt-3 rounded-2xl border border-subtle surface-glass-panel p-3 shadow-xl">
+            <nav class="grid grid-cols-2 gap-2">
+              {#each navItems as item}
+                <a
+                  class={`rounded-xl px-3 py-3 text-sm font-medium transition-colors ${
+                    item.active($page.url.pathname)
+                      ? "bg-accent/15 text-default border border-accent/40"
+                      : "bg-white/5 text-muted border border-transparent hover:text-default"
+                  }`}
+                  href={item.href}
+                  on:click={() => (showMobileMenu = false)}
+                >
+                  {item.label}
+                </a>
+              {/each}
+            </nav>
+
+            <div class="mt-3 space-y-2">
+              {#if user}
+                <div class="rounded-xl border border-subtle bg-surface-2 px-3 py-3 text-sm">
+                  <div class="font-semibold text-default">{user.display_name}</div>
+                  <div class="text-subtle text-xs">{user.email}</div>
+                </div>
+              {/if}
+
+              {#if !user && authChecked}
+                <div class="grid grid-cols-2 gap-2">
+                  <a class="btn btn-primary btn-sm normal-case font-normal" href="/signup" on:click={() => (showMobileMenu = false)}>Sign up</a>
+                  <a class="btn btn-outline btn-sm normal-case font-normal" href="/login" on:click={() => (showMobileMenu = false)}>Log in</a>
+                </div>
+              {/if}
+
+              {#if user}
+                <a class="menu-item" href="/settings/user" on:click={() => (showMobileMenu = false)}>User Settings</a>
+              {/if}
+              <a class="menu-item" href="/settings/library" on:click={() => (showMobileMenu = false)}>Library Management</a>
+              <a class="menu-item" href="/settings/scheduler" on:click={() => (showMobileMenu = false)}>Scheduler</a>
+              <a class="menu-item" href="/settings/media-quality" on:click={() => (showMobileMenu = false)}>Media Quality</a>
+              <a class="menu-item" href="/renderers" on:click={() => (showMobileMenu = false)}>Network Renderers</a>
+              {#if user}
+                <button class="menu-item text-red-400 hover:text-red-500" on:click={handleLogout}>Sign Out</button>
+              {/if}
+              {#if scanMessage}
+                <p class="px-3 py-2 text-xs text-muted">{scanMessage}</p>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
     </header>
+
+    {#if showMobileSearch}
+      <div class="fixed inset-0 z-[70] md:hidden">
+        <div
+          class="absolute inset-0 bg-black/70 backdrop-blur-sm"
+          role="button"
+          tabindex="0"
+          aria-label="Close search"
+          on:click={() => (showMobileSearch = false)}
+          on:keydown={(e) => {
+            if (e.key === "Enter" || e.key === " " || e.key === "Escape") {
+              showMobileSearch = false;
+            }
+          }}
+        ></div>
+        <div class="absolute inset-x-0 top-0 max-h-full overflow-y-auto border-b border-white/10 bg-[rgb(10_12_18_/_96%)] px-4 pb-6 pt-4 shadow-2xl">
+          <SearchBar mobile={true} autoFocus={true} onClose={() => (showMobileSearch = false)} />
+        </div>
+      </div>
+    {/if}
   {/if}
 
   <main class="pb-32">
