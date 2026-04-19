@@ -25,8 +25,8 @@ export interface PlayerState {
 }
 
 export const playerState = writable<PlayerState>({
-    renderers: [{ udn: 'local', name: 'This Device (Web Browser)', type: 'local' }],
-    renderer: 'local',
+    renderers: [],
+    renderer: '',
     queue: [],
     current_index: -1,
     is_playing: false,
@@ -115,7 +115,13 @@ export async function refreshRenderers(force: boolean = false) {
                 return r;
             });
 
-            playerState.update(s => ({ ...s, renderers: finalRenderers }));
+            playerState.update(s => {
+                const currentRenderer =
+                    s.renderer && finalRenderers.some((r: Renderer) => r.udn === s.renderer)
+                        ? s.renderer
+                        : `local:${myId}`;
+                return { ...s, renderers: finalRenderers, renderer: currentRenderer };
+            });
 
         } else {
             console.error('[refreshRenderers] Response not OK:', res.status, res.statusText);
@@ -133,7 +139,10 @@ export async function setRenderer(udn: string) {
             body: JSON.stringify({ udn })
         });
         if (res.ok) {
-            playerState.update(s => ({ ...s, renderer: udn }));
+            const data = await res.json();
+            const active = data.active || udn;
+            playerState.update(s => ({ ...s, renderer: active }));
+            await loadQueueFromServer();
         }
     } catch (e) {
         console.error('Failed to set renderer', e);
@@ -386,6 +395,65 @@ export async function next() {
     } else if (s.repeatMode === 'all' && s.queue.length > 0) {
         await playFromQueue(0);
     }
+}
+
+// Advance the server's current_index and local store WITHOUT triggering
+// playback. Used when the PlayerBar has already started the next track
+// via a pre-armed <audio> element and only needs to sync state. Calling
+// the normal playFromQueue() here would re-fetch the stream URL and
+// interrupt the audio that is already playing.
+export async function advanceIndexLocal(newIndex: number) {
+    const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+    const client_ip = await getClientIp();
+    try {
+        const res = await fetchWithAuth('/api/player/index', {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ index: newIndex, hostname, client_ip }),
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const newState = data.state || {};
+            const mergedQueue = newState.queue
+                ? mergeQueueArt(get(playerState).queue, newState.queue)
+                : undefined;
+            playerState.update((s) => ({
+                ...s,
+                queue: mergedQueue ?? s.queue,
+                current_index: newState.current_index ?? newIndex,
+                is_playing: true,
+                position_seconds: 0,
+                transport_state: newState.transport_state ?? s.transport_state,
+                renderer: newState.renderer ?? s.renderer,
+                volume: newState.volume ?? s.volume,
+            }));
+        } else {
+            console.error('[advanceIndexLocal] Failed, status:', res.status);
+        }
+    } catch (e) {
+        console.error('[advanceIndexLocal] Exception:', e);
+    }
+}
+
+// Pure helper: given current queue state, compute which track should be
+// pre-armed as the next one to play. Returns null if nothing to arm.
+export function computeNextTrackToArm(
+    queue: Track[],
+    currentIndex: number,
+    repeatMode: 'off' | 'all' | 'one',
+): { index: number; track: Track } | null {
+    if (!queue.length || currentIndex < 0) return null;
+    if (repeatMode === 'one') {
+        const t = queue[currentIndex];
+        return t ? { index: currentIndex, track: t } : null;
+    }
+    if (currentIndex < queue.length - 1) {
+        return { index: currentIndex + 1, track: queue[currentIndex + 1] };
+    }
+    if (repeatMode === 'all' && queue.length > 0) {
+        return { index: 0, track: queue[0] };
+    }
+    return null;
 }
 
 export async function previous() {
