@@ -478,6 +478,35 @@
     }
   }
 
+  function handleSeekKeyDown(event: KeyboardEvent) {
+    const totalDuration = currentTrack?.duration_seconds || audio?.duration || 0;
+    if (!totalDuration) return;
+
+    let nextTime: number | null = null;
+    const step = Math.max(5, totalDuration * 0.05);
+
+    if (event.key === "ArrowLeft") nextTime = Math.max(0, progress - step);
+    if (event.key === "ArrowRight") nextTime = Math.min(totalDuration, progress + step);
+    if (event.key === "Home") nextTime = 0;
+    if (event.key === "End") nextTime = totalDuration;
+
+    if (nextTime === null) return;
+
+    event.preventDefault();
+
+    if (!$playerState.renderer.startsWith("local")) {
+      seek(nextTime);
+      progress = nextTime;
+      return;
+    }
+
+    if (audio) {
+      audio.currentTime = nextTime;
+      progress = nextTime;
+      updateProgress(nextTime, isPlaying);
+    }
+  }
+
   function checkPlayThreshold() {
     if (!currentTrack) return;
 
@@ -836,9 +865,207 @@
 </script>
 
 <div
-  class="fixed bottom-0 w-full surface-glass-panel border-t border-subtle p-4 text-default z-50"
+  class="fixed bottom-0 w-full surface-glass-panel border-t border-subtle p-3 md:p-4 text-default z-50"
 >
-  <div class="flex items-center justify-between max-w-[1700px] mx-auto">
+  <div class="mx-auto flex max-w-[1700px] flex-col gap-3 md:hidden">
+    <div class="flex items-center gap-3">
+      {#if currentTrack}
+        <button
+          class="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-surface-3"
+          aria-label="Open queue"
+          on:click={toggleQueue}
+        >
+          <img
+            src={currentTrack.art_sha1
+              ? getArtUrl(currentTrack.art_sha1, 60)
+              : "/assets/logo.png"}
+            alt="Art"
+            class="h-full w-full object-cover"
+            on:error={handleImageError}
+          />
+        </button>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm font-semibold text-default">
+            {currentTrack.title}
+          </div>
+          <div class="truncate text-xs text-muted">
+            <ArtistLinks
+              artists={currentTrack.artists}
+              artist={{
+                name: currentTrack.artist,
+                mbid: currentTrack.artist_mbid,
+              }}
+              linkClass="hover:text-default hover:underline cursor-pointer"
+              separatorClass="text-muted"
+            />
+          </div>
+          <div class="mt-0.5 text-[11px] text-subtle">
+            {#if $playerState.queue.length > 0}
+              {$playerState.current_index + 1} of {$playerState.queue.length}
+            {:else}
+              Ready to play
+            {/if}
+          </div>
+        </div>
+      {:else}
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium text-muted">No track playing</div>
+        </div>
+      {/if}
+
+      <button
+        class="btn btn-outline btn-sm flex-shrink-0"
+        title="Queue"
+        on:click={toggleQueue}
+      >
+        <svg
+          class="h-5 w-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M4 6h16M4 12h16M4 18h16"
+          ></path>
+        </svg>
+      </button>
+    </div>
+
+    <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <button
+          class="btn btn-outline btn-sm"
+          aria-label="Previous track"
+          on:click={previous}
+        >
+          <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+          </svg>
+        </button>
+
+        <button class="btn btn-primary" on:click={togglePlay}>
+          {#if isPlaying}
+            <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+            </svg>
+          {:else}
+            <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          {/if}
+        </button>
+
+        <button
+          class="btn btn-outline btn-sm"
+          aria-label="Next track"
+          on:click={next}
+        >
+          <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          class="btn btn-outline btn-sm {$playerState.repeatMode !== 'off'
+            ? 'border-accent bg-accent/10 text-accent'
+            : ''}"
+          on:click={toggleRepeat}
+          title="Repeat: {$playerState.repeatMode}"
+        >
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+            {#if $playerState.repeatMode === "one"}
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 11L12 17"
+              />
+            {/if}
+          </svg>
+        </button>
+
+        <button
+          class="btn btn-outline btn-sm"
+          on:click={shuffleQueue}
+          title="Shuffle Queue"
+        >
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
+            />
+          </svg>
+        </button>
+
+        <button
+          class="btn btn-outline btn-sm"
+          title="Now Playing"
+          on:click={toggleNowPlaying}
+        >
+          <svg
+            class="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 8h16M4 16h10m-6-8v8"
+            ></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2 text-[11px] text-muted">
+      <span class="w-9 text-left">{formatTime(progress)}</span>
+      <div
+        class="relative h-4 flex-1 cursor-pointer"
+        on:click={handleSeek}
+        on:keydown={handleSeekKeyDown}
+        role="slider"
+        aria-valuenow={progress}
+        aria-valuemin={0}
+        aria-valuemax={duration || 100}
+        tabindex="0"
+      >
+        <div class="absolute top-1/2 h-1 w-full -translate-y-1/2 rounded-full bg-surface-3 overflow-hidden">
+          <div
+            class="h-full bg-accent transition-all duration-100 ease-linear"
+            style="width: {(progress / (duration || 1)) * 100}%"
+          ></div>
+        </div>
+      </div>
+      <span class="w-9 text-right">{formatTime(duration)}</span>
+    </div>
+  </div>
+
+  <div class="hidden items-center justify-between max-w-[1700px] mx-auto md:flex">
     <!-- Track Info -->
     <div class="flex items-center gap-4 w-1/3">
       {#if currentTrack}

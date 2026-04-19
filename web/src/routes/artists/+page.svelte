@@ -45,10 +45,10 @@
 
 <section class="mx-auto flex w-full flex-col gap-10 px-8 py-10">
   <div
-    class="section-head sticky top-0 z-20 bg-surface-50/80 backdrop-blur-xl py-4 rounded-b-2xl transition-all border-b border-subtle shadow-lg"
+    class="section-head sticky top-0 z-20 rounded-b-2xl border-b border-subtle bg-surface-50/80 py-4 shadow-lg backdrop-blur-xl"
   >
     <!-- Left title, centre letters fill remaining width, right toggle -->
-    <div class="flex w-full items-center gap-6">
+    <div class="hidden w-full items-center gap-6 md:flex">
       <!-- LEFT: Title -->
       <div class="flex flex-col whitespace-nowrap">
         <p class="text-sm uppercase tracking-wide text-muted">Browse</p>
@@ -94,6 +94,59 @@
         </div>
       </div>
     </div>
+
+    <div class="space-y-4 md:hidden">
+      <div class="flex flex-col gap-1">
+        <p class="text-xs uppercase tracking-wide text-muted">Browse</p>
+        <h2 class="text-xl font-semibold text-default">Artists A–Z</h2>
+      </div>
+
+      <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+        <label class="min-w-0">
+          <span class="mb-1 block text-[11px] uppercase tracking-widest text-subtle">
+            Letter
+          </span>
+          <select
+            class="w-full rounded-xl border border-subtle bg-surface-2 px-3 py-3 text-sm text-default"
+            bind:value={activeFilter}
+            on:change={(e) =>
+              handleFilterClick((e.currentTarget as HTMLSelectElement).value)}
+          >
+            {#each filters as filter}
+              <option value={filter}>{filter}</option>
+            {/each}
+          </select>
+        </label>
+
+        <div class="min-w-[128px]">
+          <span class="mb-1 block text-[11px] uppercase tracking-widest text-subtle">
+            View
+          </span>
+          <div class="flex rounded-xl bg-surface-2 p-1 gap-1">
+            <TabButton
+              active={!showAllArtists}
+              onClick={() => {
+                showAllArtists = false;
+              }}
+              size="sm"
+              className="flex-1 justify-center"
+            >
+              Primary
+            </TabButton>
+            <TabButton
+              active={showAllArtists}
+              onClick={() => {
+                showAllArtists = true;
+              }}
+              size="sm"
+              className="flex-1 justify-center"
+            >
+              All
+            </TabButton>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="flex flex-col gap-10">
@@ -110,7 +163,7 @@
       </div>
     {:else}
       <div
-        class="grid gap-3 sm:gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]"
+        class="grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] sm:gap-4 lg:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]"
       >
         {#each visibleArtists as artist}
           <a
@@ -118,7 +171,7 @@
             href={`/artist/${artist.mbid}`}
           >
             <div class="flex justify-center">
-                <div class="h-[300px] w-[300px] overflow-hidden rounded-xl">
+                <div class="aspect-square w-full max-w-[300px] overflow-hidden rounded-xl">
                 <img
                   src={artist.art_sha1
                     ? getArtUrl(artist.art_sha1, 300)
@@ -131,10 +184,10 @@
               </div>
             </div>
             <div class="mt-3 space-y-1">
-              <p class="text-base font-semibold line-clamp-1 text-default">
+              <p class="line-clamp-1 text-sm font-semibold text-default sm:text-base">
                 {artist.name}
               </p>
-              <p class="text-xs text-muted line-clamp-2">
+              <p class="line-clamp-2 text-[11px] text-muted sm:text-xs">
                 {artist.bio || "No bio yet."}
               </p>
             </div>
