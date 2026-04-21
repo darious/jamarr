@@ -422,3 +422,270 @@ The order is:
 5. Minimal Android adapter only if needed.
 6. Phone UI expansion.
 7. Optional hardening.
+
+## Current Implementation Status - 2026-04-21
+
+The native Android proof of concept now exists under `android/`.
+
+Backend and web were intentionally left unchanged. The app uses existing Jamarr
+API routes only.
+
+### Verified On Device
+
+Test device:
+
+- Pixel XL
+- Android 10
+- ADB serial seen locally as `HT69K0206009`
+
+Verified behavior:
+
+- Login works against a LAN Jamarr server URL.
+- Track search works.
+- The app calls `GET /api/stream-url/{track_id}` and plays the returned stream
+  URL with Media3 ExoPlayer.
+- Playback works on device.
+- Media notification shade controls work.
+- In-app controls work:
+  - play
+  - pause
+  - previous
+  - next
+  - seek back 10 seconds
+  - seek forward 30 seconds
+- Notification shade controls also work.
+- Artwork appears in the Android media notification.
+- Scrolling works on the phone UI.
+
+### Implemented App Shape
+
+The current app is a native Kotlin Android project:
+
+```text
+android/
+  settings.gradle.kts
+  build.gradle.kts
+  gradle/wrapper/
+  app/
+    build.gradle.kts
+    src/main/AndroidManifest.xml
+    src/main/java/com/jamarr/android/
+      MainActivity.kt
+      auth/SettingsStore.kt
+      data/JamarrApiClient.kt
+      data/JamarrDtos.kt
+      playback/JamarrPlaybackController.kt
+      playback/JamarrPlaybackService.kt
+      ui/JamarrApp.kt
+      ui/Theme.kt
+    src/main/res/drawable/jamarr_logo.png
+```
+
+Main dependencies:
+
+- Kotlin
+- Jetpack Compose
+- AndroidX DataStore preferences
+- Media3 ExoPlayer
+- Media3 Session
+- OkHttp
+- kotlinx.serialization
+- Coil 3 for artwork loading
+
+### API Routes Used
+
+Authentication:
+
+```text
+POST /api/auth/login
+```
+
+Search and playback:
+
+```text
+GET /api/search?q=<query>
+GET /api/stream-url/{track_id}
+GET /api/stream/{track_id}?token=<stream_jwt>
+```
+
+Home page sections:
+
+```text
+GET /api/home/new-releases
+GET /api/home/recently-added-albums
+GET /api/history/albums
+GET /api/home/discover-artists
+GET /api/history/artists
+```
+
+Album playback:
+
+```text
+GET /api/tracks?album=<album>&artist=<artist>
+```
+
+Artwork:
+
+```text
+GET /api/art/file/{sha1}?max_size=400
+```
+
+### Stage 1 Result
+
+Stage 1 is complete for the POC.
+
+Implementation details:
+
+- Server URL and access token are saved with DataStore.
+- Login sends the existing JSON body:
+
+  ```json
+  {
+    "username": "chris",
+    "password": "..."
+  }
+  ```
+
+- The password field had to be changed to `KeyboardType.Password`. Before this,
+  Android treated it as normal autocorrect text, which could leave unexpected
+  whitespace in the field and cause `Invalid credentials`.
+- Cleartext HTTP is currently enabled in the manifest for LAN development URLs
+  such as `http://192.168.1.107:8111`.
+- Do not use `localhost` from a physical phone unless Jamarr is running on the
+  phone itself. Use the machine's LAN IP.
+
+### Stage 2 Result
+
+Stage 2 is complete for the POC.
+
+Implementation details:
+
+- `JamarrPlaybackService` extends Media3 `MediaSessionService`.
+- The service owns the ExoPlayer instance.
+- `JamarrPlaybackController` uses a Media3 `MediaController`.
+- The phone UI no longer owns ExoPlayer directly.
+- The manifest declares the media playback foreground service:
+
+  ```xml
+  <service
+      android:name=".playback.JamarrPlaybackService"
+      android:exported="true"
+      android:foregroundServiceType="mediaPlayback">
+      <intent-filter>
+          <action android:name="androidx.media3.session.MediaSessionService" />
+      </intent-filter>
+  </service>
+  ```
+
+- The app requests notification permission on Android 13+.
+- Search results are turned into a Media3 playlist, so previous/next works from
+  both the app and notification shade.
+
+### UI Work Completed
+
+The UI is no longer just the original bare POC.
+
+Completed UI changes:
+
+- Dark grey and pink theme.
+- Site logo copied from `web/static/assets/logo.png` into Android resources.
+- Home screen with horizontal artwork rows matching the web home page:
+  - New Releases
+  - Recently Added
+  - Recently Played Albums
+  - Newly Added Artists
+  - Recently Played Artists
+- Album cards load artwork and can start playback.
+- Artist cards currently search for the artist name.
+- Search still works and track cards can start playback.
+- Now-playing controls remain visible in the screen.
+
+### Development Environment Notes
+
+Host environment used:
+
+- CachyOS / Arch
+- Android Studio installed
+- Android SDK under `/home/darious/Android/Sdk`
+- Android SDK platform `android-36` present
+- ADB available at `/usr/bin/adb`
+- System Java default was Java 26:
+
+  ```text
+  java-26-openjdk (default)
+  ```
+
+- Java 17 was already installed:
+
+  ```text
+  java-17-openjdk
+  ```
+
+Important build detail:
+
+- Use Java 17 for Android Gradle Plugin 8.13.2 builds.
+- The project has a Gradle wrapper pinned to Gradle 8.13.
+- The system `gradle` package was 9.4.1 and used Java 26 by default, so the
+  wrapper is preferred.
+
+Recommended build command:
+
+```bash
+cd android
+JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:assembleDebug
+```
+
+Recommended install command:
+
+```bash
+cd android
+JAVA_HOME=/usr/lib/jvm/java-17-openjdk ./gradlew :app:installDebug
+```
+
+The Codex sandbox could not use `/home/darious/.gradle` because it was outside
+the writable workspace. During this session, builds used a workspace-local
+Gradle user home:
+
+```bash
+GRADLE_USER_HOME=/home/darious/code/jamarr/android/.gradle-user
+```
+
+That directory is ignored by `android/.gitignore` and should not be committed.
+
+ADB needed to run outside the sandbox to access USB and the local ADB daemon.
+
+Useful device checks:
+
+```bash
+adb devices
+adb shell pm list packages com.jamarr.android
+adb shell monkey -p com.jamarr.android 1
+```
+
+### Build Status
+
+The final checked app state built and installed successfully on 2026-04-21:
+
+```text
+BUILD SUCCESSFUL
+Installed on 1 device.
+```
+
+### Known Limitations
+
+These are acceptable for the current POC but should be addressed later:
+
+- Access tokens are stored in DataStore. Refresh-cookie/session handling is not
+  fully implemented yet.
+- Refresh/session material is not stored in encrypted storage yet.
+- Stream URLs are resolved eagerly for a whole queue. Later, resolve URLs lazily
+  when a track is about to play so short-lived stream tokens do not expire in a
+  long queue.
+- Album playback currently fetches album tracks from the existing web-shaped
+  `/api/tracks` route.
+- Artist cards do not open artist detail screens yet; they trigger a search.
+- No playlist, album detail, artist detail, or full library screens yet.
+- No playback history reporting from Android yet.
+- No Android Auto `MediaLibraryService` browse tree yet. That remains Stage 3.
+- No `/api/android` adapter exists. Stage 4 should only be added if Android Auto
+  browsing proves the current API is too awkward.
