@@ -492,6 +492,15 @@ Main dependencies:
 - kotlinx.serialization
 - Coil 3 for artwork loading
 
+Build stack:
+
+- Android Gradle Plugin 9.0.1
+- Gradle wrapper 9.1.0
+- AGP 9 built-in Kotlin support
+- Compose compiler plugin 2.3.10
+- kotlinx.serialization compiler plugin 2.3.10
+- JDK 17
+
 ### API Routes Used
 
 Authentication:
@@ -623,10 +632,13 @@ Host environment used:
 
 Important build detail:
 
-- Use Java 17 for Android Gradle Plugin 8.13.2 builds.
-- The project has a Gradle wrapper pinned to Gradle 8.13.
+- Use Java 17 for Android Gradle Plugin builds.
+- The project has a Gradle wrapper pinned to Gradle 9.1.0.
 - The system `gradle` package was 9.4.1 and used Java 26 by default, so the
   wrapper is preferred.
+- AGP 9 built-in Kotlin is enabled. Do not re-add the
+  `org.jetbrains.kotlin.android` plugin; AGP 9 provides Kotlin support for the
+  Android app module.
 
 Recommended build command:
 
