@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Jamarr Music</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"/>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="data.js"></script>
+<script type="text/babel" src="android-frame.jsx"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0c0c0c; display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: 'Inter', sans-serif; }
+  ::-webkit-scrollbar { width: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ── Design tokens ──────────────────────────────────────────────────────────
+const C = {
+  bg:      '#150808',
+  surface: '#1e0e0e',
+  card:    '#261212',
+  primary: '#FF2D55',
+  tertiary:'#00996E',
+  text:    '#FFCDD2',
+  muted:   '#A1A1A2',
+  neutral: '#8B7171',
+  border:  '#2e1818',
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+const fmt = n => n >= 1000 ? (n/1000).toFixed(1)+'k' : n;
+
+function AlbumArt({ album, size = 120, style = {} }) {
+  const colors = album?.color ? [album.color, '#150808'] : ['#261212', '#150808'];
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: 6, flexShrink: 0,
+      background: `linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 100%)`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.18, color: C.neutral, fontWeight: 600,
+      letterSpacing: '-0.02em', textAlign: 'center', padding: 6,
+      ...style
+    }}>
+      {album?.title?.split(' ').slice(0,2).map(w => w[0]).join('') || '??'}
+    </div>
+  );
+}
+
+function ArtistArt({ artist, size = 56, style = {} }) {
+  const hue = artist?.name?.charCodeAt(0) % 360 || 0;
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      background: `conic-gradient(from ${hue}deg, #FF2D5533, #00996E33, #FF2D5533)`,
+      border: `1.5px solid ${C.border}`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.32, color: C.text, fontWeight: 700,
+      ...style
+    }}>
+      {artist?.name?.[0] || '?'}
+    </div>
+  );
+}
+
+function Pill({ children, active, onClick, style = {} }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
+      fontSize: 12, fontWeight: 500, fontFamily: 'Inter',
+      background: active ? C.primary : C.card,
+      color: active ? '#fff' : C.muted,
+      flexShrink: 0,
+      transition: 'all 0.15s',
+      ...style
+    }}>{children}</button>
+  );
+}
+
+function SectionHeader({ title, onMore }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+      <span style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{title}</span>
+      {onMore && <button onClick={onMore} style={{ background: 'none', border: 'none', color: C.primary, fontSize: 12, cursor: 'pointer', fontFamily: 'Inter' }}>See all</button>}
+    </div>
+  );
+}
+
+function PlayButton({ size = 44, style = {} }) {
+  const [playing, setPlaying] = useState(false);
+  return (
+    <button onClick={() => setPlaying(p => !p)} style={{
+      width: size, height: size, borderRadius: '50%', border: 'none',
+      background: C.primary, cursor: 'pointer', display: 'flex',
+      alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+      boxShadow: `0 4px 16px ${C.primary}55`, ...style
+    }}>
+      {playing
+        ? <svg width={size*0.4} height={size*0.4} viewBox="0 0 16 16" fill="white"><rect x="2" y="2" width="4" height="12"/><rect x="10" y="2" width="4" height="12"/></svg>
+        : <svg width={size*0.4} height={size*0.4} viewBox="0 0 16 16" fill="white"><polygon points="4,2 14,8 4,14"/></svg>
+      }
+    </button>
+  );
+}
+
+// ── ICON SET ───────────────────────────────────────────────────────────────
+const Icon = {
+  Home: ({size=22,color=C.muted}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1z"/><path d="M9 21V12h6v9"/></svg>,
+  Chart: ({size=22,color=C.muted}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
+  History: ({size=22,color=C.muted}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>,
+  Playlist: ({size=22,color=C.muted}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3" cy="6" r="1" fill={color}/><circle cx="3" cy="12" r="1" fill={color}/><circle cx="3" cy="18" r="1" fill={color}/></svg>,
+  Search: ({size=18,color=C.muted}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  SortAZ: ({size=16,color=C.muted}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l4-4 4 4M7 5v14M21 15l-4 4-4-4M17 19V5"/></svg>,
+  Back: ({size=20,color=C.text}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>,
+  Play: ({size=18,color='white'}) => <svg width={size} height={size} viewBox="0 0 24 24" fill={color}><polygon points="5,3 19,12 5,21"/></svg>,
+  Dot: ({size=4,color=C.muted}) => <div style={{width:size,height:size,borderRadius:'50%',background:color}}/>,
+  ChevDown: ({size=16,color=C.muted}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round"><polyline points="6 9 12 15 18 9"/></svg>,
+  ChevUp: ({size=16,color=C.muted}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round"><polyline points="18 15 12 9 6 15"/></svg>,
+  Music: ({size=16,color=C.muted}) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>,
+  Up: ({size=12,color='#00996E'}) => <svg width={size} height={size} viewBox="0 0 12 12" fill={color}><path d="M6 1l4 5H2z"/></svg>,
+  Down: ({size=12,color=C.primary}) => <svg width={size} height={size} viewBox="0 0 12 12" fill={color}><path d="M6 11l4-5H2z"/></svg>,
+};
+
+// ── HOME SCREEN ────────────────────────────────────────────────────────────
+function HomeScreen({ navigate }) {
+  const D = window.MOCK_DATA;
+  const [query, setQuery] = useState('');
+  const newReleases = D.albums.slice(0, 6);
+  const recentAlbums = D.albums.slice(2, 8);
+  const playedAlbums = D.albums.slice(1, 7);
+  const artists = D.artists.slice(0, 6);
+
+  const q = query.trim().toLowerCase();
+  const searchResults = q.length > 0 ? [
+    ...D.albums.filter(a => a.title.toLowerCase().includes(q) || a.artist.toLowerCase().includes(q)).map(a => ({ type: 'album', data: a })),
+    ...D.artists.filter(a => a.name.toLowerCase().includes(q)).map(a => ({ type: 'artist', data: a })),
+  ] : [];
+
+  const HScroll = ({ children }) => (
+    <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
+      {children}
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 80px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingTop: 4 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>Good evening</div>
+          <div style={{ fontSize: 13, color: C.muted }}>What's in your library?</div>
+        </div>
+        <div style={{ width: 36, height: 36, borderRadius: '50%', background: C.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: 'white' }}>J</div>
+      </div>
+
+      {/* Search */}
+      <div style={{ position: 'relative', marginBottom: 20 }}>
+        <div style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+          <Icon.Search size={16} color={C.neutral} />
+        </div>
+        <input
+          value={query} onChange={e => setQuery(e.target.value)}
+          placeholder="Search albums, artists…"
+          style={{ width: '100%', background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px 10px 36px', color: C.text, fontSize: 13, fontFamily: 'Inter', outline: 'none' }}
+        />
+        {query && <button onClick={() => setQuery('')} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: C.muted, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>}
+      </div>
+
+      {/* Search results */}
+      {searchResults.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <SectionHeader title={`${searchResults.length} result${searchResults.length !== 1 ? 's' : ''}`} />
+          {searchResults.map((r, i) => r.type === 'album' ? (
+            <div key={i} onClick={() => navigate('album', r.data)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
+              <AlbumArt album={r.data} size={44} style={{ borderRadius: 5 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.data.title}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>{r.data.artist} · Album</div>
+              </div>
+            </div>
+          ) : (
+            <div key={i} onClick={() => navigate('artist', r.data)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
+              <ArtistArt artist={r.data} size={44} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{r.data.name}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>{r.data.genre} · Artist</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Hide sections when searching */}
+      {!q && <>
+      
+
+      {/* New Releases */}
+      <div style={{ marginBottom: 24 }}>
+        <SectionHeader title="New Releases" />
+        <HScroll>
+          {newReleases.map(al => (
+            <div key={al.id} onClick={() => navigate('album', al)} style={{ cursor: 'pointer', flexShrink: 0 }}>
+              <AlbumArt album={al} size={130} />
+              <div style={{ marginTop: 6, width: 130 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{al.title}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>{al.artist}</div>
+              </div>
+            </div>
+          ))}
+        </HScroll>
+      </div>
+
+      {/* Recently Added Albums */}
+      <div style={{ marginBottom: 24 }}>
+        <SectionHeader title="Recently Added" />
+        <HScroll>
+          {recentAlbums.map(al => (
+            <div key={al.id} onClick={() => navigate('album', al)} style={{ cursor: 'pointer', flexShrink: 0 }}>
+              <AlbumArt album={al} size={100} />
+              <div style={{ marginTop: 6, width: 100 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{al.title}</div>
+                <div style={{ fontSize: 10, color: C.muted }}>{al.artist}</div>
+              </div>
+            </div>
+          ))}
+        </HScroll>
+      </div>
+
+      {/* Recently Played Albums */}
+      <div style={{ marginBottom: 24 }}>
+        <SectionHeader title="Recently Played" />
+        <HScroll>
+          {playedAlbums.map(al => (
+            <div key={al.id} onClick={() => navigate('album', al)} style={{ cursor: 'pointer', flexShrink: 0 }}>
+              <AlbumArt album={al} size={100} />
+              <div style={{ marginTop: 6, width: 100 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{al.title}</div>
+                <div style={{ fontSize: 10, color: C.muted }}>{al.artist}</div>
+              </div>
+            </div>
+          ))}
+        </HScroll>
+      </div>
+
+      {/* Artists */}
+      <div style={{ marginBottom: 24 }}>
+        <SectionHeader title="Artists" />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {artists.map(ar => (
+            <div key={ar.id} onClick={() => navigate('artist', ar)} style={{
+              display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+              background: C.card, borderRadius: 10, padding: '8px 10px',
+              border: `1px solid ${C.border}`
+            }}>
+              <ArtistArt artist={ar} size={40} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ar.name}</div>
+                <div style={{ fontSize: 10, color: C.muted }}>{fmt(ar.scrobbles)} plays</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      </>}
+    </div>
+  );
+}
+
+// ── ARTIST SCREEN ──────────────────────────────────────────────────────────
+function ArtistScreen({ artist, navigate, goBack }) {
+  const D = window.MOCK_DATA;
+  const [linksOpen, setLinksOpen] = useState(false);
+  const [tracksTab, setTracksTab] = useState('scrobbled');
+  const [discoTab, setDiscoTab] = useState('albums');
+
+  const artistAlbums = D.albums.filter(al => al.artistId === artist.id);
+  const discoTypes = { albums: 'album', compilations: 'compilation', live: 'live', eps: 'ep', singles: 'single', 'appears on': 'appears' };
+  const filteredDisco = artistAlbums.filter(al => al.type === discoTypes[discoTab]) ;
+  const discoShow = filteredDisco.length > 0 ? filteredDisco : artistAlbums.slice(0, 3);
+
+  const tracks = D.tracks[artist.id] || [];
+  const sortedTracks = [...tracks].sort((a, b) =>
+    tracksTab === 'scrobbled' ? b.scrobbles - a.scrobbles :
+    tracksTab === 'listened' ? b.listens - a.listens :
+    a.title.localeCompare(b.title)
+  );
+
+  const similarIds = D.similarArtists[artist.id] || [];
+  const similarArtists = D.artists.filter(a => similarIds.includes(a.id));
+
+  const links = ['Last.fm', 'MusicBrainz', 'Bandcamp', 'Wikipedia', 'Discogs', 'AllMusic'];
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
+      {/* Hero */}
+      <div style={{ position: 'relative', height: 200, background: `conic-gradient(from ${artist.name.charCodeAt(0)*7}deg at 30% 50%, #FF2D5522, #00996E33, #FF2D5511)`, borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={goBack} style={{ position: 'absolute', top: 12, left: 12, background: '#00000066', border: 'none', borderRadius: '50%', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          <Icon.Back />
+        </button>
+        <div style={{ position: 'absolute', bottom: 16, left: 16, right: 16 }}>
+          <div style={{ fontSize: 26, fontWeight: 700, color: C.text }}>{artist.name}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{artist.genre} · {fmt(artist.scrobbles)} plays</div>
+        </div>
+        <PlayButton size={44} style={{ position: 'absolute', bottom: 16, right: 16 }} />
+      </div>
+
+      {/* Links dropdown */}
+      <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.border}` }}>
+        <button onClick={() => setLinksOpen(o => !o)} style={{
+          display: 'flex', alignItems: 'center', gap: 6, background: C.card,
+          border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 14px',
+          cursor: 'pointer', color: C.text, fontSize: 13, fontWeight: 500, fontFamily: 'Inter'
+        }}>
+          <Icon.Music size={14} color={C.tertiary} />
+          Links
+          {linksOpen ? <Icon.ChevUp size={14} color={C.muted} /> : <Icon.ChevDown size={14} color={C.muted} />}
+        </button>
+        {linksOpen && (
+          <div style={{ marginTop: 8, background: C.card, borderRadius: 10, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
+            {links.map((l, i) => (
+              <div key={l} style={{
+                padding: '10px 14px', fontSize: 13, color: C.primary, fontWeight: 500,
+                borderBottom: i < links.length - 1 ? `1px solid ${C.border}` : 'none',
+                cursor: 'pointer'
+              }}>{l}</div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ padding: '0 16px' }}>
+        {/* Top Tracks */}
+        <div style={{ marginTop: 20, marginBottom: 24 }}>
+          <SectionHeader title="Top Tracks" />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {[['scrobbled','Most Scrobbled'],['listened','Most Listened'],['singles','Singles']].map(([k,l]) => (
+              <Pill key={k} active={tracksTab===k} onClick={() => setTracksTab(k)}>{l}</Pill>
+            ))}
+          </div>
+          {sortedTracks.slice(0,6).map((t, i) => (
+            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: `1px solid ${C.border}` }}>
+              <span style={{ width: 18, textAlign: 'right', fontSize: 12, color: C.neutral }}>{i+1}</span>
+              <AlbumArt album={D.albums.find(a=>a.id===t.albumId)} size={38} style={{ borderRadius: 4 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.title}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>{t.album}</div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: 11, color: C.muted }}>{fmt(tracksTab==='listened'?t.listens:t.scrobbles)}</div>
+                <div style={{ fontSize: 10, color: C.neutral }}>{t.duration}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Discography */}
+        <div style={{ marginBottom: 24 }}>
+          <SectionHeader title="Discography" />
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14, overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {Object.keys(discoTypes).map(k => (
+              <Pill key={k} active={discoTab===k} onClick={() => setDiscoTab(k)} style={{ textTransform: 'capitalize' }}>{k}</Pill>
+            ))}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {discoShow.map(al => (
+              <div key={al.id} onClick={() => navigate('album', al)} style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', padding: '4px 0' }}>
+                <AlbumArt album={al} size={52} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{al.title}</div>
+                  <div style={{ fontSize: 11, color: C.muted }}>{al.year} · {al.tracks} tracks</div>
+                </div>
+                <Icon.ChevDown size={14} color={C.neutral} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Similar Artists */}
+        {similarArtists.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <SectionHeader title="Similar Artists" />
+            <div style={{ display: 'flex', gap: 14, overflowX: 'auto', scrollbarWidth: 'none' }}>
+              {similarArtists.map(ar => (
+                <div key={ar.id} onClick={() => navigate('artist', ar)} style={{ flexShrink: 0, textAlign: 'center', cursor: 'pointer' }}>
+                  <ArtistArt artist={ar} size={64} />
+                  <div style={{ fontSize: 11, fontWeight: 500, color: C.text, marginTop: 6, width: 64, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ar.name}</div>
+                  <div style={{ fontSize: 10, color: C.muted }}>{ar.genre}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── ALBUM SCREEN ───────────────────────────────────────────────────────────
+function AlbumScreen({ album, navigate, goBack }) {
+  const D = window.MOCK_DATA;
+  const artist = D.artists.find(a => a.id === album.artistId);
+  const tracks = D.albumTracks[album.id] || Array.from({length: album.tracks}, (_, i) => ({
+    n: i+1, title: `Track ${i+1}`, duration: `${3+Math.floor(Math.random()*3)}:${String(Math.floor(Math.random()*60)).padStart(2,'0')}`, scrobbles: Math.floor(Math.random()*300)+50
+  }));
+  const totalDuration = tracks.length * 4.5;
+  const [playingIdx, setPlayingIdx] = useState(null);
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
+      {/* Hero */}
+      <div style={{ position: 'relative', background: `linear-gradient(180deg, ${album.color || '#261212'} 0%, ${C.bg} 100%)`, padding: '0 0 20px' }}>
+        <button onClick={goBack} style={{ position: 'absolute', top: 12, left: 12, background: '#00000066', border: 'none', borderRadius: '50%', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 2 }}>
+          <Icon.Back />
+        </button>
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 50 }}>
+          <AlbumArt album={album} size={180} style={{ borderRadius: 10, boxShadow: '0 16px 48px #00000088' }} />
+        </div>
+        <div style={{ padding: '16px 20px 0', textAlign: 'center' }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>{album.title}</div>
+          <button onClick={() => artist && navigate('artist', artist)} style={{ background: 'none', border: 'none', fontSize: 14, color: C.primary, cursor: 'pointer', fontFamily: 'Inter', fontWeight: 500, marginTop: 2 }}>
+            {album.artist}
+          </button>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{album.year} · {album.tracks} tracks · ~{Math.round(totalDuration)} min</div>
+        </div>
+        {/* Play All */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px 0' }}>
+          <PlayButton size={48} style={{ flex: 'none' }} />
+          <div style={{ flex: 1, height: 1, background: C.border }} />
+          <button style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: '8px 16px', color: C.text, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter' }}>Shuffle</button>
+        </div>
+      </div>
+
+      {/* Track list */}
+      <div style={{ padding: '12px 16px' }}>
+        {tracks.map((t, i) => (
+          <div key={t.n} onClick={() => setPlayingIdx(i === playingIdx ? null : i)} style={{
+            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
+            borderBottom: `1px solid ${C.border}`, cursor: 'pointer',
+            background: i === playingIdx ? `${C.primary}11` : 'transparent',
+            borderRadius: i === playingIdx ? 6 : 0,
+            paddingLeft: i === playingIdx ? 6 : 0,
+          }}>
+            <div style={{ width: 22, textAlign: 'center' }}>
+              {i === playingIdx
+                ? <div style={{ width: 16, height: 16, margin: 'auto' }}><Icon.Play size={14} color={C.primary} /></div>
+                : <span style={{ fontSize: 12, color: C.neutral }}>{t.n}</span>
+              }
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: i === playingIdx ? 600 : 400, color: i === playingIdx ? C.primary : C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.title}</div>
+              {t.scrobbles && <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>{fmt(t.scrobbles)} plays</div>}
+            </div>
+            <span style={{ fontSize: 12, color: C.neutral, flexShrink: 0 }}>{t.duration}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── CHARTS SCREEN ──────────────────────────────────────────────────────────
+function ChartsScreen({ navigate }) {
+  const D = window.MOCK_DATA;
+
+  const ChangeIcon = ({ v }) => {
+    if (v === 'NEW') return <span style={{ fontSize: 9, fontWeight: 700, color: C.tertiary, background: `${C.tertiary}22`, padding: '2px 4px', borderRadius: 3 }}>NEW</span>;
+    if (v > 0) return <span style={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: 10, color: C.tertiary }}><Icon.Up />{v}</span>;
+    if (v < 0) return <span style={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: 10, color: C.primary }}><Icon.Down />{Math.abs(v)}</span>;
+    return <span style={{ fontSize: 10, color: C.neutral }}>—</span>;
+  };
+
+  const findAlbum = (item) => D.albums.find(a => a.title === item.title) || { title: item.title, color: '#261212' };
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 80px' }}>
+      <div style={{ fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 2 }}>Charts</div>
+      <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>Top 100 Albums · This Week</div>
+
+      {/* Top 3 podium */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 8, marginBottom: 20 }}>
+        {[1, 0, 2].map(idx => {
+          const item = D.charts[idx];
+          const al = findAlbum(item);
+          const heights = [90, 110, 75];
+          const rank = idx + 1;
+          return (
+            <div key={idx} onClick={() => navigate('album', al)} style={{ flex: 1, textAlign: 'center', cursor: 'pointer' }}>
+              <AlbumArt album={al} size={idx===0?80:64} style={{ margin: '0 auto 6px', borderRadius: 8, border: idx===0?`2px solid ${C.primary}`:'none' }} />
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</div>
+              <div style={{ fontSize: 10, color: C.muted }}>{item.artist}</div>
+              <div style={{ marginTop: 6, height: heights[idx===0?1:idx===1?0:2], background: idx===0?`${C.card}`:`${C.surface}`, borderRadius: '4px 4px 0 0', border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ fontSize: idx===1?18:14, fontWeight: 700, color: idx===1?C.primary:C.muted }}>#{rank}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Full list */}
+      {D.charts.slice(3).map((item, i) => {
+        const al = findAlbum(item);
+        return (
+          <div key={i} onClick={() => navigate('album', al)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
+            <div style={{ width: 28, textAlign: 'right', fontSize: 12, color: C.neutral, fontWeight: 600 }}>{item.rank}</div>
+            <AlbumArt album={al} size={42} style={{ borderRadius: 4 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</div>
+              <div style={{ fontSize: 11, color: C.muted }}>{item.artist} · {item.year}</div>
+            </div>
+            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+              <ChangeIcon v={item.change} />
+              <div style={{ fontSize: 10, color: C.neutral }}>{item.plays} plays</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── PLAYLIST ART ──────────────────────────────────────────────────────────
+function PlaylistArt({ playlist, size = 56, style = {} }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: 6, flexShrink: 0,
+      background: `linear-gradient(135deg, ${playlist.color || '#261212'} 0%, #150808 100%)`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.32, color: C.neutral, fontWeight: 600,
+      ...style
+    }}>
+      <svg width={size*0.44} height={size*0.44} viewBox="0 0 24 24" fill="none" stroke={C.neutral} strokeWidth="1.8" strokeLinecap="round">
+        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+        <line x1="8" y1="18" x2="21" y2="18"/>
+        <circle cx="3" cy="6" r="1" fill={C.neutral}/><circle cx="3" cy="12" r="1" fill={C.neutral}/><circle cx="3" cy="18" r="1" fill={C.neutral}/>
+      </svg>
+    </div>
+  );
+}
+
+// ── PLAYLISTS LIST SCREEN ──────────────────────────────────────────────────
+function PlaylistsScreen({ navigate }) {
+  const D = window.MOCK_DATA;
+  const [sort, setSort] = useState('updated');
+
+  const sorted = [...D.playlists].sort((a, b) =>
+    sort === 'name' ? a.name.localeCompare(b.name) : b.updatedAt.localeCompare(a.updatedAt)
+  );
+
+  const fmtDate = d => {
+    const days = Math.floor((new Date() - new Date(d)) / 86400000);
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return `${days} days ago`;
+    return new Date(d).toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+  };
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 80px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>Playlists</div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setSort('updated')} style={{ background: sort==='updated'?`${C.primary}22`:'none', border: `1px solid ${sort==='updated'?C.primary:C.border}`, borderRadius: 6, padding: '5px 10px', color: sort==='updated'?C.primary:C.muted, fontSize: 11, cursor: 'pointer', fontFamily:'Inter', fontWeight: 500 }}>Updated</button>
+          <button onClick={() => setSort('name')} style={{ background: sort==='name'?`${C.primary}22`:'none', border: `1px solid ${sort==='name'?C.primary:C.border}`, borderRadius: 6, padding: '5px 10px', color: sort==='name'?C.primary:C.muted, fontSize: 11, cursor: 'pointer', fontFamily:'Inter', fontWeight: 500 }}>A–Z</button>
+        </div>
+      </div>
+      <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>{D.playlists.length} playlists</div>
+
+      {sorted.map(pl => (
+        <div key={pl.id} onClick={() => navigate('playlist', pl)} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 0', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
+          <PlaylistArt playlist={pl} size={54} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pl.name}</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{pl.trackCount} tracks · Updated {fmtDate(pl.updatedAt)}</div>
+          </div>
+          <Icon.ChevDown size={14} color={C.neutral} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── PLAYLIST DETAIL SCREEN ─────────────────────────────────────────────────
+function PlaylistScreen({ playlist, goBack }) {
+  const [playingIdx, setPlayingIdx] = useState(null);
+  const tracks = playlist.tracks || [];
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
+      {/* Hero */}
+      <div style={{ position: 'relative', background: `linear-gradient(180deg, ${playlist.color || '#261212'} 0%, ${C.bg} 100%)`, padding: '0 0 20px' }}>
+        <button onClick={goBack} style={{ position: 'absolute', top: 12, left: 12, background: '#00000066', border: 'none', borderRadius: '50%', width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 2 }}>
+          <Icon.Back />
+        </button>
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 50 }}>
+          <div style={{ width: 180, height: 180, borderRadius: 12, background: `linear-gradient(135deg, ${playlist.color || '#261212'} 0%, #0a0404 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 16px 48px #00000088' }}>
+            <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke={C.neutral} strokeWidth="1.2" strokeLinecap="round">
+              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+              <line x1="8" y1="18" x2="21" y2="18"/>
+              <circle cx="3" cy="6" r="1.2" fill={C.neutral}/><circle cx="3" cy="12" r="1.2" fill={C.neutral}/><circle cx="3" cy="18" r="1.2" fill={C.neutral}/>
+            </svg>
+          </div>
+        </div>
+        <div style={{ padding: '16px 20px 0', textAlign: 'center' }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.text }}>{playlist.name}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{playlist.trackCount} tracks</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px 0' }}>
+          <PlayButton size={48} />
+          <div style={{ flex: 1, height: 1, background: C.border }} />
+          <button style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: '8px 16px', color: C.text, fontSize: 13, cursor: 'pointer', fontFamily: 'Inter' }}>Shuffle</button>
+        </div>
+      </div>
+
+      {/* Track list */}
+      <div style={{ padding: '12px 16px' }}>
+        {tracks.map((t, i) => (
+          <div key={i} onClick={() => setPlayingIdx(i === playingIdx ? null : i)} style={{
+            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',
+            borderBottom: `1px solid ${C.border}`, cursor: 'pointer',
+            background: i === playingIdx ? `${C.primary}11` : 'transparent',
+            borderRadius: i === playingIdx ? 6 : 0,
+            paddingLeft: i === playingIdx ? 6 : 0,
+          }}>
+            <div style={{ width: 22, textAlign: 'center' }}>
+              {i === playingIdx
+                ? <Icon.Play size={14} color={C.primary} />
+                : <span style={{ fontSize: 12, color: C.neutral }}>{t.n}</span>
+              }
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: i === playingIdx ? 600 : 400, color: i === playingIdx ? C.primary : C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.title}</div>
+              <div style={{ fontSize: 11, color: C.muted }}>{t.artist} · {t.album}</div>
+            </div>
+            <span style={{ fontSize: 12, color: C.neutral, flexShrink: 0 }}>{t.duration}</span>
+          </div>
+        ))}
+        {tracks.length < playlist.trackCount && (
+          <div style={{ padding: '12px 0', textAlign: 'center', fontSize: 12, color: C.neutral }}>
+            + {playlist.trackCount - tracks.length} more tracks
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── HISTORY SCREEN ─────────────────────────────────────────────────────────
+function HistoryScreen({ navigate }) {
+  const D = window.MOCK_DATA;
+  const [period, setPeriod] = useState('30d');
+  const [tab, setTab] = useState('tracks');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [showCustom, setShowCustom] = useState(false);
+
+  const multipliers = { today: 0.08, '7d': 0.3, '30d': 1, custom: 0.6 };
+  const m = multipliers[period] || 1;
+
+  const data = D.history[tab];
+
+  const maxVal = data[0]?.plays || 1;
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 80px' }}>
+      <div style={{ fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 4 }}>History</div>
+      <div style={{ fontSize: 13, color: C.muted, marginBottom: 14 }}>Your listening stats</div>
+
+      {/* Date filter */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8, overflowX: 'auto', scrollbarWidth: 'none' }}>
+        {[['today','Today'],['7d','Last 7 Days'],['30d','Last 30 Days'],['custom','Custom']].map(([k,l]) => (
+          <Pill key={k} active={period===k} onClick={() => { setPeriod(k); if(k==='custom') setShowCustom(true); else setShowCustom(false); }}>{l}</Pill>
+        ))}
+      </div>
+
+      {/* Custom range */}
+      {showCustom && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+          <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} style={{ flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 10px', color: C.text, fontSize: 12, fontFamily: 'Inter', colorScheme: 'dark' }} />
+          <span style={{ color: C.muted, fontSize: 12 }}>to</span>
+          <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} style={{ flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 10px', color: C.text, fontSize: 12, fontFamily: 'Inter', colorScheme: 'dark' }} />
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {['tracks','albums','artists'].map(k => (
+          <button key={k} onClick={() => setTab(k)} style={{
+            flex: 1, padding: '8px 0', borderRadius: 8, border: `1px solid ${tab===k?C.primary:C.border}`,
+            background: tab===k ? `${C.primary}22` : C.card, color: tab===k ? C.primary : C.muted,
+            fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter', textTransform: 'capitalize'
+          }}>{k}</button>
+        ))}
+      </div>
+
+      {/* Stats summary */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 20 }}>
+        {[
+          { label: 'Tracks', val: Math.round(D.history.tracks.reduce((s,t)=>s+t.plays,0)*m) },
+          { label: 'Albums', val: Math.round(D.history.albums.reduce((s,t)=>s+t.plays,0)*m) },
+          { label: 'Artists', val: D.history.artists.length },
+        ].map(s => (
+          <div key={s.label} style={{ background: C.card, borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.text }}>{fmt(s.val)}</div>
+            <div style={{ fontSize: 10, color: C.muted }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Ranked list */}
+      {data.map((item, i) => {
+        const val = Math.round(item.plays * m);
+        const pct = val / (data[0].plays * m);
+        return (
+          <div key={i} onClick={() => tab === 'albums' ? navigate('album', window.MOCK_DATA.albums.find(a=>a.id===item.albumId)) : tab === 'artists' ? navigate('artist', window.MOCK_DATA.artists.find(a=>a.id===item.artistId)) : null} style={{
+            marginBottom: 12, cursor: tab !== 'tracks' ? 'pointer' : 'default'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+              <span style={{ width: 20, fontSize: 12, fontWeight: 700, color: i<3?C.primary:C.neutral, textAlign: 'right' }}>#{i+1}</span>
+              {tab !== 'tracks'
+                ? tab === 'artists'
+                  ? <ArtistArt artist={{ name: item.name || item.artist }} size={36} />
+                  : <AlbumArt album={window.MOCK_DATA.albums.find(a=>a.id===item.albumId)||{title:item.title, color:'#261212'}} size={36} style={{ borderRadius: 4 }} />
+                : <div style={{ width: 36, height: 36, borderRadius: 4, background: C.card, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon.Music size={14} color={C.primary} />
+                  </div>
+              }
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title || item.name}</div>
+                {(item.artist || item.album) && <div style={{ fontSize: 11, color: C.muted }}>{item.artist || item.album}</div>}
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.text, flexShrink: 0 }}>{fmt(val)}</span>
+            </div>
+            <div style={{ marginLeft: 30, height: 3, background: C.border, borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ width: `${pct * 100}%`, height: '100%', background: i === 0 ? C.primary : i < 3 ? C.tertiary : C.neutral, borderRadius: 2, transition: 'width 0.4s' }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── BOTTOM NAV ─────────────────────────────────────────────────────────────
+function BottomNav({ active, onSelect }) {
+  const tabs = [
+    { id: 'home', label: 'Home', Ic: Icon.Home },
+    { id: 'playlists', label: 'Playlists', Ic: Icon.Playlist },
+    { id: 'charts', label: 'Charts', Ic: Icon.Chart },
+    { id: 'history', label: 'History', Ic: Icon.History },
+  ];
+  return (
+    <div style={{ display: 'flex', background: C.surface, borderTop: `1px solid ${C.border}`, position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+      {tabs.map(({ id, label, Ic }) => {
+        const isActive = active === id;
+        return (
+          <button key={id} onClick={() => onSelect(id)} style={{
+            flex: 1, padding: '10px 0 8px', border: 'none', background: 'none',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+            cursor: 'pointer', transition: 'all 0.15s',
+          }}>
+            <Ic size={22} color={isActive ? C.primary : C.muted} />
+            <span style={{ fontSize: 10, color: isActive ? C.primary : C.muted, fontFamily: 'Inter', fontWeight: isActive ? 600 : 400 }}>{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── MINI PLAYER ────────────────────────────────────────────────────────────
+function MiniPlayer() {
+  const [visible] = useState(true);
+  if (!visible) return null;
+  return (
+    <div style={{
+      position: 'absolute', bottom: 58, left: 8, right: 8,
+      background: C.card, borderRadius: 12, padding: '8px 12px',
+      border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 10,
+      boxShadow: '0 -4px 20px #00000055'
+    }}>
+      <AlbumArt album={{ title: 'Mezzanine', color: '#1a0a2e' }} size={36} style={{ borderRadius: 6 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Teardrop</div>
+        <div style={{ fontSize: 10, color: C.muted }}>Massive Attack</div>
+      </div>
+      <PlayButton size={32} />
+    </div>
+  );
+}
+
+// ── ROOT APP ───────────────────────────────────────────────────────────────
+function App() {
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('jamarr_nav') || '{}'); } catch { return {}; } })();
+  const safeTab = ['home','charts','history','playlists'].includes(saved.tab) ? saved.tab : 'home';
+  const [screen, setScreen] = useState(safeTab);
+  const [stack, setStack] = useState([]);
+  const [activeTab, setActiveTab] = useState(safeTab);
+  const [detailData, setDetailData] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem('jamarr_nav', JSON.stringify({ screen, tab: activeTab }));
+  }, [screen, activeTab]);
+
+  const navigate = (type, data) => {
+    setStack(s => [...s, { screen, detailData }]);
+    setScreen(type);
+    setDetailData(data);
+  };
+
+  const goBack = () => {
+    const prev = stack[stack.length - 1];
+    if (prev) {
+      setScreen(prev.screen);
+      setDetailData(prev.detailData);
+      setStack(s => s.slice(0, -1));
+    }
+  };
+
+  const selectTab = (tab) => {
+    setActiveTab(tab);
+    setScreen(tab);
+    setStack([]);
+    setDetailData(null);
+  };
+
+  const renderScreen = () => {
+    if (screen === 'artist') return <ArtistScreen artist={detailData} navigate={navigate} goBack={goBack} />;
+    if (screen === 'album') return <AlbumScreen album={detailData} navigate={navigate} goBack={goBack} />;
+    if (screen === 'playlist') return <PlaylistScreen playlist={detailData} goBack={goBack} />;
+    if (screen === 'charts') return <ChartsScreen navigate={navigate} />;
+    if (screen === 'history') return <HistoryScreen navigate={navigate} />;
+    if (screen === 'playlists') return <PlaylistsScreen navigate={navigate} />;
+    return <HomeScreen navigate={navigate} />;
+  };
+
+  const isDetail = screen === 'artist' || screen === 'album' || screen === 'playlist';
+
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: C.bg, position: 'relative', fontFamily: 'Inter', color: C.text, overflow: 'hidden' }}>
+      {renderScreen()}
+      <MiniPlayer />
+      {!isDetail && <BottomNav active={activeTab} onSelect={selectTab} />}
+      {isDetail && (
+        <div style={{ background: C.surface, borderTop: `1px solid ${C.border}`, padding: '10px 0 8px', display: 'flex', justifyContent: 'center' }}>
+          <button onClick={goBack} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 12, cursor: 'pointer', fontFamily: 'Inter', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Icon.Back size={14} color={C.muted} /> Back
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── WRAPPER IN ANDROID FRAME ───────────────────────────────────────────────
+function Root() {
+  const [scale, setScale] = React.useState(1);
+  const DEVICE_W = 412, DEVICE_H = 892;
+
+  React.useEffect(() => {
+    const update = () => {
+      const s = Math.min(
+        (window.innerWidth - 16) / DEVICE_W,
+        (window.innerHeight - 16) / DEVICE_H,
+        1
+      );
+      setScale(s);
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  return (
+    <div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0c0c0c' }}>
+      <div style={{ transform: `scale(${scale})`, transformOrigin: 'center center', flexShrink: 0 }}>
+        <AndroidDevice dark={true} width={DEVICE_W} height={DEVICE_H}>
+          <App />
+        </AndroidDevice>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+</script>
+
+<!-- Tweaks panel -->
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accentColor": "#FF2D55",
+  "tertiaryColor": "#00996E",
+  "showMiniPlayer": true
+}/*EDITMODE-END*/;
+
+(function() {
+  window.addEventListener('message', e => {
+    if (e.data?.type === '__activate_edit_mode') {
+      document.getElementById('tweaks-panel').style.display = 'flex';
+    }
+    if (e.data?.type === '__deactivate_edit_mode') {
+      document.getElementById('tweaks-panel').style.display = 'none';
+    }
+  });
+  window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+
+  const panel = document.createElement('div');
+  panel.id = 'tweaks-panel';
+  panel.style.cssText = 'display:none;position:fixed;bottom:20px;right:20px;background:#1e0e0e;border:1px solid #2e1818;border-radius:12px;padding:14px 16px;z-index:9999;flex-direction:column;gap:10px;min-width:200px;box-shadow:0 8px 32px #00000088;font-family:Inter,sans-serif;';
+  panel.innerHTML = `
+    <div style="font-size:13px;font-weight:700;color:#FFCDD2;margin-bottom:2px">Tweaks</div>
+    <label style="font-size:11px;color:#A1A1A2;display:flex;flex-direction:column;gap:4px">
+      Accent Color
+      <input type="color" id="tw-accent" value="${TWEAK_DEFAULTS.accentColor}" style="width:100%;height:28px;border:none;background:none;cursor:pointer;border-radius:6px"/>
+    </label>
+    <label style="font-size:11px;color:#A1A1A2;display:flex;flex-direction:column;gap:4px">
+      Tertiary Color
+      <input type="color" id="tw-tertiary" value="${TWEAK_DEFAULTS.tertiaryColor}" style="width:100%;height:28px;border:none;background:none;cursor:pointer;border-radius:6px"/>
+    </label>
+  `;
+  document.body.appendChild(panel);
+})();
+</script>
+</body>
+</html>
