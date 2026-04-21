@@ -1,0 +1,176 @@
+// Mock data for Jamarr Music app
+const MOCK_DATA = {
+  artists: [
+    { id: 'a1', name: 'Massive Attack', image: null, genre: 'Trip-hop', scrobbles: 4821, listeners: 2341 },
+    { id: 'a2', name: 'Portishead', image: null, genre: 'Trip-hop', scrobbles: 3109, listeners: 1820 },
+    { id: 'a3', name: 'Björk', image: null, genre: 'Art Pop', scrobbles: 2944, listeners: 1654 },
+    { id: 'a4', name: 'Burial', image: null, genre: 'UK Garage', scrobbles: 2108, listeners: 987 },
+    { id: 'a5', name: 'The Knife', image: null, genre: 'Synth Pop', scrobbles: 1876, listeners: 843 },
+    { id: 'a6', name: 'FKA twigs', image: null, genre: 'Alt R&B', scrobbles: 1654, listeners: 721 },
+    { id: 'a7', name: 'Nicolas Jaar', image: null, genre: 'Electronic', scrobbles: 1432, listeners: 654 },
+    { id: 'a8', name: 'Arca', image: null, genre: 'Experimental', scrobbles: 1287, listeners: 543 },
+  ],
+  albums: [
+    { id: 'al1', title: 'Mezzanine', artist: 'Massive Attack', artistId: 'a1', year: 1998, tracks: 11, type: 'album', color: '#1a0a2e' },
+    { id: 'al2', title: 'Dummy', artist: 'Portishead', artistId: 'a2', year: 1994, tracks: 11, type: 'album', color: '#0a1a0e' },
+    { id: 'al3', title: 'Homogenic', artist: 'Björk', artistId: 'a3', year: 1997, tracks: 10, type: 'album', color: '#2e1a00' },
+    { id: 'al4', title: 'Untrue', artist: 'Burial', artistId: 'a4', year: 2007, tracks: 13, type: 'album', color: '#0a1e2e' },
+    { id: 'al5', title: 'Blue Lines', artist: 'Massive Attack', artistId: 'a1', year: 1991, tracks: 9, type: 'album', color: '#1e0a0a' },
+    { id: 'al6', title: 'Portishead', artist: 'Portishead', artistId: 'a2', year: 1997, tracks: 11, type: 'album', color: '#1a1a00' },
+    { id: 'al7', title: 'Vespertine', artist: 'Björk', artistId: 'a3', year: 2001, tracks: 12, type: 'album', color: '#001e2e' },
+    { id: 'al8', title: 'LP1', artist: 'FKA twigs', artistId: 'a6', year: 2014, tracks: 10, type: 'album', color: '#2e0a1e' },
+    { id: 'al9', title: 'Space Is Only Noise', artist: 'Nicolas Jaar', artistId: 'a7', year: 2011, tracks: 10, type: 'album', color: '#0e1e0a' },
+    { id: 'al10', title: 'Protection', artist: 'Massive Attack', artistId: 'a1', year: 1994, tracks: 11, type: 'album', color: '#1e0e1e' },
+    { id: 'al11', title: 'Live at the Roseland', artist: 'Portishead', artistId: 'a2', year: 1998, tracks: 10, type: 'live', color: '#0a2e1a' },
+    { id: 'al12', title: 'Shaking the Habitual', artist: 'The Knife', artistId: 'a5', year: 2013, tracks: 13, type: 'album', color: '#1a2e0a' },
+    { id: 'al13', title: 'Arca', artist: 'Arca', artistId: 'a8', year: 2017, tracks: 13, type: 'album', color: '#2e1a1a' },
+    { id: 'al14', title: 'MAGDALENE', artist: 'FKA twigs', artistId: 'a6', year: 2019, tracks: 9, type: 'album', color: '#1e0a2e' },
+    { id: 'al15', title: 'Heligoland', artist: 'Massive Attack', artistId: 'a1', year: 2010, tracks: 11, type: 'album', color: '#002e1e' },
+  ],
+  tracks: {
+    'a1': [
+      { id: 't1', title: 'Teardrop', album: 'Mezzanine', albumId: 'al1', duration: '5:29', scrobbles: 621, listens: 834 },
+      { id: 't2', title: 'Angel', album: 'Mezzanine', albumId: 'al1', duration: '6:17', scrobbles: 489, listens: 701 },
+      { id: 't3', title: 'Safe from Harm', album: 'Blue Lines', albumId: 'al5', duration: '5:18', scrobbles: 412, listens: 589 },
+      { id: 't4', title: 'Unfinished Sympathy', album: 'Blue Lines', albumId: 'al5', duration: '5:07', scrobbles: 398, listens: 543 },
+      { id: 't5', title: 'Risingson', album: 'Mezzanine', albumId: 'al1', duration: '5:56', scrobbles: 334, listens: 478 },
+      { id: 't6', title: 'Dissolved Girl', album: 'Mezzanine', albumId: 'al1', duration: '6:07', scrobbles: 298, listens: 421 },
+      { id: 't7', title: 'Protection', album: 'Protection', albumId: 'al10', duration: '4:58', scrobbles: 276, listens: 398 },
+      { id: 't8', title: 'Inertia Creeps', album: 'Mezzanine', albumId: 'al1', duration: '5:58', scrobbles: 243, listens: 367 },
+      { id: 't9', title: 'Karmacoma', album: 'Protection', albumId: 'al10', duration: '5:18', scrobbles: 221, listens: 312 },
+      { id: 't10', title: 'Atlas Air', album: 'Heligoland', albumId: 'al15', duration: '5:30', scrobbles: 198, listens: 287 },
+    ]
+  },
+  albumTracks: {
+    'al1': [
+      { n: 1, title: 'Angel', duration: '6:17', scrobbles: 489 },
+      { n: 2, title: 'Risingson', duration: '5:56', scrobbles: 334 },
+      { n: 3, title: 'Teardrop', duration: '5:29', scrobbles: 621 },
+      { n: 4, title: 'Inertia Creeps', duration: '5:58', scrobbles: 243 },
+      { n: 5, title: 'Exchange', duration: '4:28', scrobbles: 187 },
+      { n: 6, title: 'Dissolved Girl', duration: '6:07', scrobbles: 298 },
+      { n: 7, title: 'Man Next Door', duration: '5:57', scrobbles: 156 },
+      { n: 8, title: 'Black Milk', duration: '6:22', scrobbles: 134 },
+      { n: 9, title: 'Mezzanine', duration: '7:21', scrobbles: 112 },
+      { n: 10, title: 'Group Four', duration: '8:14', scrobbles: 98 },
+      { n: 11, title: '(Exchange)', duration: '1:53', scrobbles: 76 },
+    ]
+  },
+  similarArtists: {
+    'a1': ['a2', 'a3', 'a4', 'a5']
+  },
+  playlists: [
+    { id: 'pl1', name: 'Late Night Drives', trackCount: 24, updatedAt: '2026-04-20', color: '#1a0a2e', tracks: [
+      { n:1, title:'Teardrop', artist:'Massive Attack', album:'Mezzanine', duration:'5:29' },
+      { n:2, title:'Glory Box', artist:'Portishead', album:'Dummy', duration:'5:05' },
+      { n:3, title:'Joga', artist:'Björk', album:'Homogenic', duration:'5:03' },
+      { n:4, title:'Archangel', artist:'Burial', album:'Untrue', duration:'5:01' },
+      { n:5, title:'Dissolve Me', artist:'Alt-J', album:'An Awesome Wave', duration:'4:53' },
+      { n:6, title:'Risingson', artist:'Massive Attack', album:'Mezzanine', duration:'5:56' },
+    ]},
+    { id: 'pl2', name: 'Electronic Moods', trackCount: 31, updatedAt: '2026-04-18', color: '#0a1e2e', tracks: [
+      { n:1, title:'Windowlicker', artist:'Aphex Twin', album:'Windowlicker', duration:'9:57' },
+      { n:2, title:'Knife Prty', artist:'Deftones', album:'Diamond Eyes', duration:'4:22' },
+      { n:3, title:'Inertia Creeps', artist:'Massive Attack', album:'Mezzanine', duration:'5:58' },
+      { n:4, title:'Frozen', artist:'Madonna', album:'Ray of Light', duration:'6:12' },
+      { n:5, title:'Wandering Star', artist:'Portishead', album:'Dummy', duration:'6:56' },
+    ]},
+    { id: 'pl3', name: 'Sunday Morning', trackCount: 18, updatedAt: '2026-04-15', color: '#0a1a0e', tracks: [
+      { n:1, title:'Unfinished Sympathy', artist:'Massive Attack', album:'Blue Lines', duration:'5:07' },
+      { n:2, title:'Sour Times', artist:'Portishead', album:'Dummy', duration:'4:11' },
+      { n:3, title:'Bachelorette', artist:'Björk', album:'Homogenic', duration:'5:11' },
+      { n:4, title:'Safe from Harm', artist:'Massive Attack', album:'Blue Lines', duration:'5:18' },
+    ]},
+    { id: 'pl4', name: 'Trip Hop Classics', trackCount: 42, updatedAt: '2026-04-10', color: '#2e1a00', tracks: [
+      { n:1, title:'Protection', artist:'Massive Attack', album:'Protection', duration:'4:58' },
+      { n:2, title:'Glory Box', artist:'Portishead', album:'Dummy', duration:'5:05' },
+      { n:3, title:'Hell Is Round the Corner', artist:'Tricky', album:'Maxinquaye', duration:'4:41' },
+      { n:4, title:'Karmacoma', artist:'Massive Attack', album:'Protection', duration:'5:18' },
+      { n:5, title:'Pedestal', artist:'Portishead', album:'Portishead', duration:'3:56' },
+    ]},
+    { id: 'pl5', name: 'Workout', trackCount: 15, updatedAt: '2026-03-28', color: '#1e0a0a', tracks: [
+      { n:1, title:'Atlas Air', artist:'Massive Attack', album:'Heligoland', duration:'5:30' },
+      { n:2, title:'Silent Spring', artist:'Massive Attack', album:'Heligoland', duration:'4:30' },
+      { n:3, title:'Rough Sleeper', artist:'Massive Attack', album:'Heligoland', duration:'4:09' },
+    ]},
+    { id: 'pl6', name: 'Focus', trackCount: 27, updatedAt: '2026-03-14', color: '#001e2e', tracks: [
+      { n:1, title:'Dissolved Girl', artist:'Massive Attack', album:'Mezzanine', duration:'6:07' },
+      { n:2, title:'Hunter', artist:'Björk', album:'Homogenic', duration:'4:10' },
+      { n:3, title:'Five Years', artist:'Arca', album:'Arca', duration:'3:37' },
+    ]},
+  ],
+  charts: Array.from({length: 100}, (_, i) => {
+    const albumPool = [
+      { title: 'Mezzanine', artist: 'Massive Attack', year: 1998 },
+      { title: 'Dummy', artist: 'Portishead', year: 1994 },
+      { title: 'Homogenic', artist: 'Björk', year: 1997 },
+      { title: 'Untrue', artist: 'Burial', year: 2007 },
+      { title: 'Blue Lines', artist: 'Massive Attack', year: 1991 },
+      { title: 'Portishead', artist: 'Portishead', year: 1997 },
+      { title: 'Vespertine', artist: 'Björk', year: 2001 },
+      { title: 'LP1', artist: 'FKA twigs', year: 2014 },
+      { title: 'Space Is Only Noise', artist: 'Nicolas Jaar', year: 2011 },
+      { title: 'Protection', artist: 'Massive Attack', year: 1994 },
+      { title: 'Shaking the Habitual', artist: 'The Knife', year: 2013 },
+      { title: 'Arca', artist: 'Arca', year: 2017 },
+      { title: 'MAGDALENE', artist: 'FKA twigs', year: 2019 },
+      { title: 'Heligoland', artist: 'Massive Attack', year: 2010 },
+      { title: 'Geogaddi', artist: 'Boards of Canada', year: 2002 },
+      { title: 'Music Has the Right to Children', artist: 'Boards of Canada', year: 1998 },
+      { title: 'Selected Ambient Works II', artist: 'Aphex Twin', year: 1994 },
+      { title: 'Drukqs', artist: 'Aphex Twin', year: 2001 },
+      { title: 'Richard D. James Album', artist: 'Aphex Twin', year: 1996 },
+      { title: 'Maxinquaye', artist: 'Tricky', year: 1995 },
+    ];
+    const base = albumPool[i % albumPool.length];
+    return {
+      rank: i + 1,
+      title: i < albumPool.length ? base.title : `${base.title} (${Math.floor(i / albumPool.length) + 1})`,
+      artist: base.artist,
+      year: base.year,
+      plays: Math.max(50, 621 - i * 5 + Math.floor(Math.random() * 10)),
+      peak: Math.max(1, i - Math.floor(Math.random() * 3)),
+      change: [-2, -1, 0, 1, 2, 3, 'NEW'][Math.floor(Math.random() * 7)],
+    };
+  }),
+  history: {
+    tracks: [
+      { title: 'Teardrop', artist: 'Massive Attack', album: 'Mezzanine', plays: 621 },
+      { title: 'Angel', artist: 'Massive Attack', album: 'Mezzanine', plays: 489 },
+      { title: 'Safe from Harm', artist: 'Massive Attack', album: 'Blue Lines', plays: 412 },
+      { title: 'Unfinished Sympathy', artist: 'Massive Attack', album: 'Blue Lines', plays: 398 },
+      { title: 'Risingson', artist: 'Massive Attack', album: 'Mezzanine', plays: 334 },
+      { title: 'Dissolved Girl', artist: 'Massive Attack', album: 'Mezzanine', plays: 298 },
+      { title: 'Glory Box', artist: 'Portishead', album: 'Dummy', plays: 287 },
+      { title: 'Sour Times', artist: 'Portishead', album: 'Dummy', plays: 276 },
+      { title: 'Protection', artist: 'Massive Attack', album: 'Protection', plays: 276 },
+      { title: 'Joga', artist: 'Björk', album: 'Homogenic', plays: 265 },
+      { title: 'Bachelorette', artist: 'Björk', album: 'Homogenic', plays: 254 },
+      { title: 'Hunter', artist: 'Björk', album: 'Homogenic', plays: 243 },
+    ],
+    albums: [
+      { title: 'Mezzanine', artist: 'Massive Attack', plays: 2341, artistId: 'a1', albumId: 'al1' },
+      { title: 'Dummy', artist: 'Portishead', plays: 1876, artistId: 'a2', albumId: 'al2' },
+      { title: 'Homogenic', artist: 'Björk', plays: 1654, artistId: 'a3', albumId: 'al3' },
+      { title: 'Blue Lines', artist: 'Massive Attack', plays: 1432, artistId: 'a1', albumId: 'al5' },
+      { title: 'Untrue', artist: 'Burial', plays: 1287, artistId: 'a4', albumId: 'al4' },
+      { title: 'Protection', artist: 'Massive Attack', plays: 1109, artistId: 'a1', albumId: 'al10' },
+      { title: 'Portishead', artist: 'Portishead', plays: 987, artistId: 'a2', albumId: 'al6' },
+      { title: 'Vespertine', artist: 'Björk', plays: 876, artistId: 'a3', albumId: 'al7' },
+      { title: 'LP1', artist: 'FKA twigs', plays: 765, artistId: 'a6', albumId: 'al8' },
+      { title: 'Space Is Only Noise', artist: 'Nicolas Jaar', plays: 654, artistId: 'a7', albumId: 'al9' },
+    ],
+    artists: [
+      { name: 'Massive Attack', plays: 4821, artistId: 'a1' },
+      { name: 'Portishead', plays: 3109, artistId: 'a2' },
+      { name: 'Björk', plays: 2944, artistId: 'a3' },
+      { name: 'Burial', plays: 2108, artistId: 'a4' },
+      { name: 'The Knife', plays: 1876, artistId: 'a5' },
+      { name: 'FKA twigs', plays: 1654, artistId: 'a6' },
+      { name: 'Nicolas Jaar', plays: 1432, artistId: 'a7' },
+      { name: 'Arca', plays: 1287, artistId: 'a8' },
+    ]
+  }
+};
+
+Object.assign(window, { MOCK_DATA });
