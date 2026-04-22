@@ -80,22 +80,133 @@ class JamarrApiClient(
     suspend fun albumTracks(
         serverUrl: String,
         accessToken: String,
-        album: String,
-        artist: String,
+        album: String? = null,
+        artist: String? = null,
+        albumMbid: String? = null,
     ): List<SearchTrack> = withContext(Dispatchers.IO) {
-        val url = apiUrl(serverUrl, "/api/tracks")
-            .toHttpUrl()
-            .newBuilder()
-            .addQueryParameter("album", album)
-            .addQueryParameter("artist", artist)
-            .build()
+        val builder = apiUrl(serverUrl, "/api/tracks").toHttpUrl().newBuilder()
+        if (!albumMbid.isNullOrBlank()) builder.addQueryParameter("album_mbid", albumMbid)
+        if (!album.isNullOrBlank()) builder.addQueryParameter("album", album)
+        if (!artist.isNullOrBlank()) builder.addQueryParameter("artist", artist)
 
         val request = Request.Builder()
-            .url(url)
+            .url(builder.build())
             .get()
             .bearer(accessToken)
             .build()
 
+        execute(request)
+    }
+
+    suspend fun albumDetail(
+        serverUrl: String,
+        accessToken: String,
+        albumMbid: String? = null,
+        artistMbid: String? = null,
+    ): AlbumDetail? = withContext(Dispatchers.IO) {
+        val builder = apiUrl(serverUrl, "/api/albums").toHttpUrl().newBuilder()
+        if (!albumMbid.isNullOrBlank()) builder.addQueryParameter("album_mbid", albumMbid)
+        if (!artistMbid.isNullOrBlank()) builder.addQueryParameter("artist_mbid", artistMbid)
+
+        val request = Request.Builder()
+            .url(builder.build())
+            .get()
+            .bearer(accessToken)
+            .build()
+
+        val results: List<AlbumDetail> = execute(request)
+        results.firstOrNull()
+    }
+
+    suspend fun artistAlbums(
+        serverUrl: String,
+        accessToken: String,
+        artistMbid: String,
+    ): List<AlbumDetail> = withContext(Dispatchers.IO) {
+        val url = apiUrl(serverUrl, "/api/albums")
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("artist_mbid", artistMbid)
+            .build()
+
+        val request = Request.Builder().url(url).get().bearer(accessToken).build()
+        execute(request)
+    }
+
+    suspend fun artistDetail(
+        serverUrl: String,
+        accessToken: String,
+        mbid: String? = null,
+        name: String? = null,
+    ): ArtistDetail? = withContext(Dispatchers.IO) {
+        val builder = apiUrl(serverUrl, "/api/artists").toHttpUrl().newBuilder()
+        if (!mbid.isNullOrBlank()) builder.addQueryParameter("mbid", mbid)
+        if (!name.isNullOrBlank()) builder.addQueryParameter("name", name)
+
+        val request = Request.Builder()
+            .url(builder.build())
+            .get()
+            .bearer(accessToken)
+            .build()
+
+        val results: List<ArtistDetail> = execute(request)
+        results.firstOrNull()
+    }
+
+    suspend fun playlists(
+        serverUrl: String,
+        accessToken: String,
+    ): List<PlaylistSummary> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/playlists"))
+            .get()
+            .bearer(accessToken)
+            .build()
+        execute(request)
+    }
+
+    suspend fun playlistDetail(
+        serverUrl: String,
+        accessToken: String,
+        id: Long,
+    ): PlaylistDetail = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/playlists/$id"))
+            .get()
+            .bearer(accessToken)
+            .build()
+        execute(request)
+    }
+
+    suspend fun chart(
+        serverUrl: String,
+        accessToken: String,
+    ): List<ChartAlbum> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/charts"))
+            .get()
+            .bearer(accessToken)
+            .build()
+        execute(request)
+    }
+
+    suspend fun historyStats(
+        serverUrl: String,
+        accessToken: String,
+        from: String? = null,
+        to: String? = null,
+        scope: String = "mine",
+    ): HistoryStats = withContext(Dispatchers.IO) {
+        val builder = apiUrl(serverUrl, "/api/history/stats").toHttpUrl().newBuilder()
+            .addQueryParameter("scope", scope)
+        if (!from.isNullOrBlank()) builder.addQueryParameter("from", from)
+        if (!to.isNullOrBlank()) builder.addQueryParameter("to", to)
+
+        val request = Request.Builder()
+            .url(builder.build())
+            .get()
+            .bearer(accessToken)
+            .build()
         execute(request)
     }
 
