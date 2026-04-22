@@ -2,6 +2,7 @@ package com.jamarr.android.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -30,9 +32,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import com.jamarr.android.data.AlbumDetail
 import com.jamarr.android.data.ArtistDetail
 import com.jamarr.android.data.ArtistTrackEntry
@@ -56,10 +60,36 @@ private enum class TopTracksTab(val label: String) {
     Singles("Singles"),
 }
 
+private enum class DiscographyTab(val label: String) {
+    Albums("Albums"),
+    Compilations("Compilations"),
+    Live("Live"),
+    EPs("EPs"),
+    Singles("Singles"),
+    AppearsOn("Appears On"),
+}
+
+private fun AlbumDetail.matchesDiscoTab(tab: DiscographyTab): Boolean {
+    // "Appears On" is determined by the API's type field, not release_type
+    if (tab == DiscographyTab.AppearsOn) return type == "appears_on"
+    // Non-AppearsOn tabs should exclude appears_on albums
+    if (type == "appears_on") return false
+    val rt = (releaseType ?: "album").lowercase().trim()
+    return when (tab) {
+        DiscographyTab.Albums -> rt == "album" || rt == "other" || rt.isBlank()
+        DiscographyTab.Compilations -> rt == "compilation"
+        DiscographyTab.Live -> rt == "live"
+        DiscographyTab.EPs -> rt == "ep"
+        DiscographyTab.Singles -> rt == "single"
+        DiscographyTab.AppearsOn -> false
+    }
+}
+
 @Composable
 fun ArtistDetailScreen(
     initialMbid: String?,
     initialName: String?,
+    initialArtSha1: String? = null,
     onBack: () -> Unit,
     onAlbumClick: (AlbumDetail) -> Unit,
     onSimilarArtistClick: (mbid: String?, name: String) -> Unit,
@@ -70,6 +100,7 @@ fun ArtistDetailScreen(
     val detail = remember { mutableStateOf<ArtistDetail?>(null) }
     val albums = remember { mutableStateOf<List<AlbumDetail>>(emptyList()) }
     val tab = remember { mutableStateOf(TopTracksTab.MostScrobbled) }
+    val discoTab = remember { mutableStateOf(DiscographyTab.Albums) }
     val errorState = remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(initialMbid, initialName) {
@@ -101,8 +132,11 @@ fun ArtistDetailScreen(
             ),
         ) {
             item {
+                val artImageUrl = ctx.artworkUrl(detail.value?.artSha1 ?: initialArtSha1, 800)
+                    ?: detail.value?.imageUrl
                 ArtistHero(
                     name = artistName,
+                    artImageUrl = artImageUrl,
                     genres = detail.value?.genres?.take(2)?.joinToString(" · ") { it.name },
                     listens = detail.value?.listens ?: 0,
                     onBack = onBack,
@@ -181,7 +215,10 @@ fun ArtistDetailScreen(
                 )
             }
 
-            if (albums.value.isNotEmpty()) {
+            val availableTabs = DiscographyTab.entries.filter { tab ->
+                albums.value.any { it.matchesDiscoTab(tab) }
+            }
+            if (availableTabs.isNotEmpty()) {
                 item {
                     Text(
                         text = "Discography",
@@ -193,7 +230,19 @@ fun ArtistDetailScreen(
                         ),
                     )
                 }
-                items(albums.value, key = { it.albumMbid ?: it.album }) { album ->
+                item {
+                    val selectedTab = if (discoTab.value in availableTabs) discoTab.value else availableTabs.first()
+                    if (selectedTab != discoTab.value) discoTab.value = selectedTab
+                    PillTabs(
+                        tabs = availableTabs.map { it.label },
+                        selectedIndex = availableTabs.indexOf(discoTab.value),
+                        onSelect = { idx -> discoTab.value = availableTabs[idx] },
+                        modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                val filteredAlbums = albums.value.filter { it.matchesDiscoTab(discoTab.value) }
+                items(filteredAlbums, key = { "disco-${discoTab.value}-${it.albumMbid ?: it.album}" }) { album ->
                     DiscographyRow(album = album, onClick = { onAlbumClick(album) })
                 }
             }
@@ -229,6 +278,7 @@ fun ArtistDetailScreen(
 @Composable
 private fun ArtistHero(
     name: String,
+    artImageUrl: String?,
     genres: String?,
     listens: Int,
     onBack: () -> Unit,
@@ -238,14 +288,31 @@ private fun ArtistHero(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(200.dp)
-            .background(
-                Brush.verticalGradient(listOf(top, JamarrColors.Bg)),
-            )
-            .statusBarsPadding(),
+            .height(300.dp)
+            .background(Brush.verticalGradient(listOf(top, JamarrColors.Bg))),
     ) {
+        if (!artImageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = artImageUrl,
+                contentDescription = name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         Box(
             modifier = Modifier
+                .fillMaxWidth()
+                .height(160.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, JamarrColors.Bg),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .statusBarsPadding()
                 .padding(JamarrDims.ScreenPadding)
                 .size(34.dp)
                 .clip(CircleShape)
@@ -341,7 +408,7 @@ private fun PillTabs(
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier,
+        modifier = modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         tabs.forEachIndexed { index, label ->

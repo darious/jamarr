@@ -32,7 +32,7 @@ object JamarrDims {
     val AlbumArtRadiusLarge = 10.dp
     val ListItemVPadding = 10.dp
     val BottomNavHeight = 64.dp
-    val MiniPlayerHeight = 56.dp
+    val MiniPlayerHeight = 72.dp
 }
 
 object JamarrShapes {

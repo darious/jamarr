@@ -35,6 +35,12 @@ class JamarrPlaybackController(context: Context) {
     val currentMediaId: String?
         get() = controller?.currentMediaItem?.mediaId
 
+    val currentPosition: Long
+        get() = controller?.currentPosition ?: 0L
+
+    val duration: Long
+        get() = controller?.duration?.coerceAtLeast(0L) ?: 0L
+
     init {
         val sessionToken = SessionToken(
             appContext,
@@ -117,6 +123,10 @@ class JamarrPlaybackController(context: Context) {
 
     fun next() {
         controller?.seekToNextMediaItem()
+    }
+
+    fun seekTo(positionMs: Long) {
+        controller?.seekTo(positionMs.coerceAtLeast(0L))
     }
 
     fun release() {

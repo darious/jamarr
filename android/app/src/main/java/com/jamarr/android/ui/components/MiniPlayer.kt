@@ -2,6 +2,7 @@ package com.jamarr.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,16 +15,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jamarr.android.ui.theme.JamarrColors
-import com.jamarr.android.ui.theme.JamarrDims
 import com.jamarr.android.ui.theme.JamarrShapes
 import com.jamarr.android.ui.theme.JamarrType
 
@@ -34,72 +36,135 @@ fun MiniPlayer(
     isPlaying: Boolean,
     artworkUrl: String?,
     seedName: String,
+    progressMs: Long,
+    durationMs: Long,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onStop: () -> Unit,
+    onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .height(JamarrDims.MiniPlayerHeight)
-            .background(JamarrColors.Surface)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(JamarrColors.Surface),
     ) {
-        Box(
+        // Progress bar - tappable to seek
+        ProgressBar(
+            progressMs = progressMs,
+            durationMs = durationMs,
+            onSeek = onSeek,
+        )
+
+        // Controls row
+        Row(
             modifier = Modifier
-                .size(40.dp)
-                .clip(JamarrShapes.AlbumArt)
-                .background(JamarrColors.Card),
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            AlbumArt(
-                title = title,
-                seedName = seedName,
-                artworkUrl = artworkUrl,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = JamarrType.CardTitle,
-                color = JamarrColors.Text,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (!artist.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(JamarrShapes.AlbumArt)
+                    .background(JamarrColors.Card),
+            ) {
+                AlbumArt(
+                    title = title,
+                    seedName = seedName,
+                    artworkUrl = artworkUrl,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = artist,
-                    style = JamarrType.CaptionSmall,
-                    color = JamarrColors.Muted,
+                    text = title,
+                    style = JamarrType.CardTitle,
+                    color = JamarrColors.Text,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-            }
-        }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            ControlButton(onClick = onPrevious) {
-                SkipPreviousIcon(tint = JamarrColors.Text, size = 18.dp)
-            }
-            PrimaryControlButton(onClick = onToggle) {
-                if (isPlaying) {
-                    PauseIcon(tint = Color.White, size = 18.dp)
-                } else {
-                    PlayIcon(tint = Color.White, size = 18.dp)
+                if (!artist.isNullOrBlank()) {
+                    Text(
+                        text = artist,
+                        style = JamarrType.CaptionSmall,
+                        color = JamarrColors.Muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
-            ControlButton(onClick = onNext) {
-                SkipNextIcon(tint = JamarrColors.Text, size = 18.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                ControlButton(onClick = onPrevious) {
+                    SkipPreviousIcon(tint = JamarrColors.Text, size = 18.dp)
+                }
+                PrimaryControlButton(onClick = onToggle) {
+                    if (isPlaying) {
+                        PauseIcon(tint = Color.White, size = 18.dp)
+                    } else {
+                        PlayIcon(tint = Color.White, size = 18.dp)
+                    }
+                }
+                ControlButton(onClick = onNext) {
+                    SkipNextIcon(tint = JamarrColors.Text, size = 18.dp)
+                }
+                ControlButton(onClick = onStop) {
+                    StopIcon(tint = JamarrColors.Muted, size = 14.dp)
+                }
             }
-            ControlButton(onClick = onStop) {
-                StopIcon(tint = JamarrColors.Muted, size = 14.dp)
-            }
+        }
+    }
+}
+
+@Composable
+private fun ProgressBar(
+    progressMs: Long,
+    durationMs: Long,
+    onSeek: (Long) -> Unit,
+) {
+    val fraction = if (durationMs > 0) {
+        (progressMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(16.dp)
+            .pointerInput(durationMs) {
+                detectTapGestures { offset ->
+                    if (durationMs > 0) {
+                        val f = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        onSeek((f * durationMs).toLong())
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        // Track background
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(RoundedCornerShape(1.5.dp))
+                .background(JamarrColors.Border),
+        )
+        // Filled portion
+        if (fraction > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(JamarrColors.Primary)
+                    .align(Alignment.CenterStart),
+            )
         }
     }
 }
