@@ -1,5 +1,6 @@
 package com.jamarr.android.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,7 +41,9 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.sp
+import com.jamarr.android.R
 import com.jamarr.android.data.HomeAlbum
 import com.jamarr.android.data.HomeArtist
 import com.jamarr.android.data.HomeContent
@@ -212,21 +215,14 @@ private fun HeaderRow(greetingInitial: String, onAvatarClick: () -> Unit) {
                 color = JamarrColors.Muted,
             )
         }
-        Box(
+        Image(
+            painter = painterResource(id = R.drawable.jamarr_logo),
+            contentDescription = "Menu",
             modifier = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
-                .background(JamarrColors.Primary)
                 .clickable(onClick = onAvatarClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = greetingInitial.ifBlank { "J" }.take(1).uppercase(),
-                color = Color.White,
-                fontWeight = FontWeight.W700,
-                fontSize = 16.sp,
-            )
-        }
+        )
     }
 }
 

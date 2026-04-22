@@ -27,9 +27,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import com.jamarr.android.data.AlbumDetail
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.ui.components.AlbumArt
@@ -50,6 +52,7 @@ fun AlbumDetailScreen(
     albumTitle: String?,
     artistName: String?,
     artistMbid: String?,
+    fallbackArtSha1: String? = null,
     onBack: () -> Unit,
     onArtistClick: () -> Unit,
     onPlayTracks: (List<SearchTrack>, Int) -> Unit,
@@ -90,7 +93,7 @@ fun AlbumDetailScreen(
     val trackCount = detail.value?.trackCount ?: tracks.value.size
     val totalDuration = detail.value?.totalDuration
         ?: tracks.value.mapNotNull { it.durationSeconds }.sum().takeIf { it > 0 }
-    val artworkUrl = ctx.artworkUrl(detail.value?.artSha1, 800)
+    val artworkUrl = ctx.artworkUrl(detail.value?.artSha1 ?: fallbackArtSha1, 800)
     val currentMediaId = ctx.playbackController.currentMediaId?.toLongOrNull()
 
     Box(modifier = Modifier.fillMaxSize().background(JamarrColors.Bg)) {
@@ -173,47 +176,47 @@ private fun AlbumHero(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(top, JamarrColors.Bg),
-                ),
-            )
-            .statusBarsPadding()
-            .padding(horizontal = JamarrDims.ScreenPadding, vertical = 20.dp),
+            .height(360.dp)
+            .background(Brush.verticalGradient(listOf(top, JamarrColors.Bg))),
     ) {
+        if (!artworkUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = artworkUrl,
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         Box(
             modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, JamarrColors.Bg),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .statusBarsPadding()
+                .padding(JamarrDims.ScreenPadding)
                 .size(34.dp)
                 .clip(CircleShape)
                 .background(Color(0x66000000))
                 .clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = "←",
-                color = Color.White,
-                style = JamarrType.CardTitle,
-            )
+            Text(text = "←", color = Color.White, style = JamarrType.CardTitle)
         }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 46.dp),
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = JamarrDims.ScreenPadding, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(180.dp)
-                    .clip(JamarrShapes.AlbumArtLarge),
-            ) {
-                AlbumArt(
-                    title = title,
-                    seedName = seed,
-                    artworkUrl = artworkUrl,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-            Spacer(Modifier.height(16.dp))
             Text(
                 text = title,
                 style = JamarrType.AlbumHeroTitle,

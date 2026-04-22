@@ -6,6 +6,9 @@ cd "$(dirname "$0")"
 GRADLE_USER_HOME="${GRADLE_USER_HOME:-/tmp/gradle-cache}"
 export GRADLE_USER_HOME
 
+JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-17-openjdk}"
+export JAVA_HOME
+
 if ! command -v adb >/dev/null 2>&1; then
   echo "adb is not installed or is not on PATH." >&2
   exit 1

@@ -94,6 +94,8 @@ private fun JamarrRoot() {
     var nowPlayingTrack by remember { mutableStateOf<SearchTrack?>(null) }
     var nowPlayingArtworkUrl by remember { mutableStateOf<String?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
+    var playbackPosition by remember { mutableStateOf(0L) }
+    var playbackDuration by remember { mutableStateOf(0L) }
 
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -168,6 +170,8 @@ private fun JamarrRoot() {
     LaunchedEffect(playbackController) {
         while (true) {
             isPlaying = playbackController.isPlaying
+            playbackPosition = playbackController.currentPosition
+            playbackDuration = playbackController.duration
             delay(500)
         }
     }
@@ -445,7 +449,17 @@ private fun JamarrRoot() {
                         isPlaying = isPlaying,
                         artworkUrl = nowPlayingArtworkUrl,
                         seedName = (track.album ?: track.title),
+                        progressMs = playbackPosition,
+                        durationMs = playbackDuration,
                         onToggle = { playbackController.togglePlayPause() },
+                        onPrevious = { playbackController.previous() },
+                        onNext = { playbackController.next() },
+                        onStop = {
+                            playbackController.stop()
+                            nowPlayingTrack = null
+                            nowPlayingArtworkUrl = null
+                        },
+                        onSeek = { playbackController.seekTo(it) },
                     )
                 }
                 if (atRoot) {
