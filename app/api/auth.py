@@ -23,7 +23,7 @@ from app.auth_tokens import (
     hash_refresh_token,
     REFRESH_TOKEN_TTL_DAYS,
 )
-from app.api.deps import get_current_user_jwt
+from app.api.deps import get_current_admin_user_jwt, get_current_user_jwt
 from app.db import get_db
 
 router = APIRouter()
@@ -100,6 +100,7 @@ def _public_user_dict(row: asyncpg.Record) -> dict:
         "username": row["username"],
         "email": row["email"],
         "display_name": row["display_name"] or row["username"],
+        "is_admin": bool(row.get("is_admin", False)),
         "accent_color": row.get("accent_color") or "#ff006e",
         "theme_mode": row.get("theme_mode") or "dark",
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
@@ -121,7 +122,7 @@ def _validate_password(password: str) -> None:
 @router.post("/api/auth/users", status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: CreateUserBody,
-    _current_user: asyncpg.Record = Depends(get_current_user_jwt),
+    _current_user: asyncpg.Record = Depends(get_current_admin_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
 ):
     username = payload.username.strip()

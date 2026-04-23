@@ -3,6 +3,10 @@
   import PlayerBar from "$components/PlayerBar.svelte";
   import SearchBar from "$components/SearchBar.svelte";
   import DownloadManager from "$components/DownloadManager.svelte";
+  import {
+    getSettingsMenuItems,
+    shouldShowAdminControls,
+  } from "$lib/settings-menu";
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
   import {
@@ -75,6 +79,8 @@
   // Track whether we're on an auth page
   $: isAuthPage = $page.url.pathname.startsWith("/login");
   $: activeRendererItem = rendererList.find((r) => r.udn === activeRenderer);
+  $: isAdmin = shouldShowAdminControls(user);
+  $: settingsMenuItems = getSettingsMenuItems(user);
   $: if (isAuthPage) {
     showMobileMenu = false;
     showMobileSearch = false;
@@ -267,7 +273,8 @@
           <SearchBar className="mx-4" />
         </div>
 
-        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-3">
+          {#if isAdmin}
           <div class="relative" bind:this={renderersContainer}>
             <button
               class="px-4 py-2 text-sm font-normal text-muted hover:text-default transition-all border-b-2 border-transparent hover:border-accent min-w-[200px] justify-between flex items-center gap-2 disabled:opacity-50"
@@ -362,6 +369,7 @@
               </div>
             {/if}
           </div>
+          {/if}
           <nav class="flex items-center gap-2 text-sm text-muted">
             {#each navItems as item}
               <a
@@ -428,57 +436,16 @@
                       </div>
                       <div class="text-subtle">{user.email}</div>
                     </div>
-                    <a
-                      class="menu-item"
-                      href="/settings/user"
-                      on:click={() => (showSettings = false)}
-                    >
-                      User Settings
-                    </a>
-                    <a
-                      class="menu-item"
-                      href="/settings/users"
-                      on:click={() => (showSettings = false)}
-                    >
-                      Create User
-                    </a>
-                  {:else}
-                    <a
-                      class="menu-item"
-                      href="/login"
-                      on:click={() => (showSettings = false)}
-                    >
-                      Log In
-                    </a>
                   {/if}
-                  <a
-                    class="menu-item"
-                    href="/settings/library"
-                    on:click={() => (showSettings = false)}
-                  >
-                    Library Management
-                  </a>
-                  <a
-                    class="menu-item"
-                    href="/settings/scheduler"
-                    on:click={() => (showSettings = false)}
-                  >
-                    Scheduler
-                  </a>
-                  <a
-                    class="menu-item"
-                    href="/settings/media-quality"
-                    on:click={() => (showSettings = false)}
-                  >
-                    Media Quality
-                  </a>
-                  <a
-                    class="menu-item"
-                    href="/renderers"
-                    on:click={() => (showSettings = false)}
-                  >
-                    Network Renderers
-                  </a>
+                  {#each settingsMenuItems as item}
+                    <a
+                      class="menu-item"
+                      href={item.href}
+                      on:click={() => (showSettings = false)}
+                    >
+                      {item.label}
+                    </a>
+                  {/each}
                   {#if user}
                     <button
                       class="menu-item text-red-400 hover:text-red-500"
@@ -520,6 +487,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </button>
+            {#if isAdmin}
             <button
               class="inline-flex min-w-[120px] items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-muted transition-colors hover:text-default disabled:opacity-50"
               disabled={renderersLoading}
@@ -548,6 +516,7 @@
                 {activeRendererItem?.name || "Player"}
               </span>
             </button>
+            {/if}
             <button
               class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-muted transition-colors hover:text-default"
               aria-label="Menu"
@@ -564,7 +533,7 @@
           </div>
         </div>
 
-        {#if showRenderers}
+        {#if showRenderers && isAdmin}
           <div class="mt-3 rounded-2xl border border-subtle surface-glass-panel shadow-xl">
             <div class="max-h-80 overflow-y-auto p-2 space-y-1">
               {#each rendererList as renderer}
@@ -626,20 +595,9 @@
                 </div>
               {/if}
 
-              {#if !user && authChecked}
-                <div class="grid grid-cols-1 gap-2">
-                  <a class="btn btn-outline btn-sm normal-case font-normal" href="/login" on:click={() => (showMobileMenu = false)}>Log in</a>
-                </div>
-              {/if}
-
-              {#if user}
-                <a class="menu-item" href="/settings/user" on:click={() => (showMobileMenu = false)}>User Settings</a>
-                <a class="menu-item" href="/settings/users" on:click={() => (showMobileMenu = false)}>Create User</a>
-              {/if}
-              <a class="menu-item" href="/settings/library" on:click={() => (showMobileMenu = false)}>Library Management</a>
-              <a class="menu-item" href="/settings/scheduler" on:click={() => (showMobileMenu = false)}>Scheduler</a>
-              <a class="menu-item" href="/settings/media-quality" on:click={() => (showMobileMenu = false)}>Media Quality</a>
-              <a class="menu-item" href="/renderers" on:click={() => (showMobileMenu = false)}>Network Renderers</a>
+              {#each settingsMenuItems as item}
+                <a class="menu-item" href={item.href} on:click={() => (showMobileMenu = false)}>{item.label}</a>
+              {/each}
               {#if user}
                 <button class="menu-item text-red-400 hover:text-red-500" on:click={handleLogout}>Sign Out</button>
               {/if}
@@ -677,7 +635,7 @@
     <slot />
   </main>
 
-  {#if !isAuthPage && user}
+  {#if !isAuthPage && isAdmin}
     <DownloadManager />
     <PlayerBar />
   {/if}

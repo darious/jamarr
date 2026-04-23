@@ -263,6 +263,7 @@ async def init_db():
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 last_login_at TIMESTAMPTZ,
                 is_active BOOLEAN DEFAULT TRUE,
+                is_admin BOOLEAN NOT NULL DEFAULT FALSE,
                 accent_color TEXT DEFAULT '#ff006e',
                 theme_mode TEXT DEFAULT 'dark',
                 lastfm_username TEXT,
@@ -433,6 +434,15 @@ async def init_db():
 
             -- Search Optimization Indexes (Trigram)
             CREATE INDEX IF NOT EXISTS idx_artist_name_trgm ON artist USING GIN (name gin_trgm_ops);
+        """)
+
+        await conn.execute("""
+            ALTER TABLE "user"
+            ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
+
+            UPDATE "user"
+            SET is_admin = TRUE
+            WHERE username = 'chris';
         """)
 
         # Create FTS trigger function

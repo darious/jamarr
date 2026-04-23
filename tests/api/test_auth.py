@@ -16,14 +16,15 @@ def random_user():
 async def seed_user(db, user_data):
     return await db.fetchrow(
         """
-        INSERT INTO "user" (username, email, password_hash, display_name, created_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        INSERT INTO "user" (username, email, password_hash, display_name, is_admin, created_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
         RETURNING *
         """,
         user_data["username"],
         user_data["email"],
         hash_password(user_data["password"]),
         user_data.get("display_name"),
+        user_data.get("is_admin", False),
     )
 
 @pytest.mark.asyncio
@@ -61,6 +62,25 @@ async def test_create_user_requires_auth(client: AsyncClient, db):
     response = await client.post("/api/auth/users", json=random_user())
     assert response.status_code == 401
 
+
+@pytest.mark.asyncio
+async def test_create_user_requires_admin(client: AsyncClient, db):
+    normal = random_user()
+    await seed_user(db, normal)
+    login_response = await client.post("/api/auth/login", json={
+        "username": normal["username"],
+        "password": normal["password"],
+    })
+    access_token = login_response.json()["access_token"]
+
+    response = await client.post(
+        "/api/auth/users",
+        json=random_user(),
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin privileges required"
+
 @pytest.mark.asyncio
 async def test_login_flow(client: AsyncClient, db):
     u = random_user()
@@ -75,6 +95,7 @@ async def test_login_flow(client: AsyncClient, db):
     assert "access_token" in response.json()
     assert "jamarr_refresh" in response.cookies
     assert response.json()["username"] == u["username"]
+    assert response.json()["is_admin"] is False
     
     # 2. Login Invalid Password
     response = await client.post("/api/auth/login", json={
@@ -111,6 +132,7 @@ async def test_me_and_logout(client: AsyncClient, db):
     response = await client.get("/api/auth/me", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["username"] == u["username"]
+    assert response.json()["is_admin"] is False
     
     # Logout
     response = await client.post("/api/auth/logout")
