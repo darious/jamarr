@@ -1,4 +1,5 @@
 """FastAPI dependencies for JWT authentication."""
+import logging
 from typing import Optional
 
 import asyncpg
@@ -7,6 +8,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from app.auth import get_user_by_id
 from app.auth_tokens import verify_access_token
 from app.db import get_db
+from app.security import log_security_event
 
 
 async def get_current_user_jwt(
@@ -35,6 +37,7 @@ async def get_current_user_jwt(
             authorization = f"Bearer {token}"
 
     if not authorization:
+        log_security_event("auth_missing", request, level=logging.INFO)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authorization header",
@@ -44,6 +47,7 @@ async def get_current_user_jwt(
     # Parse "Bearer <token>" format
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
+        log_security_event("auth_invalid_header", request, level=logging.WARNING)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authorization header format. Expected: Bearer <token>",
@@ -53,13 +57,28 @@ async def get_current_user_jwt(
     token = parts[1]
     
     # Verify JWT and extract claims
-    claims = verify_access_token(token)  # Raises 401 if invalid
+    try:
+        claims = verify_access_token(token)  # Raises 401 if invalid
+    except HTTPException as exc:
+        log_security_event(
+            "auth_invalid_token",
+            request,
+            level=logging.WARNING,
+            reason=exc.detail,
+        )
+        raise
     
     # Get user from database
     user_id = int(claims["sub"])
     user = await get_user_by_id(db, user_id)
     
     if not user:
+        log_security_event(
+            "auth_user_not_found",
+            request,
+            level=logging.WARNING,
+            user_id=user_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
@@ -67,6 +86,13 @@ async def get_current_user_jwt(
         )
     
     if not user.get("is_active", True):
+        log_security_event(
+            "auth_inactive_user",
+            request,
+            level=logging.WARNING,
+            user_id=user["id"],
+            username=user["username"],
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account is inactive",
@@ -76,9 +102,18 @@ async def get_current_user_jwt(
     return user
 
 
-def require_admin_user(user: asyncpg.Record) -> asyncpg.Record:
+def require_admin_user(
+    user: asyncpg.Record, request: Request | None = None
+) -> asyncpg.Record:
     """Require the authenticated user to have admin privileges."""
     if not user.get("is_admin", False):
+        log_security_event(
+            "admin_denied",
+            request,
+            level=logging.WARNING,
+            user_id=user["id"],
+            username=user["username"],
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required",
@@ -87,10 +122,11 @@ def require_admin_user(user: asyncpg.Record) -> asyncpg.Record:
 
 
 async def get_current_admin_user_jwt(
+    request: Request,
     user: asyncpg.Record = Depends(get_current_user_jwt),
 ) -> asyncpg.Record:
     """Dependency to require JWT authentication and admin privileges."""
-    return require_admin_user(user)
+    return require_admin_user(user, request)
 
 
 async def get_optional_user_jwt(
