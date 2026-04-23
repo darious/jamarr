@@ -1084,11 +1084,11 @@
           </div>
 
           <div
-            class="hidden flex-col gap-3 border-b border-subtle pb-0 lg:flex lg:gap-8"
+            class="hidden flex-wrap items-center gap-8 border-b border-subtle pb-0 lg:flex"
           >
             <!-- Left Group: Releases -->
-            <div class="relative overflow-x-auto custom-scrollbar">
-              <div class="flex min-w-max gap-2 md:gap-4">
+            <div class="relative min-w-0 overflow-x-auto overflow-y-hidden scrollbar-hide">
+              <div class="flex min-w-max gap-4">
                 {#each releaseTabs as tab}
                   <button
                     class={`relative whitespace-nowrap px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
@@ -1105,11 +1105,11 @@
             </div>
 
             <!-- Spacer -->
-            <div class="hidden flex-1 lg:block"></div>
+            <div class="flex-1"></div>
 
             {#if missingAlbums.length > 0}
-              <div class="relative overflow-x-auto custom-scrollbar">
-                <div class="flex min-w-max gap-2 md:gap-4">
+              <div class="relative min-w-0 overflow-x-auto overflow-y-hidden scrollbar-hide">
+                <div class="flex min-w-max gap-4">
                   <button
                     class={`relative whitespace-nowrap px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
                       activeTab === "missing_albums"
@@ -1125,8 +1125,8 @@
             {/if}
 
             <!-- Right Group: Tracks -->
-            <div class="relative overflow-x-auto custom-scrollbar">
-              <div class="flex min-w-max gap-2 md:gap-4">
+            <div class="relative min-w-0 overflow-x-auto overflow-y-hidden scrollbar-hide">
+              <div class="flex min-w-max gap-4">
                 {#each trackTabs as tab}
                   <button
                     class={`relative whitespace-nowrap px-2 py-3 text-sm font-medium transition-all duration-200 border-b-2 -mb-[1.5px] ${
