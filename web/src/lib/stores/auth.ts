@@ -45,35 +45,28 @@ let refreshPromise: Promise<boolean> | null = null;
 export async function refreshAccessToken(fetchImpl: typeof fetch = fetch): Promise<boolean> {
     // If a refresh is already in progress, wait for it
     if (refreshPromise) {
-        console.log('[Auth] Refresh already in progress, waiting...');
         return refreshPromise;
     }
 
     // Create a new refresh promise
     refreshPromise = (async () => {
         try {
-            console.log('[Auth] Attempting to refresh access token...');
             const res = await fetchImpl('/api/auth/refresh', {
                 method: 'POST',
                 credentials: 'include', // Send refresh cookie
             });
 
-            console.log('[Auth] Refresh response status:', res.status);
-
             if (!res.ok) {
-                console.warn('[Auth] Refresh failed with status:', res.status);
                 clearAccessToken();
                 return false;
             }
 
             const data = await res.json();
             if (data.access_token) {
-                console.log('[Auth] Refresh successful, new token received');
                 setAccessToken(data.access_token);
                 return true;
             }
 
-            console.warn('[Auth] Refresh response missing access_token');
             return false;
         } catch (e) {
             console.error('[Auth] Failed to refresh access token:', e);
@@ -103,7 +96,6 @@ export function setupTokenRefresh() {
     refreshTimer = setInterval(async () => {
         const success = await refreshAccessToken();
         if (!success) {
-            console.warn('Token refresh failed, user may need to re-login');
             clearAccessToken();
         }
     }, 8 * 60 * 1000);
