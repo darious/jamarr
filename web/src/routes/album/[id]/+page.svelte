@@ -187,7 +187,7 @@
       <div class="flex flex-col gap-6 lg:sticky lg:top-20 lg:gap-8">
         <!-- Artwork -->
         <div
-          class="relative mx-auto aspect-square w-full max-w-[420px] overflow-hidden rounded-2xl shadow-2xl transition-transform duration-500 hover:scale-105 lg:max-w-none lg:rounded"
+          class="group relative mx-auto aspect-square w-full max-w-[420px] overflow-hidden rounded-2xl shadow-2xl transition-transform duration-500 hover:scale-105 lg:max-w-none lg:rounded"
         >
           <img
             src={albumArtUrl}
@@ -199,7 +199,12 @@
           <div
             class="absolute inset-0 flex items-end justify-center gap-3 bg-gradient-to-t from-black/85 via-black/15 to-transparent p-4 opacity-100 transition-opacity lg:items-center lg:bg-black/35 lg:p-0 lg:opacity-0 group-hover:opacity-100"
           >
-            <IconButton variant="primary" title="Play Album" onClick={playAll}>
+            <IconButton
+              variant="primary"
+              title="Play Album"
+              onClick={playAll}
+              stopPropagation={true}
+            >
               <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
                 ><path d="M8 5v14l11-7z" /></svg
               >
@@ -208,6 +213,7 @@
               variant="primary"
               title="Add to Queue"
               onClick={addAllToQueue}
+              stopPropagation={true}
             >
               <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
                 ><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" /></svg
@@ -217,6 +223,7 @@
               variant="primary"
               title="Download Album"
               onClick={handleDownload}
+              stopPropagation={true}
             >
               <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
                 ><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z" /></svg
