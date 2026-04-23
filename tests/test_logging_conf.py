@@ -35,6 +35,24 @@ def test_logging_configuration():
     # 5. Frontend Log
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.info("TEST-FRONTEND-ACCESS")
+    access_logger.info(
+        '%s - "%s %s HTTP/%s" %d',
+        "203.0.113.9:1234",
+        "GET",
+        "/api/stream/1?access_token=SECRET_TOKEN&foo=bar",
+        "1.1",
+        200,
+    )
+    
+    # 6. Monitoring Logs
+    app_access_logger = logging.getLogger("app.monitoring.access")
+    app_access_logger.info("TEST-APP-ACCESS path=/api/albums")
+
+    security_logger = logging.getLogger("app.security.audit")
+    security_logger.warning(
+        "TEST-SECURITY Authorization: Bearer SECRET_BEARER password=SECRET_PASSWORD "
+        "lastfm_session_key=SECRET_LASTFM"
+    )
     
     # Filter Test
     access_logger.info("GET /api/player/state HTTP/1.1") # Should be filtered out
@@ -48,6 +66,8 @@ def test_logging_configuration():
     assert os.path.exists(os.path.join(log_dir, "upnp.log"))
     assert os.path.exists(os.path.join(log_dir, "player.log"))
     assert os.path.exists(os.path.join(log_dir, "frontend.log"))
+    assert os.path.exists(os.path.join(log_dir, "access.log"))
+    assert os.path.exists(os.path.join(log_dir, "security.log"))
     
     # Check Content
     with open(os.path.join(log_dir, "backend.log"), "r") as f:
@@ -59,6 +79,7 @@ def test_logging_configuration():
         assert "TEST-SCANNER-DEBUG" not in content
         assert "TEST-UPNP-DEBUG" not in content
         assert "TEST-PLAYER-INFO" not in content
+        assert "TEST-SECURITY" not in content
         
     with open(os.path.join(log_dir, "scanner.log"), "r") as f:
         content = f.read()
@@ -78,3 +99,17 @@ def test_logging_configuration():
         content = f.read()
         assert "TEST-FRONTEND-ACCESS" in content
         assert "GET /api/player/state" not in content
+        assert "SECRET_TOKEN" not in content
+        assert "foo=bar" not in content
+
+    with open(os.path.join(log_dir, "access.log"), "r") as f:
+        content = f.read()
+        assert "TEST-APP-ACCESS" in content
+
+    with open(os.path.join(log_dir, "security.log"), "r") as f:
+        content = f.read()
+        assert "TEST-SECURITY" in content
+        assert "SECRET_BEARER" not in content
+        assert "SECRET_PASSWORD" not in content
+        assert "SECRET_LASTFM" not in content
+        assert "[REDACTED]" in content

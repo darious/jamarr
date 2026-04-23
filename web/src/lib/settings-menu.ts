@@ -23,6 +23,7 @@ export function getSettingsMenuItems(user: SettingsMenuUser | null | undefined):
             { label: 'Scheduler', href: '/settings/scheduler' },
             { label: 'Media Quality', href: '/settings/media-quality' },
             { label: 'Network Renderers', href: '/renderers' },
+            { label: 'Monitoring', href: '/settings/monitoring' },
         );
     }
 

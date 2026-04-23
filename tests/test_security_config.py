@@ -12,6 +12,8 @@ from app.security import (
     fastapi_docs_config,
     get_client_ip,
     parse_csv_env,
+    redact_secrets,
+    strip_query_string,
 )
 
 
@@ -56,6 +58,29 @@ def test_fastapi_docs_enabled_outside_production(monkeypatch):
         "redoc_url": "/redoc",
         "openapi_url": "/openapi.json",
     }
+
+
+def test_log_redaction_removes_sensitive_values():
+    value = (
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.abc.def "
+        "/api/stream?access_token=secret-token&foo=bar "
+        "password=hunter2 lastfm_session_key=lastfm-secret "
+        "user_auth_token=qobuz-secret tidal_secret=tidal-secret"
+    )
+
+    redacted = redact_secrets(value)
+
+    assert "eyJhbGci" not in redacted
+    assert "secret-token" not in redacted
+    assert "hunter2" not in redacted
+    assert "lastfm-secret" not in redacted
+    assert "qobuz-secret" not in redacted
+    assert "tidal-secret" not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_strip_query_string_removes_full_query():
+    assert strip_query_string("/api/albums?artist=Name&access_token=secret") == "/api/albums"
 
 
 def test_production_app_does_not_register_docs_or_debug_routes():
@@ -196,3 +221,27 @@ async def test_proxy_headers_are_trusted_only_from_configured_proxy(monkeypatch)
 
     assert trusted.json() == {"client_ip": "203.0.113.50", "scheme": "https"}
     assert untrusted.json() == {"client_ip": "REDACTED_IP", "scheme": "http"}
+
+
+@pytest.mark.asyncio
+async def test_get_client_ip_uses_forwarded_headers_for_trusted_proxy(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "REDACTED_IP")
+    app = FastAPI()
+
+    @app.get("/whoami")
+    async def whoami(request: Request):
+        return {"client_ip": get_client_ip(request)}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app, client=("REDACTED_IP", 12345)),
+        base_url="http://REDACTED_IP:8111",
+    ) as client:
+        response = await client.get(
+            "/whoami",
+            headers={
+                "X-Forwarded-For": "198.51.100.77, REDACTED_IP",
+                "X-Real-IP": "198.51.100.77",
+            },
+        )
+
+    assert response.json() == {"client_ip": "198.51.100.77"}

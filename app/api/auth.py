@@ -1,5 +1,6 @@
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+import logging
 import os
 
 import asyncpg
@@ -25,6 +26,7 @@ from app.auth_tokens import (
 )
 from app.api.deps import get_current_admin_user_jwt, get_current_user_jwt
 from app.db import get_db
+from app.security import get_client_ip, log_security_event
 
 router = APIRouter()
 ENV = os.getenv("ENV", "development").lower()
@@ -121,8 +123,9 @@ def _validate_password(password: str) -> None:
 
 @router.post("/api/auth/users", status_code=status.HTTP_201_CREATED)
 async def create_user(
+    request: Request,
     payload: CreateUserBody,
-    _current_user: asyncpg.Record = Depends(get_current_admin_user_jwt),
+    current_user: asyncpg.Record = Depends(get_current_admin_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
 ):
     username = payload.username.strip()
@@ -152,6 +155,16 @@ async def create_user(
         payload.display_name.strip() if payload.display_name else None,
     )
 
+    log_security_event(
+        "user_created",
+        request,
+        level=logging.INFO,
+        admin_user_id=current_user["id"],
+        admin_username=current_user["username"],
+        created_user_id=user["id"],
+        created_username=user["username"],
+    )
+
     return _public_user_dict(user)
 
 
@@ -171,6 +184,12 @@ async def login(
     user = await get_user_by_username_or_email(db, username)
 
     if not user or not verify_password(payload.password, user["password_hash"]):
+        log_security_event(
+            "login_failed",
+            request,
+            level=logging.WARNING,
+            username=username,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials."
         )
@@ -196,11 +215,19 @@ async def login(
         token_hash=refresh_token_hash,
         expires_at=expires_at,
         user_agent=request.headers.get("user-agent"),
-        ip=request.client.host if request.client else None,
+        ip=get_client_ip(request),
     )
 
     # Set refresh token cookie
     _set_refresh_cookie(response, refresh_token)
+
+    log_security_event(
+        "login_success",
+        request,
+        level=logging.INFO,
+        user_id=user["id"],
+        username=user["username"],
+    )
 
     # Return access token and user data
     user_data = _public_user_dict(user)
@@ -221,6 +248,7 @@ async def logout(
     if refresh_token:
         token_hash = hash_refresh_token(refresh_token)
         await revoke_refresh_session(db, token_hash)
+        log_security_event("logout", request, level=logging.INFO)
     
     _clear_refresh_cookie(response)
     return {"ok": True}
@@ -234,6 +262,7 @@ async def refresh(
     refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
     
     if not refresh_token:
+        log_security_event("refresh_missing", request, level=logging.INFO)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing refresh token",
@@ -245,6 +274,7 @@ async def refresh(
     
     if not session:
         # Token is either revoked, expired, or doesn't exist
+        log_security_event("refresh_invalid", request, level=logging.WARNING)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
@@ -266,7 +296,7 @@ async def refresh(
         token_hash=new_token_hash,
         expires_at=expires_at,
         user_agent=request.headers.get("user-agent"),
-        ip=request.client.host if request.client else None,
+        ip=get_client_ip(request),
     )
     
     # Set new refresh cookie
@@ -348,6 +378,7 @@ async def update_profile(
 @router.post("/api/auth/password")
 async def change_password(
     payload: ChangePasswordBody,
+    request: Request,
     response: Response,
     user: asyncpg.Record = Depends(get_current_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
@@ -355,6 +386,13 @@ async def change_password(
     _validate_password(payload.new_password)
 
     if not verify_password(payload.current_password, user["password_hash"]):
+        log_security_event(
+            "password_change_failed",
+            request,
+            level=logging.WARNING,
+            user_id=user["id"],
+            username=user["username"],
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect.",
@@ -372,6 +410,13 @@ async def change_password(
         user["id"],
     )
     _clear_refresh_cookie(response)
+    log_security_event(
+        "password_changed",
+        request,
+        level=logging.INFO,
+        user_id=user["id"],
+        username=user["username"],
+    )
     return {"ok": True}
 
 

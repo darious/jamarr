@@ -1,9 +1,76 @@
+import logging
 import os
+import re
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+SENSITIVE_KEYS = (
+    "authorization",
+    "access_token",
+    "refresh_token",
+    "token",
+    "jwt",
+    "password",
+    "session_key",
+    "lastfm_session_key",
+    "user_auth_token",
+    "client_secret",
+    "secret",
+    "api_key",
+    "qobuz",
+    "qobuz_secret",
+    "tidal",
+    "tidal_secret",
+)
+
+_BEARER_RE = re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]+")
+_JWT_RE = re.compile(r"\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b")
+_QUERY_SECRET_RE = re.compile(
+    r"(?i)([?&](?:"
+    + "|".join(re.escape(key) for key in SENSITIVE_KEYS)
+    + r")=)[^&\s]+"
+)
+_ASSIGNMENT_SECRET_RE = re.compile(
+    r"(?i)\b("
+    + "|".join(re.escape(key) for key in SENSITIVE_KEYS)
+    + r")\b\s*[:=]\s*(['\"]?)[^,'\"\s&)}\]]+"
+)
+
+
+def strip_query_string(value: str) -> str:
+    """Return a request target without its query string."""
+    return value.split("?", 1)[0]
+
+
+def redact_secrets(value: Any) -> Any:
+    """Redact credentials and tokens from values before they enter logs or UI."""
+    if not isinstance(value, str):
+        return value
+
+    redacted = _BEARER_RE.sub("Bearer [REDACTED]", value)
+    redacted = _JWT_RE.sub("[REDACTED_JWT]", redacted)
+    redacted = _QUERY_SECRET_RE.sub(r"\1[REDACTED]", redacted)
+    redacted = _ASSIGNMENT_SECRET_RE.sub(r"\1=[REDACTED]", redacted)
+    return redacted
+
+
+def sanitize_log_value(value: Any, max_length: int = 200) -> str:
+    text = str(redact_secrets(value)).replace("\n", "\\n").replace("\r", "\\r")
+    if len(text) > max_length:
+        return f"{text[:max_length]}..."
+    return text
+
+
+def safe_request_path(request: Request) -> str:
+    return request.url.path
+
+
+def safe_user_agent(request: Request) -> str:
+    return sanitize_log_value(request.headers.get("user-agent", "-"), max_length=160)
 
 
 def parse_csv_env(name: str) -> list[str]:
@@ -49,5 +116,47 @@ def configure_security_middleware(app: FastAPI) -> None:
         )
 
 
+def _trusted_proxy_ips() -> set[str]:
+    return set(parse_csv_env("TRUSTED_PROXY_IPS"))
+
+
 def get_client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    direct_ip = request.client.host if request.client else "unknown"
+    if direct_ip in _trusted_proxy_ips():
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        if forwarded_for:
+            first_hop = forwarded_for.split(",", 1)[0].strip()
+            if first_hop:
+                return first_hop
+
+        real_ip = request.headers.get("x-real-ip", "").strip()
+        if real_ip:
+            return real_ip
+
+    return direct_ip
+
+
+def log_security_event(
+    event: str,
+    request: Request | None = None,
+    *,
+    level: int = logging.INFO,
+    **fields: Any,
+) -> None:
+    """Write a structured security event without logging secrets."""
+    parts = [f"event={sanitize_log_value(event, 80)}"]
+    if request is not None:
+        parts.extend(
+            [
+                f"ip={sanitize_log_value(get_client_ip(request), 80)}",
+                f"method={request.method}",
+                f"path={safe_request_path(request)}",
+                f"user_agent={safe_user_agent(request)}",
+            ]
+        )
+    for key, value in fields.items():
+        if value is None:
+            continue
+        parts.append(f"{sanitize_log_value(key, 80)}={sanitize_log_value(value)}")
+
+    logging.getLogger("app.security.audit").log(level, " ".join(parts))

@@ -852,6 +852,45 @@ export async function listSchedulerRuns(taskId: number): Promise<ScheduledRun[]>
     return await res.json();
 }
 
+// Monitoring
+export interface MonitoringLogFile {
+    key: string;
+    name: string;
+    exists: boolean;
+    size_bytes: number;
+    modified_at: number | null;
+}
+
+export interface MonitoringSummary {
+    logs: MonitoringLogFile[];
+    alerts: string[];
+}
+
+export interface MonitoringLogResponse {
+    key: string;
+    name: string;
+    lines: string[];
+}
+
+export async function fetchMonitoringSummary(): Promise<MonitoringSummary> {
+    const res = await fetchWithAuth('/api/monitoring/summary');
+    if (!res.ok) throw new Error('Failed to fetch monitoring summary');
+    return await res.json();
+}
+
+export async function fetchMonitoringLog(
+    file: string,
+    lines: number = 200,
+): Promise<MonitoringLogResponse> {
+    const params = new URLSearchParams({
+        file,
+        lines: String(lines),
+    });
+    const res = await fetchWithAuth(`/api/monitoring/logs?${params.toString()}`);
+    if (!res.ok) throw new Error('Failed to fetch log file');
+    return await res.json();
+}
+
 // Last.fm Integration
 export interface LastfmStatus {
     connected: boolean;
