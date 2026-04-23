@@ -41,7 +41,7 @@ else:
     REFRESH_COOKIE_SECURE = ENV == "production"
 
 
-class SignupBody(BaseModel):
+class CreateUserBody(BaseModel):
     username: str
     email: EmailStr
     password: str
@@ -118,11 +118,10 @@ def _validate_password(password: str) -> None:
         )
 
 
-@router.post("/api/auth/signup")
-async def signup(
-    payload: SignupBody,
-    request: Request,
-    response: Response,
+@router.post("/api/auth/users", status_code=status.HTTP_201_CREATED)
+async def create_user(
+    payload: CreateUserBody,
+    _current_user: asyncpg.Record = Depends(get_current_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
 ):
     username = payload.username.strip()
@@ -140,12 +139,10 @@ async def signup(
 
     password_hash = hash_password(payload.password)
 
-    # Insert new user
-    # Note: theme_mode defaults to dark in DB schema, so we don't need to explicit insert it unless user could choose at signup
     user = await db.fetchrow(
         """
-        INSERT INTO "user" (username, email, password_hash, display_name, created_at, last_login_at)
-        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        INSERT INTO "user" (username, email, password_hash, display_name, created_at)
+        VALUES ($1, $2, $3, $4, NOW())
         RETURNING *
         """,
         username,
@@ -154,29 +151,7 @@ async def signup(
         payload.display_name.strip() if payload.display_name else None,
     )
 
-    access_token = create_access_token(user_id=user["id"])
-    refresh_token = generate_refresh_token()
-    refresh_token_hash = hash_refresh_token(refresh_token)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_TTL_DAYS)
-
-    await create_refresh_session(
-        db=db,
-        user_id=user["id"],
-        token_hash=refresh_token_hash,
-        expires_at=expires_at,
-        user_agent=request.headers.get("user-agent"),
-        ip=request.client.host if request.client else None,
-    )
-
-    _set_refresh_cookie(response, refresh_token)
-
-    user_data = _public_user_dict(user)
-    return {
-        **user_data,
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user_data,
-    }
+    return _public_user_dict(user)
 
 
 @router.post("/api/auth/login")

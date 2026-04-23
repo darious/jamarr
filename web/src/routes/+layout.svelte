@@ -44,6 +44,9 @@
   let activeRendererItem: any = null;
   let authLoading = true;  // Add loading state
   let renderersLoading = false;
+  let appInitialized = false;
+  let appInitializing = false;
+  let rendererPollInterval: ReturnType<typeof setInterval> | undefined;
 
   const navItems = [
     { href: "/artists", label: "Artists", active: (pathname: string) => pathname.startsWith("/artists") || pathname.startsWith("/artist/") },
@@ -70,9 +73,7 @@
   }
 
   // Track whether we're on an auth page
-  $: isAuthPage =
-    $page.url.pathname.startsWith("/login") ||
-    $page.url.pathname.startsWith("/signup");
+  $: isAuthPage = $page.url.pathname.startsWith("/login");
   $: activeRendererItem = rendererList.find((r) => r.udn === activeRenderer);
   $: if (isAuthPage) {
     showMobileMenu = false;
@@ -81,95 +82,81 @@
 
   // Don't seed auth state here - wait for client-side initialization
 
-  onMount(() => {
-    let rendererPollInterval: ReturnType<typeof setInterval> | undefined;
-    const init = async () => {
-      // Check actual current path, not reactive variable
-      const currentPath = window.location.pathname;
-      const onAuthPage = currentPath.startsWith("/login") || currentPath.startsWith("/signup");
+  async function initializeAppShell() {
+    if (appInitialized || appInitializing || isAuthPage) return;
+    appInitializing = true;
+    authLoading = true;
 
-      console.log('[Layout] onMount started, currentPath:', currentPath, 'onAuthPage:', onAuthPage);
+    const initResult = await initializeAuth().catch((e) => {
+      console.error("[Layout] initializeAuth error:", e);
+      return false;
+    });
+    console.log("[Layout] initializeAuth result:", initResult);
 
-      // If on auth page, don't show loading
-      if (onAuthPage) {
-        console.log('[Layout] On auth page, skipping auth check');
-        authLoading = false;
-        return;
-      }
+    const hydratedUser = await hydrateUser().catch((e) => {
+      console.error("[Layout] hydrateUser error:", e);
+      return null;
+    });
+    console.log("[Layout] Hydrated user:", hydratedUser ? "SUCCESS" : "FAILED");
 
-      console.log('[Layout] Starting auth initialization...');
-      // Initialize JWT auth on client-side (try to refresh token)
-      const initResult = await initializeAuth().catch((e) => {
-        console.error('[Layout] initializeAuth error:', e);
-        return false;
-      });
-      console.log('[Layout] initializeAuth result:', initResult);
-
-      // Now hydrate user after auth is initialized
-      console.log('[Layout] Hydrating user...');
-      const hydratedUser = await hydrateUser().catch((e) => {
-        console.error('[Layout] hydrateUser error:', e);
-        return null;
-      });
-      console.log('[Layout] Hydrated user:', hydratedUser ? 'SUCCESS' : 'FAILED');
-
-      // If no user and not on auth page, redirect to login
-      if (!hydratedUser && !onAuthPage) {
-        console.log('[Layout] No user found, redirecting to login');
-        authLoading = false;
-        goto("/login");
-        return;
-      }
-
-      console.log('[Layout] Auth complete, showing content');
-      // Auth complete, show content
+    if (!hydratedUser && !isAuthPage) {
       authLoading = false;
+      appInitializing = false;
+      goto("/login");
+      return;
+    }
 
-      // Subscribe first to get immediate state (including default 'local' renderer)
+    authLoading = false;
+
+    if (!unsub) {
       unsub = playerState.subscribe((state) => {
         rendererList = state.renderers || [];
         activeRenderer = state.renderer || "";
       });
+    }
 
-      unsubUser = currentUser.subscribe((value) => (user = value));
-      unsubAuthChecked = isAuthChecked.subscribe(
-        (value) => (authChecked = value),
-      );
+    try {
+      await loadQueueFromServer();
+    } catch (e) {
+      console.error("[Layout] loadQueueFromServer failed:", e);
+    }
 
-      try {
-        await loadQueueFromServer();
-      } catch (e) {
-        console.error("[Layout] loadQueueFromServer failed:", e);
-      }
+    refreshRenderers(false).catch((e) =>
+      console.error("[Layout] refreshRenderers failed:", e),
+    );
 
-      // Trigger refresh without awaiting the full 5s discovery if we don't want to block anything else
-      // But since subscription is active, store updates will just propagate.
-      // Use force=false to get immediate cached results (background scan runs on backend)
-      refreshRenderers(false).catch((e) =>
-        console.error("[Layout] refreshRenderers failed:", e),
-      );
-
-      // Poll for new renderers every 10 seconds
+    if (!rendererPollInterval) {
       rendererPollInterval = setInterval(() => {
         refreshRenderers(false).catch((e) =>
           console.error("[Layout] Periodic refreshRenderers failed:", e),
         );
       }, 10000);
-    };
+    }
 
-    init();
+    appInitialized = true;
+    appInitializing = false;
+  }
 
-    return () => {
-      if (rendererPollInterval) {
-        clearInterval(rendererPollInterval);
-      }
-    };
+  onMount(() => {
+    unsubUser = currentUser.subscribe((value) => (user = value));
+    unsubAuthChecked = isAuthChecked.subscribe((value) => (authChecked = value));
+
+    if (isAuthPage) {
+      authLoading = false;
+    } else {
+      initializeAppShell();
+    }
   });
+
+  $: if (!isAuthPage && !appInitialized && !appInitializing) {
+    initializeAppShell();
+  }
 
   onDestroy(() => {
     if (unsub) unsub();
     if (unsubUser) unsubUser();
     if (unsubAuthChecked) unsubAuthChecked();
+    if (rendererPollInterval) clearInterval(rendererPollInterval);
   });
 
   const changeRenderer = async (udn: string) => {
@@ -392,10 +379,6 @@
           {#if !user && authChecked}
             <div class="hidden md:flex items-center gap-2">
               <a
-                class="btn btn-primary btn-sm normal-case font-normal"
-                href="/signup">Sign up</a
-              >
-              <a
                 class="btn btn-outline btn-sm normal-case font-normal"
                 href="/login">Log in</a
               >
@@ -452,14 +435,14 @@
                     >
                       User Settings
                     </a>
-                  {:else}
                     <a
                       class="menu-item"
-                      href="/signup"
+                      href="/settings/users"
                       on:click={() => (showSettings = false)}
                     >
-                      Create Account
+                      Create User
                     </a>
+                  {:else}
                     <a
                       class="menu-item"
                       href="/login"
@@ -644,14 +627,14 @@
               {/if}
 
               {#if !user && authChecked}
-                <div class="grid grid-cols-2 gap-2">
-                  <a class="btn btn-primary btn-sm normal-case font-normal" href="/signup" on:click={() => (showMobileMenu = false)}>Sign up</a>
+                <div class="grid grid-cols-1 gap-2">
                   <a class="btn btn-outline btn-sm normal-case font-normal" href="/login" on:click={() => (showMobileMenu = false)}>Log in</a>
                 </div>
               {/if}
 
               {#if user}
                 <a class="menu-item" href="/settings/user" on:click={() => (showMobileMenu = false)}>User Settings</a>
+                <a class="menu-item" href="/settings/users" on:click={() => (showMobileMenu = false)}>Create User</a>
               {/if}
               <a class="menu-item" href="/settings/library" on:click={() => (showMobileMenu = false)}>Library Management</a>
               <a class="menu-item" href="/settings/scheduler" on:click={() => (showMobileMenu = false)}>Scheduler</a>
