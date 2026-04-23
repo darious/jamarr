@@ -3,6 +3,7 @@ import os
 
 from fastapi import FastAPI
 from app.db import init_db, close_db
+from app.security import configure_security_middleware, fastapi_docs_config, is_production
 
 
 @asynccontextmanager
@@ -27,7 +28,8 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, **fastapi_docs_config())
+configure_security_middleware(app)
 
 # Configure rate limiting (disabled in test/dev)
 ENV = os.getenv("ENV", "development")
@@ -104,6 +106,11 @@ else:
 async def spa(path: str):
     # Let API and art routes fall through to their handlers
     if path.startswith("api/") or path.startswith("art/"):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    if is_production() and path.rstrip("/") in {"docs", "redoc", "openapi.json"}:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail="Not Found")

@@ -14,43 +14,13 @@ jobs:
       TARGET_DIR: /root/jamarr
 
     steps:
-    - name: Install OpenVPN
-      run: sudo apt-get update && sudo apt-get install -y openvpn traceroute
-
-    - name: Set up VPN configuration
-      run: echo "${{ secrets.VPN_CONFIG }}" > vpn-config.ovpn
-
-    - name: Connect to VPN
-      run: |
-        sudo openvpn --config vpn-config.ovpn \
-          --daemon \
-          --writepid /tmp/openvpn.pid \
-          --log /tmp/openvpn.log \
-          --verb 4 \
-          --data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-128-CBC \
-          --data-ciphers-fallback AES-128-CBC
-        sudo chmod 644 /tmp/openvpn.log
-
-    - name: Wait for VPN (don’t fail yet)
-      id: vpnwait
-      shell: bash
-      run: |
-        set +e
-        timeout 60 bash -lc 'until sudo grep -q "Initialization Sequence Completed" /tmp/openvpn.log; do sleep 1; done'
-        echo "wait_exit=$?" >> "$GITHUB_OUTPUT"
-
-    - name: Dump OpenVPN log on failure
-      if: ${{ steps.vpnwait.outputs.wait_exit != '0' }}
-      run: |
-        sudo tail -n 400 /tmp/openvpn.log || true
-        ip route || true
-
-    - name: Fail if VPN not up
-      run: |
-        if [ "${{ steps.vpnwait.outputs.wait_exit }}" != "0" ]; then
-          echo "VPN did not come up"
-          exit 1
-        fi
+    - name: Connect WireGuard
+      uses: darious/shared-actions/wireguard/connect@main
+      with:
+        config: ${{ secrets.WIREGUARD_CONFIG }}
+        target-host: ${{ env.TARGET_HOST }}
+        debug: "true"
+        traceroute: "true"
 
     - name: Run deployment on server
       env:
@@ -89,13 +59,10 @@ jobs:
             ./update.sh
         EOF
 
+    - name: Disconnect WireGuard
+      if: always()
+      uses: darious/shared-actions/wireguard/disconnect@main
+
     - name: Cleanup secrets
       if: always()
-      run: rm -f vpn-config.ovpn jamarr_env || true
-
-    - name: Disconnect VPN
-      if: always()
-      run: |
-        if [ -f /tmp/openvpn.pid ]; then
-          sudo kill "$(cat /tmp/openvpn.pid)" || true
-        fi
+      run: rm -f ~/.ssh/id_rsa || true

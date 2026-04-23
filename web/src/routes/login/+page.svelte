@@ -135,10 +135,6 @@
         </TabButton>
       </form>
 
-      <p class="mt-4 text-center text-sm text-white/60">
-        Need an account?
-        <a class="text-primary" href="/signup">Sign up</a>
-      </p>
     </div>
   </div>
 </div>

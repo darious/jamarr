@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from app.db import get_db
+from app.security import is_production
 import os
 import io
 from email.utils import parsedate_to_datetime, formatdate
@@ -50,12 +51,14 @@ def _get_art_path(sha1: str, path_on_disk: str | None = None) -> str:
     return unified
 
 
-@router.get("/art/test")
-async def get_test_artwork():
-    """Serve a JPEG for UPnP album art testing."""
-    response = Response(content=_TEST_ART_BYTES, media_type="image/jpeg")
-    response.headers["Cache-Control"] = "no-cache"
-    return response
+if not is_production():
+
+    @router.get("/art/test")
+    async def get_test_artwork():
+        """Serve a JPEG for UPnP album art testing."""
+        response = Response(content=_TEST_ART_BYTES, media_type="image/jpeg")
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 

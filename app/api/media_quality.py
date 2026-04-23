@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends
 from app.db import get_db
-from app.api.deps import get_current_user_jwt
+from app.api.deps import get_current_admin_user_jwt
 import asyncpg
 from typing import Optional
 
-router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
+router = APIRouter(dependencies=[Depends(get_current_admin_user_jwt)])
 
 
 @router.get("/api/media-quality/items")
