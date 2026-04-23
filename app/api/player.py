@@ -13,6 +13,7 @@ from app.api.deps import (
     get_current_user_jwt,
     require_admin_user,
 )
+from app.security import get_client_ip
 
 from app.models.player import (
     PlayerState,
@@ -57,18 +58,6 @@ async def get_client_id(x_jamarr_client_id: Optional[str] = Header(None)) -> str
         # Fallback for old clients or direct API calls?
         return "unknown_client"
     return x_jamarr_client_id
-
-
-def get_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For") or request.headers.get(
-        "x-forwarded-for"
-    )
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    real_ip = request.headers.get("X-Real-IP") or request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-    return request.client.host if request.client else "unknown"
 
 
 @router.get("/api/client-ip")
