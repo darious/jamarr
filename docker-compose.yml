@@ -2,7 +2,6 @@ services:
   jamarr_db:
     image: postgres:18.1-alpine
     container_name: jamarr_db
-    network_mode: "host"
     restart: unless-stopped
 
     env_file:
@@ -18,9 +17,10 @@ services:
   jamarr:
     build: .
     container_name: jamarr
-    network_mode: "host"
     depends_on:
       - jamarr_db
+    ports:
+      - "${APP_BIND_IP:-${HOST_IP:-0.0.0.0}}:8111:8111"
     env_file:
       - .env
     volumes:
@@ -34,14 +34,14 @@ services:
       - ./config.yaml:/app/config.yaml
     restart: unless-stopped
     environment:
-      - HOST=0.0.0.0
-      - HOST_IP=${HOST_IP:-127.0.0.1}
-      - HOST_PORT=8111
-      - DB_HOST=127.0.0.1
-      - DB_PORT=8110
-      - DB_USER=${DB_USER}
-      - DB_PASS=${DB_PASS}
-      - DB_NAME=jamarr
+      HOST: 0.0.0.0
+      HOST_IP: ${HOST_IP:-127.0.0.1}
+      HOST_PORT: 8111
+      DB_HOST: jamarr_db
+      DB_PORT: 8110
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_NAME: jamarr
 
 
 volumes:
