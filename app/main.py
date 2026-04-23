@@ -3,7 +3,7 @@ import os
 
 from fastapi import FastAPI
 from app.db import init_db, close_db
-from app.security import configure_security_middleware
+from app.security import configure_security_middleware, fastapi_docs_config
 
 
 @asynccontextmanager
@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, **fastapi_docs_config())
 configure_security_middleware(app)
 
 # Configure rate limiting (disabled in test/dev)

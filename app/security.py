@@ -11,6 +11,24 @@ def parse_csv_env(name: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def is_production() -> bool:
+    return os.getenv("ENV", "development").lower() == "production"
+
+
+def fastapi_docs_config() -> dict[str, str | None]:
+    if is_production():
+        return {
+            "docs_url": None,
+            "redoc_url": None,
+            "openapi_url": None,
+        }
+    return {
+        "docs_url": "/docs",
+        "redoc_url": "/redoc",
+        "openapi_url": "/openapi.json",
+    }
+
+
 def configure_security_middleware(app: FastAPI) -> None:
     trusted_proxy_ips = parse_csv_env("TRUSTED_PROXY_IPS")
     if trusted_proxy_ips:
