@@ -79,8 +79,6 @@ app.include_router(scan.router)
 app.include_router(auth.router)
 app.include_router(media_quality.router)
 app.include_router(playlist.router)
-
-app.include_router(playlist.router)
 app.include_router(charts.router, prefix="/api")
 app.include_router(lastfm.router)
 app.include_router(history.router)
