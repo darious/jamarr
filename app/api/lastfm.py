@@ -69,7 +69,7 @@ async def lastfm_callback(
     db: asyncpg.Connection = Depends(get_db),
 ):
     """Handle Last.fm OAuth callback."""
-    logger.info(f"Last.fm callback received with token: {token[:10]}...")
+    logger.info("Last.fm callback received")
     
     try:
         user = await _get_user_from_refresh_cookie(request, db)

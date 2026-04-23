@@ -19,8 +19,8 @@ jobs:
       with:
         config: ${{ secrets.WIREGUARD_CONFIG }}
         target-host: ${{ env.TARGET_HOST }}
-        debug: "true"
-        traceroute: "true"
+        debug: "false"
+        traceroute: "false"
 
     - name: Run deployment on server
       env:

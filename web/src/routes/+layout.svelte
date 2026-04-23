@@ -97,13 +97,11 @@
       console.error("[Layout] initializeAuth error:", e);
       return false;
     });
-    console.log("[Layout] initializeAuth result:", initResult);
 
     const hydratedUser = await hydrateUser().catch((e) => {
       console.error("[Layout] hydrateUser error:", e);
       return null;
     });
-    console.log("[Layout] Hydrated user:", hydratedUser ? "SUCCESS" : "FAILED");
 
     if (!hydratedUser && !isAuthPage) {
       authLoading = false;

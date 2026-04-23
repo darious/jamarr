@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+import asyncpg
 from croniter import croniter
 
 from app.db import get_pool
@@ -174,8 +175,15 @@ class Scheduler:
                 await self._lock_conn.execute(
                     "SELECT pg_advisory_unlock($1)", LOCK_KEY
                 )
+            except asyncpg.InterfaceError:
+                logger.warning(
+                    "Scheduler lock connection was already released before unlock."
+                )
             finally:
-                await get_pool().release(self._lock_conn)
+                try:
+                    await get_pool().release(self._lock_conn)
+                except asyncpg.InterfaceError:
+                    pass
                 self._lock_conn = None
         logger.info("Scheduler stopped.")
 
