@@ -1,8 +1,18 @@
+import json
+import os
+import subprocess
+import sys
+
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 import pytest
 
-from app.security import configure_security_middleware, get_client_ip, parse_csv_env
+from app.security import (
+    configure_security_middleware,
+    fastapi_docs_config,
+    get_client_ip,
+    parse_csv_env,
+)
 
 
 def _security_test_app() -> FastAPI:
@@ -26,6 +36,62 @@ def test_parse_csv_env_trims_empty_values(monkeypatch):
         "jamarr.darious.co.uk",
         "192.168.1.107",
     ]
+
+
+def test_fastapi_docs_disabled_in_production(monkeypatch):
+    monkeypatch.setenv("ENV", "production")
+
+    assert fastapi_docs_config() == {
+        "docs_url": None,
+        "redoc_url": None,
+        "openapi_url": None,
+    }
+
+
+def test_fastapi_docs_enabled_outside_production(monkeypatch):
+    monkeypatch.setenv("ENV", "development")
+
+    assert fastapi_docs_config() == {
+        "docs_url": "/docs",
+        "redoc_url": "/redoc",
+        "openapi_url": "/openapi.json",
+    }
+
+
+def test_production_app_does_not_register_docs_or_debug_routes():
+    script = """
+import json
+from app.main import app
+
+paths = sorted({route.path for route in app.routes})
+print(json.dumps({
+    "docs_url": app.docs_url,
+    "redoc_url": app.redoc_url,
+    "openapi_url": app.openapi_url,
+    "paths": paths,
+}))
+"""
+    env = {
+        **os.environ,
+        "ENV": "production",
+        "DB_NAME": "jamarr_test",
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    data = json.loads(result.stdout)
+
+    assert data["docs_url"] is None
+    assert data["redoc_url"] is None
+    assert data["openapi_url"] is None
+    assert "/api/player/debug" not in data["paths"]
+    assert "/api/player/test_upnp" not in data["paths"]
+    assert "/art/test" not in data["paths"]
+    assert "/api/auth/me" in data["paths"]
 
 
 @pytest.mark.asyncio

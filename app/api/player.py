@@ -13,7 +13,7 @@ from app.api.deps import (
     get_current_user_jwt,
     require_admin_user,
 )
-from app.security import get_client_ip
+from app.security import get_client_ip, is_production
 
 from app.models.player import (
     PlayerState,
@@ -908,32 +908,6 @@ async def seek_track(data: dict, client_id: str = Depends(get_client_id)):
             return {"status": "local", "message": "Handle seek in browser"}
 
 
-# Re-expose Debug/Manual Added endpoints
-@router.get("/api/player/debug", dependencies=[Depends(get_current_admin_user_jwt)])
-async def debug_info():
-    monitors_status = {}
-    for udn, task in playback_monitors.items():
-        monitors_status[udn] = {
-            "done": task.done(),
-            "cancelled": task.cancelled(),
-        }
-        if task.done() and not task.cancelled():
-            try:
-                task.result() # check for exception
-                monitors_status[udn]["result"] = "success"
-            except Exception as e:
-                monitors_status[udn]["error"] = str(e)
-
-    return {
-        "log": upnp.debug_log,
-        "renderers": upnp.renderers,
-        "dmr_devices_keys": list(upnp.dmr_devices.keys()),
-        "local_ip": upnp.local_ip,
-        "monitors": monitors_status,
-        "monitor_start_times": monitor_start_times,
-    }
-
-
 @router.post(
     "/api/player/add_manual",
     dependencies=[Depends(get_current_admin_user_jwt)],
@@ -949,8 +923,40 @@ async def add_manual_renderer(data: dict):
         raise HTTPException(status_code=404, detail="Device not found at IP")
 
 
-@router.get("/api/player/test_upnp", dependencies=[Depends(get_current_admin_user_jwt)])
-async def test_upnp():
-    if not upnp.active_renderer:
-        return {"error": "No active renderer"}
-    return {"status": "ok", "message": "Check debug logs"}
+if not is_production():
+
+    @router.get(
+        "/api/player/debug",
+        dependencies=[Depends(get_current_admin_user_jwt)],
+    )
+    async def debug_info():
+        monitors_status = {}
+        for udn, task in playback_monitors.items():
+            monitors_status[udn] = {
+                "done": task.done(),
+                "cancelled": task.cancelled(),
+            }
+            if task.done() and not task.cancelled():
+                try:
+                    task.result()  # check for exception
+                    monitors_status[udn]["result"] = "success"
+                except Exception as e:
+                    monitors_status[udn]["error"] = str(e)
+
+        return {
+            "log": upnp.debug_log,
+            "renderers": upnp.renderers,
+            "dmr_devices_keys": list(upnp.dmr_devices.keys()),
+            "local_ip": upnp.local_ip,
+            "monitors": monitors_status,
+            "monitor_start_times": monitor_start_times,
+        }
+
+    @router.get(
+        "/api/player/test_upnp",
+        dependencies=[Depends(get_current_admin_user_jwt)],
+    )
+    async def test_upnp():
+        if not upnp.active_renderer:
+            return {"error": "No active renderer"}
+        return {"status": "ok", "message": "Check debug logs"}
