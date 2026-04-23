@@ -1,7 +1,11 @@
 services:
   jamarr:
+    network_mode: "host"
+    ports: !reset []
     environment:
-      - WATCHFILES_FORCE_POLLING=true
+      WATCHFILES_FORCE_POLLING: "true"
+      DB_HOST: 127.0.0.1
+      DB_PORT: 8110
     volumes:
       - ./app:/app/app
       - ./scripts:/app/scripts
@@ -11,6 +15,7 @@ services:
     # Don't need to rebuild for backend changes - volume mount + reload handles it
 
   jamarr_db:
+    network_mode: "host"
     volumes:
       - /mnt/config/q-dev/jamarr/postgres:/var/lib/postgresql
     command: ["postgres", "-p", "8110", "-c", "log_error_verbosity=verbose"]
