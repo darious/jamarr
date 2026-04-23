@@ -1,18 +1,56 @@
+import os
 import pytest
 import warnings
-import os
 import asyncpg
 from typing import AsyncGenerator
 from httpx import AsyncClient, ASGITransport
+
+# Default direct pytest runs to the isolated test database. The application DB
+# module reads these values at import time, so set them before importing app.*.
+os.environ.setdefault("DB_HOST", "127.0.0.1")
+os.environ.setdefault("DB_PORT", "8109")
+os.environ.setdefault("DB_USER", "jamarr_test")
+os.environ.setdefault("DB_PASS", "jamarr_test")
+os.environ.setdefault("DB_NAME", "jamarr_test")
+
 from app.main import app
 from app.db import init_db, close_db, get_db
 
-# Use the same DB settings as in docker-compose.yml
+# Test database settings. Destructive fixtures must never point at dev/prod.
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
-DB_PORT = int(os.getenv("DB_PORT", "8110"))
-DB_USER = os.getenv("DB_USER", "jamarr")
-DB_PASS = os.getenv("DB_PASS", "jamarr")
-DB_NAME = os.getenv("DB_NAME", "jamarr")
+DB_PORT = int(os.getenv("DB_PORT", "8109"))
+DB_USER = os.getenv("DB_USER", "jamarr_test")
+DB_PASS = os.getenv("DB_PASS", "jamarr_test")
+DB_NAME = os.getenv("DB_NAME", "jamarr_test")
+
+
+def _assert_test_database_config() -> None:
+    if DB_NAME != "jamarr_test":
+        raise RuntimeError(
+            "Refusing to run tests against a non-test database. "
+            f"DB_NAME={DB_NAME!r}, DB_HOST={DB_HOST!r}, DB_PORT={DB_PORT!r}. "
+            "Use ./test.sh or set DB_NAME=jamarr_test."
+        )
+
+
+async def _assert_connected_to_test_database(conn: asyncpg.Connection) -> None:
+    row = await conn.fetchrow(
+        """
+        SELECT
+            current_database() AS database_name,
+            inet_server_addr()::text AS server_addr,
+            inet_server_port() AS server_port
+        """
+    )
+    if row["database_name"] != "jamarr_test":
+        raise RuntimeError(
+            "Refusing to truncate a non-test database. "
+            f"Connected to database={row['database_name']!r}, "
+            f"server={row['server_addr']}:{row['server_port']}."
+        )
+
+
+_assert_test_database_config()
 
 warnings.filterwarnings(
     "ignore",
@@ -25,6 +63,8 @@ warnings.filterwarnings(
 @pytest.fixture(scope="function", autouse=True)
 async def setup_db():
     """Initialize DB pool before tests run."""
+    _assert_test_database_config()
+
     # Ensure env vars
     os.environ["DB_HOST"] = DB_HOST
     os.environ["DB_PORT"] = str(DB_PORT)
@@ -64,6 +104,8 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
     We truncate tables to ensure a clean state for each test.
     """
     async for conn in get_db():
+        await _assert_connected_to_test_database(conn)
+
         # Clean relevant tables (only if they exist)
         table_rows = await conn.fetch(
             "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
@@ -118,6 +160,8 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 @pytest.fixture
 async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
     """Helper to create a user and log in, returning an access token."""
+    from app.auth import hash_password
+
     user_data = {
         "username": "testuser",
         "email": "test@example.com",
@@ -125,13 +169,20 @@ async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
         "display_name": "Test User"
     }
 
-    # 1. Try Signup
-    response = await client.post("/api/auth/signup", json=user_data)
-    
-    if response.status_code == 200:
-        return response.json()["access_token"]
+    existing = await db.fetchrow('SELECT id FROM "user" WHERE username = $1', "testuser")
+    if not existing:
+        await db.fetchrow(
+            """
+            INSERT INTO "user" (username, email, password_hash, display_name, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            RETURNING *
+            """,
+            user_data["username"],
+            user_data["email"],
+            hash_password(user_data["password"]),
+            user_data["display_name"],
+        )
 
-    # 2. If Signup Failed (User Exists), Try Login
     response = await client.post("/api/auth/login", json={
         "username": "testuser",
         "password": "password123"
@@ -144,10 +195,23 @@ async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
     # We must use the DB connection to nuke the user since we can't login
     print("Login failed for existing user. Deleting and recreating.")
     await db.execute("DELETE FROM \"user\" WHERE username = $1", "testuser")
-    
-    # Retry Signup
-    response = await client.post("/api/auth/signup", json=user_data)
-    assert response.status_code == 200, "Signup failed after user deletion"
+
+    await db.fetchrow(
+        """
+        INSERT INTO "user" (username, email, password_hash, display_name, created_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        RETURNING *
+        """,
+        user_data["username"],
+        user_data["email"],
+        hash_password(user_data["password"]),
+        user_data["display_name"],
+    )
+    response = await client.post("/api/auth/login", json={
+        "username": "testuser",
+        "password": "password123"
+    })
+    assert response.status_code == 200, "Login failed after user recreation"
     return response.json()["access_token"]
 
 
