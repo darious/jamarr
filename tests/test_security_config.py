@@ -60,16 +60,37 @@ def test_fastapi_docs_enabled_outside_production(monkeypatch):
 
 def test_production_app_does_not_register_docs_or_debug_routes():
     script = """
+import asyncio
 import json
+from httpx import ASGITransport, AsyncClient
 from app.main import app
 
-paths = sorted({route.path for route in app.routes})
-print(json.dumps({
-    "docs_url": app.docs_url,
-    "redoc_url": app.redoc_url,
-    "openapi_url": app.openapi_url,
-    "paths": paths,
-}))
+async def main():
+    paths = sorted({route.path for route in app.routes})
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://192.168.1.107:8111",
+    ) as client:
+        statuses = {
+            path: (await client.get(path)).status_code
+            for path in (
+                "/docs",
+                "/redoc",
+                "/openapi.json",
+                "/api/player/debug",
+                "/api/player/test_upnp",
+                "/art/test",
+            )
+        }
+    print(json.dumps({
+        "docs_url": app.docs_url,
+        "redoc_url": app.redoc_url,
+        "openapi_url": app.openapi_url,
+        "paths": paths,
+        "statuses": statuses,
+    }))
+
+asyncio.run(main())
 """
     env = {
         **os.environ,
@@ -92,6 +113,14 @@ print(json.dumps({
     assert "/api/player/test_upnp" not in data["paths"]
     assert "/art/test" not in data["paths"]
     assert "/api/auth/me" in data["paths"]
+    assert data["statuses"] == {
+        "/docs": 404,
+        "/redoc": 404,
+        "/openapi.json": 404,
+        "/api/player/debug": 404,
+        "/api/player/test_upnp": 404,
+        "/art/test": 404,
+    }
 
 
 @pytest.mark.asyncio

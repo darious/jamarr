@@ -3,7 +3,7 @@ import os
 
 from fastapi import FastAPI
 from app.db import init_db, close_db
-from app.security import configure_security_middleware, fastapi_docs_config
+from app.security import configure_security_middleware, fastapi_docs_config, is_production
 
 
 @asynccontextmanager
@@ -106,6 +106,11 @@ else:
 async def spa(path: str):
     # Let API and art routes fall through to their handlers
     if path.startswith("api/") or path.startswith("art/"):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    if is_production() and path.rstrip("/") in {"docs", "redoc", "openapi.json"}:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail="Not Found")
