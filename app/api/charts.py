@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.charts import refresh_chart_task
 from app.db import get_pool
-from app.api.deps import get_current_user_jwt
+from app.api.deps import get_current_admin_user_jwt, get_current_user_jwt
 
 router = APIRouter(
     prefix="/charts",
@@ -86,7 +86,7 @@ async def get_chart():
             results.append(data)
         return results
 
-@router.post("/refresh")
+@router.post("/refresh", dependencies=[Depends(get_current_admin_user_jwt)])
 async def refresh_chart():
     await refresh_chart_task()
     return {"status": "refreshed"}

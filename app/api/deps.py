@@ -76,6 +76,23 @@ async def get_current_user_jwt(
     return user
 
 
+def require_admin_user(user: asyncpg.Record) -> asyncpg.Record:
+    """Require the authenticated user to have admin privileges."""
+    if not user.get("is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+    return user
+
+
+async def get_current_admin_user_jwt(
+    user: asyncpg.Record = Depends(get_current_user_jwt),
+) -> asyncpg.Record:
+    """Dependency to require JWT authentication and admin privileges."""
+    return require_admin_user(user)
+
+
 async def get_optional_user_jwt(
     authorization: Optional[str] = Header(None),
     request: Request = None,

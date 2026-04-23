@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.db import get_db, optimize_db
-from app.api.deps import get_current_user_jwt
+from app.api.deps import get_current_admin_user_jwt, get_current_user_jwt
 import asyncpg
 from typing import Optional
 
@@ -26,7 +26,10 @@ def sha1_to_hex(sha1_value):
 class PearlarrDownloadRequest(BaseModel):
     mbid: str
 
-@router.post("/api/scan/missing")
+@router.post(
+    "/api/scan/missing",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def scan_missing_albums(artist: str = None, mbid: str = None):
     try:
         scan_manager = ScanManager.get_instance()
@@ -38,7 +41,10 @@ async def scan_missing_albums(artist: str = None, mbid: str = None):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/api/library/optimize")
+@router.post(
+    "/api/library/optimize",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def trigger_optimize():
     try:
         await optimize_db()
@@ -65,7 +71,10 @@ async def get_missing_albums(mbid: str, db: asyncpg.Connection = Depends(get_db)
     return [dict(row) for row in rows]
 
 
-@router.post("/api/download/pearlarr")
+@router.post(
+    "/api/download/pearlarr",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def download_pearlarr(req: PearlarrDownloadRequest):
     pearlarr_url = get_pearlarr_url()
     if not pearlarr_url:

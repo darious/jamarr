@@ -137,6 +137,7 @@ export interface User {
     username: string;
     email: string;
     display_name: string;
+    is_admin?: boolean;
     accent_color?: string;
     theme_mode?: 'dark' | 'light';
     created_at?: string | null;
@@ -463,18 +464,17 @@ export async function triggerPearlarrDownload(mbid: string): Promise<void> {
     if (!res.ok) throw new Error('Failed to trigger Pearlarr download');
 }
 
-export async function signup(
+export async function createUser(
     data: { username: string; email: string; password: string; display_name?: string },
-): Promise<LoginResponse> {
-    const res = await fetch('/api/auth/signup', {
+): Promise<User> {
+    const res = await fetchWithAuth('/api/auth/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(data)
     });
     if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
-        throw new Error(detail.detail || 'Failed to sign up');
+        throw new Error(detail.detail || 'Failed to create user');
     }
     return await res.json();
 }

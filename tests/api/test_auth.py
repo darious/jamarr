@@ -1,6 +1,7 @@
 import pytest
 import uuid
 from httpx import AsyncClient
+from app.auth import hash_password
 
 def random_user():
     uid = str(uuid.uuid4())[:8]
@@ -11,37 +12,79 @@ def random_user():
         "display_name": f"User {uid}"
     }
 
+
+async def seed_user(db, user_data):
+    return await db.fetchrow(
+        """
+        INSERT INTO "user" (username, email, password_hash, display_name, is_admin, created_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        RETURNING *
+        """,
+        user_data["username"],
+        user_data["email"],
+        hash_password(user_data["password"]),
+        user_data.get("display_name"),
+        user_data.get("is_admin", False),
+    )
+
 @pytest.mark.asyncio
-async def test_signup_flow(client: AsyncClient, db):
+async def test_public_signup_removed(client: AsyncClient, db):
     u = random_user()
-    
-    # 1. Signup Success
     response = await client.post("/api/auth/signup", json=u)
-    assert response.status_code == 200
+    assert response.status_code in {404, 405}
+
+
+@pytest.mark.asyncio
+async def test_create_user_flow(auth_client: AsyncClient, db, auth_token):
+    u = random_user()
+
+    response = await auth_client.post("/api/auth/users", json=u)
+    assert response.status_code == 201
     data = response.json()
     assert data["username"] == u["username"]
-    assert "access_token" in data
-    assert "jamarr_refresh" in response.cookies
-    
-    # 2. Signup Duplicate (Same User)
-    response = await client.post("/api/auth/signup", json=u)
+    assert data["email"] == u["email"]
+    assert "access_token" not in data
+    assert "jamarr_refresh" not in response.cookies
+
+    response = await auth_client.post("/api/auth/users", json=u)
     assert response.status_code == 400
     assert "already taken" in response.json()["detail"]
 
-    # 3. Signup Invalid Password
     u2 = random_user()
     u2["password"] = "short"
-    response = await client.post("/api/auth/signup", json=u2)
+    response = await auth_client.post("/api/auth/users", json=u2)
     assert response.status_code == 400
     assert "at least 8 characters" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_user_requires_auth(client: AsyncClient, db):
+    response = await client.post("/api/auth/users", json=random_user())
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_create_user_requires_admin(client: AsyncClient, db):
+    normal = random_user()
+    await seed_user(db, normal)
+    login_response = await client.post("/api/auth/login", json={
+        "username": normal["username"],
+        "password": normal["password"],
+    })
+    access_token = login_response.json()["access_token"]
+
+    response = await client.post(
+        "/api/auth/users",
+        json=random_user(),
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin privileges required"
 
 @pytest.mark.asyncio
 async def test_login_flow(client: AsyncClient, db):
     u = random_user()
-    
-    # Setup user
-    await client.post("/api/auth/signup", json=u)
-    await client.post("/api/auth/logout")
+    await seed_user(db, u)
     
     # 1. Login Success
     response = await client.post("/api/auth/login", json={
@@ -52,6 +95,7 @@ async def test_login_flow(client: AsyncClient, db):
     assert "access_token" in response.json()
     assert "jamarr_refresh" in response.cookies
     assert response.json()["username"] == u["username"]
+    assert response.json()["is_admin"] is False
     
     # 2. Login Invalid Password
     response = await client.post("/api/auth/login", json={
@@ -76,15 +120,19 @@ async def test_me_and_logout(client: AsyncClient, db):
     response = await client.get("/api/auth/me")
     assert response.status_code == 401
     
-    # Login (via Signup)
-    signup_response = await client.post("/api/auth/signup", json=u)
-    access_token = signup_response.json()["access_token"]
+    await seed_user(db, u)
+    login_response = await client.post("/api/auth/login", json={
+        "username": u["username"],
+        "password": u["password"]
+    })
+    access_token = login_response.json()["access_token"]
     auth_headers = {"Authorization": f"Bearer {access_token}"}
     
     # Authenticated
     response = await client.get("/api/auth/me", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["username"] == u["username"]
+    assert response.json()["is_admin"] is False
     
     # Logout
     response = await client.post("/api/auth/logout")
@@ -127,8 +175,7 @@ async def test_profile_update(auth_client: AsyncClient, db, auth_token):
     # We need a fresh client to create the 'other' user to avoid logging out 'testuser' from the main client
     # Or just logout/login.
     
-    # Create other user
-    await auth_client.post("/api/auth/signup", json=other)
+    await seed_user(db, other)
     
     # Try to change testuser email to other's email
     response = await auth_client.put("/api/auth/profile", json={
