@@ -7,14 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.db import get_db
-from app.api.deps import get_current_user_jwt
+from app.api.deps import get_current_admin_user_jwt
 from app.scheduler import Scheduler, get_job_definitions, JOB_DEFINITIONS
 
 
 router = APIRouter(
     prefix="/api/scheduler",
     tags=["scheduler"],
-    dependencies=[Depends(get_current_user_jwt)],
+    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 
 

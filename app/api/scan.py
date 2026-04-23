@@ -5,9 +5,9 @@ from typing import Optional
 import json
 
 from app.scanner.scan_manager import ScanManager
-from app.api.deps import get_current_user_jwt
+from app.api.deps import get_current_admin_user_jwt
 
-router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
+router = APIRouter(dependencies=[Depends(get_current_admin_user_jwt)])
 
 
 class ScanRequest(BaseModel):

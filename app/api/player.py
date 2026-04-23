@@ -8,7 +8,11 @@ from typing import Optional
 import asyncpg
 from app.db import get_db
 from app.upnp import UPnPManager
-from app.api.deps import get_current_user_jwt
+from app.api.deps import (
+    get_current_admin_user_jwt,
+    get_current_user_jwt,
+    require_admin_user,
+)
 
 from app.models.player import (
     PlayerState,
@@ -191,7 +195,10 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
     )
 
 
-@router.post("/api/player/queue")
+@router.post(
+    "/api/player/queue",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def set_queue(
     update: QueueUpdate,
     request: Request,
@@ -275,7 +282,10 @@ async def set_queue(
     return {"status": "ok"}
 
 
-@router.post("/api/player/queue/append")
+@router.post(
+    "/api/player/queue/append",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def append_queue(
     update: AppendQueue,
     request: Request,
@@ -299,7 +309,10 @@ async def append_queue(
     return {"status": "ok"}
 
 
-@router.post("/api/player/queue/reorder")
+@router.post(
+    "/api/player/queue/reorder",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def reorder_queue(
     update: QueueUpdate, client_id: str = Depends(get_client_id)
 ):
@@ -381,7 +394,10 @@ async def reorder_queue(
         }
 
 
-@router.post("/api/player/queue/clear")
+@router.post(
+    "/api/player/queue/clear",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def clear_queue(client_id: str = Depends(get_client_id)):
     """
     Empty the active renderer queue and stop playback.
@@ -427,7 +443,10 @@ async def clear_queue(client_id: str = Depends(get_client_id)):
         }
 
 
-@router.post("/api/player/index")
+@router.post(
+    "/api/player/index",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
@@ -560,7 +579,7 @@ async def update_progress(
     return {"status": "ok"}
 
 
-@router.get("/api/scan-status")
+@router.get("/api/scan-status", dependencies=[Depends(get_current_admin_user_jwt)])
 async def get_scan_status(client_id: str = Depends(get_client_id)):
     return {
         "is_scanning": upnp.is_scanning_subnet,
@@ -571,7 +590,14 @@ async def get_scan_status(client_id: str = Depends(get_client_id)):
 
 
 @router.get("/api/renderers")
-async def get_renderers(refresh: bool = False, client_id: str = Depends(get_client_id)):
+async def get_renderers(
+    refresh: bool = False,
+    client_id: str = Depends(get_client_id),
+    user: asyncpg.Record = Depends(get_current_user_jwt),
+):
+    if refresh:
+        require_admin_user(user)
+    
     if refresh:
         await upnp.discover()
         asyncio.create_task(upnp.scan_subnet())
@@ -584,7 +610,10 @@ async def get_renderers(refresh: bool = False, client_id: str = Depends(get_clie
     return [local_device, *renderers]
 
 
-@router.post("/api/player/renderer")
+@router.post(
+    "/api/player/renderer",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
     udn = data.get("udn")
     if not udn:
@@ -605,7 +634,10 @@ async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
     return {"active": udn}
 
 
-@router.post("/api/player/play")
+@router.post(
+    "/api/player/play",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def play_track(
     data: dict,
     request: Request,
@@ -790,7 +822,10 @@ async def play_track(
         return {"status": "local_playback", "message": "Handle playback in browser"}
 
 
-@router.post("/api/player/pause")
+@router.post(
+    "/api/player/pause",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def pause_playback(client_id: str = Depends(get_client_id)):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
@@ -810,7 +845,10 @@ async def pause_playback(client_id: str = Depends(get_client_id)):
         return {"status": "ok"}
 
 
-@router.post("/api/player/resume")
+@router.post(
+    "/api/player/resume",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def resume_playback(client_id: str = Depends(get_client_id)):
     async for db in get_db():
         udn = await get_active_renderer(db, client_id)
@@ -832,7 +870,10 @@ async def resume_playback(client_id: str = Depends(get_client_id)):
     return {"status": "ok"}
 
 
-@router.post("/api/player/volume")
+@router.post(
+    "/api/player/volume",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def set_volume(data: dict, client_id: str = Depends(get_client_id)):
     percent = data.get("percent")
     if percent is None:
@@ -854,7 +895,10 @@ async def set_volume(data: dict, client_id: str = Depends(get_client_id)):
     return {"status": "ok", "percent": percent}
 
 
-@router.post("/api/player/seek")
+@router.post(
+    "/api/player/seek",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def seek_track(data: dict, client_id: str = Depends(get_client_id)):
     seconds = data.get("seconds")
     if seconds is None:
@@ -876,7 +920,7 @@ async def seek_track(data: dict, client_id: str = Depends(get_client_id)):
 
 
 # Re-expose Debug/Manual Added endpoints
-@router.get("/api/player/debug")
+@router.get("/api/player/debug", dependencies=[Depends(get_current_admin_user_jwt)])
 async def debug_info():
     monitors_status = {}
     for udn, task in playback_monitors.items():
@@ -901,7 +945,10 @@ async def debug_info():
     }
 
 
-@router.post("/api/player/add_manual")
+@router.post(
+    "/api/player/add_manual",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+)
 async def add_manual_renderer(data: dict):
     ip = data.get("ip")
     if not ip:
@@ -913,7 +960,7 @@ async def add_manual_renderer(data: dict):
         raise HTTPException(status_code=404, detail="Device not found at IP")
 
 
-@router.get("/api/player/test_upnp")
+@router.get("/api/player/test_upnp", dependencies=[Depends(get_current_admin_user_jwt)])
 async def test_upnp():
     if not upnp.active_renderer:
         return {"error": "No active renderer"}

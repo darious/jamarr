@@ -23,10 +23,12 @@
     unsubUser = currentUser.subscribe((value) => {
       user = value;
       if (authReady && !user) goto("/login");
+      if (authReady && user && !user.is_admin) goto("/");
     });
     unsubAuth = isAuthChecked.subscribe((ready) => {
       authReady = ready;
       if (authReady && !user) goto("/login");
+      if (authReady && user && !user.is_admin) goto("/");
     });
     hydrateUser().catch(() => {});
   });

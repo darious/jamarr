@@ -137,6 +137,7 @@ export interface User {
     username: string;
     email: string;
     display_name: string;
+    is_admin?: boolean;
     accent_color?: string;
     theme_mode?: 'dark' | 'light';
     created_at?: string | null;

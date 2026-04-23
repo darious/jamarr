@@ -173,14 +173,19 @@ async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
     if not existing:
         await db.fetchrow(
             """
-            INSERT INTO "user" (username, email, password_hash, display_name, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            INSERT INTO "user" (username, email, password_hash, display_name, is_admin, created_at)
+            VALUES ($1, $2, $3, $4, TRUE, NOW())
             RETURNING *
             """,
             user_data["username"],
             user_data["email"],
             hash_password(user_data["password"]),
             user_data["display_name"],
+        )
+    else:
+        await db.execute(
+            'UPDATE "user" SET is_admin = TRUE WHERE username = $1',
+            user_data["username"],
         )
 
     response = await client.post("/api/auth/login", json={
@@ -198,8 +203,8 @@ async def auth_token(client: AsyncClient, db: asyncpg.Connection) -> str:
 
     await db.fetchrow(
         """
-        INSERT INTO "user" (username, email, password_hash, display_name, created_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        INSERT INTO "user" (username, email, password_hash, display_name, is_admin, created_at)
+        VALUES ($1, $2, $3, $4, TRUE, NOW())
         RETURNING *
         """,
         user_data["username"],
