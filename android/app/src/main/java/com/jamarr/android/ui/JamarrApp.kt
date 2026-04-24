@@ -52,6 +52,7 @@ import com.jamarr.android.ui.screens.ChartsScreen
 import com.jamarr.android.ui.screens.HistoryScreen
 import com.jamarr.android.ui.screens.HomeScreen
 import com.jamarr.android.ui.screens.LoginScreen
+import com.jamarr.android.ui.screens.NowPlayingSheet
 import com.jamarr.android.ui.screens.PlaylistDetailScreen
 import com.jamarr.android.ui.screens.PlaylistsScreen
 import com.jamarr.android.ui.state.JamarrAppContext
@@ -113,6 +114,9 @@ private fun JamarrRoot() {
     var playbackPosition by remember { mutableStateOf(0L) }
     var playbackDuration by remember { mutableStateOf(0L) }
     var playbackQueue by remember { mutableStateOf<List<ResolvedTrack>>(emptyList()) }
+    var shuffleEnabled by remember { mutableStateOf(false) }
+    var repeatMode by remember { mutableStateOf(0) }
+    var showNowPlaying by remember { mutableStateOf(false) }
 
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -194,6 +198,8 @@ private fun JamarrRoot() {
             isPlaying = playbackController.isPlaying
             playbackPosition = playbackController.currentPosition
             playbackDuration = playbackController.duration
+            shuffleEnabled = playbackController.shuffleEnabled
+            repeatMode = playbackController.repeatMode
             val mediaId = playbackController.currentMediaId
             if (mediaId != null && mediaId != nowPlayingTrack?.id?.toString()) {
                 val current = playbackQueue.find { it.track.id.toString() == mediaId }
@@ -256,7 +262,7 @@ private fun JamarrRoot() {
         Box(modifier = Modifier.fillMaxSize().background(JamarrColors.Bg)) {
             val atRoot = isRootRoute(currentRoute)
             val activeTab = routeToTab(currentRoute) ?: JamarrTab.Home
-            val navBarHeight = if (atRoot) JamarrDims.BottomNavHeight else 56.dp
+            val navBarHeight = if (atRoot) JamarrDims.BottomNavHeight else 0.dp
             val miniHeight = if (nowPlayingTrack != null) JamarrDims.MiniPlayerHeight else 0.dp
             val contentPadding = PaddingValues(bottom = navBarHeight + miniHeight)
 
@@ -492,8 +498,10 @@ private fun JamarrRoot() {
                             nowPlayingTrack = null
                             nowPlayingArtworkUrl = null
                             playbackQueue = emptyList()
+                            showNowPlaying = false
                         },
                         onSeek = { playbackController.seekTo(it) },
+                        onClick = { showNowPlaying = true },
                     )
                 }
                 if (atRoot) {
@@ -508,6 +516,36 @@ private fun JamarrRoot() {
                         },
                     )
                 }
+            }
+
+            // Now Playing full-screen overlay
+            val npTrack = nowPlayingTrack
+            if (npTrack != null) {
+                NowPlayingSheet(
+                    visible = showNowPlaying,
+                    track = npTrack,
+                    artworkUrl = nowPlayingArtworkUrl,
+                    isPlaying = isPlaying,
+                    progressMs = playbackPosition,
+                    durationMs = playbackDuration,
+                    shuffleEnabled = shuffleEnabled,
+                    repeatMode = repeatMode,
+                    queue = playbackQueue,
+                    onDismiss = { showNowPlaying = false },
+                    onToggle = { playbackController.togglePlayPause() },
+                    onPrevious = { playbackController.previous() },
+                    onNext = { playbackController.next() },
+                    onSeek = { playbackController.seekTo(it) },
+                    onShuffle = { playbackController.toggleShuffle() },
+                    onRepeat = { playbackController.cycleRepeatMode() },
+                    onQueueItemClick = { index ->
+                        playbackController.playQueueItem(index)
+                    },
+                    onArtistClick = { artistName ->
+                        showNowPlaying = false
+                        navController.navigate(Routes.artist(mbid = null, name = artistName))
+                    },
+                )
             }
         }
     }
