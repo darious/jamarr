@@ -6,6 +6,7 @@ export interface Artist {
     image_url: string | null;
     art_sha1?: string | null;
     background_sha1?: string | null;
+    is_favorite?: boolean;
     bio: string | null;
     similar_artists: {
         name: string;
@@ -88,6 +89,7 @@ export interface Album {
     mbid?: string;
     album_mbid?: string;
     art_sha1?: string | null;
+    is_favorite?: boolean;
     artist_name: string;
     artist_mbid?: string;
     is_hires: number;
@@ -210,7 +212,14 @@ export async function fetchWithAuth(
 
 export async function fetchArtists(
     fetchFn: any = fetchWithAuth,
-    options: { limit?: number; offset?: number; name?: string; mbid?: string, startsWith?: string } = {}
+    options: {
+        limit?: number;
+        offset?: number;
+        name?: string;
+        mbid?: string;
+        startsWith?: string;
+        favoriteOnly?: boolean;
+    } = {}
 ): Promise<Artist[]> {
     const params = new URLSearchParams();
     if (options.limit !== undefined) params.append('limit', options.limit.toString());
@@ -218,6 +227,7 @@ export async function fetchArtists(
     if (options.name !== undefined) params.append('name', options.name);
     if (options.mbid !== undefined) params.append('mbid', options.mbid);
     if (options.startsWith !== undefined) params.append('starts_with', options.startsWith);
+    if (options.favoriteOnly) params.append('favorite_only', 'true');
 
     const res = await fetchFn(`/api/artists?${params.toString()}`);
     if (!res.ok) throw new Error('Failed to fetch artists');
@@ -252,6 +262,24 @@ export async function fetchAlbums(params: { artist?: string; artistMbid?: string
     const res = await fetchFn(url);
     if (!res.ok) throw new Error('Failed to fetch albums');
     return await res.json();
+}
+
+export async function setArtistFavorite(artistMbid: string, favorite: boolean): Promise<void> {
+    const res = await fetchWithAuth(`/api/favorites/artists/${encodeURIComponent(artistMbid)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ favorite })
+    });
+    if (!res.ok) throw new Error('Failed to update artist favorite');
+}
+
+export async function setReleaseFavorite(albumMbid: string, favorite: boolean): Promise<void> {
+    const res = await fetchWithAuth(`/api/favorites/releases/${encodeURIComponent(albumMbid)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ favorite })
+    });
+    if (!res.ok) throw new Error('Failed to update release favorite');
 }
 
 export async function fetchTracks(params: { album?: string, artist?: string, albumMbid?: string } = {}, fetchFn: any = fetchWithAuth): Promise<Track[]> {

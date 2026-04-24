@@ -4,11 +4,17 @@
   import { goto } from "$app/navigation";
   import TabButton from "$lib/components/TabButton.svelte";
 
-  export let data: { artists: Artist[]; start: string; index: string[] };
+  export let data: {
+    artists: Artist[];
+    start: string;
+    index: string[];
+    favoriteOnly?: boolean;
+  };
 
   let artists: Artist[] = data.artists;
 
   let showAllArtists = false;
+  let showFavoriteArtists = false;
   let visibleArtists: Artist[] = artists;
   let activeFilter = data.start;
 
@@ -17,6 +23,7 @@
   $: {
     artists = data.artists;
     activeFilter = data.start;
+    showFavoriteArtists = !!data.favoriteOnly;
 
     const idx = data.index || [];
     const hasHash = idx.includes("#");
@@ -38,8 +45,21 @@
     ? artists
     : artists.filter(isPrimaryArtist);
 
+  function buildQuery(filter: string, favoriteOnly = showFavoriteArtists) {
+    const params = new URLSearchParams();
+    params.set("start", filter);
+    if (favoriteOnly) {
+      params.set("favorite_only", "1");
+    }
+    return `?${params.toString()}`;
+  }
+
   function handleFilterClick(filter: string) {
-    goto(`?start=${filter}`, { keepFocus: true });
+    goto(buildQuery(filter), { keepFocus: true });
+  }
+
+  function toggleFavoriteFilter() {
+    goto(buildQuery(activeFilter, !showFavoriteArtists), { keepFocus: true });
   }
 </script>
 
@@ -71,7 +91,32 @@
       </div>
 
       <!-- RIGHT: Primary / All -->
-      <div class="flex justify-end whitespace-nowrap">
+      <div class="flex justify-end whitespace-nowrap gap-3">
+        <button
+          type="button"
+          class={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors ${
+            showFavoriteArtists
+              ? "border-rose-500/50 bg-rose-500/15 text-default"
+              : "border-subtle bg-surface-2 text-muted hover:text-default"
+          }`}
+          on:click={toggleFavoriteFilter}
+          aria-pressed={showFavoriteArtists}
+          title={showFavoriteArtists ? "Show all artists" : "Show favorite artists only"}
+        >
+          <svg
+            class={`h-4 w-4 ${showFavoriteArtists ? "fill-rose-500 text-rose-500" : "fill-none text-current"}`}
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 21s-6.716-4.31-9.193-8.115C1.09 10.25 1.81 6.91 4.68 5.526c1.9-.916 4.154-.468 5.78 1.147L12 8.213l1.54-1.54c1.626-1.615 3.88-2.063 5.78-1.147 2.87 1.384 3.59 4.724 1.873 7.359C18.716 16.69 12 21 12 21z"
+            />
+          </svg>
+          <span>Favorites</span>
+        </button>
         <div class="flex bg-surface-2 rounded-lg p-1 gap-1">
           <TabButton
             active={!showAllArtists}
@@ -146,13 +191,42 @@
           </div>
         </div>
       </div>
+
+      <button
+        type="button"
+        class={`inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-colors ${
+          showFavoriteArtists
+            ? "border-rose-500/50 bg-rose-500/15 text-default"
+            : "border-subtle bg-surface-2 text-muted"
+        }`}
+        on:click={toggleFavoriteFilter}
+        aria-pressed={showFavoriteArtists}
+      >
+        <svg
+          class={`h-4 w-4 ${showFavoriteArtists ? "fill-rose-500 text-rose-500" : "fill-none text-current"}`}
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="1.8"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M12 21s-6.716-4.31-9.193-8.115C1.09 10.25 1.81 6.91 4.68 5.526c1.9-.916 4.154-.468 5.78 1.147L12 8.213l1.54-1.54c1.626-1.615 3.88-2.063 5.78-1.147 2.87 1.384 3.59 4.724 1.873 7.359C18.716 16.69 12 21 12 21z"
+          />
+        </svg>
+        <span>{showFavoriteArtists ? "Showing Favorites" : "Show Favorites Only"}</span>
+      </button>
     </div>
   </div>
 
   <div class="flex flex-col gap-10">
     {#if visibleArtists.length === 0}
       <div class="text-muted text-lg italic py-10 text-center">
-        No artists found starting with "{activeFilter}"
+        {#if showFavoriteArtists}
+          No favorite artists found.
+        {:else}
+          No artists found starting with "{activeFilter}"
+        {/if}
         {#if !showAllArtists}
           <br />
           <span class="text-sm"

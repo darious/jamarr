@@ -6,11 +6,12 @@
   import IconButton from "$components/IconButton.svelte";
   import TrackCard from "$components/TrackCard.svelte";
   import { downloadTracks } from "$lib/helpers/downloader";
-  import { getArtUrl } from "$lib/api";
+  import { getArtUrl, setReleaseFavorite } from "$lib/api";
 
   let showPlaylistModal = false;
   let selectedTrackIds: number[] = [];
   let isDescriptionExpanded = false;
+  let favoritePending = false;
 
   function openPlaylistModal(trackId: number) {
     selectedTrackIds = [trackId];
@@ -23,6 +24,36 @@
     tracks: Track[];
     albumMeta?: Album;
   };
+
+  async function toggleAlbumFavorite() {
+    const albumMbid = data.albumMeta?.album_mbid || data.albumMeta?.mb_release_id;
+    if (!albumMbid || favoritePending || !data.albumMeta) return;
+
+    const nextFavorite = !data.albumMeta.is_favorite;
+    favoritePending = true;
+    data = {
+      ...data,
+      albumMeta: {
+        ...data.albumMeta,
+        is_favorite: nextFavorite,
+      },
+    };
+
+    try {
+      await setReleaseFavorite(albumMbid, nextFavorite);
+    } catch (e) {
+      console.error("Failed to update release favorite", e);
+      data = {
+        ...data,
+        albumMeta: {
+          ...data.albumMeta,
+          is_favorite: !nextFavorite,
+        },
+      };
+    } finally {
+      favoritePending = false;
+    }
+  }
 
   // Reactive album art URL - recalculates when data changes
   $: albumArtUrl = (() => {
@@ -235,11 +266,38 @@
         <!-- Album details -->
         <div class="space-y-4">
           <div>
-            <h1
-              class="text-3xl font-bold tracking-tight text-default leading-tight sm:text-4xl md:text-5xl"
-            >
-              {data.album}
-            </h1>
+            <div class="flex items-start gap-3">
+              <h1
+                class="min-w-0 text-3xl font-bold tracking-tight text-default leading-tight sm:text-4xl md:text-5xl"
+              >
+                {data.album}
+              </h1>
+              {#if data.albumMeta?.album_mbid || data.albumMeta?.mb_release_id}
+                <IconButton
+                  variant={data.albumMeta?.is_favorite ? "primary" : "outline"}
+                  title={data.albumMeta?.is_favorite ? "Remove release favorite" : "Favorite release"}
+                  onClick={toggleAlbumFavorite}
+                  className={`shrink-0 ${
+                    data.albumMeta?.is_favorite
+                      ? "border-rose-500 bg-rose-500 text-white hover:bg-rose-400"
+                      : "border-subtle bg-surface-2 text-default hover:bg-surface-3"
+                  } ${favoritePending ? "opacity-70" : ""}`}
+                >
+                  <svg
+                    class={`h-5 w-5 ${data.albumMeta?.is_favorite ? "fill-current" : "fill-none"}`}
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M12 21s-6.716-4.31-9.193-8.115C1.09 10.25 1.81 6.91 4.68 5.526c1.9-.916 4.154-.468 5.78 1.147L12 8.213l1.54-1.54c1.626-1.615 3.88-2.063 5.78-1.147 2.87 1.384 3.59 4.724 1.873 7.359C18.716 16.69 12 21 12 21z"
+                    />
+                  </svg>
+                </IconButton>
+              {/if}
+            </div>
             <div class="mt-2 text-lg font-medium text-muted sm:text-xl md:text-2xl">
               {#if data.albumMeta?.artists && data.albumMeta.artists.length > 0}
                 {#each data.albumMeta.artists as artist, i}

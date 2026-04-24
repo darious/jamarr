@@ -8,6 +8,7 @@
     triggerPearlarrDownload,
     getArtUrl,
     getPlaylist,
+    setArtistFavorite,
   } from "$lib/api";
   import { goto, invalidateAll } from "$app/navigation";
   import IconButton from "$components/IconButton.svelte";
@@ -59,6 +60,25 @@
   let scanningMissing = false;
   // Pearlarr State
   let downloadingMbids = new Set<string>();
+  let favoritePending = false;
+
+  async function toggleArtistFavorite() {
+    if (!artist?.mbid || favoritePending) return;
+
+    const nextFavorite = !artist.is_favorite;
+    favoritePending = true;
+    artist = { ...artist, is_favorite: nextFavorite };
+
+    try {
+      await setArtistFavorite(artist.mbid, nextFavorite);
+    } catch (e) {
+      console.error("Failed to update artist favorite", e);
+      artist = { ...artist, is_favorite: !nextFavorite };
+      message = "Failed to update favorite";
+    } finally {
+      favoritePending = false;
+    }
+  }
 
   async function downloadAlbum(mbid: string) {
     if (downloadingMbids.has(mbid)) return;
@@ -118,7 +138,7 @@
   }
 
   // Update artist when route data changes (client nav)
-  $: if (data.artist !== artist) {
+  $: if (data.artist && data.artist.mbid !== artist?.mbid) {
     artist = data.artist;
   }
   $: if (data.playlists !== playlists) {
@@ -839,11 +859,38 @@
     <!-- Hero Content -->
     <div class="absolute inset-0 flex items-end px-4 pb-8 md:px-12 md:pb-12 xl:px-16">
       <div class="w-full space-y-2">
-        <h1
-          class="text-4xl font-bold tracking-tight text-white drop-shadow-2xl sm:text-5xl md:text-8xl lg:text-9xl"
-        >
-          {artist?.name ?? data.name}
-        </h1>
+        <div class="flex items-end gap-3 md:gap-4">
+          <h1
+            class="min-w-0 text-4xl font-bold tracking-tight text-white drop-shadow-2xl sm:text-5xl md:text-8xl lg:text-9xl"
+          >
+            {artist?.name ?? data.name}
+          </h1>
+          {#if artist?.mbid}
+            <IconButton
+              variant={artist.is_favorite ? "primary" : "outline"}
+              title={artist.is_favorite ? "Remove artist favorite" : "Favorite artist"}
+              onClick={toggleArtistFavorite}
+              className={`mb-1 shrink-0 border-white/30 ${
+                artist.is_favorite
+                  ? "bg-rose-500 text-white hover:bg-rose-400"
+                  : "bg-black/20 text-white hover:bg-black/35"
+              } ${favoritePending ? "opacity-70" : ""}`}
+            >
+              <svg
+                class={`h-5 w-5 md:h-6 md:w-6 ${artist.is_favorite ? "fill-current" : "fill-none"}`}
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="1.8"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M12 21s-6.716-4.31-9.193-8.115C1.09 10.25 1.81 6.91 4.68 5.526c1.9-.916 4.154-.468 5.78 1.147L12 8.213l1.54-1.54c1.626-1.615 3.88-2.063 5.78-1.147 2.87 1.384 3.59 4.724 1.873 7.359C18.716 16.69 12 21 12 21z"
+                />
+              </svg>
+            </IconButton>
+          {/if}
+        </div>
         {#if artist?.genres?.length}
           <div class="flex flex-wrap gap-2 text-sm font-medium text-white/70 sm:text-base md:text-lg">
             {artist.genres.map((g) => g.name).join(" · ")}
