@@ -40,7 +40,6 @@ import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.playback.JamarrPlaybackController
 import com.jamarr.android.playback.ResolvedTrack
 import com.jamarr.android.ui.components.MiniPlayer
-import com.jamarr.android.ui.nav.BackBar
 import com.jamarr.android.ui.nav.BottomNavBar
 import com.jamarr.android.ui.nav.JamarrTab
 import com.jamarr.android.ui.nav.Routes
@@ -496,8 +495,6 @@ private fun JamarrRoot() {
                             }
                         },
                     )
-                } else {
-                    BackBar(onBack = { navController.popBackStack() })
                 }
             }
         }
