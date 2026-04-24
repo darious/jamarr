@@ -37,6 +37,7 @@ class JamarrApiClient(
     private val onRefreshFailed: suspend () -> Unit = {},
     private val json: Json = Json {
         ignoreUnknownKeys = true
+        coerceInputValues = true
     },
 ) {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
