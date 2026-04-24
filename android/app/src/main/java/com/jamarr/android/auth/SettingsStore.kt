@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
 
@@ -19,6 +20,7 @@ class SettingsStore(private val context: Context) {
     private val serverUrlKey = stringPreferencesKey("server_url")
     private val accessTokenKey = stringPreferencesKey("access_token")
     private val activeTabKey = intPreferencesKey("active_tab")
+    private val cookiesKey = stringSetPreferencesKey("cookies_v1")
 
     suspend fun load(): StoredSession {
         val prefs = context.jamarrDataStore.data.first()
@@ -50,6 +52,17 @@ class SettingsStore(private val context: Context) {
     suspend fun saveActiveTab(index: Int) {
         context.jamarrDataStore.edit { prefs ->
             prefs[activeTabKey] = index
+        }
+    }
+
+    suspend fun loadCookies(): Set<String> {
+        return context.jamarrDataStore.data.first()[cookiesKey].orEmpty()
+    }
+
+    suspend fun saveCookies(cookies: Collection<String>) {
+        context.jamarrDataStore.edit { prefs ->
+            if (cookies.isEmpty()) prefs.remove(cookiesKey)
+            else prefs[cookiesKey] = cookies.toSet()
         }
     }
 }

@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,10 +29,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.jamarr.android.auth.SettingsStore
+import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.HomeAlbum
 import com.jamarr.android.data.HomeArtist
 import com.jamarr.android.data.HomeContent
 import com.jamarr.android.data.JamarrApiClient
+import com.jamarr.android.data.JamarrCookieJar
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.playback.JamarrPlaybackController
@@ -60,6 +63,8 @@ import com.jamarr.android.ui.theme.JamarrTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+private const val DEFAULT_SERVER_URL = "https://jamarr.darious.co.uk"
+
 @Composable
 fun JamarrApp() {
     JamarrTheme {
@@ -75,15 +80,27 @@ fun JamarrApp() {
 @Composable
 private fun JamarrRoot() {
     val context = LocalContext.current
-    val apiClient = remember { JamarrApiClient() }
     val settingsStore = remember { SettingsStore(context.applicationContext) }
+    val tokenHolder = remember { TokenHolder() }
+    val cookieJar = remember { JamarrCookieJar(settingsStore) }
+    val apiClient = remember {
+        JamarrApiClient(
+            tokenHolder = tokenHolder,
+            cookieJar = cookieJar,
+            onTokenRefreshed = { newToken -> settingsStore.saveAccessToken(newToken) },
+            onRefreshFailed = {
+                settingsStore.clearAccessToken()
+                cookieJar.clear()
+            },
+        )
+    }
     val playbackController = remember { JamarrPlaybackController(context.applicationContext) }
     val scope = rememberCoroutineScope()
 
-    var serverUrl by rememberSaveable { mutableStateOf("") }
+    var serverUrl by rememberSaveable { mutableStateOf(DEFAULT_SERVER_URL) }
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
-    var accessToken by rememberSaveable { mutableStateOf("") }
+    val accessToken by tokenHolder.token.collectAsState()
     var status by rememberSaveable { mutableStateOf("Connect to Jamarr.") }
     var busy by remember { mutableStateOf(false) }
 
@@ -102,18 +119,20 @@ private fun JamarrRoot() {
     val currentRoute = backStackEntry?.destination?.route
 
     fun refreshHome() {
-        if (serverUrl.isBlank() || accessToken.isBlank()) return
+        val token = tokenHolder.get()
+        if (serverUrl.isBlank() || token.isBlank()) return
         scope.launch {
-            runCatching { apiClient.home(serverUrl, accessToken) }
+            runCatching { apiClient.home(serverUrl, token) }
                 .onSuccess { homeContent = it }
                 .onFailure { status = it.message ?: "Failed to load home." }
         }
     }
 
     fun runSearch() {
-        if (serverUrl.isBlank() || accessToken.isBlank() || query.trim().length < 2) return
+        val token = tokenHolder.get()
+        if (serverUrl.isBlank() || token.isBlank() || query.trim().length < 2) return
         scope.launch {
-            runCatching { apiClient.search(serverUrl, accessToken, query.trim()) }
+            runCatching { apiClient.search(serverUrl, token, query.trim()) }
                 .onSuccess { searchResults = it }
                 .onFailure { status = it.message ?: "Search failed." }
         }
@@ -121,10 +140,11 @@ private fun JamarrRoot() {
 
     suspend fun playTracks(queue: List<SearchTrack>, startIndex: Int) {
         if (queue.isEmpty()) return
+        val token = tokenHolder.get()
         val resolved = queue.map { queueTrack ->
             ResolvedTrack(
                 track = queueTrack,
-                streamUrl = apiClient.streamUrl(serverUrl, accessToken, queueTrack.id),
+                streamUrl = apiClient.streamUrl(serverUrl, token, queueTrack.id),
                 artworkUrl = apiClient.artworkUrl(serverUrl, queueTrack.artSha1),
             )
         }
@@ -145,10 +165,11 @@ private fun JamarrRoot() {
     }
 
     LaunchedEffect(Unit) {
+        cookieJar.prime()
         val saved = settingsStore.load()
-        serverUrl = saved.serverUrl
-        accessToken = saved.accessToken
+        serverUrl = saved.serverUrl.ifBlank { DEFAULT_SERVER_URL }
         if (saved.accessToken.isNotBlank()) {
+            tokenHolder.set(saved.accessToken)
             status = "Welcome back."
             refreshHome()
             val saved_route = JamarrTab.fromIndex(saved.activeTabIndex).route()
@@ -200,7 +221,7 @@ private fun JamarrRoot() {
                         settingsStore.saveServerUrl(normalized)
                         settingsStore.saveAccessToken(response.accessToken)
                         serverUrl = normalized
-                        accessToken = response.accessToken
+                        tokenHolder.set(response.accessToken)
                         password = ""
                     }
                         .onSuccess {
@@ -284,9 +305,11 @@ private fun JamarrRoot() {
                         },
                         onLogout = {
                             scope.launch {
+                                runCatching { apiClient.logout(serverUrl) }
                                 settingsStore.clearAccessToken()
+                                cookieJar.clear()
+                                tokenHolder.clear()
                                 playbackController.stop()
-                                accessToken = ""
                                 homeContent = HomeContent()
                                 searchResults = SearchResponse()
                                 query = ""
