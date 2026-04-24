@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.jamarr.android.ui.components.ChartsIcon
+import com.jamarr.android.ui.components.HeartIcon
 import com.jamarr.android.ui.components.HistoryIcon
 import com.jamarr.android.ui.components.HomeIcon
 import com.jamarr.android.ui.components.PlaylistIcon
@@ -68,6 +69,7 @@ private fun NavItem(
         Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
             when (tab) {
                 JamarrTab.Home -> HomeIcon(tint = tint)
+                JamarrTab.Favourites -> HeartIcon(tint = tint, filled = active, size = 22.dp)
                 JamarrTab.Playlists -> PlaylistIcon(tint = tint)
                 JamarrTab.Charts -> ChartsIcon(tint = tint)
                 JamarrTab.History -> HistoryIcon(tint = tint)

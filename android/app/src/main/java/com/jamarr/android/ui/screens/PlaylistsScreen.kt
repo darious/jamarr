@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jamarr.android.data.PlaylistSummary
 import com.jamarr.android.ui.components.PlaylistCover
+import com.jamarr.android.ui.components.RefreshIcon
 import com.jamarr.android.ui.components.seedColor
 import com.jamarr.android.ui.state.LocalJamarrContext
 import com.jamarr.android.ui.theme.JamarrColors
@@ -50,8 +52,9 @@ fun PlaylistsScreen(
     val ctx = LocalJamarrContext.current
     val playlists = remember { mutableStateOf<List<PlaylistSummary>>(emptyList()) }
     val error = remember { mutableStateOf<String?>(null) }
+    val refreshTick = remember { mutableStateOf(0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(refreshTick.value) {
         runCatching { ctx.apiClient.playlists(ctx.serverUrl, ctx.accessToken) }
             .onSuccess { playlists.value = it }
             .onFailure { error.value = it.message }
@@ -65,21 +68,36 @@ fun PlaylistsScreen(
             ),
         ) {
             item {
-                Column(
+                Row(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .statusBarsPadding()
                         .padding(
                             horizontal = JamarrDims.ScreenPadding,
                             vertical = 16.dp,
                         ),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Playlists", style = JamarrType.ScreenTitle, color = JamarrColors.Text)
-                    Text(
-                        text = "${playlists.value.size} playlist${if (playlists.value.size == 1) "" else "s"}",
-                        style = JamarrType.Caption,
-                        color = JamarrColors.Muted,
-                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text("Playlists", style = JamarrType.ScreenTitle, color = JamarrColors.Text)
+                        Text(
+                            text = "${playlists.value.size} playlist${if (playlists.value.size == 1) "" else "s"}",
+                            style = JamarrType.Caption,
+                            color = JamarrColors.Muted,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .clickable { refreshTick.value += 1 },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        RefreshIcon(tint = JamarrColors.Muted, size = 20.dp)
+                    }
                 }
             }
             if (playlists.value.isEmpty() && error.value != null) {

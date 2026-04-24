@@ -423,6 +423,156 @@ The order is:
 6. Phone UI expansion.
 7. Optional hardening.
 
+## Stage 3 Plan: Android Auto v1 - 2026-04-25
+
+Stages 0-2 are complete. Stage 5 (Phone UI) is well past its original scope:
+home, search, artist detail, album detail, playlists, charts, history,
+favourites, queue/now playing, and history+scrobble reporting all ship in the
+phone app. The next milestone is in-car playback through Android Auto.
+
+This section captures the concrete decisions made before any car-related code.
+Stage 4's `/api/android` adapter is **not** part of v1 - existing endpoints map
+to the planned browse tree without change.
+
+### Auth in the car
+
+The car has no UI for typing a password. The `MediaLibraryService` runs on the
+phone and reuses the access token already in DataStore.
+
+- If the token is missing or expired beyond refresh, the root browse tree
+  returns a single non-playable item titled "Sign in on phone to use Jamarr".
+- The existing `JamarrApiClient` auth interceptor handles refresh transparently
+  while the car session is live.
+- No in-car login flow.
+
+### Service architecture
+
+Upgrade the existing `JamarrPlaybackService extends MediaSessionService` to
+extend `MediaLibraryService` instead. `MediaLibraryService` is a subclass of
+`MediaSessionService`, so the phone behaviour is preserved and the same service
+serves both phone and car. No second service.
+
+### Browse tree
+
+Drive-safe and shallow. The artist and album catalogues are too large to be
+useful as flat lists in the car, so they are intentionally **not** root nodes -
+voice/text search is the entry point for "play <something specific>".
+
+```
+Root
+├── Recently Played
+│   ├── Albums   → album    → tracks
+│   └── Artists  → artist   → albums   → tracks
+├── Favourites
+│   ├── Artists  → artist   → albums   → tracks
+│   └── Releases → album    → tracks
+└── Playlists    → playlist → tracks
+```
+
+Tap behaviour:
+
+- Track: play it; queue siblings (album/playlist) for prev/next.
+- Album / playlist: play from track 1.
+- Artist: show albums (no auto-play; "Shuffle artist" deferred).
+
+Search is wired through `MediaLibrarySession.Callback.onSearch` later (see
+deferred section). For v1, AA's text search field will be empty.
+
+### Stream URL lifecycle
+
+Stream URLs are short-lived, signed tokens. The current phone code resolves the
+whole queue's URLs up front, which would fail mid-drive on long playlists.
+
+For Android Auto - and the phone, since they share the service - switch to lazy
+resolution: implement a Media3 `ResolvingDataSource.Factory` that calls
+`GET /api/stream-url/{id}` immediately before each track plays. The `MediaItem`
+holds the track id; the data source resolves it to a fresh URL on demand.
+
+No backend change. This also fixes any "queue dies after N tracks" issue from
+expired tokens.
+
+### Artwork
+
+`MediaMetadata.artworkUri` is fetched by the AA system process, not by our app,
+so it can't carry our bearer token. v1 embeds bytes:
+
+- Fetch artwork via OkHttp/Coil using the existing
+  `/api/art/file/{sha1}?max_size=400` endpoint (auth header attached as normal).
+- Set the bytes on `MediaMetadata.artworkData`.
+- ~30-100 KB per track in the session bundle - acceptable for now.
+
+If memory/IPC cost becomes a problem, revisit with a signed art URL endpoint.
+
+### History reporting and Last.fm scrobbling
+
+These ship in v1 (not deferred). The phone already calls
+`POST /api/player/queue`, `POST /api/player/index`, and
+`POST /api/player/progress` from the polling loop in `JamarrApp.kt`. The same
+loop must keep running while AA is connected; nothing about car playback should
+disable it.
+
+The polling loop is driven by `MediaController` state, not by the foreground
+UI, so it should continue working when the phone screen is off and AA is in
+control. Verify this explicitly during DHU testing - history rows for
+in-car playback must appear at the same 30s/20% threshold the web UI uses.
+
+### Manifest and discovery
+
+- Add `res/xml/automotive_app_desc.xml`:
+
+  ```xml
+  <automotiveApp>
+      <uses name="media"/>
+  </automotiveApp>
+  ```
+
+- Application-level meta-data:
+
+  ```xml
+  <meta-data
+      android:name="com.google.android.gms.car.application"
+      android:resource="@xml/automotive_app_desc"/>
+  ```
+
+- The service intent filter keeps `MediaSessionService` and adds
+  `MediaLibraryService` (Media3 dispatches to both).
+
+### Testing
+
+Use Android Studio's Desktop Head Unit (DHU) to iterate without driving:
+
+- Install DHU via the SDK Manager (Extras > Android Auto Desktop Head Unit).
+- Phone needs USB debugging + AA developer mode enabled.
+- A small helper script under `android/scripts/dhu.sh` should:
+  - check `adb` is available,
+  - start the phone-side AA in head-unit-server mode,
+  - launch the DHU binary,
+  - tear everything down on Ctrl-C.
+
+The `android/README.md` (or root README) needs a "Testing in the car" section
+linking to the script and noting prerequisites. Real-car validation is the
+final step.
+
+### Deferred to v2
+
+- Voice/text search (`onSearch`) - intentional v1 omission.
+- Custom session commands (favourite from car, etc.).
+- Offline downloads.
+- Pagination/alphabet scaffolding for full Artists/Albums browse - rejected
+  for v1; search covers the use case.
+- The `/api/android` adapter - revisit only if a v1 awkwardness justifies it.
+
+### Implementation order
+
+1. Lazy stream resolution via `ResolvingDataSource.Factory` (fixes phone bug
+   too).
+2. Service upgrade to `MediaLibraryService` + manifest changes.
+3. Root browse tree + Recently Played + Favourites + Playlists nodes.
+4. Drilldown nodes (album→tracks, artist→albums, playlist→tracks).
+5. Embedded artwork on `MediaMetadata`.
+6. DHU helper script + README.
+7. Verify history/scrobble reporting still works under AA.
+
 ## Current Implementation Status - 2026-04-21
 
 The native Android proof of concept now exists under `android/`.

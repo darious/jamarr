@@ -22,6 +22,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +37,7 @@ import coil3.compose.AsyncImage
 import com.jamarr.android.data.AlbumDetail
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.ui.components.AlbumArt
+import com.jamarr.android.ui.components.HeartIcon
 import com.jamarr.android.ui.components.PlayShuffleActions
 import com.jamarr.android.ui.components.TrackRow
 import com.jamarr.android.ui.components.formatDuration
@@ -59,9 +62,11 @@ fun AlbumDetailScreen(
     contentPadding: PaddingValues,
 ) {
     val ctx = LocalJamarrContext.current
+    val scope = rememberCoroutineScope()
     val detail = remember { mutableStateOf<AlbumDetail?>(null) }
     val tracks = remember { mutableStateOf<List<SearchTrack>>(emptyList()) }
     val errorState = remember { mutableStateOf<String?>(null) }
+    val isFavorite = remember { mutableStateOf(false) }
 
     LaunchedEffect(albumMbid, albumTitle, artistName, artistMbid) {
         errorState.value = null
@@ -72,8 +77,10 @@ fun AlbumDetailScreen(
                 albumMbid = albumMbid,
                 artistMbid = artistMbid,
             )
-        }.onSuccess { detail.value = it }
-            .onFailure { errorState.value = it.message }
+        }.onSuccess {
+            detail.value = it
+            isFavorite.value = it?.isFavorite == true
+        }.onFailure { errorState.value = it.message }
 
         runCatching {
             ctx.apiClient.albumTracks(
@@ -104,6 +111,7 @@ fun AlbumDetailScreen(
             ),
         ) {
             item {
+                val resolvedAlbumMbid = detail.value?.albumMbid ?: albumMbid
                 AlbumHero(
                     title = title,
                     artist = artist,
@@ -114,6 +122,23 @@ fun AlbumDetailScreen(
                     seed = title + artist,
                     onBack = onBack,
                     onArtistClick = onArtistClick,
+                    canFavorite = !resolvedAlbumMbid.isNullOrBlank(),
+                    isFavorite = isFavorite.value,
+                    onToggleFavorite = {
+                        val mbid = resolvedAlbumMbid ?: return@AlbumHero
+                        val desired = !isFavorite.value
+                        isFavorite.value = desired
+                        scope.launch {
+                            runCatching {
+                                ctx.apiClient.setAlbumFavorite(
+                                    serverUrl = ctx.serverUrl,
+                                    accessToken = ctx.accessToken,
+                                    albumMbid = mbid,
+                                    favorite = desired,
+                                )
+                            }.onFailure { isFavorite.value = !desired }
+                        }
+                    },
                 )
             }
             item {
@@ -171,6 +196,9 @@ private fun AlbumHero(
     seed: String,
     onBack: () -> Unit,
     onArtistClick: () -> Unit,
+    canFavorite: Boolean,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
 ) {
     val top = seedColor(seed)
     Box(
@@ -209,6 +237,25 @@ private fun AlbumHero(
             contentAlignment = Alignment.Center,
         ) {
             Text(text = "←", color = Color.White, style = JamarrType.CardTitle)
+        }
+        if (canFavorite) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(JamarrDims.ScreenPadding)
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x66000000))
+                    .clickable(onClick = onToggleFavorite),
+                contentAlignment = Alignment.Center,
+            ) {
+                HeartIcon(
+                    tint = if (isFavorite) JamarrColors.Primary else Color.White,
+                    filled = isFavorite,
+                    size = 18.dp,
+                )
+            }
         }
         Column(
             modifier = Modifier
