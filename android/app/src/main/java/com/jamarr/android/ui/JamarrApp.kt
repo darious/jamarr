@@ -117,6 +117,7 @@ private fun JamarrRoot() {
     var shuffleEnabled by remember { mutableStateOf(false) }
     var repeatMode by remember { mutableStateOf(0) }
     var showNowPlaying by remember { mutableStateOf(false) }
+    var clientId by remember { mutableStateOf("") }
 
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -157,6 +158,11 @@ private fun JamarrRoot() {
         val startTrack = resolved[startIndex.coerceIn(0, resolved.lastIndex)]
         nowPlayingTrack = startTrack.track
         nowPlayingArtworkUrl = startTrack.artworkUrl
+
+        // Report queue to server for history/scrobbling
+        if (clientId.isNotBlank()) {
+            apiClient.reportQueue(serverUrl, clientId, queue, startIndex)
+        }
     }
 
     fun playTrack(track: SearchTrack, queue: List<SearchTrack> = listOf(track)) {
@@ -171,6 +177,7 @@ private fun JamarrRoot() {
 
     LaunchedEffect(Unit) {
         cookieJar.prime()
+        clientId = settingsStore.getClientId()
         val saved = settingsStore.load()
         serverUrl = saved.serverUrl.ifBlank { DEFAULT_SERVER_URL }
         if (saved.accessToken.isNotBlank()) {
@@ -194,6 +201,8 @@ private fun JamarrRoot() {
     }
 
     LaunchedEffect(playbackController) {
+        var lastProgressReport = 0L
+        var lastReportedMediaId: String? = null
         while (true) {
             isPlaying = playbackController.isPlaying
             playbackPosition = playbackController.currentPosition
@@ -207,6 +216,24 @@ private fun JamarrRoot() {
                     nowPlayingTrack = current.track
                     nowPlayingArtworkUrl = current.artworkUrl
                 }
+                // Track changed — report new index to server
+                if (clientId.isNotBlank() && mediaId != lastReportedMediaId) {
+                    lastReportedMediaId = mediaId
+                    val newIndex = playbackQueue.indexOfFirst { it.track.id.toString() == mediaId }
+                    if (newIndex >= 0) {
+                        apiClient.reportIndex(serverUrl, clientId, newIndex)
+                    }
+                }
+            }
+            // Report progress every ~5 seconds
+            val now = System.currentTimeMillis()
+            if (playbackController.isPlaying && clientId.isNotBlank() && now - lastProgressReport >= 5000) {
+                lastProgressReport = now
+                apiClient.reportProgress(
+                    serverUrl, clientId,
+                    positionSeconds = playbackPosition / 1000.0,
+                    isPlaying = true,
+                )
             }
             delay(500)
         }
