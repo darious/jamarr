@@ -112,6 +112,7 @@ private fun JamarrRoot() {
     var isPlaying by remember { mutableStateOf(false) }
     var playbackPosition by remember { mutableStateOf(0L) }
     var playbackDuration by remember { mutableStateOf(0L) }
+    var playbackQueue by remember { mutableStateOf<List<ResolvedTrack>>(emptyList()) }
 
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -147,6 +148,7 @@ private fun JamarrRoot() {
                 artworkUrl = apiClient.artworkUrl(serverUrl, queueTrack.artSha1),
             )
         }
+        playbackQueue = resolved
         playbackController.playQueue(resolved, startIndex.coerceIn(0, resolved.lastIndex))
         val startTrack = resolved[startIndex.coerceIn(0, resolved.lastIndex)]
         nowPlayingTrack = startTrack.track
@@ -192,6 +194,14 @@ private fun JamarrRoot() {
             isPlaying = playbackController.isPlaying
             playbackPosition = playbackController.currentPosition
             playbackDuration = playbackController.duration
+            val mediaId = playbackController.currentMediaId
+            if (mediaId != null && mediaId != nowPlayingTrack?.id?.toString()) {
+                val current = playbackQueue.find { it.track.id.toString() == mediaId }
+                if (current != null) {
+                    nowPlayingTrack = current.track
+                    nowPlayingArtworkUrl = current.artworkUrl
+                }
+            }
             delay(500)
         }
     }
@@ -314,6 +324,7 @@ private fun JamarrRoot() {
                                 query = ""
                                 nowPlayingTrack = null
                                 nowPlayingArtworkUrl = null
+                                playbackQueue = emptyList()
                                 status = "Signed out."
                             }
                         },
@@ -480,6 +491,7 @@ private fun JamarrRoot() {
                             playbackController.stop()
                             nowPlayingTrack = null
                             nowPlayingArtworkUrl = null
+                            playbackQueue = emptyList()
                         },
                         onSeek = { playbackController.seekTo(it) },
                     )
