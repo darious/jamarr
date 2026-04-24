@@ -81,6 +81,7 @@ async def test_get_artists(auth_client: AsyncClient, db, library_data):
     # Verify artwork fields logic
     tester = next(a for a in data if a["name"] == "The Testers")
     assert tester["art_sha1"] == '1111111111222222222233333333334444444444'
+    assert tester["is_favorite"] is False
 
     # 2. Filter by name
     response = await auth_client.get("/api/artists", params={"name": "The Testers"})
@@ -110,11 +111,43 @@ async def test_get_artists_lightweight_starts_with(auth_client: AsyncClient, db,
     assert "top_tracks" not in data[0]
     assert "primary_album_count" in data[0]
     assert "appears_on_album_count" in data[0]
+    assert data[0]["is_favorite"] is False
 
     response = await auth_client.get("/api/artists", params={"starts_with": "#"})
     data = response.json()
     assert len(data) == 1
     assert data[0]["name"] == "123 Band"
+
+
+@pytest.mark.asyncio
+async def test_get_artists_favorite_only_filters_for_current_user(
+    auth_client: AsyncClient, db, library_data
+):
+    current_user = await db.fetchrow('SELECT id FROM "user" WHERE username = $1', "testuser")
+    other_user = await db.fetchrow(
+        """
+        INSERT INTO "user" (username, email, password_hash, display_name, created_at)
+        VALUES ('otheruser', 'otheruser@example.com', 'hash', 'Other User', NOW())
+        RETURNING id
+        """
+    )
+
+    await db.execute(
+        "INSERT INTO favorite_artist (user_id, artist_mbid) VALUES ($1, $2)",
+        current_user["id"],
+        "artist-1",
+    )
+    await db.execute(
+        "INSERT INTO favorite_artist (user_id, artist_mbid) VALUES ($1, $2)",
+        other_user["id"],
+        "artist-2",
+    )
+
+    response = await auth_client.get("/api/artists", params={"favorite_only": "true"})
+    assert response.status_code == 200
+    data = response.json()
+    assert [artist["name"] for artist in data] == ["The Testers"]
+    assert data[0]["is_favorite"] is True
 
 @pytest.mark.asyncio
 async def test_get_albums(auth_client: AsyncClient, db, library_data):
@@ -136,6 +169,7 @@ async def test_get_albums(auth_client: AsyncClient, db, library_data):
         "aaaaabbbbbcccccdddddeeeeefffff1111122222",
         None,
     }
+    assert test_album["is_favorite"] is False
     
     # 2. Filter by Artist
     response = await auth_client.get("/api/albums", params={"artist": "The Testers"})
@@ -222,6 +256,25 @@ async def test_get_albums_details(auth_client: AsyncClient, db, library_data):
     assert test_album["external_links"] is None or isinstance(
         test_album["external_links"], list
     )
+
+
+@pytest.mark.asyncio
+async def test_get_albums_includes_user_favorite_state(
+    auth_client: AsyncClient, db, library_data
+):
+    current_user = await db.fetchrow('SELECT id FROM "user" WHERE username = $1', "testuser")
+    await db.execute(
+        "INSERT INTO favorite_release (user_id, album_mbid) VALUES ($1, $2)",
+        current_user["id"],
+        "release-1",
+    )
+
+    response = await auth_client.get("/api/albums", params={"album_mbid": "release-1"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["album"] == "Test Album"
+    assert data[0]["is_favorite"] is True
 
 @pytest.mark.asyncio
 async def test_get_tracks(auth_client: AsyncClient, db, library_data):

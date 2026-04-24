@@ -133,6 +133,8 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
             "lastfm_skip_artist",
             "track_artist",
             "artist_album",
+            "favorite_artist",
+            "favorite_release",
         ]
         truncate = [t for t in tables if t in existing]
         if truncate:
