@@ -31,10 +31,15 @@ services:
       - ./web:/app/web
       # Use named volume for node_modules to avoid conflicts with host
       - jamarr_web_node_modules:/app/web/node_modules
-    entrypoint: /bin/sh -c "npm install && npm run dev:host"
+      # Keep generated dev artifacts inside Docker-owned volumes
+      - jamarr_web_svelte_kit:/app/web/.svelte-kit
+      - jamarr_web_vite_cache:/app/web/.vite
+    entrypoint: /bin/sh -c "npm install && npx svelte-kit sync && npm run dev:host -- --force"
     environment:
       - VITE_API_URL=http://127.0.0.1:8111
     restart: unless-stopped
 
 volumes:
   jamarr_web_node_modules:
+  jamarr_web_svelte_kit:
+  jamarr_web_vite_cache:

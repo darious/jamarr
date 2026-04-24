@@ -29,7 +29,6 @@ echo "Changes to frontend or backend code will auto-reload!"
 echo "No Docker rebuilds needed! 🎉"
 echo ""
 
-
 # Check for dependency changes
 DEP_HASH_FILE=".deps.sha256"
 # Calculate hash of pyproject.toml and uv.lock (if it exists)
@@ -50,8 +49,15 @@ else
   echo "✨ Dependencies unchanged, skipping build."
 fi
 
-# Start services in detached mode
+# Stop existing containers before clearing generated frontend state.
 docker compose down
+
+# Clear generated frontend caches so route graph changes cannot leave
+# stale .svelte-kit / Vite artifacts behind across dev restarts.
+echo "🧽 Clearing frontend dev caches..."
+rm -rf web/.svelte-kit web/.vite
+
+# Start services in detached mode
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 echo ""

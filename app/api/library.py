@@ -117,6 +117,8 @@ async def get_artists(
     name: Optional[str] = None,
     mbid: Optional[str] = None,
     starts_with: Optional[str] = None,
+    favorite_only: bool = False,
+    user: asyncpg.Record = Depends(get_current_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
 ):
     if not name and not mbid:
@@ -128,9 +130,12 @@ async def get_artists(
                 a.bio,
                 ar.sha1 as art_sha1,
                 COALESCE(ac.primary_count, 0) as primary_album_count,
-                COALESCE(ac.appears_count, 0) as appears_on_album_count
+                COALESCE(ac.appears_count, 0) as appears_on_album_count,
+                (fav.user_id IS NOT NULL) as is_favorite
             FROM artist a
             LEFT JOIN artwork ar ON a.artwork_id = ar.id
+            LEFT JOIN favorite_artist fav
+                ON fav.artist_mbid = a.mbid AND fav.user_id = $1
             -- Lateral join calculates counts ONLY for the artists returned by the main query
             LEFT JOIN LATERAL (
                 SELECT 
@@ -141,11 +146,15 @@ async def get_artists(
             ) ac ON TRUE
             WHERE a.name IS NOT NULL
         """
-        params = []
+        params = [user["id"]]
+        param_num = 2
         if starts_with:
             letter = "#" if starts_with == "#" else starts_with.upper()
-            query += " AND a.letter = $1"
+            query += f" AND a.letter = ${param_num}"
             params.append(letter)
+            param_num += 1
+        if favorite_only:
+            query += " AND fav.user_id IS NOT NULL"
         query += " ORDER BY LOWER(COALESCE(a.sort_name, a.name)), a.sort_name, a.name"
 
         rows = await db.fetch(query, *params)
@@ -158,6 +167,7 @@ async def get_artists(
                 "art_sha1": sha1_to_hex(row["art_sha1"]),
                 "primary_album_count": row["primary_album_count"],
                 "appears_on_album_count": row["appears_on_album_count"],
+                "is_favorite": row["is_favorite"],
             }
             for row in rows
         ]
@@ -183,9 +193,12 @@ async def get_artists(
             el.links->>'discogs' as discogs_url,
             COALESCE(ac.primary_count, 0) as primary_album_count,
             COALESCE(ac.appears_count, 0) as appears_on_album_count,
-            COALESCE(lp.listens, 0) as listens
+            COALESCE(lp.listens, 0) as listens,
+            (fav.user_id IS NOT NULL) as is_favorite
         FROM artist a
         LEFT JOIN artwork ar ON a.artwork_id = ar.id
+        LEFT JOIN favorite_artist fav
+            ON fav.artist_mbid = a.mbid AND fav.user_id = $1
         -- 1. Pivot External Links using JSONB for cleanliness and speed
         LEFT JOIN LATERAL (
             SELECT jsonb_object_agg(type, url) as links
@@ -210,8 +223,8 @@ async def get_artists(
         WHERE a.name IS NOT NULL
     """
 
-    params = []
-    param_num = 1
+    params = [user["id"]]
+    param_num = 2
     if name:
         # citext handles case-insensitivity
         query += f" AND REPLACE(a.name, '‐', '-') = REPLACE(${param_num}, '‐', '-')"
@@ -229,6 +242,8 @@ async def get_artists(
             query += f" AND a.sort_name ILIKE ${param_num} || '%'"
             params.append(starts_with)
             param_num += 1
+    if favorite_only:
+        query += " AND fav.user_id IS NOT NULL"
 
     query += (
         " ORDER BY LOWER(a.sort_name), a.sort_name"
@@ -281,6 +296,7 @@ async def get_artists(
             "primary_album_count": row["primary_album_count"],
             "appears_on_album_count": row["appears_on_album_count"],
             "listens": row["listens"],
+            "is_favorite": row["is_favorite"],
             "albums": [],  # Deprecated
             "background_sha1": sha1_to_hex(bg_info.get("art_sha1")),
         }
@@ -469,6 +485,7 @@ async def get_albums(
     artist: str = None,
     artist_mbid: str = None,
     album_mbid: str = None,
+    user: asyncpg.Record = Depends(get_current_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
 ):
     # 1. If artist is provided, find their MBID to classify 'main' vs 'appears_on'
@@ -486,8 +503,8 @@ async def get_albums(
             -- Get only the albums we actually need first
             SELECT aa.album_mbid, aa.type, aa.artist_mbid
             FROM artist_album aa
-            WHERE ($1::text IS NULL OR aa.artist_mbid = $1)
-            AND ($2::text IS NULL OR aa.album_mbid = $2)
+            WHERE ($2::text IS NULL OR aa.artist_mbid = $2)
+            AND ($3::text IS NULL OR aa.album_mbid = $3)
         )
         SELECT
             al.title as album,
@@ -499,7 +516,7 @@ async def get_albums(
             fa.album_mbid,
             fa.album_mbid as mb_release_id,
             CASE 
-                WHEN $1 IS NOT NULL AND fa.type = 'contributor' THEN 'appears_on' 
+                WHEN $2 IS NOT NULL AND fa.type = 'contributor' THEN 'appears_on' 
                 ELSE 'main' 
             END as type,
             tr.track_count,
@@ -510,9 +527,12 @@ async def get_albums(
             ma.artists,
             art.sha1 AS art_sha1,
             lk.external_links,
-            ls.listens
+            ls.listens,
+            (fr.user_id IS NOT NULL) as is_favorite
         FROM filtered_albums fa
         JOIN album al ON fa.album_mbid = al.mbid
+        LEFT JOIN favorite_release fr
+            ON fr.album_mbid = al.mbid AND fr.user_id = $1
         -- Use LATERAL for track stats (avoids scanning the whole track table)
         LEFT JOIN LATERAL (
             SELECT 
@@ -551,7 +571,7 @@ async def get_albums(
     """
     
     # Execute
-    rows = await db.fetch(query, target_mbid, album_mbid)
+    rows = await db.fetch(query, user["id"], target_mbid, album_mbid)
     
     results = []
     for row in rows:
