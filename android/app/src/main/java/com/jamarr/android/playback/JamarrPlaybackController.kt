@@ -5,8 +5,10 @@ import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
@@ -35,11 +37,62 @@ class JamarrPlaybackController(context: Context) {
     val currentMediaId: String?
         get() = controller?.currentMediaItem?.mediaId
 
+    val currentMediaItem: MediaItem?
+        get() = controller?.currentMediaItem
+
+    val mediaItemCount: Int
+        get() = controller?.mediaItemCount ?: 0
+
+    fun currentQueueSnapshot(): List<ResolvedTrack> {
+        val c = controller ?: return emptyList()
+        val count = c.mediaItemCount
+        if (count == 0) return emptyList()
+
+        val orderedIndices: List<Int> = if (c.shuffleModeEnabled) {
+            // Walk the player's shuffle order starting from the current item so
+            // the queue view shows tracks in the order they'll actually play.
+            val timeline = c.currentTimeline
+            val current = c.currentMediaItemIndex.coerceIn(0, count - 1)
+            val list = mutableListOf(current)
+            var idx = current
+            while (list.size < count) {
+                val next = timeline.getNextWindowIndex(idx, Player.REPEAT_MODE_OFF, true)
+                if (next == C.INDEX_UNSET || next in list) break
+                list.add(next)
+                idx = next
+            }
+            list
+        } else {
+            (0 until count).toList()
+        }
+
+        return orderedIndices.map { i ->
+            val item = c.getMediaItemAt(i)
+            val md = item.mediaMetadata
+            ResolvedTrack(
+                track = SearchTrack(
+                    id = item.mediaId.toLongOrNull() ?: 0L,
+                    title = md.title?.toString().orEmpty(),
+                    artist = md.artist?.toString(),
+                    album = md.albumTitle?.toString(),
+                ),
+                streamUrl = "",
+                artworkUrl = md.artworkUri?.toString(),
+            )
+        }
+    }
+
     val currentPosition: Long
         get() = controller?.currentPosition ?: 0L
 
     val duration: Long
         get() = controller?.duration?.coerceAtLeast(0L) ?: 0L
+
+    val shuffleEnabled: Boolean
+        get() = controller?.shuffleModeEnabled == true
+
+    val repeatMode: Int
+        get() = controller?.repeatMode ?: Player.REPEAT_MODE_OFF
 
     init {
         val sessionToken = SessionToken(
@@ -83,7 +136,7 @@ class JamarrPlaybackController(context: Context) {
             .build()
 
         return MediaItem.Builder()
-            .setUri(streamUrl)
+            .setUri(JamarrPlaybackService.trackUri(searchTrack.id))
             .setMediaId(searchTrack.id.toString())
             .setMediaMetadata(metadata)
             .build()
@@ -127,6 +180,24 @@ class JamarrPlaybackController(context: Context) {
 
     fun seekTo(positionMs: Long) {
         controller?.seekTo(positionMs.coerceAtLeast(0L))
+    }
+
+    fun toggleShuffle() {
+        controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
+    }
+
+    fun cycleRepeatMode() {
+        controller?.let {
+            it.repeatMode = when (it.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
+        }
+    }
+
+    fun playQueueItem(index: Int) {
+        controller?.seekTo(index, 0L)
     }
 
     fun release() {

@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jamarr.android.data.HistoryStats
 import com.jamarr.android.ui.components.AlbumArt
+import com.jamarr.android.ui.components.RefreshIcon
 import com.jamarr.android.ui.state.LocalJamarrContext
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
@@ -69,8 +70,9 @@ fun HistoryScreen(
     val tab = remember { mutableStateOf(HistoryTab.Tracks) }
     val stats = remember { mutableStateOf(HistoryStats()) }
     val error = remember { mutableStateOf<String?>(null) }
+    val refreshTick = remember { mutableStateOf(0) }
 
-    LaunchedEffect(range.value) {
+    LaunchedEffect(range.value, refreshTick.value) {
         val (from, to) = dateRangeBounds(range.value)
         runCatching {
             ctx.apiClient.historyStats(
@@ -93,18 +95,33 @@ fun HistoryScreen(
             ),
         ) {
             item {
-                Column(
+                Row(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .statusBarsPadding()
                         .padding(horizontal = JamarrDims.ScreenPadding, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("History", style = JamarrType.ScreenTitle, color = JamarrColors.Text)
-                    Text(
-                        text = "What you've been listening to",
-                        style = JamarrType.Caption,
-                        color = JamarrColors.Muted,
-                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text("History", style = JamarrType.ScreenTitle, color = JamarrColors.Text)
+                        Text(
+                            text = "What you've been listening to",
+                            style = JamarrType.Caption,
+                            color = JamarrColors.Muted,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .clickable { refreshTick.value += 1 },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        RefreshIcon(tint = JamarrColors.Muted, size = 20.dp)
+                    }
                 }
             }
 

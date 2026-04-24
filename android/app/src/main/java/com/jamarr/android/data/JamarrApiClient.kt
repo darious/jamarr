@@ -1,20 +1,32 @@
 package com.jamarr.android.data
 
+import com.jamarr.android.auth.TokenHolder
 import java.net.URI
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 
 class JamarrApiException(
     val statusCode: Int,
@@ -22,12 +34,88 @@ class JamarrApiException(
 ) : Exception(message)
 
 class JamarrApiClient(
-    private val httpClient: OkHttpClient = OkHttpClient(),
+    private val tokenHolder: TokenHolder = TokenHolder(),
+    cookieJar: CookieJar = CookieJar.NO_COOKIES,
+    private val onTokenRefreshed: suspend (String) -> Unit = {},
+    private val onRefreshFailed: suspend () -> Unit = {},
     private val json: Json = Json {
         ignoreUnknownKeys = true
+        coerceInputValues = true
     },
 ) {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private val refreshLock = Any()
+    private val callbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val authInterceptor = Interceptor { chain ->
+        val original = chain.request()
+        val path = original.url.encodedPath
+        val skip = path.endsWith("/api/auth/login") || path.endsWith("/api/auth/refresh")
+        if (skip || original.header("Authorization") != null) {
+            return@Interceptor chain.proceed(original)
+        }
+        val token = tokenHolder.get()
+        val request = if (token.isNotBlank()) {
+            original.newBuilder().header("Authorization", "Bearer $token").build()
+        } else original
+        chain.proceed(request)
+    }
+
+    private val httpClient: OkHttpClient = OkHttpClient.Builder()
+        .cookieJar(cookieJar)
+        .addInterceptor(authInterceptor)
+        .authenticator { _, response ->
+            handleAuthChallenge(response)
+        }
+        .build()
+
+    private fun handleAuthChallenge(response: Response): Request? {
+        val req = response.request
+        val path = req.url.encodedPath
+        if (path.endsWith("/api/auth/login") || path.endsWith("/api/auth/refresh")) return null
+        if (response.priorResponse != null) {
+            callbackScope.launch { onRefreshFailed() }
+            return null
+        }
+        val failedAuth = req.header("Authorization")
+        val failedToken = failedAuth?.removePrefix("Bearer ")?.trim()
+        val newToken = refreshTokenSync(req.url, failedToken) ?: return null
+        return req.newBuilder().header("Authorization", "Bearer $newToken").build()
+    }
+
+    private fun refreshTokenSync(originalUrl: HttpUrl, failedToken: String?): String? {
+        synchronized(refreshLock) {
+            val current = tokenHolder.get()
+            if (current.isNotBlank() && current != failedToken) {
+                return current
+            }
+            val refreshUrl = originalUrl.newBuilder()
+                .encodedPath("/api/auth/refresh")
+                .query(null)
+                .fragment(null)
+                .build()
+            val refreshRequest = Request.Builder()
+                .url(refreshUrl)
+                .post("".toRequestBody(jsonMediaType))
+                .build()
+            val newToken = runCatching {
+                httpClient.newCall(refreshRequest).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val body = resp.body.string()
+                    json.decodeFromString<RefreshResponse>(body).accessToken
+                }
+            }.getOrNull()
+            return if (newToken.isNullOrBlank()) {
+                tokenHolder.clear()
+                callbackScope.launch { onRefreshFailed() }
+                null
+            } else {
+                tokenHolder.set(newToken)
+                callbackScope.launch { onTokenRefreshed(newToken) }
+                newToken
+            }
+        }
+    }
 
     suspend fun login(
         serverUrl: String,
@@ -57,7 +145,6 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(url)
             .get()
-            .bearer(accessToken)
             .build()
 
         execute(request)
@@ -69,11 +156,11 @@ class JamarrApiClient(
         limit: Int = 20,
     ): HomeContent = withContext(Dispatchers.IO) {
         HomeContent(
-            newReleases = get(serverUrl, accessToken, "/api/home/new-releases", limit),
-            recentlyAddedAlbums = get(serverUrl, accessToken, "/api/home/recently-added-albums", limit),
-            recentlyPlayedAlbums = get(serverUrl, accessToken, "/api/history/albums", limit),
-            discoverArtists = get(serverUrl, accessToken, "/api/home/discover-artists", limit),
-            recentlyPlayedArtists = get(serverUrl, accessToken, "/api/history/artists", limit),
+            newReleases = get(serverUrl, "/api/home/new-releases", limit),
+            recentlyAddedAlbums = get(serverUrl, "/api/home/recently-added-albums", limit),
+            recentlyPlayedAlbums = get(serverUrl, "/api/history/albums", limit),
+            discoverArtists = get(serverUrl, "/api/home/discover-artists", limit),
+            recentlyPlayedArtists = get(serverUrl, "/api/history/artists", limit),
         )
     }
 
@@ -92,7 +179,6 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(builder.build())
             .get()
-            .bearer(accessToken)
             .build()
 
         execute(request)
@@ -111,7 +197,6 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(builder.build())
             .get()
-            .bearer(accessToken)
             .build()
 
         val results: List<AlbumDetail> = execute(request)
@@ -129,7 +214,7 @@ class JamarrApiClient(
             .addQueryParameter("artist_mbid", artistMbid)
             .build()
 
-        val request = Request.Builder().url(url).get().bearer(accessToken).build()
+        val request = Request.Builder().url(url).get().build()
         execute(request)
     }
 
@@ -146,7 +231,6 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(builder.build())
             .get()
-            .bearer(accessToken)
             .build()
 
         val results: List<ArtistDetail> = execute(request)
@@ -160,7 +244,6 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(apiUrl(serverUrl, "/api/playlists"))
             .get()
-            .bearer(accessToken)
             .build()
         execute(request)
     }
@@ -173,7 +256,6 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(apiUrl(serverUrl, "/api/playlists/$id"))
             .get()
-            .bearer(accessToken)
             .build()
         execute(request)
     }
@@ -185,7 +267,6 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(apiUrl(serverUrl, "/api/charts"))
             .get()
-            .bearer(accessToken)
             .build()
         execute(request)
     }
@@ -205,7 +286,6 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(builder.build())
             .get()
-            .bearer(accessToken)
             .build()
         execute(request)
     }
@@ -218,10 +298,79 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(apiUrl(serverUrl, "/api/stream-url/$trackId"))
             .get()
-            .bearer(accessToken)
             .build()
 
         resolveUrl(serverUrl, execute<StreamUrlResponse>(request).url)
+    }
+
+    suspend fun favoriteArtists(
+        serverUrl: String,
+        accessToken: String,
+    ): List<FavoriteArtist> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/favorites/artists"))
+            .get()
+            .build()
+        execute(request)
+    }
+
+    suspend fun favoriteReleases(
+        serverUrl: String,
+        accessToken: String,
+    ): List<FavoriteRelease> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/favorites/releases"))
+            .get()
+            .build()
+        execute(request)
+    }
+
+    suspend fun setArtistFavorite(
+        serverUrl: String,
+        accessToken: String,
+        artistMbid: String,
+        favorite: Boolean,
+    ): Unit = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(FavoriteToggleRequest(favorite)).toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/favorites/artists/$artistMbid"))
+            .put(body)
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
+    }
+
+    suspend fun setAlbumFavorite(
+        serverUrl: String,
+        accessToken: String,
+        albumMbid: String,
+        favorite: Boolean,
+    ): Unit = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(FavoriteToggleRequest(favorite)).toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/favorites/releases/$albumMbid"))
+            .put(body)
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
+    }
+
+    suspend fun logout(serverUrl: String): Unit = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/auth/logout"))
+            .post("".toRequestBody(jsonMediaType))
+            .build()
+        runCatching {
+            httpClient.newCall(request).execute().use { /* best-effort */ }
+        }
     }
 
     fun artworkUrl(serverUrl: String, artSha1: String?, maxSize: Int = 400): String? {
@@ -246,7 +395,6 @@ class JamarrApiClient(
 
     private inline fun <reified T> get(
         serverUrl: String,
-        accessToken: String,
         path: String,
         limit: Int,
     ): T {
@@ -259,10 +407,80 @@ class JamarrApiClient(
         val request = Request.Builder()
             .url(url)
             .get()
-            .bearer(accessToken)
             .build()
 
         return execute(request)
+    }
+
+    suspend fun reportQueue(
+        serverUrl: String,
+        clientId: String,
+        tracks: List<SearchTrack>,
+        startIndex: Int,
+    ) = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject {
+            put("start_index", startIndex)
+            put("queue", buildJsonArray {
+                tracks.forEach { t ->
+                    add(buildJsonObject {
+                        put("id", t.id)
+                        put("title", t.title)
+                        put("artist", t.artist ?: "Unknown Artist")
+                        put("album", t.album ?: "Unknown Album")
+                        put("duration_seconds", t.durationSeconds ?: 0.0)
+                        t.artSha1?.let { put("art_sha1", it) }
+                        t.mbReleaseId?.let { put("mb_release_id", it) }
+                    })
+                }
+            })
+        }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/queue"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        runCatching {
+            httpClient.newCall(request).execute().use { it.body.string() }
+        }
+    }
+
+    suspend fun reportIndex(
+        serverUrl: String,
+        clientId: String,
+        index: Int,
+    ) = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject { put("index", index) }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/index"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        runCatching {
+            httpClient.newCall(request).execute().use { it.body.string() }
+        }
+    }
+
+    suspend fun reportProgress(
+        serverUrl: String,
+        clientId: String,
+        positionSeconds: Double,
+        isPlaying: Boolean,
+    ) = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject {
+            put("position_seconds", positionSeconds)
+            put("is_playing", isPlaying)
+        }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/progress"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        runCatching {
+            httpClient.newCall(request).execute().use { it.body.string() }
+        }
     }
 
     private inline fun <reified T> execute(request: Request): T {
@@ -273,10 +491,6 @@ class JamarrApiClient(
             }
             return json.decodeFromString(body)
         }
-    }
-
-    private fun Request.Builder.bearer(accessToken: String): Request.Builder {
-        return header("Authorization", "Bearer $accessToken")
     }
 
     private fun errorMessage(statusCode: Int, body: String): String {

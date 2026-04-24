@@ -18,6 +18,14 @@ data class LoginResponse(
 )
 
 @Serializable
+data class RefreshResponse(
+    @SerialName("access_token")
+    val accessToken: String,
+    @SerialName("token_type")
+    val tokenType: String = "bearer",
+)
+
+@Serializable
 data class SearchResponse(
     val artists: List<SearchArtist> = emptyList(),
     val albums: List<SearchAlbum> = emptyList(),
@@ -127,6 +135,7 @@ data class ArtistDetail(
     val singles: List<ArtistTrackEntry> = emptyList(),
     @SerialName("similar_artists") val similarArtists: List<SimilarArtist> = emptyList(),
     val genres: List<ArtistGenre> = emptyList(),
+    @SerialName("is_favorite") val isFavorite: Boolean = false,
 )
 
 @Serializable
@@ -176,6 +185,27 @@ data class AlbumDetail(
     val type: String? = null,
     val artists: List<AlbumArtistRef> = emptyList(),
     val description: String? = null,
+    @SerialName("is_favorite") val isFavorite: Boolean = false,
+)
+
+@Serializable
+data class FavoriteToggleRequest(val favorite: Boolean)
+
+@Serializable
+data class FavoriteArtist(
+    val mbid: String,
+    val name: String,
+    @SerialName("art_sha1") val artSha1: String? = null,
+    val listens: Int = 0,
+)
+
+@Serializable
+data class FavoriteRelease(
+    @SerialName("album_mbid") val albumMbid: String,
+    val title: String,
+    @SerialName("artist_name") val artistName: String? = null,
+    val year: String? = null,
+    @SerialName("art_sha1") val artSha1: String? = null,
 )
 
 @Serializable

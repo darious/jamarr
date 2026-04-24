@@ -4,6 +4,7 @@ import android.net.Uri
 
 object Routes {
     const val HOME = "home"
+    const val FAVOURITES = "favourites"
     const val PLAYLISTS = "playlists"
     const val CHARTS = "charts"
     const val HISTORY = "history"
@@ -31,6 +32,7 @@ object Routes {
 
 fun JamarrTab.route(): String = when (this) {
     JamarrTab.Home -> Routes.HOME
+    JamarrTab.Favourites -> Routes.FAVOURITES
     JamarrTab.Playlists -> Routes.PLAYLISTS
     JamarrTab.Charts -> Routes.CHARTS
     JamarrTab.History -> Routes.HISTORY
@@ -40,6 +42,7 @@ fun routeToTab(route: String?): JamarrTab? {
     if (route == null) return null
     return when {
         route.startsWith(Routes.HOME) -> JamarrTab.Home
+        route.startsWith(Routes.FAVOURITES) -> JamarrTab.Favourites
         route.startsWith(Routes.PLAYLISTS) -> JamarrTab.Playlists
         route.startsWith(Routes.CHARTS) -> JamarrTab.Charts
         route.startsWith(Routes.HISTORY) -> JamarrTab.History
