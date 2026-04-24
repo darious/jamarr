@@ -116,8 +116,24 @@ def configure_security_middleware(app: FastAPI) -> None:
         )
 
 
+def _trusted_proxy_ips() -> set[str]:
+    return set(parse_csv_env("TRUSTED_PROXY_IPS"))
+
+
 def get_client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    direct_ip = request.client.host if request.client else "unknown"
+    if direct_ip in _trusted_proxy_ips():
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        if forwarded_for:
+            first_hop = forwarded_for.split(",", 1)[0].strip()
+            if first_hop:
+                return first_hop
+
+        real_ip = request.headers.get("x-real-ip", "").strip()
+        if real_ip:
+            return real_ip
+
+    return direct_ip
 
 
 def log_security_event(
