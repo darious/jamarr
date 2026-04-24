@@ -27,6 +27,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +46,7 @@ import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.data.SimilarArtist
 import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.ArtistArt
+import com.jamarr.android.ui.components.HeartIcon
 import com.jamarr.android.ui.components.PlayIcon
 import com.jamarr.android.ui.components.TrackRow
 import com.jamarr.android.ui.components.formatDuration
@@ -97,11 +100,13 @@ fun ArtistDetailScreen(
     contentPadding: PaddingValues,
 ) {
     val ctx = LocalJamarrContext.current
+    val scope = rememberCoroutineScope()
     val detail = remember { mutableStateOf<ArtistDetail?>(null) }
     val albums = remember { mutableStateOf<List<AlbumDetail>>(emptyList()) }
     val tab = remember { mutableStateOf(TopTracksTab.MostScrobbled) }
     val discoTab = remember { mutableStateOf(DiscographyTab.Albums) }
     val errorState = remember { mutableStateOf<String?>(null) }
+    val isFavorite = remember { mutableStateOf(false) }
 
     LaunchedEffect(initialMbid, initialName) {
         errorState.value = null
@@ -112,14 +117,20 @@ fun ArtistDetailScreen(
                 mbid = initialMbid,
                 name = initialName,
             )
-        }.onSuccess { detail.value = it }
-            .onFailure { errorState.value = it.message }
+        }.onSuccess {
+            detail.value = it
+            isFavorite.value = it?.isFavorite == true
+        }.onFailure { errorState.value = it.message }
+    }
 
-        val mbid = detail.value?.mbid ?: initialMbid
-        if (!mbid.isNullOrBlank()) {
-            runCatching { ctx.apiClient.artistAlbums(ctx.serverUrl, ctx.accessToken, mbid) }
-                .onSuccess { albums.value = it }
+    val resolvedMbid = detail.value?.mbid ?: initialMbid
+    LaunchedEffect(resolvedMbid) {
+        if (resolvedMbid.isNullOrBlank()) {
+            albums.value = emptyList()
+            return@LaunchedEffect
         }
+        runCatching { ctx.apiClient.artistAlbums(ctx.serverUrl, ctx.accessToken, resolvedMbid) }
+            .onSuccess { albums.value = it }
     }
 
     val artistName = detail.value?.name ?: initialName ?: "Artist"
@@ -140,11 +151,21 @@ fun ArtistDetailScreen(
                     genres = detail.value?.genres?.take(2)?.joinToString(" · ") { it.name },
                     listens = detail.value?.listens ?: 0,
                     onBack = onBack,
-                    onPlay = {
-                        val trackIds = (detail.value?.mostListened.orEmpty() + detail.value?.topTracks.orEmpty())
-                            .mapNotNull { entry -> entry.toSearchTrack(artistName) }
-                        if (trackIds.isNotEmpty()) {
-                            onPlayTrack(trackIds.first(), trackIds)
+                    canFavorite = !resolvedMbid.isNullOrBlank(),
+                    isFavorite = isFavorite.value,
+                    onToggleFavorite = {
+                        val mbid = resolvedMbid ?: return@ArtistHero
+                        val desired = !isFavorite.value
+                        isFavorite.value = desired
+                        scope.launch {
+                            runCatching {
+                                ctx.apiClient.setArtistFavorite(
+                                    serverUrl = ctx.serverUrl,
+                                    accessToken = ctx.accessToken,
+                                    artistMbid = mbid,
+                                    favorite = desired,
+                                )
+                            }.onFailure { isFavorite.value = !desired }
                         }
                     },
                 )
@@ -174,16 +195,44 @@ fun ArtistDetailScreen(
                 }
             }
 
+            val topList = when (tab.value) {
+                TopTracksTab.MostScrobbled -> detail.value?.topTracks.orEmpty()
+                TopTracksTab.MostListened -> detail.value?.mostListened.orEmpty()
+                TopTracksTab.Singles -> detail.value?.singles.orEmpty()
+            }.take(6)
+            val resolvedQueue = topList.mapNotNull { it.toSearchTrack(artistName) }
             item {
-                Text(
-                    text = "Top Tracks",
-                    style = JamarrType.SectionHeader,
-                    color = JamarrColors.Text,
-                    modifier = Modifier.padding(
-                        horizontal = JamarrDims.ScreenPadding,
-                        vertical = 12.dp,
-                    ),
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = JamarrDims.ScreenPadding, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Top Tracks",
+                        style = JamarrType.SectionHeader,
+                        color = JamarrColors.Text,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (resolvedQueue.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(JamarrColors.Primary)
+                                .clickable { onPlayTrack(resolvedQueue.first(), resolvedQueue) }
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            PlayIcon(tint = Color.White, size = 14.dp)
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "Play",
+                                style = JamarrType.Caption,
+                                color = Color.White,
+                            )
+                        }
+                    }
+                }
             }
             item {
                 PillTabs(
@@ -193,12 +242,6 @@ fun ArtistDetailScreen(
                     modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding),
                 )
             }
-            val topList = when (tab.value) {
-                TopTracksTab.MostScrobbled -> detail.value?.topTracks.orEmpty()
-                TopTracksTab.MostListened -> detail.value?.mostListened.orEmpty()
-                TopTracksTab.Singles -> detail.value?.singles.orEmpty()
-            }.take(6)
-            val resolvedQueue = topList.mapNotNull { it.toSearchTrack(artistName) }
             items(topList.withIndex().toList(), key = { (i, _) -> "top-${tab.value}-$i" }) { (i, entry) ->
                 val track = entry.toSearchTrack(artistName)
                 TrackRow(
@@ -282,7 +325,9 @@ private fun ArtistHero(
     genres: String?,
     listens: Int,
     onBack: () -> Unit,
-    onPlay: () -> Unit,
+    canFavorite: Boolean,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
 ) {
     val top = seedColor(name)
     Box(
@@ -322,6 +367,25 @@ private fun ArtistHero(
         ) {
             Text(text = "←", color = Color.White, style = JamarrType.CardTitle)
         }
+        if (canFavorite) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(JamarrDims.ScreenPadding)
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x66000000))
+                    .clickable(onClick = onToggleFavorite),
+                contentAlignment = Alignment.Center,
+            ) {
+                HeartIcon(
+                    tint = if (isFavorite) JamarrColors.Primary else Color.White,
+                    filled = isFavorite,
+                    size = 18.dp,
+                )
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -349,18 +413,6 @@ private fun ArtistHero(
                     color = JamarrColors.Muted,
                 )
             }
-        }
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp)
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(JamarrColors.Primary)
-                .clickable(onClick = onPlay),
-            contentAlignment = Alignment.Center,
-        ) {
-            PlayIcon(tint = Color.White, size = 20.dp)
         }
     }
 }

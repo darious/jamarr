@@ -202,6 +202,25 @@ fun StopIcon(tint: Color, size: Dp = 18.dp) {
 }
 
 @Composable
+fun HeartIcon(tint: Color, filled: Boolean, size: Dp = 22.dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.minDimension
+        val stroke = s * 0.09f
+        val path = Path().apply {
+            moveTo(s * 0.5f, s * 0.88f)
+            cubicTo(s * 0.05f, s * 0.62f, s * 0.05f, s * 0.22f, s * 0.5f, s * 0.32f)
+            cubicTo(s * 0.95f, s * 0.22f, s * 0.95f, s * 0.62f, s * 0.5f, s * 0.88f)
+            close()
+        }
+        if (filled) {
+            drawPath(path, color = tint)
+        } else {
+            drawPath(path, color = tint, style = Stroke(width = stroke))
+        }
+    }
+}
+
+@Composable
 fun PauseIcon(tint: Color, size: Dp = 18.dp) {
     Canvas(modifier = Modifier.size(size)) {
         val s = this.size.minDimension
