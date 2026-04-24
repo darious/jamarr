@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
@@ -40,6 +41,12 @@ class JamarrPlaybackController(context: Context) {
 
     val duration: Long
         get() = controller?.duration?.coerceAtLeast(0L) ?: 0L
+
+    val shuffleEnabled: Boolean
+        get() = controller?.shuffleModeEnabled == true
+
+    val repeatMode: Int
+        get() = controller?.repeatMode ?: Player.REPEAT_MODE_OFF
 
     init {
         val sessionToken = SessionToken(
@@ -127,6 +134,24 @@ class JamarrPlaybackController(context: Context) {
 
     fun seekTo(positionMs: Long) {
         controller?.seekTo(positionMs.coerceAtLeast(0L))
+    }
+
+    fun toggleShuffle() {
+        controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
+    }
+
+    fun cycleRepeatMode() {
+        controller?.let {
+            it.repeatMode = when (it.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
+        }
+    }
+
+    fun playQueueItem(index: Int) {
+        controller?.seekTo(index, 0L)
     }
 
     fun release() {

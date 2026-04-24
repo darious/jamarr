@@ -43,12 +43,14 @@ fun MiniPlayer(
     onNext: () -> Unit,
     onStop: () -> Unit,
     onSeek: (Long) -> Unit,
+    onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(JamarrColors.Surface),
+            .background(JamarrColors.Surface)
+            .clickable(onClick = onClick),
     ) {
         // Progress bar - tappable to seek
         ProgressBar(
