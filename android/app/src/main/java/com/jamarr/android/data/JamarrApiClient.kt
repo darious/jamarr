@@ -13,8 +13,11 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -385,6 +388,77 @@ class JamarrApiClient(
             .build()
 
         return execute(request)
+    }
+
+    suspend fun reportQueue(
+        serverUrl: String,
+        clientId: String,
+        tracks: List<SearchTrack>,
+        startIndex: Int,
+    ) = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject {
+            put("start_index", startIndex)
+            put("queue", buildJsonArray {
+                tracks.forEach { t ->
+                    add(buildJsonObject {
+                        put("id", t.id)
+                        put("title", t.title)
+                        put("artist", t.artist ?: "Unknown Artist")
+                        put("album", t.album ?: "Unknown Album")
+                        put("duration_seconds", t.durationSeconds ?: 0.0)
+                        t.artSha1?.let { put("art_sha1", it) }
+                        t.mbReleaseId?.let { put("mb_release_id", it) }
+                    })
+                }
+            })
+        }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/queue"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        runCatching {
+            httpClient.newCall(request).execute().use { it.body.string() }
+        }
+    }
+
+    suspend fun reportIndex(
+        serverUrl: String,
+        clientId: String,
+        index: Int,
+    ) = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject { put("index", index) }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/index"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        runCatching {
+            httpClient.newCall(request).execute().use { it.body.string() }
+        }
+    }
+
+    suspend fun reportProgress(
+        serverUrl: String,
+        clientId: String,
+        positionSeconds: Double,
+        isPlaying: Boolean,
+    ) = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject {
+            put("position_seconds", positionSeconds)
+            put("is_playing", isPlaying)
+        }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/progress"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        runCatching {
+            httpClient.newCall(request).execute().use { it.body.string() }
+        }
     }
 
     private inline fun <reified T> execute(request: Request): T {
