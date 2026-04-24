@@ -221,3 +221,27 @@ async def test_proxy_headers_are_trusted_only_from_configured_proxy(monkeypatch)
 
     assert trusted.json() == {"client_ip": "203.0.113.50", "scheme": "https"}
     assert untrusted.json() == {"client_ip": "192.168.1.50", "scheme": "http"}
+
+
+@pytest.mark.asyncio
+async def test_get_client_ip_uses_forwarded_headers_for_trusted_proxy(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "192.168.1.103")
+    app = FastAPI()
+
+    @app.get("/whoami")
+    async def whoami(request: Request):
+        return {"client_ip": get_client_ip(request)}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app, client=("192.168.1.103", 12345)),
+        base_url="http://192.168.1.107:8111",
+    ) as client:
+        response = await client.get(
+            "/whoami",
+            headers={
+                "X-Forwarded-For": "198.51.100.77, 192.168.1.103",
+                "X-Real-IP": "198.51.100.77",
+            },
+        )
+
+    assert response.json() == {"client_ip": "198.51.100.77"}
