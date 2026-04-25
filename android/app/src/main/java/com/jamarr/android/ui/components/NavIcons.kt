@@ -203,6 +203,38 @@ fun StopIcon(tint: Color, size: Dp = 18.dp) {
 }
 
 @Composable
+fun RefreshIcon(tint: Color, size: Dp = 18.dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.minDimension
+        val stroke = s * 0.1f
+        val center = Offset(s * 0.5f, s * 0.5f)
+        val radius = s * 0.32f
+        // Open arc roughly 270 degrees (gap on the upper-right)
+        val arc = Path().apply {
+            val startAngle = -45f
+            val sweep = 290f
+            val rect = androidx.compose.ui.geometry.Rect(
+                center = center,
+                radius = radius,
+            )
+            arcTo(rect, startAngle, sweep, true)
+        }
+        drawPath(arc, color = tint, style = Stroke(width = stroke, cap = StrokeCap.Round))
+        // Arrow tip on the open side
+        val tipBase = Offset(
+            center.x + radius * kotlin.math.cos(Math.toRadians(-45.0)).toFloat(),
+            center.y + radius * kotlin.math.sin(Math.toRadians(-45.0)).toFloat(),
+        )
+        val arrow = Path().apply {
+            moveTo(tipBase.x - radius * 0.3f, tipBase.y - radius * 0.05f)
+            lineTo(tipBase.x + radius * 0.05f, tipBase.y - radius * 0.4f)
+            lineTo(tipBase.x + radius * 0.3f, tipBase.y + radius * 0.05f)
+        }
+        drawPath(arrow, color = tint, style = Stroke(width = stroke, cap = StrokeCap.Round))
+    }
+}
+
+@Composable
 fun HeartIcon(tint: Color, filled: Boolean, size: Dp = 22.dp) {
     Canvas(modifier = Modifier.size(size)) {
         val s = this.size.minDimension

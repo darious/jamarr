@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import android.util.Log
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -178,6 +179,7 @@ private fun JamarrRoot() {
     }
 
     var pendingSavedRoute by remember { mutableStateOf<String?>(null) }
+    var userPickedTab by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         cookieJar.prime()
@@ -196,11 +198,14 @@ private fun JamarrRoot() {
     }
 
     // Restore the saved tab once the NavHost has attached its graph
-    // (signalled by currentRoute becoming non-null).
-    LaunchedEffect(currentRoute, pendingSavedRoute) {
+    // (signalled by currentRoute becoming non-null). Skip the restore
+    // entirely if the user has already touched the bottom nav, so we
+    // don't yank them off a tab they explicitly picked.
+    LaunchedEffect(currentRoute, pendingSavedRoute, userPickedTab) {
         val target = pendingSavedRoute ?: return@LaunchedEffect
         if (currentRoute == null) return@LaunchedEffect
         pendingSavedRoute = null
+        if (userPickedTab) return@LaunchedEffect
         if (currentRoute != target) {
             navController.navigate(target) {
                 popUpTo(Routes.HOME) { inclusive = false }
@@ -230,6 +235,20 @@ private fun JamarrRoot() {
                 if (current != null) {
                     nowPlayingTrack = current.track
                     nowPlayingArtworkUrl = current.artworkUrl
+                } else {
+                    // Activity was recreated mid-playback; rebuild a minimal track
+                    // from the live MediaItem so the mini player still shows.
+                    val item = playbackController.currentMediaItem
+                    val md = item?.mediaMetadata
+                    if (md != null) {
+                        nowPlayingTrack = SearchTrack(
+                            id = mediaId.toLongOrNull() ?: 0L,
+                            title = md.title?.toString().orEmpty(),
+                            artist = md.artist?.toString(),
+                            album = md.albumTitle?.toString(),
+                        )
+                        nowPlayingArtworkUrl = md.artworkUri?.toString()
+                    }
                 }
                 // Track changed — report new index to server
                 if (clientId.isNotBlank() && mediaId != lastReportedMediaId) {
@@ -564,6 +583,7 @@ private fun JamarrRoot() {
                     BottomNavBar(
                         selected = activeTab,
                         onSelect = { tab ->
+                            userPickedTab = true
                             navController.navigate(tab.route()) {
                                 popUpTo(Routes.HOME) { saveState = true }
                                 launchSingleTop = true
