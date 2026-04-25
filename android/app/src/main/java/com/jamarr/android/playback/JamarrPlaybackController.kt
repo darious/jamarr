@@ -90,7 +90,7 @@ class JamarrPlaybackController(context: Context) {
             .build()
 
         return MediaItem.Builder()
-            .setUri(streamUrl)
+            .setUri(JamarrPlaybackService.trackUri(searchTrack.id))
             .setMediaId(searchTrack.id.toString())
             .setMediaMetadata(metadata)
             .build()
