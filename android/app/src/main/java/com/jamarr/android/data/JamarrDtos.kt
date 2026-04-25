@@ -192,6 +192,23 @@ data class AlbumDetail(
 data class FavoriteToggleRequest(val favorite: Boolean)
 
 @Serializable
+data class FavoriteArtist(
+    val mbid: String,
+    val name: String,
+    @SerialName("art_sha1") val artSha1: String? = null,
+    val listens: Int = 0,
+)
+
+@Serializable
+data class FavoriteRelease(
+    @SerialName("album_mbid") val albumMbid: String,
+    val title: String,
+    @SerialName("artist_name") val artistName: String? = null,
+    val year: String? = null,
+    @SerialName("art_sha1") val artSha1: String? = null,
+)
+
+@Serializable
 data class AlbumArtistRef(
     val name: String,
     val mbid: String? = null,
