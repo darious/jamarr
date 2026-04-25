@@ -36,6 +36,9 @@ class JamarrPlaybackController(context: Context) {
     val currentMediaId: String?
         get() = controller?.currentMediaItem?.mediaId
 
+    val currentMediaItem: MediaItem?
+        get() = controller?.currentMediaItem
+
     val currentPosition: Long
         get() = controller?.currentPosition ?: 0L
 
