@@ -49,6 +49,7 @@ import com.jamarr.android.ui.nav.routeToTab
 import com.jamarr.android.ui.screens.AlbumDetailScreen
 import com.jamarr.android.ui.screens.ArtistDetailScreen
 import com.jamarr.android.ui.screens.ChartsScreen
+import com.jamarr.android.ui.screens.FavouritesScreen
 import com.jamarr.android.ui.screens.HistoryScreen
 import com.jamarr.android.ui.screens.HomeScreen
 import com.jamarr.android.ui.screens.LoginScreen
@@ -364,6 +365,20 @@ private fun JamarrRoot() {
                         artworkUrlForAlbum = { album -> apiClient.artworkUrl(serverUrl, album.artSha1, 400) },
                         artworkUrlForArtist = { artist ->
                             apiClient.artworkUrl(serverUrl, artist.artSha1, 400) ?: artist.imageUrl
+                        },
+                        contentPadding = contentPadding,
+                    )
+                }
+
+                composable(Routes.FAVOURITES) {
+                    FavouritesScreen(
+                        onArtistClick = { mbid, name ->
+                            navController.navigate(Routes.artist(mbid = mbid, name = name))
+                        },
+                        onAlbumClick = { albumMbid, title, artist ->
+                            navController.navigate(
+                                Routes.album(albumMbid = albumMbid, album = title, artist = artist),
+                            )
                         },
                         contentPadding = contentPadding,
                     )

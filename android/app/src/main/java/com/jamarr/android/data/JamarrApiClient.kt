@@ -303,6 +303,28 @@ class JamarrApiClient(
         resolveUrl(serverUrl, execute<StreamUrlResponse>(request).url)
     }
 
+    suspend fun favoriteArtists(
+        serverUrl: String,
+        accessToken: String,
+    ): List<FavoriteArtist> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/favorites/artists"))
+            .get()
+            .build()
+        execute(request)
+    }
+
+    suspend fun favoriteReleases(
+        serverUrl: String,
+        accessToken: String,
+    ): List<FavoriteRelease> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/favorites/releases"))
+            .get()
+            .build()
+        execute(request)
+    }
+
     suspend fun setArtistFavorite(
         serverUrl: String,
         accessToken: String,
