@@ -37,6 +37,7 @@ import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrCookieJar
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.playback.JamarrPlaybackContext
 import com.jamarr.android.playback.JamarrPlaybackController
 import com.jamarr.android.playback.ResolvedTrack
 import com.jamarr.android.ui.components.MiniPlayer
@@ -93,7 +94,7 @@ private fun JamarrRoot() {
                 settingsStore.clearAccessToken()
                 cookieJar.clear()
             },
-        )
+        ).also { JamarrPlaybackContext.apiClient = it }
     }
     val playbackController = remember { JamarrPlaybackController(context.applicationContext) }
     val scope = rememberCoroutineScope()
@@ -146,11 +147,11 @@ private fun JamarrRoot() {
 
     suspend fun playTracks(queue: List<SearchTrack>, startIndex: Int) {
         if (queue.isEmpty()) return
-        val token = tokenHolder.get()
+        JamarrPlaybackContext.serverUrl = serverUrl
         val resolved = queue.map { queueTrack ->
             ResolvedTrack(
                 track = queueTrack,
-                streamUrl = apiClient.streamUrl(serverUrl, token, queueTrack.id),
+                streamUrl = "",
                 artworkUrl = apiClient.artworkUrl(serverUrl, queueTrack.artSha1),
             )
         }
@@ -176,6 +177,8 @@ private fun JamarrRoot() {
         }
     }
 
+    var pendingSavedRoute by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(Unit) {
         cookieJar.prime()
         clientId = settingsStore.getClientId()
@@ -185,12 +188,23 @@ private fun JamarrRoot() {
             tokenHolder.set(saved.accessToken)
             status = "Welcome back."
             refreshHome()
-            val saved_route = JamarrTab.fromIndex(saved.activeTabIndex).route()
-            if (saved_route != Routes.HOME) {
-                navController.navigate(saved_route) {
-                    popUpTo(Routes.HOME) { inclusive = false }
-                    launchSingleTop = true
-                }
+            val savedRoute = JamarrTab.fromIndex(saved.activeTabIndex).route()
+            if (savedRoute != Routes.HOME) {
+                pendingSavedRoute = savedRoute
+            }
+        }
+    }
+
+    // Restore the saved tab once the NavHost has attached its graph
+    // (signalled by currentRoute becoming non-null).
+    LaunchedEffect(currentRoute, pendingSavedRoute) {
+        val target = pendingSavedRoute ?: return@LaunchedEffect
+        if (currentRoute == null) return@LaunchedEffect
+        pendingSavedRoute = null
+        if (currentRoute != target) {
+            navController.navigate(target) {
+                popUpTo(Routes.HOME) { inclusive = false }
+                launchSingleTop = true
             }
         }
     }
