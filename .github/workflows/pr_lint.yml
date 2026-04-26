@@ -3,6 +3,17 @@ name: Lint
 on:
   pull_request:
     branches: [ "main" ]
+    paths:
+      - ".github/workflows/pr_lint.yml"
+      - "app/**"
+      - "scripts/**"
+      - "tests/**"
+      - "web/**"
+      - "docker-compose.ci.yml"
+      - "Dockerfile.node-ci"
+      - "lint.sh"
+      - "pyproject.toml"
+      - "uv.lock"
 
 jobs:
   lint:
