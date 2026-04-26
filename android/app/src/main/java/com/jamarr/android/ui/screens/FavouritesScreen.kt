@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +43,7 @@ import com.jamarr.android.data.FavoriteRelease
 import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.ArtistArt
 import com.jamarr.android.ui.components.HeartIcon
+import com.jamarr.android.ui.components.RefreshIcon
 import com.jamarr.android.ui.state.LocalJamarrContext
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
@@ -65,8 +67,9 @@ fun FavouritesScreen(
     var artistSort by remember { mutableStateOf(FavSort.Recent) }
     var releaseSort by remember { mutableStateOf(FavSort.Recent) }
     var error by remember { mutableStateOf<String?>(null) }
+    var refreshTick by remember { mutableStateOf(0) }
 
-    LaunchedEffect(ctx.serverUrl, ctx.accessToken) {
+    LaunchedEffect(ctx.serverUrl, ctx.accessToken, refreshTick) {
         runCatching {
             artists = ctx.apiClient.favoriteArtists(ctx.serverUrl, ctx.accessToken)
             releases = ctx.apiClient.favoriteReleases(ctx.serverUrl, ctx.accessToken)
@@ -91,6 +94,7 @@ fun FavouritesScreen(
             Header(
                 artistCount = artists.size,
                 releaseCount = releases.size,
+                onRefresh = { refreshTick++ },
             )
             SubTabs(selected = tab, onSelect = { tab = it })
             Spacer(Modifier.height(20.dp))
@@ -129,27 +133,42 @@ fun FavouritesScreen(
 }
 
 @Composable
-private fun Header(artistCount: Int, releaseCount: Int) {
-    Column(
+private fun Header(artistCount: Int, releaseCount: Int, onRefresh: () -> Unit) {
+    Row(
         modifier = Modifier
+            .fillMaxWidth()
             .statusBarsPadding()
             .padding(horizontal = JamarrDims.ScreenPadding, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            HeartIcon(tint = JamarrColors.Primary, filled = true, size = 20.dp)
-            Spacer(Modifier.width(8.dp))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                HeartIcon(tint = JamarrColors.Primary, filled = true, size = 20.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Favourites",
+                    style = JamarrType.ScreenTitle,
+                    color = JamarrColors.Text,
+                )
+            }
             Text(
-                text = "Favourites",
-                style = JamarrType.ScreenTitle,
-                color = JamarrColors.Text,
+                text = "$artistCount artists · $releaseCount releases",
+                style = JamarrType.Caption,
+                color = JamarrColors.Muted,
             )
         }
-        Text(
-            text = "$artistCount artists · $releaseCount releases",
-            style = JamarrType.Caption,
-            color = JamarrColors.Muted,
-        )
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onRefresh),
+            contentAlignment = Alignment.Center,
+        ) {
+            RefreshIcon(tint = JamarrColors.Muted, size = 20.dp)
+        }
     }
 }
 
