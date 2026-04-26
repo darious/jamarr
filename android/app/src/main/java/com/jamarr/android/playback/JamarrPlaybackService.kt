@@ -3,6 +3,8 @@ package com.jamarr.android.playback
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
@@ -14,6 +16,7 @@ import com.jamarr.android.MainActivity
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
 
+@OptIn(markerClass = [UnstableApi::class])
 class JamarrPlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
 
