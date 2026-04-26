@@ -23,6 +23,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jamarr.android.ui.theme.JamarrColors
@@ -102,20 +104,20 @@ fun MiniPlayer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                ControlButton(onClick = onPrevious) {
+                ControlButton(contentDescription = "Previous", onClick = onPrevious) {
                     SkipPreviousIcon(tint = JamarrColors.Text, size = 18.dp)
                 }
-                PrimaryControlButton(onClick = onToggle) {
+                PrimaryControlButton(contentDescription = if (isPlaying) "Pause" else "Play", onClick = onToggle) {
                     if (isPlaying) {
                         PauseIcon(tint = Color.White, size = 18.dp)
                     } else {
                         PlayIcon(tint = Color.White, size = 18.dp)
                     }
                 }
-                ControlButton(onClick = onNext) {
+                ControlButton(contentDescription = "Next", onClick = onNext) {
                     SkipNextIcon(tint = JamarrColors.Text, size = 18.dp)
                 }
-                ControlButton(onClick = onStop) {
+                ControlButton(contentDescription = "Stop", onClick = onStop) {
                     StopIcon(tint = JamarrColors.Muted, size = 14.dp)
                 }
             }
@@ -172,23 +174,25 @@ private fun ProgressBar(
 }
 
 @Composable
-private fun ControlButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+private fun ControlButton(contentDescription: String, onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .size(36.dp)
             .clip(CircleShape)
+            .semantics { this.contentDescription = contentDescription }
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { content() }
 }
 
 @Composable
-private fun PrimaryControlButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+private fun PrimaryControlButton(contentDescription: String, onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .size(40.dp)
             .clip(CircleShape)
             .background(JamarrColors.Primary)
+            .semantics { this.contentDescription = contentDescription }
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { content() }
