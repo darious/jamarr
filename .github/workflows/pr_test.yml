@@ -3,6 +3,17 @@ name: Test
 on:
   pull_request:
     branches: [ "main" ]
+    paths:
+      - ".github/workflows/pr_test.yml"
+      - "app/**"
+      - "tests/**"
+      - "scripts/**"
+      - "config.yaml"
+      - "docker-compose.test.yml"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "test.sh"
+      - "uv.lock"
 
 jobs:
   test:

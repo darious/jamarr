@@ -3,6 +3,12 @@ name: Build
 on:
   pull_request:
     branches: [ "main" ]
+    paths:
+      - ".github/workflows/pr_build.yml"
+      - "web/**"
+      - "docker-compose.test.yml"
+      - "Dockerfile.node-ci"
+      - "test-build.sh"
   
 jobs:
   build:
