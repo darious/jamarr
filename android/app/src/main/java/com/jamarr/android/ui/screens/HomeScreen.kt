@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -116,6 +117,7 @@ fun HomeScreen(
                 SearchBar(
                     query = searchQuery,
                     onQueryChange = onSearchQueryChange,
+                    onSubmit = onSearchSubmit,
                 )
             }
         }
@@ -230,6 +232,7 @@ private fun HeaderRow(greetingInitial: String, onAvatarClick: () -> Unit) {
 private fun SearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
+    onSubmit: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -259,6 +262,7 @@ private fun SearchBar(
                         capitalization = KeyboardCapitalization.None,
                         imeAction = ImeAction.Search,
                     ),
+                    keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -302,7 +306,7 @@ private fun AlbumRowSection(
             contentPadding = PaddingValues(horizontal = JamarrDims.ScreenPadding),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(albums, key = { it.album + it.artistName }) { album ->
+            items(albums) { album ->
                 AlbumCard(
                     album = album,
                     artSize = artSize,
@@ -369,7 +373,7 @@ private fun ArtistRowSection(
             contentPadding = PaddingValues(horizontal = JamarrDims.ScreenPadding),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            items(artists, key = { it.mbid ?: it.name }) { artist ->
+            items(artists) { artist ->
                 ArtistTile(
                     artist = artist,
                     artworkUrl = artworkUrl(artist),

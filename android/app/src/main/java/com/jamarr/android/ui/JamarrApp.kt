@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import android.util.Log
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -178,8 +177,10 @@ private fun JamarrRoot() {
         }
     }
 
-    var pendingSavedRoute by remember { mutableStateOf<String?>(null) }
-    var userPickedTab by remember { mutableStateOf(false) }
+    // Survives activity recreation so we never re-restore the saved tab
+    // and yank the user away from wherever they navigated to.
+    var initialRestoreDone by rememberSaveable { mutableStateOf(false) }
+    var pendingSavedRoute by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         cookieJar.prime()
@@ -190,22 +191,22 @@ private fun JamarrRoot() {
             tokenHolder.set(saved.accessToken)
             status = "Welcome back."
             refreshHome()
-            val savedRoute = JamarrTab.fromIndex(saved.activeTabIndex).route()
-            if (savedRoute != Routes.HOME) {
-                pendingSavedRoute = savedRoute
+            if (!initialRestoreDone) {
+                initialRestoreDone = true
+                val savedRoute = JamarrTab.fromIndex(saved.activeTabIndex).route()
+                if (savedRoute != Routes.HOME) {
+                    pendingSavedRoute = savedRoute
+                }
             }
         }
     }
 
     // Restore the saved tab once the NavHost has attached its graph
-    // (signalled by currentRoute becoming non-null). Skip the restore
-    // entirely if the user has already touched the bottom nav, so we
-    // don't yank them off a tab they explicitly picked.
-    LaunchedEffect(currentRoute, pendingSavedRoute, userPickedTab) {
+    // (signalled by currentRoute becoming non-null).
+    LaunchedEffect(currentRoute, pendingSavedRoute) {
         val target = pendingSavedRoute ?: return@LaunchedEffect
         if (currentRoute == null) return@LaunchedEffect
         pendingSavedRoute = null
-        if (userPickedTab) return@LaunchedEffect
         if (currentRoute != target) {
             navController.navigate(target) {
                 popUpTo(Routes.HOME) { inclusive = false }
@@ -229,6 +230,16 @@ private fun JamarrRoot() {
             playbackDuration = playbackController.duration
             shuffleEnabled = playbackController.shuffleEnabled
             repeatMode = playbackController.repeatMode
+            // Always sync the visible queue from the live controller so it
+            // reflects the actual playback order (including shuffle) and
+            // recovers from activity recreation that wiped in-memory state.
+            val controllerCount = playbackController.mediaItemCount
+            if (controllerCount > 0) {
+                val snapshot = playbackController.currentQueueSnapshot()
+                if (snapshot != playbackQueue) playbackQueue = snapshot
+            } else if (playbackQueue.isNotEmpty()) {
+                playbackQueue = emptyList()
+            }
             val mediaId = playbackController.currentMediaId
             if (mediaId != null && mediaId != nowPlayingTrack?.id?.toString()) {
                 val current = playbackQueue.find { it.track.id.toString() == mediaId }
@@ -583,11 +594,9 @@ private fun JamarrRoot() {
                     BottomNavBar(
                         selected = activeTab,
                         onSelect = { tab ->
-                            userPickedTab = true
                             navController.navigate(tab.route()) {
-                                popUpTo(Routes.HOME) { saveState = true }
+                                popUpTo(Routes.HOME) { inclusive = false }
                                 launchSingleTop = true
-                                restoreState = true
                             }
                         },
                     )
