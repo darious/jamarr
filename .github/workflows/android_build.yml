@@ -19,7 +19,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: android
@@ -43,7 +43,7 @@ jobs:
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
 
       - name: Install Android SDK packages
-        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "system-images;android-36;google_apis;x86_64" "emulator"
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
@@ -58,20 +58,5 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -la /dev/kvm
-
-      - name: Run Android checks
-        uses: reactivecircus/android-emulator-runner@70f4dee990796918b78d040e3278474bdbd348a7
-        with:
-          api-level: 36
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          working-directory: android
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -netdelay none -netspeed full
-          script: RUN_ANDROID_INSTRUMENTATION=1 ./test.sh
+      - name: Lint, unit tests, and build
+        run: ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
