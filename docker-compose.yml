@@ -18,6 +18,7 @@ services:
 
   jamarr:
     build: .
+    image: ghcr.io/darious/jamarr:latest
     container_name: jamarr
     network_mode: "host"
     depends_on:

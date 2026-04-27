@@ -23,17 +23,16 @@ fi
 export HOST_IP
 SERVER_IP="${HOST_IP}"
 
-echo "🚀 Building and starting Jamarr in production mode..."
+echo "🚀 Starting Jamarr in production mode..."
 echo "📍 Detected HOST_IP: ${HOST_IP}"
 echo ""
 echo "This will:"
-echo "  1. Build the frontend (npm run build)"
-echo "  2. Build the Docker image with bundled frontend"
-echo "  3. Start all services in production mode"
+echo "  1. Pull the latest Docker image from GHCR"
+echo "  2. Start all services in production mode"
 echo ""
 
-# Build and start services
-docker compose build
+# Pull and start services
+docker compose pull
 
 # Explicitly pass HOST_IP to ensure Compose overrides any .env values
 HOST_IP="${HOST_IP}" docker compose up -d

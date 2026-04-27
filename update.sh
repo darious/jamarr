@@ -10,9 +10,9 @@ if [[ -z "${HOST_IP:-}" ]]; then
 fi
 echo "Using HOST_IP=${HOST_IP}"
 
-echo "[1/7] Building latest application image..."
-# Build before stopping. If this fails, the old version keeps running.
-${COMPOSE} build jamarr
+echo "[1/7] Pulling latest application image..."
+# Pull before stopping. If this fails, the old version keeps running.
+${COMPOSE} pull jamarr
 
 echo "[2/7] Ensuring database container is up..."
 ${COMPOSE} up -d jamarr_db
