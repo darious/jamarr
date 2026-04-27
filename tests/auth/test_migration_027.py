@@ -5,12 +5,12 @@ import pytest
 import asyncpg
 
 from app.auth import hash_password
-from scripts.apply_migrations import _split_statements
+from migrations.apply_migrations import _split_statements
 
 
 @pytest.mark.asyncio
 async def test_migration_027_marks_only_chris_admin(db: asyncpg.Connection):
-    migration = Path("scripts/migrations/027_user_admin_flag.sql")
+    migration = Path("migrations/027_user_admin_flag.sql")
     statements = _split_statements(migration.read_text())
 
     tx = db.transaction()

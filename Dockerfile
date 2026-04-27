@@ -24,9 +24,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Copy backend code and scripts (including DB migrations)
+# Copy backend code and migrations
 COPY app ./app
 COPY scripts ./scripts
+COPY migrations ./migrations
 
 # Copy built frontend assets
 COPY --from=frontend-builder /app/web/build ./web/build

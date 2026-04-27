@@ -56,7 +56,7 @@ We provide helper scripts to simplify development, production, and testing workf
 
 ### Deployment & Migrations (tl;dr)
 - `update.sh`: prod deploy helper. Stops the app container, `git pull --rebase`, brings DB up, builds the app image, runs DB migrations, then restarts the app. Expects `HOST_IP` set (defaults to 127.0.0.1).
-- Migrations: Versioned SQL files in `scripts/migrations/` tracked via `schema_migration` table. Runner (`scripts/apply_migrations.py`) takes an advisory lock, checks checksums, and applies pending files in order. Runs inside the app container via `docker compose run --rm jamarr python scripts/apply_migrations.py`.
+- Migrations: Versioned SQL files in `migrations/` tracked via `schema_migration` table. Runner (`migrations/apply_migrations.py`) takes an advisory lock, checks checksums, and applies pending files in order. Runs inside the app container via `docker compose run --rm jamarr python migrations/apply_migrations.py`.
 - `prod.sh`: Build + start everything in prod mode (no migrations).
 - `dev.sh`: Start dev stack with hot-reload and dev overrides.
 - Tests: `test.sh` runs the backend suite in an isolated Compose project and manages the test DB lifecycle (see `tests/TESTING.md`).

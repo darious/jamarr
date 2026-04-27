@@ -7,7 +7,7 @@ on:
       - ".github/workflows/pr_test.yml"
       - "app/**"
       - "tests/**"
-      - "scripts/**"
+      - "migrations/**"
       - "config.yaml"
       - "docker-compose.test.yml"
       - "Dockerfile"
