@@ -4,16 +4,16 @@ services:
     container_name: jamarr_db
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8110:8110"
+      - "${DB_LISTEN_ADDR:-127.0.0.1}:${DB_PORT:-8110}:${DB_PORT:-8110}"
 
     env_file:
       - .env
     environment:
-      POSTGRES_DB: jamarr
-      PGPORT: 8110
+      POSTGRES_DB: ${POSTGRES_DB:-jamarr}
+      PGPORT: ${DB_PORT:-8110}
 
     volumes:
-      - /mnt/optane-jamarr/jamarr_db:/var/lib/postgresql
+      - ${DB_DATA_PATH:-/mnt/optane-jamarr/jamarr_db}:/var/lib/postgresql
 
 
   jamarr:
@@ -31,23 +31,23 @@ services:
         read_only: true
         volume:
           nocopy: true
-      - /mnt/config/q-jamarr/jamarr:/app/cache
+      - ${CACHE_PATH:-/mnt/config/q-jamarr/jamarr}:/app/cache
       - ./config.yaml:/app/config.yaml
     restart: unless-stopped
     environment:
-      HOST: 0.0.0.0
+      HOST: ${HOST:-0.0.0.0}
       HOST_IP: ${HOST_IP:-127.0.0.1}
-      HOST_PORT: 8111
-      DB_HOST: 127.0.0.1
-      DB_PORT: 8110
-      DB_USER: ${DB_USER}
-      DB_PASS: ${DB_PASS}
-      DB_NAME: jamarr
+      HOST_PORT: ${HOST_PORT:-8111}
+      DB_HOST: ${DB_HOST:-127.0.0.1}
+      DB_PORT: ${DB_PORT:-8110}
+      DB_USER: ${DB_USER:-jamarr}
+      DB_PASS: ${DB_PASS:-jamarr}
+      DB_NAME: ${DB_NAME:-jamarr}
 
 
 volumes:
   music:
     driver_opts:
       type: "nfs"
-      o: "addr=192.168.1.201,nolock,soft,rw"
-      device: ":/mnt/tank/music/library"
+      o: "addr=${MUSIC_NFS_ADDR:-192.168.1.201},nolock,soft,rw"
+      device: ":${MUSIC_NFS_PATH:-/mnt/tank/music/library}"
