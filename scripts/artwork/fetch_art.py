@@ -54,7 +54,7 @@ def resolve_mb_base() -> str:
 
 MB_BASE = resolve_mb_base()
 CAA_BASE = "https://coverartarchive.org"
-USER_AGENT = "JamarrArtFetcher/1.0 ( dev@jamarr.local )"
+USER_AGENT = "JamarrArtFetcher/1.0"
 MIN_TARGET_DIM = 2800
 
 console = Console()

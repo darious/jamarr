@@ -4,12 +4,12 @@ import pytest
 import asyncpg
 
 from app.auth import hash_password
-from scripts.apply_migrations import _split_statements
+from migrations.apply_migrations import _split_statements
 
 
 @pytest.mark.asyncio
 async def test_migration_028_creates_user_favorite_tables(db: asyncpg.Connection):
-    migration = Path("scripts/migrations/028_user_favorites.sql")
+    migration = Path("migrations/028_user_favorites.sql")
     statements = _split_statements(migration.read_text())
 
     tx = db.transaction()

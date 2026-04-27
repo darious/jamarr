@@ -10,9 +10,9 @@ if [[ -z "${HOST_IP:-}" ]]; then
 fi
 echo "Using HOST_IP=${HOST_IP}"
 
-echo "[1/7] Building latest application image..."
-# Build before stopping. If this fails, the old version keeps running.
-${COMPOSE} build jamarr
+echo "[1/7] Pulling latest application image..."
+# Pull before stopping. If this fails, the old version keeps running.
+${COMPOSE} pull jamarr
 
 echo "[2/7] Ensuring database container is up..."
 ${COMPOSE} up -d jamarr_db
@@ -47,7 +47,7 @@ fi
 
 echo "[5/7] Applying database migrations..."
 # Run migrations using the new image we just built
-${COMPOSE} run --rm jamarr python scripts/apply_migrations.py
+${COMPOSE} run --rm jamarr python migrations/apply_migrations.py
 
 echo "[6/7] Restarting app container..."
 # 'up -d' recreates only the containers that have changed images or config
