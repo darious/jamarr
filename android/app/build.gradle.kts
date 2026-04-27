@@ -31,17 +31,18 @@ android {
             } else {
                 file("jamarr.keystore")
             }
-            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                ?: error("ANDROID_KEYSTORE_PASSWORD env var not set")
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: ""
             keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "jamarr"
-            keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
-                ?: error("ANDROID_KEY_PASSWORD env var not set")
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: ""
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storePassword?.isNotBlank() == true) {
+                signingConfig = releaseSigning
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
