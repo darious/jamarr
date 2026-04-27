@@ -31,3 +31,31 @@ http://192.168.1.20:8000
 
 `localhost` on a physical phone means the phone itself, not the development
 machine.
+
+## Testing in the car
+
+The Stage 3 work adds an Android Auto browse tree backed by the same Media3
+session. Before driving, validate against Android Studio's Desktop Head Unit
+(DHU).
+
+Prerequisites:
+
+- Install **Android Auto Desktop Head Unit** via Android Studio →
+  SDK Manager → SDK Tools.
+- Install the Android Auto app on the phone, enable Developer Mode
+  (Android Auto → tap the version banner 10×), then choose
+  *Start head unit server*.
+- USB-connect the phone with debugging authorised.
+
+Run:
+
+```bash
+./scripts/dhu.sh
+```
+
+The script forwards the DHU socket, asks the phone to start the head-unit
+server, and launches the DHU binary. Ctrl-C tears it all down.
+
+In DHU, open the media app picker and pick **Jamarr** to load the browse tree.
+If the token is missing or expired beyond refresh, the root shows a single
+"Sign in on phone to use Jamarr" item.

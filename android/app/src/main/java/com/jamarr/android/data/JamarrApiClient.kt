@@ -378,6 +378,20 @@ class JamarrApiClient(
         return resolveUrl(serverUrl, "/api/art/file/$artSha1?max_size=$maxSize")
     }
 
+    suspend fun fetchArtworkBytes(
+        serverUrl: String,
+        artSha1: String?,
+        maxSize: Int = 400,
+    ): ByteArray? = withContext(Dispatchers.IO) {
+        val url = artworkUrl(serverUrl, artSha1, maxSize) ?: return@withContext null
+        val request = Request.Builder().url(url).get().build()
+        runCatching {
+            httpClient.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) null else resp.body.bytes()
+            }
+        }.getOrNull()
+    }
+
     fun normalizeServerUrl(serverUrl: String): String {
         val trimmed = serverUrl.trim().trimEnd('/')
         require(trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
