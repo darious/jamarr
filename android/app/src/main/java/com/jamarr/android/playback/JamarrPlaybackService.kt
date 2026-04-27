@@ -11,6 +11,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaLibraryService
@@ -22,6 +23,7 @@ import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrCookieJar
 import com.jamarr.android.data.SearchTrack
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +34,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 @OptIn(markerClass = [UnstableApi::class])
 class JamarrPlaybackService : MediaLibraryService() {
@@ -39,6 +42,7 @@ class JamarrPlaybackService : MediaLibraryService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val serverUrl = AtomicReference("")
+    private val streamUrlCache = ConcurrentHashMap<Long, String>()
     private lateinit var settingsStore: SettingsStore
     private lateinit var tokenHolder: TokenHolder
     private lateinit var apiClient: JamarrApiClient
@@ -79,8 +83,18 @@ class JamarrPlaybackService : MediaLibraryService() {
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(resolvingFactory)
 
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs */ 30_000,
+                /* maxBufferMs */ 60_000,
+                /* backBufferMs */ 2_500,
+                /* retainBackBufferMs */ 5_000,
+            )
+            .build()
+
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
             .build()
 
         serviceScope.launch(Dispatchers.Main) {
@@ -96,6 +110,20 @@ class JamarrPlaybackService : MediaLibraryService() {
                         val tracks = queueSearchTracks(player)
                         if (tracks.isNotEmpty()) {
                             apiClient.reportQueue(url, clientId, tracks, player.currentMediaItemIndex)
+                        }
+                        for (i in 0 until player.mediaItemCount) {
+                            val tid = extractTrackId(player.getMediaItemAt(i).mediaId)
+                            if (tid > 0L && !streamUrlCache.containsKey(tid)) {
+                                serviceScope.launch(Dispatchers.IO) {
+                                    runCatching {
+                                        withTimeout(5000) {
+                                            apiClient.streamUrl(url, tokenHolder.get(), tid)
+                                        }
+                                    }.onSuccess { resolved ->
+                                        streamUrlCache[tid] = resolved
+                                    }
+                                }
+                            }
                         }
                     }
                     val mediaId = player.currentMediaItem?.mediaId
@@ -143,9 +171,15 @@ class JamarrPlaybackService : MediaLibraryService() {
             ?: throw IOException("Missing track id in $uri")
         val server = serverUrl.get()
         if (server.isBlank()) throw IOException("Jamarr server URL not set")
+
+        streamUrlCache[trackId]?.let { return spec.withUri(Uri.parse(it)) }
+
         val resolved = runBlocking {
-            apiClient.streamUrl(server, tokenHolder.get(), trackId)
+            withTimeout(5000) {
+                apiClient.streamUrl(server, tokenHolder.get(), trackId)
+            }
         }
+        streamUrlCache[trackId] = resolved
         return spec.withUri(Uri.parse(resolved))
     }
 

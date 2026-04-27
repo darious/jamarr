@@ -62,6 +62,9 @@ class JamarrApiClient(
     }
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
         .cookieJar(cookieJar)
         .addInterceptor(authInterceptor)
         .authenticator { _, response ->

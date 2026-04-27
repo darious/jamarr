@@ -27,6 +27,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.jamarr.android.ui.components.RepeatIcon
+import com.jamarr.android.ui.components.RepeatOneIcon
+import com.jamarr.android.ui.components.ShuffleIcon
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrShapes
 import com.jamarr.android.ui.theme.JamarrType
@@ -40,6 +43,8 @@ fun MiniPlayer(
     seedName: String,
     progressMs: Long,
     durationMs: Long,
+    shuffleEnabled: Boolean = false,
+    repeatMode: Int = 0,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -100,6 +105,19 @@ fun MiniPlayer(
                     )
                 }
             }
+            if (shuffleEnabled || repeatMode != 0) {
+                Spacer(Modifier.width(4.dp))
+                if (shuffleEnabled) {
+                    ShuffleIcon(tint = JamarrColors.Primary, size = 14.dp)
+                }
+                if (repeatMode == 2) {
+                    Spacer(Modifier.width(2.dp))
+                    RepeatIcon(tint = JamarrColors.Primary, size = 14.dp)
+                } else if (repeatMode == 1) {
+                    Spacer(Modifier.width(2.dp))
+                    RepeatOneIcon(tint = JamarrColors.Primary, size = 14.dp)
+                }
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -140,7 +158,7 @@ private fun ProgressBar(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(16.dp)
+            .height(44.dp)
             .pointerInput(durationMs) {
                 detectTapGestures { offset ->
                     if (durationMs > 0) {

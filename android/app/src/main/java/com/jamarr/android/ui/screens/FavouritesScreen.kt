@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -68,12 +69,15 @@ fun FavouritesScreen(
     var releaseSort by remember { mutableStateOf(FavSort.Recent) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshTick by remember { mutableStateOf(0) }
+    var isRefreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(ctx.serverUrl, ctx.accessToken, refreshTick) {
+        if (refreshTick > 0) isRefreshing = true
         runCatching {
             artists = ctx.apiClient.favoriteArtists(ctx.serverUrl, ctx.accessToken)
             releases = ctx.apiClient.favoriteReleases(ctx.serverUrl, ctx.accessToken)
         }.onFailure { error = it.message }
+        isRefreshing = false
     }
 
     val sortedArtists = remember(artists, artistSort) {
@@ -90,11 +94,15 @@ fun FavouritesScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(JamarrColors.Bg)) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { refreshTick++ },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
             Header(
                 artistCount = artists.size,
                 releaseCount = releases.size,
-                onRefresh = { refreshTick++ },
             )
             SubTabs(selected = tab, onSelect = { tab = it })
             Spacer(Modifier.height(20.dp))
@@ -128,12 +136,21 @@ fun FavouritesScreen(
                     modifier = Modifier.padding(JamarrDims.ScreenPadding),
                 )
             }
+            if (error == null && sortedArtists.isEmpty() && sortedReleases.isEmpty()) {
+                Text(
+                    text = "No favourites yet. Tap the heart icon on any artist or album to add it here.",
+                    style = JamarrType.Body,
+                    color = JamarrColors.Muted,
+                    modifier = Modifier.padding(JamarrDims.ScreenPadding),
+                )
+            }
         }
+    }
     }
 }
 
 @Composable
-private fun Header(artistCount: Int, releaseCount: Int, onRefresh: () -> Unit) {
+private fun Header(artistCount: Int, releaseCount: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -159,15 +176,6 @@ private fun Header(artistCount: Int, releaseCount: Int, onRefresh: () -> Unit) {
                 style = JamarrType.Caption,
                 color = JamarrColors.Muted,
             )
-        }
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onRefresh),
-            contentAlignment = Alignment.Center,
-        ) {
-            RefreshIcon(tint = JamarrColors.Muted, size = 20.dp)
         }
     }
 }

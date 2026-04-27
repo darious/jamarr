@@ -16,8 +16,10 @@ import com.jamarr.android.data.SearchTrack
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.Serializable
 import java.util.concurrent.Executor
 
+@Serializable
 data class ResolvedTrack(
     val track: SearchTrack,
     val streamUrl: String,

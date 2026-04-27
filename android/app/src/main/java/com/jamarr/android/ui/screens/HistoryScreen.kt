@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -71,8 +72,10 @@ fun HistoryScreen(
     val stats = remember { mutableStateOf(HistoryStats()) }
     val error = remember { mutableStateOf<String?>(null) }
     val refreshTick = remember { mutableStateOf(0) }
+    val isRefreshing = remember { mutableStateOf(false) }
 
     LaunchedEffect(range.value, refreshTick.value) {
+        if (refreshTick.value > 0) isRefreshing.value = true
         val (from, to) = dateRangeBounds(range.value)
         runCatching {
             ctx.apiClient.historyStats(
@@ -85,15 +88,21 @@ fun HistoryScreen(
         }
             .onSuccess { stats.value = it }
             .onFailure { error.value = it.message }
+        isRefreshing.value = false
     }
 
     Box(modifier = Modifier.fillMaxSize().background(JamarrColors.Bg)) {
-        LazyColumn(
+        PullToRefreshBox(
+            isRefreshing = isRefreshing.value,
+            onRefresh = { refreshTick.value += 1 },
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                bottom = contentPadding.calculateBottomPadding() + 16.dp,
-            ),
         ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    bottom = contentPadding.calculateBottomPadding() + 16.dp,
+                ),
+            ) {
             item {
                 Row(
                     modifier = Modifier
@@ -112,15 +121,6 @@ fun HistoryScreen(
                             style = JamarrType.Caption,
                             color = JamarrColors.Muted,
                         )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .clickable { refreshTick.value += 1 },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        RefreshIcon(tint = JamarrColors.Muted, size = 20.dp)
                     }
                 }
             }
@@ -206,6 +206,7 @@ fun HistoryScreen(
                 }
             }
         }
+    }
     }
 }
 

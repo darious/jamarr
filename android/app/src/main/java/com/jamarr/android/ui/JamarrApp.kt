@@ -8,38 +8,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavHostController
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.jamarr.android.auth.SettingsStore
-import com.jamarr.android.auth.TokenHolder
-import com.jamarr.android.data.HomeAlbum
-import com.jamarr.android.data.HomeArtist
-import com.jamarr.android.data.HomeContent
-import com.jamarr.android.data.JamarrApiClient
-import com.jamarr.android.data.JamarrCookieJar
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
-import com.jamarr.android.playback.JamarrPlaybackContext
-import com.jamarr.android.playback.JamarrPlaybackController
-import com.jamarr.android.playback.ResolvedTrack
 import com.jamarr.android.ui.components.MiniPlayer
 import com.jamarr.android.ui.nav.BottomNavBar
 import com.jamarr.android.ui.nav.JamarrTab
@@ -62,10 +45,6 @@ import com.jamarr.android.ui.state.LocalJamarrContext
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
 import com.jamarr.android.ui.theme.JamarrTheme
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-
-private const val DEFAULT_SERVER_URL = "https://jamarr.darious.co.uk"
 
 @Composable
 fun JamarrApp() {
@@ -81,132 +60,43 @@ fun JamarrApp() {
 
 @Composable
 private fun JamarrRoot() {
-    val context = LocalContext.current
-    val settingsStore = remember { SettingsStore(context.applicationContext) }
-    val tokenHolder = remember { TokenHolder() }
-    val cookieJar = remember { JamarrCookieJar(settingsStore) }
-    val apiClient = remember {
-        JamarrApiClient(
-            tokenHolder = tokenHolder,
-            cookieJar = cookieJar,
-            onTokenRefreshed = { newToken -> settingsStore.saveAccessToken(newToken) },
-            onRefreshFailed = {
-                settingsStore.clearAccessToken()
-                cookieJar.clear()
-            },
-        ).also { JamarrPlaybackContext.apiClient = it }
+    val vm: JamarrViewModel = viewModel()
+    val accessToken by vm.tokenHolder.token.collectAsState()
+
+    if (accessToken.isBlank()) {
+        LoginScreen(
+            serverUrl = vm.serverUrl,
+            username = vm.username,
+            password = vm.password,
+            busy = vm.busy,
+            status = vm.status,
+            onServerUrlChange = { vm.serverUrl = it },
+            onUsernameChange = { vm.username = it },
+            onPasswordChange = { vm.password = it },
+            onSubmit = { vm.login() },
+        )
+        return
     }
-    val playbackController = remember { JamarrPlaybackController(context.applicationContext) }
-    val scope = rememberCoroutineScope()
-
-    var serverUrl by rememberSaveable { mutableStateOf(DEFAULT_SERVER_URL) }
-    var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    val accessToken by tokenHolder.token.collectAsState()
-    var status by rememberSaveable { mutableStateOf("Connect to Jamarr.") }
-    var busy by remember { mutableStateOf(false) }
-
-    var homeContent by remember { mutableStateOf(HomeContent()) }
-    var query by rememberSaveable { mutableStateOf("") }
-    var searchResults by remember { mutableStateOf(SearchResponse()) }
-
-    var nowPlayingTrack by remember { mutableStateOf<SearchTrack?>(null) }
-    var nowPlayingArtworkUrl by remember { mutableStateOf<String?>(null) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var playbackPosition by remember { mutableStateOf(0L) }
-    var playbackDuration by remember { mutableStateOf(0L) }
-    var playbackQueue by remember { mutableStateOf<List<ResolvedTrack>>(emptyList()) }
-    var shuffleEnabled by remember { mutableStateOf(false) }
-    var repeatMode by remember { mutableStateOf(0) }
-    var showNowPlaying by remember { mutableStateOf(false) }
-    var clientId by remember { mutableStateOf("") }
 
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
-    fun refreshHome() {
-        val token = tokenHolder.get()
-        if (serverUrl.isBlank() || token.isBlank()) return
-        scope.launch {
-            runCatching { apiClient.home(serverUrl, token) }
-                .onSuccess { homeContent = it }
-                .onFailure { status = it.message ?: "Failed to load home." }
+    // Persist active tab and refresh home on return
+    LaunchedEffect(currentRoute) {
+        routeToTab(currentRoute)?.let { tab ->
+            vm.saveActiveTab(tab.ordinal)
+        }
+        if (currentRoute == Routes.HOME) {
+            vm.refreshHome()
         }
     }
 
-    fun runSearch() {
-        val token = tokenHolder.get()
-        if (serverUrl.isBlank() || token.isBlank() || query.trim().length < 2) return
-        scope.launch {
-            runCatching { apiClient.search(serverUrl, token, query.trim()) }
-                .onSuccess { searchResults = it }
-                .onFailure { status = it.message ?: "Search failed." }
-        }
-    }
-
-    suspend fun playTracks(queue: List<SearchTrack>, startIndex: Int) {
-        if (queue.isEmpty()) return
-        JamarrPlaybackContext.serverUrl = serverUrl
-        val resolved = queue.map { queueTrack ->
-            ResolvedTrack(
-                track = queueTrack,
-                streamUrl = "",
-                artworkUrl = apiClient.artworkUrl(serverUrl, queueTrack.artSha1),
-            )
-        }
-        playbackQueue = resolved
-        playbackController.playQueue(resolved, startIndex.coerceIn(0, resolved.lastIndex))
-        val startTrack = resolved[startIndex.coerceIn(0, resolved.lastIndex)]
-        nowPlayingTrack = startTrack.track
-        nowPlayingArtworkUrl = startTrack.artworkUrl
-
-        // Report queue to server for history/scrobbling
-        if (clientId.isNotBlank()) {
-            apiClient.reportQueue(serverUrl, clientId, queue, startIndex)
-        }
-    }
-
-    fun playTrack(track: SearchTrack, queue: List<SearchTrack> = listOf(track)) {
-        scope.launch {
-            busy = true
-            val startIndex = queue.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
-            runCatching { playTracks(queue, startIndex) }
-                .onFailure { status = it.message ?: "Playback failed." }
-            busy = false
-        }
-    }
-
-    // Survives activity recreation so we never re-restore the saved tab
-    // and yank the user away from wherever they navigated to.
-    var initialRestoreDone by rememberSaveable { mutableStateOf(false) }
-    var pendingSavedRoute by rememberSaveable { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        cookieJar.prime()
-        clientId = settingsStore.getClientId()
-        val saved = settingsStore.load()
-        serverUrl = saved.serverUrl.ifBlank { DEFAULT_SERVER_URL }
-        if (saved.accessToken.isNotBlank()) {
-            tokenHolder.set(saved.accessToken)
-            status = "Welcome back."
-            refreshHome()
-            if (!initialRestoreDone) {
-                initialRestoreDone = true
-                val savedRoute = JamarrTab.fromIndex(saved.activeTabIndex).route()
-                if (savedRoute != Routes.HOME) {
-                    pendingSavedRoute = savedRoute
-                }
-            }
-        }
-    }
-
-    // Restore the saved tab once the NavHost has attached its graph
-    // (signalled by currentRoute becoming non-null).
-    LaunchedEffect(currentRoute, pendingSavedRoute) {
-        val target = pendingSavedRoute ?: return@LaunchedEffect
+    // Restore saved tab once NavHost has attached its graph
+    LaunchedEffect(currentRoute, vm.pendingSavedRoute) {
+        val target = vm.pendingSavedRoute ?: return@LaunchedEffect
         if (currentRoute == null) return@LaunchedEffect
-        pendingSavedRoute = null
+        vm.pendingSavedRoute = null
         if (currentRoute != target) {
             navController.navigate(target) {
                 popUpTo(Routes.HOME) { inclusive = false }
@@ -215,118 +105,10 @@ private fun JamarrRoot() {
         }
     }
 
-    LaunchedEffect(currentRoute) {
-        routeToTab(currentRoute)?.let { tab ->
-            settingsStore.saveActiveTab(tab.ordinal)
-        }
-    }
-
-    LaunchedEffect(playbackController) {
-        var lastProgressReport = 0L
-        var lastReportedMediaId: String? = null
-        while (true) {
-            isPlaying = playbackController.isPlaying
-            playbackPosition = playbackController.currentPosition
-            playbackDuration = playbackController.duration
-            shuffleEnabled = playbackController.shuffleEnabled
-            repeatMode = playbackController.repeatMode
-            // Always sync the visible queue from the live controller so it
-            // reflects the actual playback order (including shuffle) and
-            // recovers from activity recreation that wiped in-memory state.
-            val controllerCount = playbackController.mediaItemCount
-            if (controllerCount > 0) {
-                val snapshot = playbackController.currentQueueSnapshot()
-                if (snapshot != playbackQueue) playbackQueue = snapshot
-            } else if (playbackQueue.isNotEmpty()) {
-                playbackQueue = emptyList()
-            }
-            val mediaId = playbackController.currentMediaId
-            if (mediaId != null && mediaId != nowPlayingTrack?.id?.toString()) {
-                val current = playbackQueue.find { it.track.id.toString() == mediaId }
-                if (current != null) {
-                    nowPlayingTrack = current.track
-                    nowPlayingArtworkUrl = current.artworkUrl
-                } else {
-                    // Activity was recreated mid-playback; rebuild a minimal track
-                    // from the live MediaItem so the mini player still shows.
-                    val item = playbackController.currentMediaItem
-                    val md = item?.mediaMetadata
-                    if (md != null) {
-                        nowPlayingTrack = SearchTrack(
-                            id = mediaId.toLongOrNull() ?: 0L,
-                            title = md.title?.toString().orEmpty(),
-                            artist = md.artist?.toString(),
-                            album = md.albumTitle?.toString(),
-                        )
-                        nowPlayingArtworkUrl = md.artworkUri?.toString()
-                    }
-                }
-                // Track changed — report new index to server
-                if (clientId.isNotBlank() && mediaId != lastReportedMediaId) {
-                    lastReportedMediaId = mediaId
-                    val newIndex = playbackQueue.indexOfFirst { it.track.id.toString() == mediaId }
-                    if (newIndex >= 0) {
-                        apiClient.reportIndex(serverUrl, clientId, newIndex)
-                    }
-                }
-            }
-            // Report progress every ~5 seconds
-            val now = System.currentTimeMillis()
-            if (playbackController.isPlaying && clientId.isNotBlank() && now - lastProgressReport >= 5000) {
-                lastProgressReport = now
-                apiClient.reportProgress(
-                    serverUrl, clientId,
-                    positionSeconds = playbackPosition / 1000.0,
-                    isPlaying = true,
-                )
-            }
-            delay(500)
-        }
-    }
-
-    DisposableEffect(playbackController) {
-        onDispose { playbackController.release() }
-    }
-
-    if (accessToken.isBlank()) {
-        LoginScreen(
-            serverUrl = serverUrl,
-            username = username,
-            password = password,
-            busy = busy,
-            status = status,
-            onServerUrlChange = { serverUrl = it },
-            onUsernameChange = { username = it },
-            onPasswordChange = { password = it },
-            onSubmit = {
-                scope.launch {
-                    busy = true
-                    status = "Logging in…"
-                    runCatching {
-                        val normalized = apiClient.normalizeServerUrl(serverUrl)
-                        val response = apiClient.login(normalized, username, password)
-                        settingsStore.saveServerUrl(normalized)
-                        settingsStore.saveAccessToken(response.accessToken)
-                        serverUrl = normalized
-                        tokenHolder.set(response.accessToken)
-                        password = ""
-                    }
-                        .onSuccess {
-                            status = "Signed in."
-                            refreshHome()
-                        }
-                        .onFailure { status = it.message ?: "Login failed." }
-                    busy = false
-                }
-            },
-        )
-        return
-    }
-
     val ctx = JamarrAppContext(
-        apiClient = apiClient,
-        playbackController = playbackController,
-        serverUrl = serverUrl,
+        apiClient = vm.apiClient,
+        playbackController = vm.playbackController,
+        serverUrl = vm.serverUrl,
         accessToken = accessToken,
     )
 
@@ -335,7 +117,7 @@ private fun JamarrRoot() {
             val atRoot = isRootRoute(currentRoute)
             val activeTab = routeToTab(currentRoute) ?: JamarrTab.Home
             val navBarHeight = if (atRoot) JamarrDims.BottomNavHeight else 0.dp
-            val miniHeight = if (nowPlayingTrack != null) JamarrDims.MiniPlayerHeight else 0.dp
+            val miniHeight = if (vm.nowPlayingTrack != null) JamarrDims.MiniPlayerHeight else 0.dp
             val contentPadding = PaddingValues(bottom = navBarHeight + miniHeight)
 
             NavHost(
@@ -345,16 +127,16 @@ private fun JamarrRoot() {
             ) {
                 composable(Routes.HOME) {
                     HomeScreen(
-                        greetingInitial = username.firstOrNull()?.toString().orEmpty(),
-                        serverUrl = serverUrl,
-                        homeContent = homeContent,
-                        searchResults = searchResults,
-                        searchQuery = query,
+                        greetingInitial = vm.username.firstOrNull()?.toString().orEmpty(),
+                        serverUrl = vm.serverUrl,
+                        homeContent = vm.homeContent,
+                        searchResults = vm.searchResults,
+                        searchQuery = vm.query,
                         onSearchQueryChange = {
-                            query = it
-                            if (it.isBlank()) searchResults = SearchResponse()
+                            vm.query = it
+                            if (it.isBlank()) vm.searchResults = SearchResponse()
                         },
-                        onSearchSubmit = ::runSearch,
+                        onSearchSubmit = vm::runSearch,
                         onAlbumClick = { album ->
                             navController.navigate(
                                 Routes.album(
@@ -376,7 +158,7 @@ private fun JamarrRoot() {
                             )
                         },
                         onTrackClick = { track ->
-                            playTrack(track, searchResults.tracks.ifEmpty { listOf(track) })
+                            vm.playTrack(track, vm.searchResults.tracks.ifEmpty { listOf(track) })
                         },
                         onSearchArtistClick = { artistMbid, artistName ->
                             navController.navigate(Routes.artist(mbid = artistMbid, name = artistName))
@@ -390,27 +172,13 @@ private fun JamarrRoot() {
                                 ),
                             )
                         },
-                        onLogout = {
-                            scope.launch {
-                                runCatching { apiClient.logout(serverUrl) }
-                                settingsStore.clearAccessToken()
-                                cookieJar.clear()
-                                tokenHolder.clear()
-                                playbackController.stop()
-                                homeContent = HomeContent()
-                                searchResults = SearchResponse()
-                                query = ""
-                                nowPlayingTrack = null
-                                nowPlayingArtworkUrl = null
-                                playbackQueue = emptyList()
-                                status = "Signed out."
-                            }
-                        },
-                        artworkUrlForAlbum = { album -> apiClient.artworkUrl(serverUrl, album.artSha1, 400) },
+                        onLogout = { vm.logout() },
+                        artworkUrlForAlbum = { album -> vm.apiClient.artworkUrl(vm.serverUrl, album.artSha1, 400) },
                         artworkUrlForArtist = { artist ->
-                            apiClient.artworkUrl(serverUrl, artist.artSha1, 400) ?: artist.imageUrl
+                            vm.apiClient.artworkUrl(vm.serverUrl, artist.artSha1, 400) ?: artist.imageUrl
                         },
                         contentPadding = contentPadding,
+                        onRefresh = { vm.refreshHome() },
                     )
                 }
 
@@ -462,16 +230,7 @@ private fun JamarrRoot() {
                             )
                         },
                         onTrackClick = { trackId ->
-                            scope.launch {
-                                runCatching {
-                                    playTracks(
-                                        queue = listOf(
-                                            SearchTrack(id = trackId, title = ""),
-                                        ),
-                                        startIndex = 0,
-                                    )
-                                }
-                            }
+                            vm.playTrack(SearchTrack(id = trackId, title = ""))
                         },
                         contentPadding = contentPadding,
                     )
@@ -506,7 +265,7 @@ private fun JamarrRoot() {
                         onSimilarArtistClick = { mbidSimilar, similarName ->
                             navController.navigate(Routes.artist(mbid = mbidSimilar, name = similarName))
                         },
-                        onPlayTrack = { track, queue -> playTrack(track, queue) },
+                        onPlayTrack = { track, queue -> vm.playTrack(track, queue) },
                         contentPadding = contentPadding,
                     )
                 }
@@ -537,10 +296,7 @@ private fun JamarrRoot() {
                             navController.navigate(Routes.artist(mbid = artistMbid, name = artist))
                         },
                         onPlayTracks = { queue, startIndex ->
-                            scope.launch {
-                                runCatching { playTracks(queue, startIndex) }
-                                    .onFailure { status = it.message ?: "Playback failed." }
-                            }
+                            vm.playQueueFromUi(queue, startIndex)
                         },
                         contentPadding = contentPadding,
                     )
@@ -555,10 +311,7 @@ private fun JamarrRoot() {
                         playlistId = id,
                         onBack = { navController.popBackStack() },
                         onPlayTracks = { queue, startIndex ->
-                            scope.launch {
-                                runCatching { playTracks(queue, startIndex) }
-                                    .onFailure { status = it.message ?: "Playback failed." }
-                            }
+                            vm.playQueueFromUi(queue, startIndex)
                         },
                         contentPadding = contentPadding,
                     )
@@ -566,28 +319,24 @@ private fun JamarrRoot() {
             }
 
             Column(modifier = Modifier.align(Alignment.BottomCenter)) {
-                val track = nowPlayingTrack
+                val track = vm.nowPlayingTrack
                 if (track != null) {
                     MiniPlayer(
                         title = track.title,
                         artist = track.artist,
-                        isPlaying = isPlaying,
-                        artworkUrl = nowPlayingArtworkUrl,
+                        isPlaying = vm.isPlaying,
+                        artworkUrl = vm.nowPlayingArtworkUrl,
                         seedName = (track.album ?: track.title),
-                        progressMs = playbackPosition,
-                        durationMs = playbackDuration,
-                        onToggle = { playbackController.togglePlayPause() },
-                        onPrevious = { playbackController.previous() },
-                        onNext = { playbackController.next() },
-                        onStop = {
-                            playbackController.stop()
-                            nowPlayingTrack = null
-                            nowPlayingArtworkUrl = null
-                            playbackQueue = emptyList()
-                            showNowPlaying = false
-                        },
-                        onSeek = { playbackController.seekTo(it) },
-                        onClick = { showNowPlaying = true },
+                        progressMs = vm.playbackPosition,
+                        durationMs = vm.playbackDuration,
+                        shuffleEnabled = vm.shuffleEnabled,
+                        repeatMode = vm.repeatMode,
+                        onToggle = { vm.playbackController.togglePlayPause() },
+                        onPrevious = { vm.playbackController.previous() },
+                        onNext = { vm.playbackController.next() },
+                        onStop = { vm.stopPlayback() },
+                        onSeek = { vm.playbackController.seekTo(it) },
+                        onClick = { vm.showNowPlaying = true },
                     )
                 }
                 if (atRoot) {
@@ -599,35 +348,40 @@ private fun JamarrRoot() {
                                 launchSingleTop = true
                             }
                         },
+                        onReselect = { tab ->
+                            if (tab == JamarrTab.Home) {
+                                vm.query = ""
+                            }
+                        },
                     )
                 }
             }
 
             // Now Playing full-screen overlay
-            val npTrack = nowPlayingTrack
+            val npTrack = vm.nowPlayingTrack
             if (npTrack != null) {
                 NowPlayingSheet(
-                    visible = showNowPlaying,
+                    visible = vm.showNowPlaying,
                     track = npTrack,
-                    artworkUrl = nowPlayingArtworkUrl,
-                    isPlaying = isPlaying,
-                    progressMs = playbackPosition,
-                    durationMs = playbackDuration,
-                    shuffleEnabled = shuffleEnabled,
-                    repeatMode = repeatMode,
-                    queue = playbackQueue,
-                    onDismiss = { showNowPlaying = false },
-                    onToggle = { playbackController.togglePlayPause() },
-                    onPrevious = { playbackController.previous() },
-                    onNext = { playbackController.next() },
-                    onSeek = { playbackController.seekTo(it) },
-                    onShuffle = { playbackController.toggleShuffle() },
-                    onRepeat = { playbackController.cycleRepeatMode() },
+                    artworkUrl = vm.nowPlayingArtworkUrl,
+                    isPlaying = vm.isPlaying,
+                    progressMs = vm.playbackPosition,
+                    durationMs = vm.playbackDuration,
+                    shuffleEnabled = vm.shuffleEnabled,
+                    repeatMode = vm.repeatMode,
+                    queue = vm.playbackQueue,
+                    onDismiss = { vm.showNowPlaying = false },
+                    onToggle = { vm.playbackController.togglePlayPause() },
+                    onPrevious = { vm.playbackController.previous() },
+                    onNext = { vm.playbackController.next() },
+                    onSeek = { vm.playbackController.seekTo(it) },
+                    onShuffle = { vm.playbackController.toggleShuffle() },
+                    onRepeat = { vm.playbackController.cycleRepeatMode() },
                     onQueueItemClick = { index ->
-                        playbackController.playQueueItem(index)
+                        vm.playbackController.playQueueItem(index)
                     },
                     onArtistClick = { artistName ->
-                        showNowPlaying = false
+                        vm.showNowPlaying = false
                         navController.navigate(Routes.artist(mbid = null, name = artistName))
                     },
                 )

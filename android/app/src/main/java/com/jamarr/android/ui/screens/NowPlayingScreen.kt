@@ -63,6 +63,7 @@ import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
 import com.jamarr.android.ui.theme.JamarrShapes
 import com.jamarr.android.ui.theme.JamarrType
+import com.jamarr.android.util.formatMs
 
 @Composable
 fun NowPlayingSheet(
@@ -556,9 +557,3 @@ private fun QueueView(
     }
 }
 
-private fun formatMs(ms: Long): String {
-    val totalSeconds = (ms / 1000).coerceAtLeast(0)
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "%d:%02d".format(minutes, seconds)
-}
