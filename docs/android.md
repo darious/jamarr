@@ -460,13 +460,20 @@ voice/text search is the entry point for "play <something specific>".
 
 ```
 Root
-├── Recently Played
-│   ├── Albums   → album    → tracks
-│   └── Artists  → artist   → albums   → tracks
 ├── Favourites
 │   ├── Artists  → artist   → albums   → tracks
 │   └── Releases → album    → tracks
 └── Playlists    → playlist → tracks
+├── Recently PLayed
+│   ├── Albums   → album    → tracks
+├── Charts
+│   ├── Albums   → album    → tracks
+├── History
+│   ├── Albums   → album    → tracks
+│   └── Artists  → artist   → albums   → tracks
+├── Recently Added
+│   ├── Albums   → album    → tracks
+
 ```
 
 Tap behaviour:

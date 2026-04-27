@@ -10,18 +10,60 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
 import com.jamarr.android.MainActivity
+import com.jamarr.android.auth.SettingsStore
+import com.jamarr.android.auth.TokenHolder
+import com.jamarr.android.data.JamarrApiClient
+import com.jamarr.android.data.JamarrCookieJar
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 @OptIn(markerClass = [UnstableApi::class])
-class JamarrPlaybackService : MediaSessionService() {
-    private var mediaSession: MediaSession? = null
+class JamarrPlaybackService : MediaLibraryService() {
+    private var librarySession: MediaLibrarySession? = null
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val serverUrl = AtomicReference("")
+    private lateinit var settingsStore: SettingsStore
+    private lateinit var tokenHolder: TokenHolder
+    private lateinit var apiClient: JamarrApiClient
+    private lateinit var libraryProvider: JamarrLibraryProvider
 
     override fun onCreate() {
         super.onCreate()
+
+        settingsStore = SettingsStore(applicationContext)
+        tokenHolder = TokenHolder()
+        val cookieJar = JamarrCookieJar(settingsStore)
+        apiClient = JamarrApiClient(
+            tokenHolder = tokenHolder,
+            cookieJar = cookieJar,
+            onTokenRefreshed = { token -> settingsStore.saveAccessToken(token) },
+            onRefreshFailed = { settingsStore.clearAccessToken() },
+        )
+
+        runBlocking {
+            val saved = settingsStore.load()
+            serverUrl.set(saved.serverUrl)
+            tokenHolder.set(saved.accessToken)
+            cookieJar.prime()
+        }
+
+        serviceScope.launch {
+            settingsStore.observeSession().collectLatest { session ->
+                serverUrl.set(session.serverUrl)
+                tokenHolder.set(session.accessToken)
+            }
+        }
 
         val httpFactory = DefaultHttpDataSource.Factory()
         val resolvingFactory = ResolvingDataSource.Factory(httpFactory) { spec ->
@@ -41,7 +83,14 @@ class JamarrPlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-        mediaSession = MediaSession.Builder(this, player)
+        libraryProvider = JamarrLibraryProvider(
+            apiClient = apiClient,
+            serverUrlProvider = { serverUrl.get() },
+            tokenProvider = { tokenHolder.get() },
+            scope = serviceScope,
+        )
+
+        librarySession = MediaLibrarySession.Builder(this, player, libraryProvider.callback)
             .setSessionActivity(sessionIntent)
             .build()
     }
@@ -51,26 +100,25 @@ class JamarrPlaybackService : MediaSessionService() {
         if (uri.scheme != JAMARR_SCHEME) return spec
         val trackId = uri.lastPathSegment?.toLongOrNull()
             ?: throw IOException("Missing track id in $uri")
-        val client = JamarrPlaybackContext.apiClient
-            ?: throw IOException("Jamarr API client not initialised")
-        val serverUrl = JamarrPlaybackContext.serverUrl
-        if (serverUrl.isBlank()) throw IOException("Jamarr server URL not set")
+        val server = serverUrl.get()
+        if (server.isBlank()) throw IOException("Jamarr server URL not set")
         val resolved = runBlocking {
-            client.streamUrl(serverUrl, "", trackId)
+            apiClient.streamUrl(server, tokenHolder.get(), trackId)
         }
         return spec.withUri(Uri.parse(resolved))
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
-        return mediaSession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
+        return librarySession
     }
 
     override fun onDestroy() {
-        mediaSession?.run {
+        librarySession?.run {
             player.release()
             release()
         }
-        mediaSession = null
+        librarySession = null
+        serviceScope.cancel()
         super.onDestroy()
     }
 

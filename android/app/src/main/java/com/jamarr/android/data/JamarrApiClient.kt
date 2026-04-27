@@ -290,6 +290,35 @@ class JamarrApiClient(
         execute(request)
     }
 
+    suspend fun recentlyPlayedTracks(
+        serverUrl: String,
+        accessToken: String,
+        limit: Int = 30,
+    ): List<SearchTrack> = withContext(Dispatchers.IO) {
+        val url = apiUrl(serverUrl, "/api/history/tracks")
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("scope", "mine")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        val entries: List<PlaybackHistoryEntry> = execute(request)
+        val seen = HashSet<Long>()
+        entries.mapNotNull { e ->
+            val t = e.track ?: return@mapNotNull null
+            if (!seen.add(t.id)) return@mapNotNull null
+            SearchTrack(
+                id = t.id,
+                title = t.title,
+                artist = t.artist,
+                album = t.album,
+                mbReleaseId = t.mbReleaseId,
+                durationSeconds = t.durationSeconds,
+                artSha1 = t.artSha1,
+            )
+        }
+    }
+
     suspend fun streamUrl(
         serverUrl: String,
         accessToken: String,
@@ -376,6 +405,20 @@ class JamarrApiClient(
     fun artworkUrl(serverUrl: String, artSha1: String?, maxSize: Int = 400): String? {
         if (artSha1.isNullOrBlank()) return null
         return resolveUrl(serverUrl, "/api/art/file/$artSha1?max_size=$maxSize")
+    }
+
+    suspend fun fetchArtworkBytes(
+        serverUrl: String,
+        artSha1: String?,
+        maxSize: Int = 400,
+    ): ByteArray? = withContext(Dispatchers.IO) {
+        val url = artworkUrl(serverUrl, artSha1, maxSize) ?: return@withContext null
+        val request = Request.Builder().url(url).get().build()
+        runCatching {
+            httpClient.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) null else resp.body.bytes()
+            }
+        }.getOrNull()
     }
 
     fun normalizeServerUrl(serverUrl: String): String {
