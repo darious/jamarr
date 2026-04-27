@@ -1,3 +1,5 @@
+@file:OptIn(UnstableApi::class)
+
 package com.jamarr.android.playback
 
 import android.graphics.Bitmap
@@ -7,9 +9,12 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Bundle
+import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.SessionError
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
@@ -56,6 +61,7 @@ class JamarrLibraryProvider(
     private val tokenProvider: () -> String,
     private val scope: CoroutineScope,
 ) {
+    @OptIn(UnstableApi::class)
     val callback: MediaLibrarySession.Callback = object : MediaLibrarySession.Callback {
 
         override fun onGetLibraryRoot(
@@ -75,7 +81,7 @@ class JamarrLibraryProvider(
         ): ListenableFuture<LibraryResult<MediaItem>> = scope.future {
             val item = buildItem(mediaId)
             if (item != null) LibraryResult.ofItem(item, null)
-            else LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+            else LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
         }
 
         override fun onGetChildren(
