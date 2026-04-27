@@ -100,10 +100,10 @@ fun PlaylistsScreen(
                     }
                 }
             }
-            if (playlists.value.isEmpty() && error.value != null) {
+            if (playlists.value.isEmpty()) {
                 item {
                     Text(
-                        text = error.value.orEmpty(),
+                        text = error.value ?: "No playlists yet. Create one on the server to get started.",
                         style = JamarrType.Body,
                         color = JamarrColors.Muted,
                         modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding),

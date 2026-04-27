@@ -136,6 +136,14 @@ fun FavouritesScreen(
                     modifier = Modifier.padding(JamarrDims.ScreenPadding),
                 )
             }
+            if (error == null && sortedArtists.isEmpty() && sortedReleases.isEmpty()) {
+                Text(
+                    text = "No favourites yet. Tap the heart icon on any artist or album to add it here.",
+                    style = JamarrType.Body,
+                    color = JamarrColors.Muted,
+                    modifier = Modifier.padding(JamarrDims.ScreenPadding),
+                )
+            }
         }
     }
     }
