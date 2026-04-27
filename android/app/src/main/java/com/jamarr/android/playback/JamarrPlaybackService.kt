@@ -31,6 +31,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 @OptIn(markerClass = [UnstableApi::class])
 class JamarrPlaybackService : MediaLibraryService() {
@@ -56,11 +57,12 @@ class JamarrPlaybackService : MediaLibraryService() {
             onRefreshFailed = { settingsStore.clearAccessToken() },
         )
 
-        runBlocking {
+        val clientId = runBlocking {
             val saved = settingsStore.load()
             serverUrl.set(saved.serverUrl)
             tokenHolder.set(saved.accessToken)
             cookieJar.prime()
+            settingsStore.getClientId()
         }
 
         serviceScope.launch {
@@ -80,6 +82,40 @@ class JamarrPlaybackService : MediaLibraryService() {
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
+
+        serviceScope.launch(Dispatchers.Main) {
+            var lastProgressReport = 0L
+            var lastReportedQueueKey: String? = null
+            var lastReportedMediaId: String? = null
+            while (true) {
+                val url = serverUrl.get()
+                if (url.isNotBlank() && clientId.isNotBlank()) {
+                    val qKey = queueKey(player)
+                    if (qKey != null && qKey != lastReportedQueueKey) {
+                        lastReportedQueueKey = qKey
+                        val tracks = queueSearchTracks(player)
+                        if (tracks.isNotEmpty()) {
+                            apiClient.reportQueue(url, clientId, tracks, player.currentMediaItemIndex)
+                        }
+                    }
+                    val mediaId = player.currentMediaItem?.mediaId
+                    if (mediaId != null && mediaId != lastReportedMediaId) {
+                        lastReportedMediaId = mediaId
+                        apiClient.reportIndex(url, clientId, player.currentMediaItemIndex)
+                    }
+                    val now = System.currentTimeMillis()
+                    if (player.isPlaying && now - lastProgressReport >= 5000) {
+                        lastProgressReport = now
+                        apiClient.reportProgress(
+                            url, clientId,
+                            positionSeconds = player.currentPosition / 1000.0,
+                            isPlaying = true,
+                        )
+                    }
+                }
+                delay(500)
+            }
+        }
 
         val sessionIntent = PendingIntent.getActivity(
             this,
@@ -125,6 +161,35 @@ class JamarrPlaybackService : MediaLibraryService() {
         librarySession = null
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    private fun queueKey(player: Player): String? {
+        val count = player.mediaItemCount
+        if (count == 0) return null
+        return (0 until count).joinToString(",") { player.getMediaItemAt(it).mediaId }
+    }
+
+    private fun queueSearchTracks(player: Player): List<SearchTrack> {
+        val count = player.mediaItemCount
+        if (count == 0) return emptyList()
+        return (0 until count).map { i ->
+            val item = player.getMediaItemAt(i)
+            val md = item.mediaMetadata
+            SearchTrack(
+                id = extractTrackId(item.mediaId),
+                title = md.title?.toString().orEmpty(),
+                artist = md.artist?.toString(),
+                album = md.albumTitle?.toString(),
+            )
+        }
+    }
+
+    private fun extractTrackId(mediaId: String): Long {
+        return if (mediaId.startsWith("track:")) {
+            mediaId.removePrefix("track:").substringBefore("|").toLongOrNull() ?: 0L
+        } else {
+            mediaId.toLongOrNull() ?: 0L
+        }
     }
 
     companion object {
