@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import os
 import time
 import httpx
 from rapidfuzz import fuzz
@@ -7,11 +8,39 @@ import logging
 from rich.console import Console
 from rich.logging import RichHandler
 
-# --- Configuration ---
-QOBUZ_APP_ID = "798273057"
-QOBUZ_SECRET = "806331c3b0b641da923b890aed01d04a"
-USER_EMAIL = "chris@darious.co.uk"
-USER_PASS = "QoSLD23mxgbuZ"
+from pathlib import Path as _Path
+
+ROOT = _Path(__file__).resolve().parent.parent.parent
+
+
+def load_dotenv(path: _Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if value and value[0] in ("'", '"') and value[-1] == value[0]:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+load_dotenv(ROOT / ".env")
+
+QOBUZ_APP_ID = os.environ.get("QOBUZ_APP_ID", "")
+QOBUZ_SECRET = os.environ.get("QOBUZ_SECRET", "")
+USER_EMAIL = os.environ.get("QOBUZ_EMAIL", "")
+USER_PASS = os.environ.get("QOBUZ_PASSWORD", "")
+USER_AGENT = "JamarrScript/1.0"
 
 # --- Setup Output ---
 logging.basicConfig(
@@ -104,8 +133,8 @@ class QobuzClient:
 async def get_mb_metadata(mbid, client):
     """Fetch Artist name and relations from MusicBrainz."""
     url = f"https://musicbrainz.org/ws/2/artist/{mbid}?inc=url-rels&fmt=json"
-    headers = {"User-Agent": "JamarrScript/1.0 ( chris@darious.co.uk )"}
-    
+    headers = {"User-Agent": USER_AGENT}
+
     for attempt in range(3):
         try:
             await asyncio.sleep(1.1) # Rate limit kindness
@@ -120,7 +149,7 @@ async def get_mb_metadata(mbid, client):
         except Exception as e:
             console.print(f"[red]MB Error: {repr(e)}[/red]")
             return None
-    
+
     console.print("[red]MB Error: Max retries exceeded[/red]")
     return None
 
@@ -129,7 +158,7 @@ async def resolve_wikidata(wikidata_url, client):
     qid = wikidata_url.split("/")[-1]
     url = f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
     # Wikidata REQUIRES a User-Agent
-    headers = {"User-Agent": "JamarrScript/1.0 ( chris@darious.co.uk )"}
+    headers = {"User-Agent": USER_AGENT}
     
     try:
         resp = await client.get(url, headers=headers)

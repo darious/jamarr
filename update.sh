@@ -47,7 +47,7 @@ fi
 
 echo "[5/7] Applying database migrations..."
 # Run migrations using the new image we just built
-${COMPOSE} run --rm jamarr python scripts/apply_migrations.py
+${COMPOSE} run --rm jamarr python migrations/apply_migrations.py
 
 echo "[6/7] Restarting app container..."
 # 'up -d' recreates only the containers that have changed images or config

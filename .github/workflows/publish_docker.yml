@@ -7,7 +7,7 @@ on:
       - ".github/workflows/publish_docker.yml"
       - "app/**"
       - "web/**"
-      - "scripts/**"
+      - "migrations/**"
       - "config.yaml"
       - "docker-compose.yml"
       - "Dockerfile"

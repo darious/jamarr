@@ -7,7 +7,7 @@ from typing import Dict, List
 import asyncpg
 
 
-MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+MIGRATIONS_DIR = Path(__file__).resolve().parent
 LOCK_ID = 87412
 MIGRATION_TABLE = "schema_migration"
 

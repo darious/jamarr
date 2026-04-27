@@ -119,13 +119,13 @@ The frontend provides a polished, app-like user experience:
 ### Scripts
 - `prod.sh`: Builds and starts the prod stack (no migration step).
 - `dev.sh`: Starts dev stack with hot-reload; derives `HOST_IP` from an internal route if not provided.
-- `update.sh`: Full prod deploy. Steps: stop app container, `git pull --rebase`, ensure DB is up, build app image, run DB migrations (`docker compose run --rm jamarr python scripts/apply_migrations.py`), then start the app container.
+- `update.sh`: Full prod deploy. Steps: stop app container, `git pull --rebase`, ensure DB is up, build app image, run DB migrations (`docker compose run --rm jamarr python migrations/apply_migrations.py`), then start the app container.
 - `test.sh`: Runs the test suite in Docker; brings up the test DB, runs pytest inside `jamarr_test_runner`, tears down the stack on success (leaves DB running on failure for debugging).
 - `test-slow.sh`: Delegates to `test.sh -m "slow"` with the same lifecycle and project isolation.
 - `lint.sh [python|svelte|all]`: Runs Ruff and/or Svelte Check (Svelte via the dev Compose stack).
 
 ### Database Migrations
-- Location: `scripts/migrations/*.sql`, ordered numerically (e.g., `001_*.sql`).
+- Location: `migrations/*.sql`, ordered numerically (e.g., `001_*.sql`).
 - Tracking: `schema_migration` table stores applied versions and checksums; runner will rename an old `schema_migrations` table if present.
-- Runner: `scripts/apply_migrations.py` acquires a PostgreSQL advisory lock, validates checksums, and applies pending SQL files in order. Reads DB settings from environment (provided automatically inside the `jamarr` service by Compose).
+- Runner: `migrations/apply_migrations.py` acquires a PostgreSQL advisory lock, validates checksums, and applies pending SQL files in order. Reads DB settings from environment (provided automatically inside the `jamarr` service by Compose).
 - Idempotency: Migrations use `IF NOT EXISTS`/`IF EXISTS` guards or DO blocks so they can be re-run safely.

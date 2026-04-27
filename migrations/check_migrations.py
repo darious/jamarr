@@ -21,7 +21,7 @@ async def main():
         print(f"Applied migrations: {sorted(applied)}")
         
         # List all migrations
-        migrations_dir = Path(__file__).parent / "migrations"
+        migrations_dir = Path(__file__).parent
         all_migrations = sorted(migrations_dir.glob("*.sql"))
         
         for mig in all_migrations:
