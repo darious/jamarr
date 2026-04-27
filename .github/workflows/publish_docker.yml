@@ -57,12 +57,3 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Make package public
-        env:
-          GH_TOKEN: ${{ secrets.PKG_PAT }}
-        run: |
-          gh api \
-            --method PATCH \
-            -H "Accept: application/vnd.github+json" \
-            /user/packages/container/jamarr/visibility \
-            -f visibility=public
