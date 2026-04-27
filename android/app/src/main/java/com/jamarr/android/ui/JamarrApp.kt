@@ -110,12 +110,12 @@ private fun JamarrRoot() {
     var query by rememberSaveable { mutableStateOf("") }
     var searchResults by remember { mutableStateOf(SearchResponse()) }
 
-    var nowPlayingTrack by remember { mutableStateOf<SearchTrack?>(null) }
+    var nowPlayingTrack by rememberSaveable { mutableStateOf<SearchTrack?>(null) }
     var nowPlayingArtworkUrl by remember { mutableStateOf<String?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var playbackPosition by remember { mutableStateOf(0L) }
     var playbackDuration by remember { mutableStateOf(0L) }
-    var playbackQueue by remember { mutableStateOf<List<ResolvedTrack>>(emptyList()) }
+    var playbackQueue by rememberSaveable { mutableStateOf<List<ResolvedTrack>>(emptyList()) }
     var shuffleEnabled by remember { mutableStateOf(false) }
     var repeatMode by remember { mutableStateOf(0) }
     var showNowPlaying by remember { mutableStateOf(false) }
@@ -222,17 +222,12 @@ private fun JamarrRoot() {
     }
 
     LaunchedEffect(playbackController) {
-        var lastProgressReport = 0L
-        var lastReportedMediaId: String? = null
         while (true) {
             isPlaying = playbackController.isPlaying
             playbackPosition = playbackController.currentPosition
             playbackDuration = playbackController.duration
             shuffleEnabled = playbackController.shuffleEnabled
             repeatMode = playbackController.repeatMode
-            // Always sync the visible queue from the live controller so it
-            // reflects the actual playback order (including shuffle) and
-            // recovers from activity recreation that wiped in-memory state.
             val controllerCount = playbackController.mediaItemCount
             if (controllerCount > 0) {
                 val snapshot = playbackController.currentQueueSnapshot()
@@ -261,24 +256,6 @@ private fun JamarrRoot() {
                         nowPlayingArtworkUrl = md.artworkUri?.toString()
                     }
                 }
-                // Track changed — report new index to server
-                if (clientId.isNotBlank() && mediaId != lastReportedMediaId) {
-                    lastReportedMediaId = mediaId
-                    val newIndex = playbackQueue.indexOfFirst { it.track.id.toString() == mediaId }
-                    if (newIndex >= 0) {
-                        apiClient.reportIndex(serverUrl, clientId, newIndex)
-                    }
-                }
-            }
-            // Report progress every ~5 seconds
-            val now = System.currentTimeMillis()
-            if (playbackController.isPlaying && clientId.isNotBlank() && now - lastProgressReport >= 5000) {
-                lastProgressReport = now
-                apiClient.reportProgress(
-                    serverUrl, clientId,
-                    positionSeconds = playbackPosition / 1000.0,
-                    isPlaying = true,
-                )
             }
             delay(500)
         }
@@ -411,6 +388,7 @@ private fun JamarrRoot() {
                             apiClient.artworkUrl(serverUrl, artist.artSha1, 400) ?: artist.imageUrl
                         },
                         contentPadding = contentPadding,
+                        onRefresh = { refreshHome() },
                     )
                 }
 
@@ -597,6 +575,11 @@ private fun JamarrRoot() {
                             navController.navigate(tab.route()) {
                                 popUpTo(Routes.HOME) { inclusive = false }
                                 launchSingleTop = true
+                            }
+                        },
+                        onReselect = { tab ->
+                            if (tab == JamarrTab.Home) {
+                                query = ""
                             }
                         },
                     )

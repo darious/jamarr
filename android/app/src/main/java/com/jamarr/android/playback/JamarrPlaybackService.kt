@@ -22,6 +22,7 @@ import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrCookieJar
 import com.jamarr.android.data.SearchTrack
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 @OptIn(markerClass = [UnstableApi::class])
 class JamarrPlaybackService : MediaLibraryService() {
@@ -39,6 +41,7 @@ class JamarrPlaybackService : MediaLibraryService() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val serverUrl = AtomicReference("")
+    private val streamUrlCache = ConcurrentHashMap<Long, String>()
     private lateinit var settingsStore: SettingsStore
     private lateinit var tokenHolder: TokenHolder
     private lateinit var apiClient: JamarrApiClient
@@ -97,6 +100,20 @@ class JamarrPlaybackService : MediaLibraryService() {
                         if (tracks.isNotEmpty()) {
                             apiClient.reportQueue(url, clientId, tracks, player.currentMediaItemIndex)
                         }
+                        for (i in 0 until player.mediaItemCount) {
+                            val tid = extractTrackId(player.getMediaItemAt(i).mediaId)
+                            if (tid > 0L && !streamUrlCache.containsKey(tid)) {
+                                serviceScope.launch(Dispatchers.IO) {
+                                    runCatching {
+                                        withTimeout(5000) {
+                                            apiClient.streamUrl(url, tokenHolder.get(), tid)
+                                        }
+                                    }.onSuccess { resolved ->
+                                        streamUrlCache[tid] = resolved
+                                    }
+                                }
+                            }
+                        }
                     }
                     val mediaId = player.currentMediaItem?.mediaId
                     if (mediaId != null && mediaId != lastReportedMediaId) {
@@ -143,9 +160,15 @@ class JamarrPlaybackService : MediaLibraryService() {
             ?: throw IOException("Missing track id in $uri")
         val server = serverUrl.get()
         if (server.isBlank()) throw IOException("Jamarr server URL not set")
+
+        streamUrlCache[trackId]?.let { return spec.withUri(Uri.parse(it)) }
+
         val resolved = runBlocking {
-            apiClient.streamUrl(server, tokenHolder.get(), trackId)
+            withTimeout(5000) {
+                apiClient.streamUrl(server, tokenHolder.get(), trackId)
+            }
         }
+        streamUrlCache[trackId] = resolved
         return spec.withUri(Uri.parse(resolved))
     }
 

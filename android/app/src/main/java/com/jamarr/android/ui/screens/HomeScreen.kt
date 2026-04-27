@@ -25,12 +25,15 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,9 +84,12 @@ fun HomeScreen(
     artworkUrlForAlbum: (HomeAlbum) -> String?,
     artworkUrlForArtist: (HomeArtist) -> String?,
     contentPadding: PaddingValues,
+    onRefresh: () -> Unit = {},
 ) {
     val isSearching = searchQuery.trim().isNotEmpty()
     val showAccountSheet = remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var refreshTick by remember { mutableStateOf(0) }
 
     LaunchedEffect(searchQuery) {
         if (searchQuery.trim().length >= 2) {
@@ -92,16 +98,30 @@ fun HomeScreen(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(JamarrColors.Bg),
-        contentPadding = PaddingValues(
-            top = contentPadding.calculateTopPadding(),
-            bottom = contentPadding.calculateBottomPadding() + 16.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(JamarrDims.SectionGap),
+    LaunchedEffect(refreshTick) {
+        if (refreshTick > 0) {
+            isRefreshing = true
+            onRefresh()
+            delay(3000)
+            isRefreshing = false
+        }
+    }
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = { refreshTick++ },
+        modifier = Modifier.fillMaxSize(),
     ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(JamarrColors.Bg),
+            contentPadding = PaddingValues(
+                top = contentPadding.calculateTopPadding(),
+                bottom = contentPadding.calculateBottomPadding() + 16.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(JamarrDims.SectionGap),
+        ) {
         item {
             Column(
                 modifier = Modifier
@@ -185,6 +205,7 @@ fun HomeScreen(
                 )
             }
         }
+    }
     }
 
     if (showAccountSheet.value) {

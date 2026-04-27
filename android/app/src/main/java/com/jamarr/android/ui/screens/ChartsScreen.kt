@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,11 +48,15 @@ fun ChartsScreen(
     val ctx = LocalJamarrContext.current
     val chart = remember { mutableStateOf<List<ChartAlbum>>(emptyList()) }
     val error = remember { mutableStateOf<String?>(null) }
+    val refreshTick = remember { mutableStateOf(0) }
+    val isRefreshing = remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(refreshTick.value) {
+        if (refreshTick.value > 0) isRefreshing.value = true
         runCatching { ctx.apiClient.chart(ctx.serverUrl, ctx.accessToken) }
             .onSuccess { chart.value = it.sortedBy { a -> a.position } }
             .onFailure { error.value = it.message }
+        isRefreshing.value = false
     }
 
     val entries = chart.value
@@ -59,12 +64,17 @@ fun ChartsScreen(
     val rest = entries.drop(3)
 
     Box(modifier = Modifier.fillMaxSize().background(JamarrColors.Bg)) {
-        LazyColumn(
+        PullToRefreshBox(
+            isRefreshing = isRefreshing.value,
+            onRefresh = { refreshTick.value += 1 },
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                bottom = contentPadding.calculateBottomPadding() + 16.dp,
-            ),
         ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    bottom = contentPadding.calculateBottomPadding() + 16.dp,
+                ),
+            ) {
             item {
                 Column(
                     modifier = Modifier
@@ -102,6 +112,7 @@ fun ChartsScreen(
                 ChartRow(entry = entry, onClick = { onAlbumClick(entry) })
             }
         }
+    }
     }
 }
 
