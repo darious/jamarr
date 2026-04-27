@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -53,20 +54,28 @@ fun PlaylistsScreen(
     val playlists = remember { mutableStateOf<List<PlaylistSummary>>(emptyList()) }
     val error = remember { mutableStateOf<String?>(null) }
     val refreshTick = remember { mutableStateOf(0) }
+    val isRefreshing = remember { mutableStateOf(false) }
 
     LaunchedEffect(refreshTick.value) {
+        if (refreshTick.value > 0) isRefreshing.value = true
         runCatching { ctx.apiClient.playlists(ctx.serverUrl, ctx.accessToken) }
             .onSuccess { playlists.value = it }
             .onFailure { error.value = it.message }
+        isRefreshing.value = false
     }
 
     Box(modifier = Modifier.fillMaxSize().background(JamarrColors.Bg)) {
-        LazyColumn(
+        PullToRefreshBox(
+            isRefreshing = isRefreshing.value,
+            onRefresh = { refreshTick.value += 1 },
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                bottom = contentPadding.calculateBottomPadding() + 16.dp,
-            ),
         ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    bottom = contentPadding.calculateBottomPadding() + 16.dp,
+                ),
+            ) {
             item {
                 Row(
                     modifier = Modifier
@@ -89,15 +98,6 @@ fun PlaylistsScreen(
                             color = JamarrColors.Muted,
                         )
                     }
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .clickable { refreshTick.value += 1 },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        RefreshIcon(tint = JamarrColors.Muted, size = 20.dp)
-                    }
                 }
             }
             if (playlists.value.isEmpty() && error.value != null) {
@@ -114,6 +114,7 @@ fun PlaylistsScreen(
                 PlaylistRow(pl) { onPlaylistClick(pl.id) }
             }
         }
+    }
     }
 }
 

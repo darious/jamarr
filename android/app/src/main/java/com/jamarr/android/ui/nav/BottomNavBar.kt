@@ -30,6 +30,7 @@ fun BottomNavBar(
     selected: JamarrTab,
     onSelect: (JamarrTab) -> Unit,
     modifier: Modifier = Modifier,
+    onReselect: (JamarrTab) -> Unit = {},
 ) {
     Row(
         modifier = modifier
@@ -41,10 +42,11 @@ fun BottomNavBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         JamarrTab.entries.forEach { tab ->
+            val active = tab == selected
             NavItem(
                 tab = tab,
-                active = tab == selected,
-                onClick = { onSelect(tab) },
+                active = active,
+                onClick = { if (active) onReselect(tab) else onSelect(tab) },
                 modifier = Modifier.weight(1f),
             )
         }
