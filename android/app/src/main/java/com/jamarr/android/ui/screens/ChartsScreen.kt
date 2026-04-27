@@ -91,10 +91,10 @@ fun ChartsScreen(
                 }
             }
 
-            if (entries.isEmpty() && error.value != null) {
+            if (entries.isEmpty()) {
                 item {
                     Text(
-                        text = error.value.orEmpty(),
+                        text = error.value ?: "No chart data. Check back later for this week's top albums.",
                         style = JamarrType.Body,
                         color = JamarrColors.Muted,
                         modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding),

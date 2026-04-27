@@ -219,6 +219,9 @@ private fun JamarrRoot() {
         routeToTab(currentRoute)?.let { tab ->
             settingsStore.saveActiveTab(tab.ordinal)
         }
+        if (currentRoute == Routes.HOME) {
+            refreshHome()
+        }
     }
 
     LaunchedEffect(playbackController) {
@@ -554,6 +557,8 @@ private fun JamarrRoot() {
                         seedName = (track.album ?: track.title),
                         progressMs = playbackPosition,
                         durationMs = playbackDuration,
+                        shuffleEnabled = shuffleEnabled,
+                        repeatMode = repeatMode,
                         onToggle = { playbackController.togglePlayPause() },
                         onPrevious = { playbackController.previous() },
                         onNext = { playbackController.next() },
