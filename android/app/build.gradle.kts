@@ -1,3 +1,6 @@
+import java.io.File
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -17,8 +20,29 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val keystoreB64 = System.getenv("ANDROID_KEYSTORE_B64")
+            storeFile = if (keystoreB64 != null) {
+                val tmpFile = File.createTempFile("jamarr", ".keystore")
+                tmpFile.deleteOnExit()
+                tmpFile.writeBytes(Base64.getDecoder().decode(keystoreB64))
+                tmpFile
+            } else {
+                file("jamarr.keystore")
+            }
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: ""
+            keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "jamarr"
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: ""
+        }
+    }
+
     buildTypes {
         release {
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storePassword?.isNotBlank() == true) {
+                signingConfig = releaseSigning
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
