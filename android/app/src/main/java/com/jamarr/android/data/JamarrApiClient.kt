@@ -290,6 +290,35 @@ class JamarrApiClient(
         execute(request)
     }
 
+    suspend fun recentlyPlayedTracks(
+        serverUrl: String,
+        accessToken: String,
+        limit: Int = 30,
+    ): List<SearchTrack> = withContext(Dispatchers.IO) {
+        val url = apiUrl(serverUrl, "/api/history/tracks")
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("scope", "mine")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        val entries: List<PlaybackHistoryEntry> = execute(request)
+        val seen = HashSet<Long>()
+        entries.mapNotNull { e ->
+            val t = e.track ?: return@mapNotNull null
+            if (!seen.add(t.id)) return@mapNotNull null
+            SearchTrack(
+                id = t.id,
+                title = t.title,
+                artist = t.artist,
+                album = t.album,
+                mbReleaseId = t.mbReleaseId,
+                durationSeconds = t.durationSeconds,
+                artSha1 = t.artSha1,
+            )
+        }
+    }
+
     suspend fun streamUrl(
         serverUrl: String,
         accessToken: String,
