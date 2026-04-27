@@ -7,7 +7,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import java.util.UUID
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 private val Context.jamarrDataStore by preferencesDataStore(name = "jamarr_settings")
 
@@ -32,6 +35,16 @@ class SettingsStore(private val context: Context) {
             activeTabIndex = prefs[activeTabKey] ?: 0,
         )
     }
+
+    fun observeSession(): Flow<StoredSession> = context.jamarrDataStore.data
+        .map { prefs ->
+            StoredSession(
+                serverUrl = prefs[serverUrlKey].orEmpty(),
+                accessToken = prefs[accessTokenKey].orEmpty(),
+                activeTabIndex = prefs[activeTabKey] ?: 0,
+            )
+        }
+        .distinctUntilChanged()
 
     suspend fun saveServerUrl(serverUrl: String) {
         context.jamarrDataStore.edit { prefs ->
