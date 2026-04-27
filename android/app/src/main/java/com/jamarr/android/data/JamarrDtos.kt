@@ -143,6 +143,7 @@ data class ArtistTrackEntry(
     val name: String? = null,
     val title: String? = null,
     val album: String? = null,
+    val date: String? = null,
     @SerialName("local_track_id") val localTrackId: Long? = null,
     @SerialName("art_sha1") val artSha1: String? = null,
     @SerialName("mb_release_id") val mbReleaseId: String? = null,
@@ -313,3 +314,20 @@ data class HistoryTrackEntry(
 ) {
     val displayTitle: String get() = title ?: "Untitled"
 }
+
+@Serializable
+data class PlaybackHistoryEntry(
+    val track: PlaybackHistoryTrack? = null,
+    val timestamp: String? = null,
+)
+
+@Serializable
+data class PlaybackHistoryTrack(
+    val id: Long,
+    val title: String,
+    val artist: String? = null,
+    val album: String? = null,
+    @SerialName("art_sha1") val artSha1: String? = null,
+    @SerialName("duration_seconds") val durationSeconds: Double? = null,
+    @SerialName("mb_release_id") val mbReleaseId: String? = null,
+)

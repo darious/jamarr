@@ -18,8 +18,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Android/Sdk}}"
 DHU_BIN="$SDK_ROOT/extras/google/auto/desktop-head-unit"
+DHU_CONFIG="${DHU_CONFIG:-$SCRIPT_DIR/dhu.ini}"
 
 if ! command -v adb >/dev/null 2>&1; then
     echo "error: adb not found in PATH" >&2
@@ -80,5 +82,10 @@ EOF
 fi
 
 sleep 1
-echo "launching DHU..."
-exec "$DHU_BIN"
+echo "launching DHU (config: $DHU_CONFIG)..."
+if [ -r "$DHU_CONFIG" ]; then
+    exec "$DHU_BIN" -c "$DHU_CONFIG"
+else
+    echo "warning: DHU config not readable at $DHU_CONFIG; falling back to defaults" >&2
+    exec "$DHU_BIN"
+fi
