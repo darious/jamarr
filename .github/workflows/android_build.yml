@@ -19,7 +19,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+
     defaults:
       run:
         working-directory: android
@@ -33,20 +36,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Cache Android SDK
-        uses: actions/cache@v4
-        with:
-          path: /usr/local/lib/android/sdk
-          key: android-sdk-${{ runner.os }}-api36-v2
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
-
       - name: Accept SDK licenses
-        run: yes | sdkmanager --licenses > /dev/null 2>&1
+        run: yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1
 
-      - name: Install Android SDK packages
-        run: sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" 2>&1 | tail -5
+      - name: Install SDK packages
+        run: ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" "build-tools;36.0.0" 2>&1 | tail -5
 
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
@@ -62,4 +56,4 @@ jobs:
             gradle-${{ runner.os }}-
 
       - name: Lint, unit tests, and build
-        run: ./gradlew --no-daemon lintDebug testDebugUnitTest assembleDebug
+        run: ./gradlew --no-daemon --stacktrace lintDebug testDebugUnitTest assembleDebug
