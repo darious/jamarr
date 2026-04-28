@@ -1,5 +1,11 @@
 # Playlist Feature Specification
 
+> **Note:** This is a pre-implementation design spec. The SQL examples use SQLite
+> syntax (`AUTOINCREMENT`, `INTEGER PRIMARY KEY`) and plural table names
+> (`playlists`, `playlist_tracks`). The actual implementation uses PostgreSQL
+> (`BIGSERIAL`, `TIMESTAMPTZ`) with singular table names (`playlist`,
+> `playlist_track`). See `app/db.py` for the authoritative schema.
+
 ## Scope
 User-scoped playlists for organising and replaying tracks, integrated with the existing playback queue.
 

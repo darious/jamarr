@@ -9,7 +9,7 @@ All commands assume `uv` and `.env` are configured (see `dev.sh`).
 Fetch scrobbles from Last.fm into the local database.
 
 Options:
-- `--user`: Last.fm username (default `REDACTED_USERNAME`)
+- `--user`: Last.fm username (default `<LASTFM_USERNAME>`)
 - `--limit`: Tracks per page (default `200`)
 - `--max-pages`: Stop after N pages (default `0` = no limit)
 - `--sleep`: Delay between pages, seconds (default `0.2`)
@@ -22,7 +22,7 @@ Options:
 
 Examples:
 ```bash
-uv run python scripts/lastfm/pull-lastfm.py --user REDACTED_USERNAME --newer-than-db
+uv run python scripts/lastfm/pull-lastfm.py --user <LASTFM_USERNAME> --newer-than-db
 uv run python scripts/lastfm/pull-lastfm.py --older-than-db --max-pages 10
 uv run python scripts/lastfm/pull-lastfm.py --output /tmp/scrobbles.json
 ```
@@ -32,7 +32,7 @@ uv run python scripts/lastfm/pull-lastfm.py --output /tmp/scrobbles.json
 Match scrobbles to local tracks.
 
 Options:
-- `--user`: Last.fm username (default `REDACTED_USERNAME`)
+- `--user`: Last.fm username (default `<LASTFM_USERNAME>`)
 - `--limit`: Scrobbles to match (default `200`)
 - `--dry-run`: Compute matches without writing to DB
 - `--force`: Overwrite existing matches
@@ -54,17 +54,17 @@ uv run python scripts/lastfm/match-lastfm.py --dry-run --debug-miss-reasons
 Interactive review of match candidates (manual or Ollama-assisted).
 
 Options:
-- `--user`: Last.fm username (default `REDACTED_USERNAME`)
+- `--user`: Last.fm username (default `<LASTFM_USERNAME>`)
 - `--auto-pass`: Auto-accept obvious matches and exit
 - `--auto-limit`: Max scrobbles to auto-review (default `200`)
 - `--ollama`: Use Ollama for auto-review
-- `--ollama-url`: Ollama base URL (default `http://REDACTED_IP:11434`)
+- `--ollama-url`: Ollama base URL (default `http://localhost:11434`)
 - `--ollama-model`: Ollama model (default `mistral-nemo:12b-instruct-2407-fp16`)
 - `--ollama-limit`: Max scrobbles to send to Ollama (default `100`)
 
 Examples:
 ```bash
-uv run python scripts/lastfm/review-lastfm.py --user REDACTED_USERNAME
+uv run python scripts/lastfm/review-lastfm.py --user <LASTFM_USERNAME>
 uv run python scripts/lastfm/review-lastfm.py --auto-pass --auto-limit 500
 uv run python scripts/lastfm/review-lastfm.py --ollama --ollama-limit 50
 ```

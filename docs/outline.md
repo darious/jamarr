@@ -25,7 +25,7 @@ A PostgreSQL database serves as the single source of truth for:
 -   **Search Index**: Full-text search and trigram indexes for fast browsing.
 -   **Auxiliary Data**: Similar artists, top tracks, charts, and scheduler tasks.
 
-The database runs in a Docker container and is accessible via CloudBeaver for administration.
+The database runs in a Docker container on port 8110 and is accessible via `psql` or any PostgreSQL client.
 
 ### 3. Frontend (SvelteKit)
 The frontend provides a polished, app-like user experience:
@@ -68,25 +68,42 @@ The frontend provides a polished, app-like user experience:
 
 ```
 ├── app/                  # Python Backend
-│   ├── api/              # FastAPI Routers (library, player, etc.)
+│   ├── api/              # FastAPI Routers (library, player, auth, etc.)
 │   ├── scanner/          # Library Scanning Logic
-│   │   ├── cli.py        # CLI Entrypoint
-│   │   ├── scan_manager.py # Orchestrates scanning tasks
-│   │   ├── core.py       # Core Scanner Logic (filesystem)
-│   │   ├── stats.py      # Statistics tracker
-│   │   ├── pipeline/     # V3 Pipeline Architecture
+│   │   ├── scan_manager.py  # Orchestrates scanning tasks
+│   │   ├── core.py          # Core filesystem scanner
+│   │   ├── stats.py         # Statistics tracker
+│   │   ├── tags.py          # Tag extraction (mutagen)
+│   │   ├── artwork.py       # Artwork resolution & migration
+│   │   ├── dns_resolver.py  # DNS caching for API calls
+│   │   ├── missing_scanner.py # Missing album detection
+│   │   ├── album_helpers.py # Album grouping helpers
+│   │   ├── similar_helpers.py # Similar artist matching
+│   │   ├── utils.py         # Shared utilities
+│   │   ├── pipeline/        # V3 pipeline architecture
 │   │   │   ├── planner.py   # Enrichment planner
 │   │   │   ├── executor.py  # Pipeline executor
 │   │   │   ├── adapter.py   # Integration adapter
 │   │   │   ├── models.py    # Data models
 │   │   │   └── stages/      # Enrichment stages
-│   │   ├── services/     # External API clients
-│   │   └── tags.py       # Tag Extraction
+│   │   └── services/        # External API clients
+│   │       ├── musicbrainz.py
+│   │       ├── lastfm.py
+│   │       ├── artwork.py
+│   │       └── wikidata.py
 │   ├── services/         # Playback, UPnP, and state services
 │   ├── media/            # Artwork helpers and image lookup
-│   ├── main.py           # App Entrypoint
-│   ├── db.py             # Database Models & Connection
-│   ├── auth.py           # Authentication & User Management
+│   ├── models/           # Pydantic models
+│   ├── matching/         # Last.fm scrobble matching
+│   ├── main.py           # App entrypoint (FastAPI)
+│   ├── db.py             # Database pool + init_db() schema seeder
+│   ├── auth.py           # Authentication & user management
+│   ├── auth_tokens.py    # JWT creation/verification
+│   ├── security.py       # Security middleware & config
+│   ├── logging_conf.py   # Logging configuration
+│   ├── monitoring.py     # Production monitoring
+│   ├── scheduler.py      # Background task scheduler
+│   ├── upnp.py           # UPnP device discovery & control
 │   ├── charts.py         # Chart data ingestion
 │   └── lastfm.py         # Last.fm integration
 ├── web/                  # SvelteKit Frontend
@@ -94,18 +111,38 @@ The frontend provides a polished, app-like user experience:
 │   │   ├── routes/       # Pages (Home, Artist, Queue, etc.)
 │   │   ├── lib/          # Components, Stores, API helpers
 │   └── static/           # Static assets
-├── cache/                # Data Directory (PostgreSQL data, cached images)
+├── migrations/           # Versioned DB migration SQL files
+├── tests/                # Backend test suite (pytest)
+├── scripts/              # Utility and helper scripts
+│   ├── artwork/          # Artwork tidying tools
+│   ├── lastfm/           # Last.fm pull & review tools
+│   ├── playlist/         # Playlist import/export
+│   ├── sample/           # Chart sampling tools
+│   ├── scanner/          # Scanner validation & debug
+│   ├── backup.sh         # Manual database backup/restore
+│   ├── db-reset.sh       # Database reset helper
+│   ├── demo-jwt-auth.sh  # JWT auth demo
+│   ├── demo-jwt.sh       # JWT token demo
+│   ├── scanlog.sh        # Scan log viewer
+│   ├── test-build.sh     # Frontend CI build check
+│   └── test-ext-api.sh   # External API smoke tests
+├── cache/                # App runtime cache (scanner state, artwork)
 ├── docs/                 # Documentation
 │   ├── DEV_MODE.md       # Development setup guide
 │   ├── DATABASE_SCHEMA.md # Database schema reference
 │   ├── scanner_v3.md     # V3 pipeline architecture
+│   ├── api.md            # API endpoint reference
+│   ├── auth.md           # Authentication system
+│   ├── android.md        # Android app documentation
+│   ├── artwork-audit.md  # Artwork system audit
+│   ├── plan-mobile.md    # Mobile development plan
+│   ├── playlist--spec.md # Playlist feature spec (pre-implementation)
 │   └── outline.md        # System architecture
 ├── docker-compose.yml    # Production Docker Compose
 ├── docker-compose.dev.yml # Development overrides
 ├── Dockerfile            # Production container build
 ├── dev.sh                # Development mode startup script
-├── prod.sh               # Production startup (no migrations)
-├── update.sh             # Production deploy (git pull + build + migrations + restart)
+├── deploy.sh             # Production deploy (backup → migrate → restart)
 └── config.yaml           # Application configuration
 ```
 
@@ -117,11 +154,9 @@ The frontend provides a polished, app-like user experience:
 - **Testing**: `docker-compose.test.yml` with isolated project name (`jamarr-test`) to avoid clashing with dev/prod.
 
 ### Scripts
-- `prod.sh`: Builds and starts the prod stack (no migration step).
+- `deploy.sh`: Full prod deploy. Steps: pull latest image, ensure DB is up, create pre-migration backup, run DB migrations (`docker compose run --rm jamarr python migrations/apply_migrations.py`), restart the app container.
 - `dev.sh`: Starts dev stack with hot-reload; derives `HOST_IP` from an internal route if not provided.
-- `update.sh`: Full prod deploy. Steps: stop app container, `git pull --rebase`, ensure DB is up, build app image, run DB migrations (`docker compose run --rm jamarr python migrations/apply_migrations.py`), then start the app container.
 - `test.sh`: Runs the test suite in Docker; brings up the test DB, runs pytest inside `jamarr_test_runner`, tears down the stack on success (leaves DB running on failure for debugging).
-- `test-slow.sh`: Delegates to `test.sh -m "slow"` with the same lifecycle and project isolation.
 - `lint.sh [python|svelte|all]`: Runs Ruff and/or Svelte Check (Svelte via the dev Compose stack).
 
 ### Database Migrations
