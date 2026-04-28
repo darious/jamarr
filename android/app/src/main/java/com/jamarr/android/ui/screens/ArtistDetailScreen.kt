@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -50,6 +52,7 @@ import com.jamarr.android.ui.components.HeartIcon
 import com.jamarr.android.ui.components.PlayIcon
 import com.jamarr.android.ui.components.TrackRow
 import com.jamarr.android.ui.components.formatDuration
+import com.jamarr.android.ui.components.isWide
 import com.jamarr.android.ui.components.seedColor
 import com.jamarr.android.ui.state.LocalJamarrContext
 import com.jamarr.android.ui.theme.JamarrColors
@@ -142,6 +145,8 @@ fun ArtistDetailScreen(
                 bottom = contentPadding.calculateBottomPadding() + 16.dp,
             ),
         ) {
+            val bio = detail.value?.bio
+            val links = detail.value.collectLinks()
             item {
                 val artImageUrl = ctx.artworkUrl(detail.value?.artSha1 ?: initialArtSha1, 800)
                     ?: detail.value?.imageUrl
@@ -171,14 +176,13 @@ fun ArtistDetailScreen(
                 )
             }
 
-            val bio = detail.value?.bio
             if (!bio.isNullOrBlank()) {
                 item {
                     Text(
                         text = bio,
                         style = JamarrType.Body,
                         color = JamarrColors.Muted,
-                        maxLines = 4,
+                        maxLines = 6,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(
                             horizontal = JamarrDims.ScreenPadding,
@@ -188,7 +192,6 @@ fun ArtistDetailScreen(
                 }
             }
 
-            val links = detail.value.collectLinks()
             if (links.isNotEmpty()) {
                 item {
                     LinksRow(links)
@@ -329,11 +332,19 @@ private fun ArtistHero(
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
 ) {
+    // Mirror web pattern: full-bleed image hero, scaled tall on wide screens.
+    // Web uses h-[42vh sm:48vh md:60vh] with min-h-[500px] on md+.
+    val cfg = androidx.compose.ui.platform.LocalConfiguration.current
+    val heroHeight = if (isWide()) {
+        (cfg.screenHeightDp * 0.6f).dp.coerceAtLeast(420.dp)
+    } else {
+        (cfg.screenHeightDp * 0.42f).dp.coerceAtLeast(300.dp)
+    }
     val top = seedColor(name)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(300.dp)
+            .height(heroHeight)
             .background(Brush.verticalGradient(listOf(top, JamarrColors.Bg))),
     ) {
         if (!artImageUrl.isNullOrBlank()) {
@@ -341,13 +352,14 @@ private fun ArtistHero(
                 model = artImageUrl,
                 contentDescription = name,
                 contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
                 modifier = Modifier.fillMaxSize(),
             )
         }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(160.dp)
+                .height(heroHeight * 0.55f)
                 .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
@@ -391,8 +403,8 @@ private fun ArtistHero(
                 .fillMaxWidth()
                 .align(Alignment.BottomStart)
                 .padding(
-                    horizontal = JamarrDims.ScreenPadding,
-                    vertical = 16.dp,
+                    horizontal = if (isWide()) 48.dp else JamarrDims.ScreenPadding,
+                    vertical = if (isWide()) 32.dp else 16.dp,
                 ),
         ) {
             Text(

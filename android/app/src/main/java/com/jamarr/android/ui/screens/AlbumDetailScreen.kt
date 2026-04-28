@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -42,6 +47,7 @@ import com.jamarr.android.ui.components.PlayShuffleActions
 import com.jamarr.android.ui.components.TrackRow
 import com.jamarr.android.ui.components.formatDuration
 import com.jamarr.android.ui.components.formatTotalDuration
+import com.jamarr.android.ui.components.isWide
 import com.jamarr.android.ui.components.seedColor
 import com.jamarr.android.ui.state.LocalJamarrContext
 import com.jamarr.android.ui.theme.JamarrColors
@@ -103,16 +109,35 @@ fun AlbumDetailScreen(
     val artworkUrl = ctx.artworkUrl(detail.value?.artSha1 ?: fallbackArtSha1, 800)
     val currentMediaId = ctx.playbackController.currentMediaId?.toLongOrNull()
 
+    val resolvedAlbumMbid = detail.value?.albumMbid ?: albumMbid
+    val onPlay: () -> Unit = {
+        if (tracks.value.isNotEmpty()) onPlayTracks(tracks.value, 0)
+    }
+    val onShuffle: () -> Unit = {
+        if (tracks.value.isNotEmpty()) onPlayTracks(tracks.value.shuffled(), 0)
+    }
+    val onToggleFavorite: () -> Unit = {
+        val mbid = resolvedAlbumMbid
+        if (!mbid.isNullOrBlank()) {
+            val desired = !isFavorite.value
+            isFavorite.value = desired
+            scope.launch {
+                runCatching {
+                    ctx.apiClient.setAlbumFavorite(
+                        serverUrl = ctx.serverUrl,
+                        accessToken = ctx.accessToken,
+                        albumMbid = mbid,
+                        favorite = desired,
+                    )
+                }.onFailure { isFavorite.value = !desired }
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(JamarrColors.Bg)) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                bottom = contentPadding.calculateBottomPadding() + 16.dp,
-            ),
-        ) {
-            item {
-                val resolvedAlbumMbid = detail.value?.albumMbid ?: albumMbid
-                AlbumHero(
+        if (isWide()) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                AlbumLeftPane(
                     title = title,
                     artist = artist,
                     year = year,
@@ -124,64 +149,198 @@ fun AlbumDetailScreen(
                     onArtistClick = onArtistClick,
                     canFavorite = !resolvedAlbumMbid.isNullOrBlank(),
                     isFavorite = isFavorite.value,
-                    onToggleFavorite = {
-                        val mbid = resolvedAlbumMbid ?: return@AlbumHero
-                        val desired = !isFavorite.value
-                        isFavorite.value = desired
-                        scope.launch {
-                            runCatching {
-                                ctx.apiClient.setAlbumFavorite(
-                                    serverUrl = ctx.serverUrl,
-                                    accessToken = ctx.accessToken,
-                                    albumMbid = mbid,
-                                    favorite = desired,
-                                )
-                            }.onFailure { isFavorite.value = !desired }
+                    onToggleFavorite = onToggleFavorite,
+                    onPlay = onPlay,
+                    onShuffle = onShuffle,
+                    modifier = Modifier
+                        .width(500.dp)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(JamarrDims.ScreenPadding),
+                )
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    contentPadding = PaddingValues(
+                        top = 16.dp,
+                        bottom = contentPadding.calculateBottomPadding() + 16.dp,
+                    ),
+                ) {
+                    if (errorState.value != null && tracks.value.isEmpty()) {
+                        item {
+                            Text(
+                                text = errorState.value.orEmpty(),
+                                style = JamarrType.Body,
+                                color = JamarrColors.Muted,
+                                modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding),
+                            )
                         }
-                    },
-                )
-            }
-            item {
-                Column(modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding, vertical = 16.dp)) {
-                    PlayShuffleActions(
-                        onPlay = {
-                            if (tracks.value.isNotEmpty()) {
-                                onPlayTracks(tracks.value, 0)
-                            }
-                        },
-                        onShuffle = {
-                            if (tracks.value.isNotEmpty()) {
-                                val shuffled = tracks.value.shuffled()
-                                onPlayTracks(shuffled, 0)
-                            }
-                        },
-                    )
+                    }
+                    items(tracks.value, key = { it.id }) { track ->
+                        TrackRow(
+                            number = tracks.value.indexOf(track) + 1,
+                            title = track.title,
+                            subtitle = track.artist,
+                            duration = formatDuration(track.durationSeconds),
+                            active = currentMediaId == track.id,
+                            onClick = {
+                                val start = tracks.value.indexOf(track).coerceAtLeast(0)
+                                onPlayTracks(tracks.value, start)
+                            },
+                        )
+                    }
                 }
             }
-            if (errorState.value != null && tracks.value.isEmpty()) {
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    bottom = contentPadding.calculateBottomPadding() + 16.dp,
+                ),
+            ) {
                 item {
-                    Text(
-                        text = errorState.value.orEmpty(),
-                        style = JamarrType.Body,
-                        color = JamarrColors.Muted,
-                        modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding),
+                    AlbumHero(
+                        title = title,
+                        artist = artist,
+                        year = year,
+                        trackCount = trackCount,
+                        totalDuration = totalDuration,
+                        artworkUrl = artworkUrl,
+                        seed = title + artist,
+                        onBack = onBack,
+                        onArtistClick = onArtistClick,
+                        canFavorite = !resolvedAlbumMbid.isNullOrBlank(),
+                        isFavorite = isFavorite.value,
+                        onToggleFavorite = onToggleFavorite,
                     )
                 }
-            }
-            items(tracks.value, key = { it.id }) { track ->
-                TrackRow(
-                    number = tracks.value.indexOf(track) + 1,
-                    title = track.title,
-                    subtitle = track.artist,
-                    duration = formatDuration(track.durationSeconds),
-                    active = currentMediaId == track.id,
-                    onClick = {
-                        val start = tracks.value.indexOf(track).coerceAtLeast(0)
-                        onPlayTracks(tracks.value, start)
-                    },
-                )
+                item {
+                    Column(modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding, vertical = 16.dp)) {
+                        PlayShuffleActions(onPlay = onPlay, onShuffle = onShuffle)
+                    }
+                }
+                if (errorState.value != null && tracks.value.isEmpty()) {
+                    item {
+                        Text(
+                            text = errorState.value.orEmpty(),
+                            style = JamarrType.Body,
+                            color = JamarrColors.Muted,
+                            modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding),
+                        )
+                    }
+                }
+                items(tracks.value, key = { it.id }) { track ->
+                    TrackRow(
+                        number = tracks.value.indexOf(track) + 1,
+                        title = track.title,
+                        subtitle = track.artist,
+                        duration = formatDuration(track.durationSeconds),
+                        active = currentMediaId == track.id,
+                        onClick = {
+                            val start = tracks.value.indexOf(track).coerceAtLeast(0)
+                            onPlayTracks(tracks.value, start)
+                        },
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun AlbumLeftPane(
+    title: String,
+    artist: String,
+    year: String?,
+    trackCount: Int?,
+    totalDuration: Double?,
+    artworkUrl: String?,
+    seed: String,
+    onBack: () -> Unit,
+    onArtistClick: () -> Unit,
+    canFavorite: Boolean,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onPlay: () -> Unit,
+    onShuffle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x66000000))
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = "←", color = Color.White, style = JamarrType.CardTitle)
+            }
+            Spacer(Modifier.weight(1f))
+            if (canFavorite) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x66000000))
+                        .clickable(onClick = onToggleFavorite),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    HeartIcon(
+                        tint = if (isFavorite) JamarrColors.Primary else Color.White,
+                        filled = isFavorite,
+                        size = 18.dp,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(JamarrShapes.AlbumArt),
+        ) {
+            AlbumArt(
+                title = title,
+                seedName = seed,
+                artworkUrl = artworkUrl,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        Text(
+            text = title,
+            style = JamarrType.AlbumHeroTitle,
+            color = JamarrColors.Text,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = artist,
+            style = JamarrType.ArtistLink,
+            color = JamarrColors.Primary,
+            modifier = Modifier.clickable(onClick = onArtistClick),
+        )
+        Spacer(Modifier.height(8.dp))
+        val metaParts = listOfNotNull(
+            year,
+            trackCount?.let { "$it track${if (it == 1) "" else "s"}" },
+            formatTotalDuration(totalDuration),
+        )
+        if (metaParts.isNotEmpty()) {
+            Text(
+                text = metaParts.joinToString(" · "),
+                style = JamarrType.Caption,
+                color = JamarrColors.Muted,
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        PlayShuffleActions(onPlay = onPlay, onShuffle = onShuffle)
     }
 }
 
