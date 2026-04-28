@@ -527,6 +527,37 @@ export async function login(data: { username: string; password: string }): Promi
     return await res.json();
 }
 
+export interface SetupStatus {
+    setup_required: boolean;
+}
+
+export interface SetupPayload {
+    username: string;
+    email: string;
+    password: string;
+    display_name?: string;
+}
+
+export async function checkSetupStatus(): Promise<SetupStatus> {
+    const res = await fetch('/api/auth/setup-status');
+    if (!res.ok) throw new Error('Failed to check setup status');
+    return await res.json();
+}
+
+export async function setupFirstUser(data: SetupPayload): Promise<LoginResponse> {
+    const res = await fetch('/api/auth/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Setup failed');
+    }
+    return await res.json();
+}
+
 export async function logout(): Promise<void> {
     await fetchWithAuth('/api/auth/logout', {
         method: 'POST',

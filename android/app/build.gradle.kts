@@ -18,7 +18,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://jamarr.darious.co.uk\"")
+        buildConfigField("String", "DEFAULT_SERVER_URL", "\"http://10.0.2.2:8111\"")
     }
 
     signingConfigs {

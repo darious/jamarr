@@ -426,7 +426,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Pull Last.fm scrobble history and store in dev DB.",
     )
-    parser.add_argument("--user", default="darious1472", help="Last.fm username")
+    parser.add_argument("--user", default=os.getenv("LASTFM_USERNAME", ""), help="Last.fm username")
     parser.add_argument("--limit", type=int, default=200, help="Tracks per page")
     parser.add_argument("--max-pages", type=int, default=0, help="Stop after N pages")
     parser.add_argument(

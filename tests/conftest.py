@@ -117,26 +117,29 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
             "client_session",
             "renderer_state",
             "playback_history",
-            "track",
-            "artist",
-            "album",
-            "missing_album",
-            "artwork",
-            "renderer",
-            "top_track",
-            "similar_artist",
-            "artist_genre",
-            "external_link",
-            "image_map",
-            "lastfm_scrobble",
-            "lastfm_scrobble_match",
-            "lastfm_skip_artist",
-            "track_artist",
-            "artist_album",
-            "favorite_artist",
-            "favorite_release",
+            'track',
+            'artist',
+            'album',
+            'missing_album',
+            'artwork',
+            'renderer',
+            'top_track',
+            'similar_artist',
+            'artist_genre',
+            'external_link',
+            'image_map',
+            'lastfm_scrobble',
+            'lastfm_scrobble_match',
+            'lastfm_skip_artist',
+            'track_artist',
+            'artist_album',
+            'favorite_artist',
+            'favorite_release',
         ]
-        truncate = [t for t in tables if t in existing]
+        # user is a reserved word, needs quoting
+        if 'user' in existing:
+            tables.append('"user"')
+        truncate = [t for t in tables if t in existing or (t == '"user"' and 'user' in existing)]
         if truncate:
             await conn.execute(
                 f"TRUNCATE TABLE {', '.join(truncate)} RESTART IDENTITY CASCADE;"

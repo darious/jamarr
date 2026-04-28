@@ -4,7 +4,7 @@
 
 set -e
 
-BASE_URL="http://REDACTED_IP:8111"
+BASE_URL="${JAMARR_URL:-http://localhost:8111}"
 COOKIES_FILE="/tmp/jamarr_cookies.txt"
 
 echo "=========================================="
@@ -20,7 +20,7 @@ echo "Step 1: Login with username/password"
 echo "--------------------------------------"
 LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"username":"chris","password":"sld23mxg"}' \
+  -d '{"username":"YOUR_USERNAME","password":"YOUR_PASSWORD"}' \
   -c "$COOKIES_FILE" \
   -w "\n%{http_code}")
 

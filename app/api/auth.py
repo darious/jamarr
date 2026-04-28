@@ -450,7 +450,7 @@ async def update_preferences(
             )
         updates.append(f"theme_mode = ${len(values) + 1}")
         values.append(payload.theme_mode)
-        
+
     if updates:
         values.append(user["id"])
         await db.execute(
@@ -462,3 +462,86 @@ async def update_preferences(
         user["id"],
     )
     return _public_user_dict(updated_user or user)
+
+
+class SetupBody(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+    display_name: Optional[str] = None
+
+
+@router.get("/api/auth/setup-status")
+async def setup_status(db: asyncpg.Connection = Depends(get_db)):
+    count = await db.fetchval('SELECT COUNT(*) FROM "user"')
+    return {"setup_required": count == 0}
+
+
+@router.post("/api/auth/setup", status_code=status.HTTP_201_CREATED)
+async def setup_first_user(
+    request: Request,
+    response: Response,
+    payload: SetupBody,
+    db: asyncpg.Connection = Depends(get_db),
+):
+    _validate_password(payload.password)
+
+    username = payload.username.strip()
+    email = payload.email.strip()
+    password_hash = hash_password(payload.password)
+    display_name = payload.display_name.strip() if payload.display_name else None
+
+    async with db.transaction():
+        # Serialize concurrent setup attempts within the same transaction
+        await db.execute("SELECT pg_advisory_xact_lock(997342)")
+
+        user = await db.fetchrow(
+            """
+            INSERT INTO "user" (username, email, password_hash, display_name, is_admin, created_at)
+            SELECT $1, $2, $3, $4, TRUE, NOW()
+            WHERE NOT EXISTS (SELECT 1 FROM "user")
+            RETURNING *
+            """,
+            username,
+            email,
+            password_hash,
+            display_name,
+        )
+
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Setup has already been completed. A user already exists.",
+            )
+
+        access_token = create_access_token(user_id=user["id"])
+
+        refresh_token = generate_refresh_token()
+        refresh_token_hash = hash_refresh_token(refresh_token)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_TTL_DAYS)
+
+        await create_refresh_session(
+            db=db,
+            user_id=user["id"],
+            token_hash=refresh_token_hash,
+            expires_at=expires_at,
+            user_agent=request.headers.get("user-agent"),
+            ip=get_client_ip(request),
+        )
+
+    log_security_event(
+        "setup_completed",
+        request,
+        level=logging.INFO,
+        user_id=user["id"],
+        username=user["username"],
+    )
+
+    _set_refresh_cookie(response, refresh_token)
+
+    user_data = _public_user_dict(user)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_data,
+    }

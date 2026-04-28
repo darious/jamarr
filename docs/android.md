@@ -707,7 +707,7 @@ Implementation details:
 
   ```json
   {
-    "username": "chris",
+    "username": "your_username",
     "password": "..."
   }
   ```
