@@ -1,0 +1,54 @@
+name: Repository Smoke
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  repo-smoke:
+    name: Repository smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required public repo files
+        run: |
+          test -s LICENSE
+          test -s README.md
+          test -s CONTRIBUTING.md
+          test -s CODE_OF_CONDUCT.md
+          test -s SECURITY.md
+          test -s THIRD_PARTY_NOTICES.md
+          grep -q "GNU AFFERO GENERAL PUBLIC LICENSE" LICENSE
+
+      - name: Validate manifest syntax and license metadata
+        run: |
+          python - <<'PY'
+          import json
+          import tomllib
+
+          with open("pyproject.toml", "rb") as f:
+              pyproject = tomllib.load(f)
+          assert pyproject["project"]["license"] == "AGPL-3.0-only"
+
+          with open("web/package.json", encoding="utf-8") as f:
+              package = json.load(f)
+          assert package["license"] == "AGPL-3.0-only"
+
+          with open("web/package-lock.json", encoding="utf-8") as f:
+              lockfile = json.load(f)
+          assert lockfile["packages"][""]["license"] == "AGPL-3.0-only"
+          PY
+
+      - name: Check sensitive files are not tracked
+        run: |
+          if git ls-files | grep -E '(^|/)\.env($|\.)|\.keystore$|\.jks$|\.p12$|\.pem$' | grep -v '^\.env\.example$'; then
+            echo "Sensitive-looking file is tracked"
+            exit 1
+          fi

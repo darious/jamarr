@@ -20,6 +20,14 @@ It supports **gapless playback** (via UPnP queue management), **instant search**
 For a detailed system overview, see [Architecture & Outline](docs/outline.md).
 For database details, see [Database Schema](docs/DATABASE_SCHEMA.md).
 
+## License
+
+Jamarr is licensed under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`). See [LICENSE](LICENSE).
+
+Third-party dependencies, logos, service names, and trademarks remain under their own licenses and ownership. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Contributions are welcome under the same license. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
 ## Setup
 
 ### Prerequisites
