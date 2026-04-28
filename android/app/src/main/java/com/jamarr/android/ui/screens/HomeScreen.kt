@@ -57,6 +57,7 @@ import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.ArtistArt
+import com.jamarr.android.ui.components.CastIcon
 import com.jamarr.android.ui.components.CloseIcon
 import com.jamarr.android.ui.components.SearchIcon
 import com.jamarr.android.ui.state.LocalJamarrContext
@@ -85,6 +86,8 @@ fun HomeScreen(
     artworkUrlForArtist: (HomeArtist) -> String?,
     contentPadding: PaddingValues,
     onRefresh: () -> Unit = {},
+    rendererName: String = "This Device",
+    onRendererClick: () -> Unit = {},
 ) {
     val isSearching = searchQuery.trim().isNotEmpty()
     val showAccountSheet = remember { mutableStateOf(false) }
@@ -132,7 +135,9 @@ fun HomeScreen(
             ) {
                 HeaderRow(
                     greetingInitial = greetingInitial,
+                    rendererName = rendererName,
                     onAvatarClick = { showAccountSheet.value = true },
+                    onRendererClick = onRendererClick,
                 )
                 SearchBar(
                     query = searchQuery,
@@ -221,7 +226,12 @@ fun HomeScreen(
 }
 
 @Composable
-private fun HeaderRow(greetingInitial: String, onAvatarClick: () -> Unit) {
+private fun HeaderRow(
+    greetingInitial: String,
+    rendererName: String,
+    onAvatarClick: () -> Unit,
+    onRendererClick: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -237,6 +247,15 @@ private fun HeaderRow(greetingInitial: String, onAvatarClick: () -> Unit) {
                 style = JamarrType.Body,
                 color = JamarrColors.Muted,
             )
+        }
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onRendererClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            CastIcon(tint = JamarrColors.Muted, size = 18.dp)
         }
         Image(
             painter = painterResource(id = R.drawable.jamarr_logo),
