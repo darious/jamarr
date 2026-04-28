@@ -15,7 +15,7 @@
   import TrackCard from "$components/TrackCard.svelte";
   import { addToQueue, loadQueueFromServer, setQueue } from "$stores/player";
   import { browser } from "$app/environment";
-  import ColorThief from "colorthief";
+  import { getColor } from "colorthief";
   import Tabs from "$lib/components/Tabs.svelte";
   import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
   import { downloadTracks } from "$lib/helpers/downloader";
@@ -187,10 +187,15 @@
       const img = new Image();
       img.crossOrigin = "Anonymous";
       img.src = bgUrl;
-      img.onload = () => {
+      img.onload = async () => {
         try {
-          const thief = new ColorThief();
-          accentColor = thief.getColor(img);
+          const color = await getColor(img);
+          if (color) {
+            const { r, g, b } = color.rgb();
+            accentColor = [r, g, b];
+          } else {
+            accentColor = null;
+          }
         } catch (e) {
           console.warn("Color extraction failed", e);
           accentColor = null;
