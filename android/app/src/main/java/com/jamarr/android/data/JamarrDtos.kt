@@ -331,3 +331,44 @@ data class PlaybackHistoryTrack(
     @SerialName("duration_seconds") val durationSeconds: Double? = null,
     @SerialName("mb_release_id") val mbReleaseId: String? = null,
 )
+
+@Serializable
+data class Renderer(
+    val udn: String,
+    @SerialName("friendly_name") val name: String = "",
+    val type: String = "upnp",
+    val ip: String? = null,
+    @SerialName("icon_url") val iconUrl: String? = null,
+    val manufacturer: String? = null,
+    @SerialName("model_name") val modelName: String? = null,
+    @SerialName("model_number") val modelNumber: String? = null,
+    @SerialName("serial_number") val serialNumber: String? = null,
+    @SerialName("firmware_version") val firmwareVersion: String? = null,
+    @SerialName("supports_events") val supportsEvents: Boolean? = null,
+    @SerialName("supports_gapless") val supportsGapless: Boolean? = null,
+    @SerialName("supported_mime_types") val supportedMimeTypes: String? = null,
+) {
+    val isLocal: Boolean get() = udn.startsWith("local:")
+}
+
+@Serializable
+data class PlayerStateResponse(
+    val queue: List<PlayerStateTrack> = emptyList(),
+    @SerialName("current_index") val currentIndex: Int = -1,
+    @SerialName("position_seconds") val positionSeconds: Double = 0.0,
+    @SerialName("is_playing") val isPlaying: Boolean = false,
+    val renderer: String = "",
+    @SerialName("transport_state") val transportState: String? = null,
+    val volume: Int? = null,
+)
+
+@Serializable
+data class PlayerStateTrack(
+    val id: Long,
+    val title: String,
+    val artist: String? = null,
+    val album: String? = null,
+    @SerialName("art_sha1") val artSha1: String? = null,
+    @SerialName("duration_seconds") val durationSeconds: Double? = null,
+    @SerialName("mb_release_id") val mbReleaseId: String? = null,
+)

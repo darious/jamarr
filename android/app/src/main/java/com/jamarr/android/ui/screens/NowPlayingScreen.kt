@@ -52,6 +52,7 @@ import androidx.media3.common.Player
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.playback.ResolvedTrack
 import com.jamarr.android.ui.components.AlbumArt
+import com.jamarr.android.ui.components.CastIcon
 import com.jamarr.android.ui.components.ChevronDownIcon
 import com.jamarr.android.ui.components.PauseIcon
 import com.jamarr.android.ui.components.PlayIcon
@@ -89,6 +90,10 @@ fun NowPlayingSheet(
     onRepeat: () -> Unit,
     onQueueItemClick: (Int) -> Unit,
     onArtistClick: (String) -> Unit,
+    rendererName: String = "This Device",
+    onRendererClick: () -> Unit = {},
+    volume: Int = 0,
+    onVolumeChange: (Int) -> Unit = {},
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -123,8 +128,10 @@ fun NowPlayingSheet(
                 // Top bar: chevron + queue toggle
                 TopBar(
                     showQueue = showQueue,
+                    rendererName = rendererName,
                     onDismiss = onDismiss,
                     onToggleQueue = { showQueue = !showQueue },
+                    onRendererClick = onRendererClick,
                 )
 
                 if (isWide() && !showQueue) {
@@ -155,6 +162,14 @@ fun NowPlayingSheet(
                                 onSeek = onSeek,
                                 horizontalPadding = 0.dp,
                             )
+                            if (rendererName != "This Device") {
+                                Spacer(Modifier.height(16.dp))
+                                VolumeBar(
+                                    volume = volume,
+                                    onVolumeChange = onVolumeChange,
+                                    horizontalPadding = 0.dp,
+                                )
+                            }
                             TransportControls(
                                 isPlaying = isPlaying,
                                 shuffleEnabled = shuffleEnabled,
@@ -194,6 +209,14 @@ fun NowPlayingSheet(
                         onSeek = onSeek,
                     )
 
+                    // Volume (remote only)
+                    if (rendererName != "This Device") {
+                        VolumeBar(
+                            volume = volume,
+                            onVolumeChange = onVolumeChange,
+                        )
+                    }
+
                     // Transport controls
                     TransportControls(
                         isPlaying = isPlaying,
@@ -216,43 +239,71 @@ fun NowPlayingSheet(
 @Composable
 private fun TopBar(
     showQueue: Boolean,
+    rendererName: String,
     onDismiss: () -> Unit,
     onToggleQueue: () -> Unit,
+    onRendererClick: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onDismiss),
-            contentAlignment = Alignment.Center,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            ChevronDownIcon(tint = JamarrColors.Text, size = 24.dp)
-        }
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = if (showQueue) "Queue" else "Now Playing",
-            style = JamarrType.SectionHeader,
-            color = JamarrColors.Text,
-        )
-        Spacer(Modifier.weight(1f))
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onToggleQueue),
-            contentAlignment = Alignment.Center,
-        ) {
-            QueueIcon(
-                tint = if (showQueue) JamarrColors.Primary else JamarrColors.Text,
-                size = 22.dp,
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center,
+            ) {
+                ChevronDownIcon(tint = JamarrColors.Text, size = 24.dp)
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = if (showQueue) "Queue" else "Now Playing",
+                style = JamarrType.SectionHeader,
+                color = JamarrColors.Text,
             )
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onRendererClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                CastIcon(
+                    tint = JamarrColors.Muted,
+                    size = 20.dp,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onToggleQueue),
+                contentAlignment = Alignment.Center,
+            ) {
+                QueueIcon(
+                    tint = if (showQueue) JamarrColors.Primary else JamarrColors.Text,
+                    size = 22.dp,
+                )
+            }
         }
+        Text(
+            text = rendererName,
+            style = JamarrType.CaptionSmall,
+            color = JamarrColors.Muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 56.dp, bottom = 4.dp),
+        )
     }
 }
 
@@ -673,6 +724,86 @@ private fun QueueView(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VolumeBar(
+    volume: Int,
+    onVolumeChange: (Int) -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 32.dp,
+) {
+    val fraction = (volume / 100f).coerceIn(0f, 1f)
+
+    var scrubbing by remember { mutableStateOf(false) }
+    var scrubFraction by remember { mutableStateOf(0f) }
+    val displayFraction = if (scrubbing) scrubFraction else fraction
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = horizontalPadding, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "🔊",
+            style = JamarrType.CaptionSmall,
+            color = JamarrColors.Muted,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(32.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        val f = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        onVolumeChange((f * 100).toInt())
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { offset ->
+                            scrubbing = true
+                            scrubFraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        },
+                        onDragEnd = {
+                            onVolumeChange((scrubFraction * 100).toInt())
+                            scrubbing = false
+                        },
+                        onDragCancel = { scrubbing = false },
+                        onHorizontalDrag = { _, dragAmount ->
+                            scrubFraction =
+                                (scrubFraction + dragAmount / size.width.toFloat()).coerceIn(0f, 1f)
+                        },
+                    )
+                },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(JamarrColors.Border),
+            )
+            if (displayFraction > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(displayFraction)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(JamarrColors.Primary),
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "${(displayFraction * 100).toInt()}%",
+            style = JamarrType.CaptionSmall,
+            color = JamarrColors.Muted,
+            modifier = Modifier.width(36.dp),
+        )
     }
 }
 

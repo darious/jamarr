@@ -5,7 +5,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -13,6 +16,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -24,6 +29,7 @@ import androidx.navigation.navArgument
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.ui.components.MiniPlayer
+import com.jamarr.android.ui.components.RendererPicker
 import com.jamarr.android.ui.nav.BottomNavBar
 import com.jamarr.android.ui.nav.JamarrTab
 import com.jamarr.android.ui.nav.Routes
@@ -45,6 +51,7 @@ import com.jamarr.android.ui.state.LocalJamarrContext
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
 import com.jamarr.android.ui.theme.JamarrTheme
+import com.jamarr.android.ui.theme.JamarrType
 
 @Composable
 fun JamarrApp() {
@@ -90,6 +97,11 @@ private fun JamarrRoot() {
         if (currentRoute == Routes.HOME) {
             vm.refreshHome()
         }
+    }
+
+    // Load cached renderers immediately, then trigger a refresh scan
+    LaunchedEffect(Unit) {
+        vm.refreshRenderers()
     }
 
     // Restore saved tab once NavHost has attached its graph
@@ -179,6 +191,8 @@ private fun JamarrRoot() {
                         },
                         contentPadding = contentPadding,
                         onRefresh = { vm.refreshHome() },
+                        rendererName = vm.activeRendererName,
+                        onRendererClick = { vm.showRendererPicker = true },
                     )
                 }
 
@@ -331,11 +345,11 @@ private fun JamarrRoot() {
                         durationMs = vm.playbackDuration,
                         shuffleEnabled = vm.shuffleEnabled,
                         repeatMode = vm.repeatMode,
-                        onToggle = { vm.playbackController.togglePlayPause() },
-                        onPrevious = { vm.playbackController.previous() },
-                        onNext = { vm.playbackController.next() },
+                        onToggle = { vm.togglePlayPause() },
+                        onPrevious = { vm.skipPrevious() },
+                        onNext = { vm.skipNext() },
                         onStop = { vm.stopPlayback() },
-                        onSeek = { vm.playbackController.seekTo(it) },
+                        onSeek = { vm.seekTo(it) },
                         onClick = { vm.showNowPlaying = true },
                     )
                 }
@@ -371,21 +385,55 @@ private fun JamarrRoot() {
                     repeatMode = vm.repeatMode,
                     queue = vm.playbackQueue,
                     onDismiss = { vm.showNowPlaying = false },
-                    onToggle = { vm.playbackController.togglePlayPause() },
-                    onPrevious = { vm.playbackController.previous() },
-                    onNext = { vm.playbackController.next() },
-                    onSeek = { vm.playbackController.seekTo(it) },
-                    onShuffle = { vm.playbackController.toggleShuffle() },
-                    onRepeat = { vm.playbackController.cycleRepeatMode() },
-                    onQueueItemClick = { index ->
-                        vm.playbackController.playQueueItem(index)
-                    },
+                    onToggle = { vm.togglePlayPause() },
+                    onPrevious = { vm.skipPrevious() },
+                    onNext = { vm.skipNext() },
+                    onSeek = { vm.seekTo(it) },
+                    onShuffle = { vm.toggleShuffle() },
+                    onRepeat = { vm.cycleRepeatMode() },
+                    onQueueItemClick = { index -> vm.playQueueItem(index) },
                     onArtistClick = { artistName ->
                         vm.showNowPlaying = false
                         navController.navigate(Routes.artist(mbid = null, name = artistName))
                     },
+                    rendererName = vm.activeRendererName,
+                    onRendererClick = { vm.showRendererPicker = true },
+                    volume = vm.remoteVolume,
+                    onVolumeChange = { vm.changeRemoteVolume(it) },
                 )
             }
+
+            // Status banner (visible after login)
+            if (!accessToken.isBlank() && vm.status.isNotBlank() && vm.status != "Connect to Jamarr." && vm.status != "Welcome back." && vm.status != "Signed in." && vm.status != "Signed out.") {
+                LaunchedEffect(vm.status) {
+                    kotlinx.coroutines.delay(4000)
+                    vm.status = ""
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = JamarrDims.ScreenPadding)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(JamarrColors.Primary.copy(alpha = 0.9f))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = vm.status,
+                        style = JamarrType.Caption,
+                        color = Color.White,
+                    )
+                }
+            }
+
+            // Renderer picker overlay
+            RendererPicker(
+                visible = vm.showRendererPicker,
+                renderers = vm.renderers,
+                activeUdn = vm.activeRendererUdn,
+                onDismiss = { vm.showRendererPicker = false },
+                onSelect = { vm.setRenderer(it) },
+                onRefresh = { vm.refreshRenderers() },
+            )
         }
     }
 }
