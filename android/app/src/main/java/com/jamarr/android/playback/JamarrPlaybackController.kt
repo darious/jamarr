@@ -160,6 +160,13 @@ class JamarrPlaybackController(context: Context) {
         }
     }
 
+    fun clearQueue() {
+        controller?.run {
+            stop()
+            clearMediaItems()
+        }
+    }
+
     fun seekBackward() {
         controller?.run {
             seekTo((currentPosition - 10_000L).coerceAtLeast(0L))

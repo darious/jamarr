@@ -24,6 +24,7 @@ import androidx.navigation.navArgument
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.ui.components.MiniPlayer
+import com.jamarr.android.ui.components.RendererPicker
 import com.jamarr.android.ui.nav.BottomNavBar
 import com.jamarr.android.ui.nav.JamarrTab
 import com.jamarr.android.ui.nav.Routes
@@ -90,6 +91,11 @@ private fun JamarrRoot() {
         if (currentRoute == Routes.HOME) {
             vm.refreshHome()
         }
+    }
+
+    // Load cached renderers immediately, then trigger a refresh scan
+    LaunchedEffect(Unit) {
+        vm.refreshRenderers()
     }
 
     // Restore saved tab once NavHost has attached its graph
@@ -179,6 +185,8 @@ private fun JamarrRoot() {
                         },
                         contentPadding = contentPadding,
                         onRefresh = { vm.refreshHome() },
+                        rendererName = vm.activeRendererName,
+                        onRendererClick = { vm.showRendererPicker = true },
                     )
                 }
 
@@ -331,11 +339,11 @@ private fun JamarrRoot() {
                         durationMs = vm.playbackDuration,
                         shuffleEnabled = vm.shuffleEnabled,
                         repeatMode = vm.repeatMode,
-                        onToggle = { vm.playbackController.togglePlayPause() },
-                        onPrevious = { vm.playbackController.previous() },
-                        onNext = { vm.playbackController.next() },
+                        onToggle = { vm.togglePlayPause() },
+                        onPrevious = { vm.skipPrevious() },
+                        onNext = { vm.skipNext() },
                         onStop = { vm.stopPlayback() },
-                        onSeek = { vm.playbackController.seekTo(it) },
+                        onSeek = { vm.seekTo(it) },
                         onClick = { vm.showNowPlaying = true },
                     )
                 }
@@ -371,21 +379,31 @@ private fun JamarrRoot() {
                     repeatMode = vm.repeatMode,
                     queue = vm.playbackQueue,
                     onDismiss = { vm.showNowPlaying = false },
-                    onToggle = { vm.playbackController.togglePlayPause() },
-                    onPrevious = { vm.playbackController.previous() },
-                    onNext = { vm.playbackController.next() },
-                    onSeek = { vm.playbackController.seekTo(it) },
-                    onShuffle = { vm.playbackController.toggleShuffle() },
-                    onRepeat = { vm.playbackController.cycleRepeatMode() },
-                    onQueueItemClick = { index ->
-                        vm.playbackController.playQueueItem(index)
-                    },
+                    onToggle = { vm.togglePlayPause() },
+                    onPrevious = { vm.skipPrevious() },
+                    onNext = { vm.skipNext() },
+                    onSeek = { vm.seekTo(it) },
+                    onShuffle = { vm.toggleShuffle() },
+                    onRepeat = { vm.cycleRepeatMode() },
+                    onQueueItemClick = { index -> vm.playQueueItem(index) },
                     onArtistClick = { artistName ->
                         vm.showNowPlaying = false
                         navController.navigate(Routes.artist(mbid = null, name = artistName))
                     },
+                    rendererName = vm.activeRendererName,
+                    onRendererClick = { vm.showRendererPicker = true },
                 )
             }
+
+            // Renderer picker overlay
+            RendererPicker(
+                visible = vm.showRendererPicker,
+                renderers = vm.renderers,
+                activeUdn = vm.activeRendererUdn,
+                onDismiss = { vm.showRendererPicker = false },
+                onSelect = { vm.setRenderer(it) },
+                onRefresh = { vm.refreshRenderers() },
+            )
         }
     }
 }

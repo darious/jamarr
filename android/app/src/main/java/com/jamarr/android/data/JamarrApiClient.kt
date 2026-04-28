@@ -529,6 +529,129 @@ class JamarrApiClient(
         }
     }
 
+    suspend fun getRenderers(
+        serverUrl: String,
+        refresh: Boolean = false,
+    ): List<Renderer> = withContext(Dispatchers.IO) {
+        val builder = apiUrl(serverUrl, "/api/renderers").toHttpUrl().newBuilder()
+        if (refresh) builder.addQueryParameter("refresh", "true")
+        val request = Request.Builder().url(builder.build()).get().build()
+        execute(request)
+    }
+
+    suspend fun setRenderer(
+        serverUrl: String,
+        clientId: String,
+        udn: String,
+    ): Unit = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject { put("udn", udn) }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/renderer"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
+    }
+
+    suspend fun getPlayerState(
+        serverUrl: String,
+        clientId: String,
+    ): PlayerStateResponse = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/state"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .get()
+            .build()
+        execute(request)
+    }
+
+    suspend fun remotePause(
+        serverUrl: String,
+        clientId: String,
+    ): Unit = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/pause"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post("".toRequestBody(jsonMediaType))
+            .build()
+        httpClient.newCall(request).execute().use { it.body.string() }
+    }
+
+    suspend fun remoteResume(
+        serverUrl: String,
+        clientId: String,
+    ): Unit = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/resume"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post("".toRequestBody(jsonMediaType))
+            .build()
+        httpClient.newCall(request).execute().use { it.body.string() }
+    }
+
+    suspend fun remoteSeek(
+        serverUrl: String,
+        clientId: String,
+        seconds: Double,
+    ): Unit = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject { put("seconds", seconds) }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/seek"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        httpClient.newCall(request).execute().use { it.body.string() }
+    }
+
+    suspend fun remoteVolume(
+        serverUrl: String,
+        clientId: String,
+        percent: Int,
+    ): Unit = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject { put("percent", percent) }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/volume"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        httpClient.newCall(request).execute().use { it.body.string() }
+    }
+
+    suspend fun remotePlay(
+        serverUrl: String,
+        clientId: String,
+        trackId: Long,
+    ): Unit = withContext(Dispatchers.IO) {
+        val payload = buildJsonObject { put("track_id", trackId) }
+        val body = payload.toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/play"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post(body)
+            .build()
+        httpClient.newCall(request).execute().use { it.body.string() }
+    }
+
+    suspend fun remoteClearQueue(
+        serverUrl: String,
+        clientId: String,
+    ): Unit = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/player/queue/clear"))
+            .header("X-Jamarr-Client-Id", clientId)
+            .post("".toRequestBody(jsonMediaType))
+            .build()
+        httpClient.newCall(request).execute().use { it.body.string() }
+    }
+
     private inline fun <reified T> execute(request: Request): T {
         httpClient.newCall(request).execute().use { response ->
             val body = response.body.string()

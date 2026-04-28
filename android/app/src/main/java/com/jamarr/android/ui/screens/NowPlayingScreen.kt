@@ -52,6 +52,7 @@ import androidx.media3.common.Player
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.playback.ResolvedTrack
 import com.jamarr.android.ui.components.AlbumArt
+import com.jamarr.android.ui.components.CastIcon
 import com.jamarr.android.ui.components.ChevronDownIcon
 import com.jamarr.android.ui.components.PauseIcon
 import com.jamarr.android.ui.components.PlayIcon
@@ -89,6 +90,8 @@ fun NowPlayingSheet(
     onRepeat: () -> Unit,
     onQueueItemClick: (Int) -> Unit,
     onArtistClick: (String) -> Unit,
+    rendererName: String = "This Device",
+    onRendererClick: () -> Unit = {},
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -123,8 +126,10 @@ fun NowPlayingSheet(
                 // Top bar: chevron + queue toggle
                 TopBar(
                     showQueue = showQueue,
+                    rendererName = rendererName,
                     onDismiss = onDismiss,
                     onToggleQueue = { showQueue = !showQueue },
+                    onRendererClick = onRendererClick,
                 )
 
                 if (isWide() && !showQueue) {
@@ -216,43 +221,71 @@ fun NowPlayingSheet(
 @Composable
 private fun TopBar(
     showQueue: Boolean,
+    rendererName: String,
     onDismiss: () -> Unit,
     onToggleQueue: () -> Unit,
+    onRendererClick: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onDismiss),
-            contentAlignment = Alignment.Center,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            ChevronDownIcon(tint = JamarrColors.Text, size = 24.dp)
-        }
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = if (showQueue) "Queue" else "Now Playing",
-            style = JamarrType.SectionHeader,
-            color = JamarrColors.Text,
-        )
-        Spacer(Modifier.weight(1f))
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onToggleQueue),
-            contentAlignment = Alignment.Center,
-        ) {
-            QueueIcon(
-                tint = if (showQueue) JamarrColors.Primary else JamarrColors.Text,
-                size = 22.dp,
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center,
+            ) {
+                ChevronDownIcon(tint = JamarrColors.Text, size = 24.dp)
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = if (showQueue) "Queue" else "Now Playing",
+                style = JamarrType.SectionHeader,
+                color = JamarrColors.Text,
             )
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onRendererClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                CastIcon(
+                    tint = JamarrColors.Muted,
+                    size = 20.dp,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onToggleQueue),
+                contentAlignment = Alignment.Center,
+            ) {
+                QueueIcon(
+                    tint = if (showQueue) JamarrColors.Primary else JamarrColors.Text,
+                    size = 22.dp,
+                )
+            }
         }
+        Text(
+            text = rendererName,
+            style = JamarrType.CaptionSmall,
+            color = JamarrColors.Muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 56.dp, bottom = 4.dp),
+        )
     }
 }
 

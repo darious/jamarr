@@ -12,6 +12,8 @@ import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.HomeContent
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrCookieJar
+import com.jamarr.android.data.PlayerStateResponse
+import com.jamarr.android.data.Renderer
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.playback.JamarrPlaybackController
@@ -61,6 +63,16 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     var showNowPlaying by mutableStateOf(false)
     var clientId by mutableStateOf("")
 
+    // Renderer / remote playback state
+    var renderers by mutableStateOf<List<Renderer>>(emptyList())
+    var activeRendererUdn by mutableStateOf("")
+    var showRendererPicker by mutableStateOf(false)
+    val isRemoteMode: Boolean get() = activeRendererUdn.isNotBlank() && !activeRendererUdn.startsWith("local:")
+    val activeRendererName: String get() {
+        if (!isRemoteMode) return "This Device"
+        return renderers.find { it.udn == activeRendererUdn }?.name ?: "Network Renderer"
+    }
+
     // Navigation restore
     var initialRestoreDone by mutableStateOf(false)
     var pendingSavedRoute by mutableStateOf<String?>(null)
@@ -69,12 +81,14 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             cookieJar.prime()
             clientId = settingsStore.getClientId()
+            activeRendererUdn = "local:$clientId"
             val saved = settingsStore.load()
             serverUrl = saved.serverUrl.ifBlank { BuildConfig.DEFAULT_SERVER_URL }
             if (saved.accessToken.isNotBlank()) {
                 tokenHolder.set(saved.accessToken)
                 status = "Welcome back."
                 refreshHome()
+                loadCachedRenderers()
                 if (!initialRestoreDone) {
                     initialRestoreDone = true
                     val savedRoute = JamarrTab.fromIndex(saved.activeTabIndex).route()
@@ -122,6 +136,44 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                 delay(500)
             }
         }
+
+        // Remote playback state polling
+        viewModelScope.launch {
+            while (true) {
+                if (isRemoteMode && isPlaying) {
+                    runCatching {
+                        val state = apiClient.getPlayerState(serverUrl, clientId)
+                        playbackPosition = (state.positionSeconds * 1000).toLong()
+                        isPlaying = state.isPlaying
+                        val q = state.queue.map { t ->
+                            ResolvedTrack(
+                                track = SearchTrack(
+                                    id = t.id,
+                                    title = t.title,
+                                    artist = t.artist,
+                                    album = t.album,
+                                    artSha1 = t.artSha1,
+                                    durationSeconds = t.durationSeconds,
+                                    mbReleaseId = t.mbReleaseId,
+                                ),
+                                streamUrl = "",
+                                artworkUrl = t.artSha1?.let { apiClient.artworkUrl(serverUrl, it) },
+                            )
+                        }
+                        if (q != playbackQueue) playbackQueue = q
+                        val currentTrack = q.getOrNull(state.currentIndex)
+                        if (currentTrack != null && currentTrack.track.id != nowPlayingTrack?.id) {
+                            nowPlayingTrack = currentTrack.track
+                            nowPlayingArtworkUrl = currentTrack.artworkUrl
+                        }
+                        if (currentTrack != null) {
+                            playbackDuration = ((currentTrack.track.durationSeconds ?: 0.0) * 1000).toLong()
+                        }
+                    }
+                }
+                delay(1000)
+            }
+        }
     }
 
     override fun onCleared() {
@@ -151,21 +203,32 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
     suspend fun playTracks(queue: List<SearchTrack>, startIndex: Int) {
         if (queue.isEmpty()) return
-        val resolved = queue.map { queueTrack ->
-            ResolvedTrack(
-                track = queueTrack,
-                streamUrl = "",
-                artworkUrl = apiClient.artworkUrl(serverUrl, queueTrack.artSha1),
-            )
-        }
-        playbackQueue = resolved
-        playbackController.playQueue(resolved, startIndex.coerceIn(0, resolved.lastIndex))
-        val startTrack = resolved[startIndex.coerceIn(0, resolved.lastIndex)]
-        nowPlayingTrack = startTrack.track
-        nowPlayingArtworkUrl = startTrack.artworkUrl
 
         if (clientId.isNotBlank()) {
             apiClient.reportQueue(serverUrl, clientId, queue, startIndex)
+        }
+
+        if (isRemoteMode) {
+            playbackController.clearQueue()
+            val startTrack = queue[startIndex.coerceIn(0, queue.lastIndex)]
+            nowPlayingTrack = startTrack
+            nowPlayingArtworkUrl = startTrack.artSha1?.let { apiClient.artworkUrl(serverUrl, it) }
+            isPlaying = true
+            playbackPosition = 0L
+            playbackDuration = ((startTrack.durationSeconds ?: 0.0) * 1000).toLong()
+        } else {
+            val resolved = queue.map { queueTrack ->
+                ResolvedTrack(
+                    track = queueTrack,
+                    streamUrl = "",
+                    artworkUrl = apiClient.artworkUrl(serverUrl, queueTrack.artSha1),
+                )
+            }
+            playbackQueue = resolved
+            playbackController.playQueue(resolved, startIndex.coerceIn(0, resolved.lastIndex))
+            val startTrack = resolved[startIndex.coerceIn(0, resolved.lastIndex)]
+            nowPlayingTrack = startTrack.track
+            nowPlayingArtworkUrl = startTrack.artworkUrl
         }
     }
 
@@ -217,10 +280,13 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             playbackController.stop()
             homeContent = HomeContent()
             searchResults = SearchResponse()
+            renderers = emptyList()
+            activeRendererUdn = ""
             query = ""
             nowPlayingTrack = null
             nowPlayingArtworkUrl = null
             playbackQueue = emptyList()
+            isPlaying = false
             status = "Signed out."
         }
     }
@@ -230,10 +296,124 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stopPlayback() {
-        playbackController.stop()
+        if (isRemoteMode) {
+            viewModelScope.launch {
+                runCatching { apiClient.remoteClearQueue(serverUrl, clientId) }
+            }
+        } else {
+            playbackController.stop()
+        }
         nowPlayingTrack = null
         nowPlayingArtworkUrl = null
         playbackQueue = emptyList()
+        isPlaying = false
+        playbackPosition = 0L
         showNowPlaying = false
+    }
+
+    fun togglePlayPause() {
+        if (isRemoteMode) {
+            viewModelScope.launch {
+                if (isPlaying) {
+                    runCatching { apiClient.remotePause(serverUrl, clientId) }
+                        .onSuccess { isPlaying = false }
+                } else {
+                    runCatching { apiClient.remoteResume(serverUrl, clientId) }
+                        .onSuccess { isPlaying = true }
+                }
+            }
+        } else {
+            playbackController.togglePlayPause()
+        }
+    }
+
+    fun seekTo(positionMs: Long) {
+        if (isRemoteMode) {
+            viewModelScope.launch {
+                runCatching { apiClient.remoteSeek(serverUrl, clientId, positionMs / 1000.0) }
+            }
+        } else {
+            playbackController.seekTo(positionMs)
+        }
+    }
+
+    fun skipNext() {
+        if (isRemoteMode) {
+            val queue = playbackQueue
+            if (queue.isEmpty()) return
+            val currentIndex = queue.indexOfFirst { it.track.id == nowPlayingTrack?.id }.coerceAtLeast(0)
+            val nextIndex = (currentIndex + 1).coerceAtMost(queue.lastIndex)
+            if (nextIndex != currentIndex) {
+                viewModelScope.launch {
+                    runCatching { apiClient.reportIndex(serverUrl, clientId, nextIndex) }
+                }
+            }
+        } else {
+            playbackController.next()
+        }
+    }
+
+    fun skipPrevious() {
+        if (isRemoteMode) {
+            val queue = playbackQueue
+            if (queue.isEmpty()) return
+            val currentIndex = queue.indexOfFirst { it.track.id == nowPlayingTrack?.id }.coerceAtLeast(0)
+            val prevIndex = (currentIndex - 1).coerceAtLeast(0)
+            if (prevIndex != currentIndex) {
+                viewModelScope.launch {
+                    runCatching { apiClient.reportIndex(serverUrl, clientId, prevIndex) }
+                }
+            }
+        } else {
+            playbackController.previous()
+        }
+    }
+
+    fun playQueueItem(index: Int) {
+        if (isRemoteMode) {
+            viewModelScope.launch {
+                runCatching { apiClient.reportIndex(serverUrl, clientId, index) }
+            }
+        } else {
+            playbackController.playQueueItem(index)
+        }
+    }
+
+    fun toggleShuffle() {
+        if (!isRemoteMode) {
+            playbackController.toggleShuffle()
+        }
+    }
+
+    fun cycleRepeatMode() {
+        if (!isRemoteMode) {
+            playbackController.cycleRepeatMode()
+        }
+    }
+
+    fun refreshRenderers() {
+        viewModelScope.launch {
+            runCatching { apiClient.getRenderers(serverUrl, refresh = true) }
+                .onSuccess { renderers = it }
+                .onFailure { status = "Renderer scan: ${it.message}" }
+        }
+    }
+
+    private fun loadCachedRenderers() {
+        viewModelScope.launch {
+            runCatching { apiClient.getRenderers(serverUrl, refresh = false) }
+                .onSuccess { renderers = it }
+        }
+    }
+
+    fun setRenderer(udn: String) {
+        viewModelScope.launch {
+            runCatching { apiClient.setRenderer(serverUrl, clientId, udn) }
+                .onSuccess {
+                    activeRendererUdn = udn
+                    showRendererPicker = false
+                }
+                .onFailure { status = it.message ?: "Failed to set renderer" }
+        }
     }
 }
