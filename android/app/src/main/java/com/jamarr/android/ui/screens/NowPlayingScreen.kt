@@ -16,14 +16,17 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -58,6 +61,7 @@ import com.jamarr.android.ui.components.RepeatOneIcon
 import com.jamarr.android.ui.components.ShuffleIcon
 import com.jamarr.android.ui.components.SkipNextIcon
 import com.jamarr.android.ui.components.SkipPreviousIcon
+import com.jamarr.android.ui.components.isWide
 import com.jamarr.android.ui.components.seedColor
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
@@ -123,43 +127,87 @@ fun NowPlayingSheet(
                     onToggleQueue = { showQueue = !showQueue },
                 )
 
-                if (showQueue) {
-                    QueueView(
-                        queue = queue,
-                        currentTrackId = track.id,
-                        onItemClick = onQueueItemClick,
-                        modifier = Modifier.weight(1f),
-                    )
+                if (isWide() && !showQueue) {
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 48.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally),
+                    ) {
+                        ArtworkPane(
+                            track = track,
+                            artworkUrl = artworkUrl,
+                            isPlaying = isPlaying,
+                            modifier = Modifier.fillMaxHeight().aspectRatio(1f),
+                        )
+                        Column(
+                            modifier = Modifier
+                                .widthIn(max = 672.dp)
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            TrackInfo(track = track, onArtistClick = onArtistClick)
+                            Spacer(Modifier.height(28.dp))
+                            ScrubBar(
+                                progressMs = progressMs,
+                                durationMs = durationMs,
+                                onSeek = onSeek,
+                                horizontalPadding = 0.dp,
+                            )
+                            TransportControls(
+                                isPlaying = isPlaying,
+                                shuffleEnabled = shuffleEnabled,
+                                repeatMode = repeatMode,
+                                onToggle = onToggle,
+                                onPrevious = onPrevious,
+                                onNext = onNext,
+                                onShuffle = onShuffle,
+                                onRepeat = onRepeat,
+                                horizontalPadding = 0.dp,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(24.dp))
                 } else {
-                    ArtworkView(
-                        track = track,
-                        artworkUrl = artworkUrl,
-                        isPlaying = isPlaying,
-                        onArtistClick = onArtistClick,
-                        modifier = Modifier.weight(1f),
+                    if (showQueue) {
+                        QueueView(
+                            queue = queue,
+                            currentTrackId = track.id,
+                            onItemClick = onQueueItemClick,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        ArtworkView(
+                            track = track,
+                            artworkUrl = artworkUrl,
+                            isPlaying = isPlaying,
+                            onArtistClick = onArtistClick,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    // Progress bar
+                    ScrubBar(
+                        progressMs = progressMs,
+                        durationMs = durationMs,
+                        onSeek = onSeek,
                     )
+
+                    // Transport controls
+                    TransportControls(
+                        isPlaying = isPlaying,
+                        shuffleEnabled = shuffleEnabled,
+                        repeatMode = repeatMode,
+                        onToggle = onToggle,
+                        onPrevious = onPrevious,
+                        onNext = onNext,
+                        onShuffle = onShuffle,
+                        onRepeat = onRepeat,
+                    )
+
+                    Spacer(Modifier.height(24.dp))
                 }
-
-                // Progress bar
-                ScrubBar(
-                    progressMs = progressMs,
-                    durationMs = durationMs,
-                    onSeek = onSeek,
-                )
-
-                // Transport controls
-                TransportControls(
-                    isPlaying = isPlaying,
-                    shuffleEnabled = shuffleEnabled,
-                    repeatMode = repeatMode,
-                    onToggle = onToggle,
-                    onPrevious = onPrevious,
-                    onNext = onNext,
-                    onShuffle = onShuffle,
-                    onRepeat = onRepeat,
-                )
-
-                Spacer(Modifier.height(24.dp))
             }
         }
     }
@@ -229,9 +277,10 @@ private fun ArtworkView(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Album art
+        // Album art (capped so controls always have room)
         Box(
             modifier = Modifier
+                .widthIn(max = 360.dp)
                 .fillMaxWidth()
                 .aspectRatio(1f)
                 .scale(artScale)
@@ -292,10 +341,79 @@ private fun ArtworkView(
 }
 
 @Composable
+private fun ArtworkPane(
+    track: SearchTrack,
+    artworkUrl: String?,
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val artScale by animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0.88f,
+        animationSpec = tween(400),
+        label = "art-scale-wide",
+    )
+    Box(
+        modifier = modifier
+            .scale(artScale)
+            .clip(JamarrShapes.AlbumArtLarge)
+            .background(JamarrColors.Card),
+    ) {
+        AlbumArt(
+            title = track.title,
+            seedName = track.album ?: track.title,
+            artworkUrl = artworkUrl,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun TrackInfo(
+    track: SearchTrack,
+    onArtistClick: (String) -> Unit,
+) {
+    Text(
+        text = track.title,
+        style = JamarrType.AlbumHeroTitle,
+        color = JamarrColors.Text,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(4.dp))
+    val artist = track.artist
+    if (!artist.isNullOrBlank()) {
+        Text(
+            text = artist,
+            style = JamarrType.ArtistLink,
+            color = JamarrColors.Primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onArtistClick(artist) },
+        )
+    }
+    val album = track.album
+    if (!album.isNullOrBlank()) {
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = album,
+            style = JamarrType.Caption,
+            color = JamarrColors.Muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
 private fun ScrubBar(
     progressMs: Long,
     durationMs: Long,
     onSeek: (Long) -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 32.dp,
 ) {
     val fraction = if (durationMs > 0) {
         (progressMs.toFloat() / durationMs).coerceIn(0f, 1f)
@@ -308,7 +426,7 @@ private fun ScrubBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp),
+            .padding(horizontal = horizontalPadding),
     ) {
         // Scrub track
         Box(
@@ -405,11 +523,12 @@ private fun TransportControls(
     onNext: () -> Unit,
     onShuffle: () -> Unit,
     onRepeat: () -> Unit,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 32.dp,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 16.dp),
+            .padding(horizontal = horizontalPadding, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
