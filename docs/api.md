@@ -109,13 +109,15 @@ Side effect: revokes the previous refresh token and sets a new refresh cookie.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/auth/signup` | Create a user, return access token, set refresh cookie |
+| `POST` | `/api/auth/login` | Login, return JWT access token, set refresh cookie |
+| `POST` | `/api/auth/refresh` | Refresh access token via refresh cookie |
 | `POST` | `/api/auth/logout` | Revoke current refresh token and clear cookie |
 | `POST` | `/api/auth/logout-all` | Revoke all refresh sessions for current user |
 | `GET` | `/api/auth/me` | Return current user profile |
 | `PUT` | `/api/auth/profile` | Update email/display name |
 | `POST` | `/api/auth/password` | Change password |
 | `PATCH` | `/api/auth/preferences` | Update accent/theme preferences |
+| `POST` | `/api/auth/users` | Admin-only: create a new user |
 
 ## Streaming
 
@@ -231,8 +233,8 @@ Query params:
 
 | Param | Type | Purpose |
 | --- | --- | --- |
-| `limit` | integer | Present in signature, but the current unfiltered list path does not apply it. |
-| `offset` | integer | Present in signature, but the current unfiltered list path does not apply it. |
+| `limit` | integer | Page size for unfiltered listing (default 100). |
+| `offset` | integer | Offset for unfiltered listing (default 0). |
 | `name` | string | Exact-ish artist lookup by name |
 | `mbid` | string | Artist lookup by MusicBrainz ID |
 | `starts_with` | string | Filter by cached artist letter |
@@ -250,9 +252,8 @@ List response fields include:
 Single-artist lookups include heavier fields such as external links,
 `top_tracks`, `most_listened`, `singles`, `genres`, and `background_sha1`.
 
-Stage 0 caveat: unfiltered artist listing is not actually paginated at the
-moment. That is acceptable for the phone prototype if search is used first, but
-it is not ideal for Android Auto root browsing.
+Stage 0 caveat: unfiltered artist listing is paginated via `limit`/`offset`.
+The unfiltered path previously returned all artists; this has been corrected.
 
 ### `GET /api/artists/index`
 
@@ -346,8 +347,7 @@ root in Android Auto because it has no pagination.
 
 ## Playlists
 
-Playlist routes require JWT auth. The playlist router is included twice in
-`app/main.py`; this should not affect the Android prototype but is worth noting.
+Playlist routes require JWT auth.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -537,8 +537,8 @@ These are observations only. They are not required fixes before Stage 1.
 1. The main library browse endpoints are not consistently paginated. This is
    the biggest reason Android Auto may eventually want a tiny `/api/android`
    browse adapter.
-2. `/api/artists` exposes `limit` and `offset`, but the unfiltered list branch
-   currently returns the whole artist list.
+2. `/api/artists` pagination: `limit` and `offset` are now applied for
+   unfiltered listing (previously returned all artists).
 3. `/api/albums` and `/api/tracks` do not expose pagination.
 4. Artwork routes are currently unauthenticated even though other docs describe
    authenticated artwork access. Android can use them as implemented, but this
@@ -546,9 +546,8 @@ These are observations only. They are not required fixes before Stage 1.
 5. Player routes update Jamarr renderer state and are coupled to local browser
    and UPnP behavior. Android Auto should avoid them for playback and use
    Media3 instead.
-6. The playlist router appears to be included twice in `app/main.py`. This is
-   unrelated to Android, but it is worth cleaning up separately if it affects
-   OpenAPI output or route duplication.
+6. The playlist router is included once in `app/main.py` (previously was
+   included twice; this has been fixed).
 
 ## Do Not Change Yet
 

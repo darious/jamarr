@@ -200,7 +200,7 @@ async def test_cors_allows_only_configured_origins(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_proxy_headers_are_trusted_only_from_configured_proxy(monkeypatch):
-    monkeypatch.setenv("TRUSTED_PROXY_IPS", "REDACTED_IP")
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.2")
     app = _security_test_app()
     headers = {
         "X-Forwarded-For": "203.0.113.50",
@@ -208,19 +208,19 @@ async def test_proxy_headers_are_trusted_only_from_configured_proxy(monkeypatch)
     }
 
     async with AsyncClient(
-        transport=ASGITransport(app=app, client=("REDACTED_IP", 12345)),
-        base_url="http://REDACTED_IP:8111",
+        transport=ASGITransport(app=app, client=("10.0.0.2", 12345)),
+        base_url="http://10.0.0.2:8111",
     ) as client:
         trusted = await client.get("/whoami", headers=headers)
 
     async with AsyncClient(
-        transport=ASGITransport(app=app, client=("REDACTED_IP", 12345)),
-        base_url="http://REDACTED_IP:8111",
+        transport=ASGITransport(app=app, client=("198.51.100.1", 12345)),
+        base_url="http://198.51.100.1:8111",
     ) as client:
         untrusted = await client.get("/whoami", headers=headers)
 
     assert trusted.json() == {"client_ip": "203.0.113.50", "scheme": "https"}
-    assert untrusted.json() == {"client_ip": "REDACTED_IP", "scheme": "http"}
+    assert untrusted.json() == {"client_ip": "198.51.100.1", "scheme": "http"}
 
 
 @pytest.mark.asyncio

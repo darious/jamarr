@@ -30,7 +30,7 @@ Under the hood it runs `docker compose -f docker-compose.yml -f docker-compose.d
 - **Backend**: Runs in Docker with uvicorn --reload
   - Auto-reloads on Python file changes
   - No Docker rebuild needed
-- **Database & CloudBeaver**: Unchanged
+- **Database**: Unchanged
 
 ## Services
 
@@ -39,7 +39,6 @@ Under the hood it runs `docker compose -f docker-compose.yml -f docker-compose.d
 | Frontend | http://HOST_IP:5173 | ✅ Vite HMR |
 | Backend API | http://HOST_IP:8111 | ✅ Uvicorn --reload |
 | PostgreSQL | HOST_IP:8110 | N/A |
-| CloudBeaver | http://HOST_IP:8978 | N/A |
 
 ## FastAPI Docs
 

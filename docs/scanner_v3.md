@@ -224,6 +224,13 @@ app/scanner/
 ├── core.py                    # Filesystem scanning
 ├── scan_manager.py            # High-level orchestration
 ├── stats.py                   # Statistics tracker
+├── tags.py                    # Mutagen tag extraction
+├── artwork.py                 # Artwork resolution & migration
+├── album_helpers.py           # Album grouping & sort helpers
+├── similar_helpers.py         # Similar artist matching
+├── utils.py                   # Shared scanner utilities
+├── dns_resolver.py            # DNS caching for API calls
+├── missing_scanner.py         # Missing album detection
 ├── pipeline/
 │   ├── __init__.py
 │   ├── planner.py            # EnrichmentPlanner
@@ -241,13 +248,15 @@ app/scanner/
 │       ├── singles.py        # MusicBrainz singles
 │       └── albums.py         # MusicBrainz album metadata
 ├── services/                  # External API clients
+│   ├── __init__.py
 │   ├── musicbrainz.py
 │   ├── lastfm.py
 │   ├── artwork.py
 │   ├── wikidata.py
 │   ├── wikipedia.py
 │   ├── qobuz.py              # Qobuz search with fuzzy matching
-│   └── album.py
+│   ├── album.py
+│   └── utils.py              # Service utilities
 ```
 
 ## Testing
@@ -359,5 +368,5 @@ The v3 pipeline **completely replaces** the old `MetadataCoordinator`:
 **Result:**
 - ✅ 94% reduction in cyclomatic complexity
 - ✅ 90% reduction in conditional branches
-- ✅ 201 tests passing
+- ✅ 226 tests passing
 - ✅ Clean, maintainable codebase

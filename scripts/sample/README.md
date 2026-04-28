@@ -11,7 +11,7 @@ Scrapes the Official Charts albums chart and prints a table. Also attempts Music
 CLI options:
 - `--limit`: Number of rows to print (default: 20).
 - `--url`: Chart URL to scrape (default: Official Charts albums chart).
-- `--mb-base-url`: MusicBrainz API base URL (default: `http://REDACTED_IP:5000`).
+- `--mb-base-url`: MusicBrainz API base URL (default: local MusicBrainz mirror).
 
 Examples:
 ```bash
