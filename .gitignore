@@ -211,6 +211,8 @@ __marimo__/
 # Local cache
 cache/
 cache
+.codex
+.codex/
 
 # Frontend build artifacts
 web/build/
