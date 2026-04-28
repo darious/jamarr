@@ -303,9 +303,28 @@ User accounts.
 | `lastfm_session_key` | TEXT | Last.fm session key. |
 | `lastfm_enabled` | BOOLEAN | Last.fm sync enabled. |
 | `lastfm_connected_at` | TIMESTAMPTZ | When Last.fm was linked. |
+| `is_admin` | BOOLEAN | Whether user has admin privileges. Default: `FALSE`. |
+
+### `favorite_artist`
+Per-user favorited artists.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `user_id` | BIGINT | Foreign key `user.id`. |
+| `artist_mbid` | TEXT | Foreign key `artist.mbid`. |
+| `created_at` | TIMESTAMPTZ | When favorited. |
+
+### `favorite_release`
+Per-user favorited albums/releases.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `user_id` | BIGINT | Foreign key `user.id`. |
+| `album_mbid` | TEXT | Foreign key `album.mbid`. |
+| `created_at` | TIMESTAMPTZ | When favorited. |
 
 ### `session`
-User sessions.
+User sessions (legacy token-based sessions).
 
 | Column | Type | Description |
 | :--- | :--- | :--- |
@@ -316,6 +335,21 @@ User sessions.
 | `expires_at` | TIMESTAMPTZ | Expiration time. |
 | `user_agent` | TEXT | User agent. |
 | `ip` | TEXT | IP address. |
+
+### `auth_refresh_session`
+JWT refresh token sessions (replaces legacy session tokens for auth).
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | BIGSERIAL | Primary key. |
+| `user_id` | BIGINT | Foreign key `user.id`. |
+| `token_hash` | TEXT | SHA-256 hash of refresh token. Unique. |
+| `created_at` | TIMESTAMPTZ | Creation time. |
+| `expires_at` | TIMESTAMPTZ | Expiration time. |
+| `revoked_at` | TIMESTAMPTZ | When revoked (null if active). |
+| `last_used_at` | TIMESTAMPTZ | Last time token was used. |
+| `user_agent` | TEXT | User agent at creation. |
+| `ip` | TEXT | IP address at creation. |
 
 ### `top_track`
 Top tracks for artists.
@@ -456,7 +490,7 @@ Scheduled jobs (cron).
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | `id` | BIGSERIAL | Primary key. |
-| `job_key` | TEXT | Job identifier. |
+| `job_key` | TEXT | Job identifier. Not null. |
 | `cron` | TEXT | Cron expression. |
 | `timezone` | TEXT | Timezone. |
 | `enabled` | BOOLEAN | Enabled flag. |

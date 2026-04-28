@@ -35,7 +35,7 @@ PYTEST_MARK_EXPR="not slow" ./test.sh
 Run a production build inside the test container:
 
 ```bash
-./test-build.sh
+./scripts/test-build.sh
 ```
 
 This installs dependencies in the container and runs `npm run build` against the `web/` code.
@@ -45,7 +45,7 @@ This installs dependencies in the container and runs `npm run build` against the
 Run the external API script directly:
 
 ```bash
-./test-ext-api.sh
+./scripts/test-ext-api.sh
 ```
 
 ## Running Pytest Locally (Advanced)

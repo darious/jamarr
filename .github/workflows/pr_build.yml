@@ -8,7 +8,7 @@ on:
       - "web/**"
       - "docker-compose.test.yml"
       - "Dockerfile.node-ci"
-      - "test-build.sh"
+      - "scripts/test-build.sh"
   
 jobs:
   build:
@@ -34,7 +34,7 @@ jobs:
           EOF
 
       - name: Make scripts executable
-        run: chmod +x test-build.sh
+        run: chmod +x scripts/test-build.sh
 
       - name: Run Production Build
-        run: ./test-build.sh
+        run: ./scripts/test-build.sh
