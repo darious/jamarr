@@ -32,10 +32,10 @@ def _security_test_app() -> FastAPI:
 
 
 def test_parse_csv_env_trims_empty_values(monkeypatch):
-    monkeypatch.setenv("ALLOWED_HOSTS", " REDACTED_HOST, ,REDACTED_IP ")
+    monkeypatch.setenv("ALLOWED_HOSTS", " jamarr.example.com, ,REDACTED_IP ")
 
     assert parse_csv_env("ALLOWED_HOSTS") == [
-        "REDACTED_HOST",
+        "jamarr.example.com",
         "REDACTED_IP",
     ]
 
@@ -150,7 +150,7 @@ asyncio.run(main())
 
 @pytest.mark.asyncio
 async def test_allowed_hosts_are_enforced_when_configured(monkeypatch):
-    monkeypatch.setenv("ALLOWED_HOSTS", "REDACTED_HOST,REDACTED_IP")
+    monkeypatch.setenv("ALLOWED_HOSTS", "jamarr.example.com,REDACTED_IP")
     app = _security_test_app()
 
     async with AsyncClient(
@@ -167,7 +167,7 @@ async def test_allowed_hosts_are_enforced_when_configured(monkeypatch):
 async def test_cors_allows_only_configured_origins(monkeypatch):
     monkeypatch.setenv(
         "ALLOWED_ORIGINS",
-        "https://REDACTED_HOST,http://REDACTED_IP:8111",
+        "https://jamarr.example.com,http://REDACTED_IP:8111",
     )
     app = _security_test_app()
 
@@ -177,7 +177,7 @@ async def test_cors_allows_only_configured_origins(monkeypatch):
         allowed = await client.options(
             "/whoami",
             headers={
-                "Origin": "https://REDACTED_HOST",
+                "Origin": "https://jamarr.example.com",
                 "Access-Control-Request-Method": "GET",
             },
         )
@@ -192,7 +192,7 @@ async def test_cors_allows_only_configured_origins(monkeypatch):
     assert allowed.status_code == 200
     assert (
         allowed.headers["access-control-allow-origin"]
-        == "https://REDACTED_HOST"
+        == "https://jamarr.example.com"
     )
     assert blocked.status_code == 400
     assert "access-control-allow-origin" not in blocked.headers

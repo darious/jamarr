@@ -1298,7 +1298,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Match Last.fm scrobbles to library tracks using local data.",
     )
-    parser.add_argument("--user", default="REDACTED_USERNAME", help="Last.fm username")
+    parser.add_argument("--user", default=os.getenv("LASTFM_USERNAME", ""), help="Last.fm username")
     parser.add_argument("--limit", type=int, default=200, help="Scrobbles to match")
     parser.add_argument(
         "--dry-run",

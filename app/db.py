@@ -465,10 +465,6 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE "user"
             ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
-
-            UPDATE "user"
-            SET is_admin = TRUE
-            WHERE username = 'REDACTED';
         """)
 
         # Create FTS trigger function

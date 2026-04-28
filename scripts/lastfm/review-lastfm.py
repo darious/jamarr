@@ -252,7 +252,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Review and confirm Last.fm match candidates.",
     )
-    parser.add_argument("--user", default="REDACTED_USERNAME", help="Last.fm username")
+    parser.add_argument("--user", default=os.getenv("LASTFM_USERNAME", ""), help="Last.fm username")
     parser.add_argument(
         "--auto-pass",
         action="store_true",
