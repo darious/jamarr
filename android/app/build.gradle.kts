@@ -87,21 +87,21 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
-    implementation("org.jupnp:org.jupnp:3.0.3") {
+    implementation("org.jupnp:org.jupnp:3.0.4") {
         exclude(group = "org.osgi")
     }
-    implementation("org.jupnp:org.jupnp.support:3.0.3") {
+    implementation("org.jupnp:org.jupnp.support:3.0.4") {
         exclude(group = "org.osgi")
     }
-    implementation("org.jupnp:org.jupnp.android:3.0.3") {
+    implementation("org.jupnp:org.jupnp.android:3.0.4") {
         exclude(group = "org.osgi")
     }
     implementation("org.eclipse.jetty:jetty-server:9.4.53.v20231009")
     implementation("org.eclipse.jetty:jetty-servlet:9.4.53.v20231009")
     implementation("org.eclipse.jetty:jetty-client:9.4.53.v20231009")
     implementation("javax.servlet:javax.servlet-api:3.1.0")
-    implementation("org.slf4j:slf4j-api:2.0.13")
-    runtimeOnly("org.slf4j:slf4j-jdk14:2.0.13")
+    implementation("org.slf4j:slf4j-api:2.0.17")
+    runtimeOnly("org.slf4j:slf4j-jdk14:2.0.17")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
