@@ -586,7 +586,12 @@ class JamarrApiClient(
             .header("X-Jamarr-Client-Id", clientId)
             .post("".toRequestBody(jsonMediaType))
             .build()
-        httpClient.newCall(request).execute().use { it.body.string() }
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
     }
 
     suspend fun remoteResume(
@@ -598,7 +603,12 @@ class JamarrApiClient(
             .header("X-Jamarr-Client-Id", clientId)
             .post("".toRequestBody(jsonMediaType))
             .build()
-        httpClient.newCall(request).execute().use { it.body.string() }
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
     }
 
     suspend fun remoteSeek(
@@ -613,7 +623,12 @@ class JamarrApiClient(
             .header("X-Jamarr-Client-Id", clientId)
             .post(body)
             .build()
-        httpClient.newCall(request).execute().use { it.body.string() }
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
     }
 
     suspend fun remoteVolume(
@@ -628,7 +643,12 @@ class JamarrApiClient(
             .header("X-Jamarr-Client-Id", clientId)
             .post(body)
             .build()
-        httpClient.newCall(request).execute().use { it.body.string() }
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
     }
 
     suspend fun remotePlay(
@@ -643,7 +663,12 @@ class JamarrApiClient(
             .header("X-Jamarr-Client-Id", clientId)
             .post(body)
             .build()
-        httpClient.newCall(request).execute().use { it.body.string() }
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
     }
 
     suspend fun remoteClearQueue(
@@ -655,7 +680,12 @@ class JamarrApiClient(
             .header("X-Jamarr-Client-Id", clientId)
             .post("".toRequestBody(jsonMediaType))
             .build()
-        httpClient.newCall(request).execute().use { it.body.string() }
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
     }
 
     private inline fun <reified T> execute(request: Request): T {

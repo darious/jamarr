@@ -428,11 +428,16 @@ private fun JamarrRoot() {
             // Renderer picker overlay
             RendererPicker(
                 visible = vm.showRendererPicker,
-                renderers = vm.renderers,
+                serverRenderers = vm.renderers,
+                deviceRenderers = vm.deviceRenderers,
                 activeUdn = vm.activeRendererUdn,
+                useDeviceUpnp = vm.useDeviceUpnp,
                 onDismiss = { vm.showRendererPicker = false },
-                onSelect = { vm.setRenderer(it) },
+                onSelectServer = { vm.setRenderer(it, RendererSource.SERVER) },
+                onSelectDevice = { vm.setRenderer(it, RendererSource.DEVICE) },
+                onSelectLocal = { vm.selectLocalRenderer() },
                 onRefresh = { vm.refreshRenderers() },
+                onToggleDeviceMode = { vm.toggleUseDeviceUpnp(it) },
             )
         }
     }

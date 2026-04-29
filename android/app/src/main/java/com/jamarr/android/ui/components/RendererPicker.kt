@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -33,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.jamarr.android.data.Renderer
+import com.jamarr.android.upnp.UpnpRendererInfo
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrShapes
 import com.jamarr.android.ui.theme.JamarrType
@@ -41,11 +44,16 @@ import com.jamarr.android.ui.theme.JamarrType
 @Composable
 fun RendererPicker(
     visible: Boolean,
-    renderers: List<Renderer>,
+    serverRenderers: List<Renderer>,
+    deviceRenderers: List<UpnpRendererInfo>,
     activeUdn: String,
+    useDeviceUpnp: Boolean,
     onDismiss: () -> Unit,
-    onSelect: (String) -> Unit,
+    onSelectServer: (String) -> Unit,
+    onSelectDevice: (String) -> Unit,
+    onSelectLocal: () -> Unit,
     onRefresh: () -> Unit,
+    onToggleDeviceMode: (Boolean) -> Unit,
 ) {
     if (!visible) return
 
@@ -62,7 +70,6 @@ fun RendererPicker(
                 .fillMaxWidth()
                 .padding(bottom = 32.dp),
         ) {
-            // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -86,42 +93,87 @@ fun RendererPicker(
                 }
             }
 
+            // Mode toggle row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Control from this device",
+                        style = JamarrType.CardTitle,
+                        color = JamarrColors.Text,
+                    )
+                    Text(
+                        text = if (useDeviceUpnp) "Phone discovers UPnP renderers on Wi-Fi"
+                        else "Server discovers and drives renderers",
+                        style = JamarrType.CaptionSmall,
+                        color = JamarrColors.Muted,
+                    )
+                }
+                Switch(
+                    checked = useDeviceUpnp,
+                    onCheckedChange = onToggleDeviceMode,
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = JamarrColors.Primary,
+                    ),
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
 
             LazyColumn {
-                // Local device option
                 item(key = "local") {
                     RendererRow(
                         name = "This Device",
                         subtitle = "Play on your phone",
                         isSelected = activeUdn.startsWith("local:"),
                         icon = { PhoneIcon(tint = JamarrColors.Text, size = 22.dp) },
-                        onClick = {
-                            val localUdn = renderers.firstOrNull { it.isLocal }?.udn
-                                ?: activeUdn.ifBlank { "local:default" }
-                            onSelect(localUdn)
-                        },
+                        onClick = onSelectLocal,
                     )
                 }
 
-                items(renderers.filter { !it.isLocal }, key = { it.udn }) { r ->
-                    RendererRow(
-                        name = r.name,
-                        subtitle = r.ip ?: r.manufacturer ?: "Network Device",
-                        isSelected = r.udn == activeUdn,
-                        icon = { SpeakerIcon(tint = JamarrColors.Text, size = 22.dp) },
-                        onClick = { onSelect(r.udn) },
-                    )
-                }
-
-                if (renderers.none { !it.isLocal }) {
-                    item(key = "empty") {
-                        Text(
-                            text = "No network renderers found.\nTap refresh to scan.",
-                            style = JamarrType.Caption,
-                            color = JamarrColors.Muted,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
+                if (useDeviceUpnp) {
+                    items(deviceRenderers, key = { "dev:" + it.udn }) { r ->
+                        RendererRow(
+                            name = r.name,
+                            subtitle = r.ip ?: r.manufacturer ?: "Network Device",
+                            isSelected = r.udn == activeUdn,
+                            icon = { SpeakerIcon(tint = JamarrColors.Text, size = 22.dp) },
+                            onClick = { onSelectDevice(r.udn) },
                         )
+                    }
+                    if (deviceRenderers.isEmpty()) {
+                        item(key = "empty-dev") {
+                            Text(
+                                text = "Searching for UPnP renderers on Wi-Fi…\nTap refresh to scan again.",
+                                style = JamarrType.Caption,
+                                color = JamarrColors.Muted,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
+                            )
+                        }
+                    }
+                } else {
+                    items(serverRenderers.filter { !it.isLocal }, key = { "srv:" + it.udn }) { r ->
+                        RendererRow(
+                            name = r.name,
+                            subtitle = r.ip ?: r.manufacturer ?: "Network Device",
+                            isSelected = r.udn == activeUdn,
+                            icon = { SpeakerIcon(tint = JamarrColors.Text, size = 22.dp) },
+                            onClick = { onSelectServer(r.udn) },
+                        )
+                    }
+                    if (serverRenderers.none { !it.isLocal }) {
+                        item(key = "empty-srv") {
+                            Text(
+                                text = "No network renderers found.\nTap refresh to scan.",
+                                style = JamarrType.Caption,
+                                color = JamarrColors.Muted,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -193,7 +245,6 @@ fun SpeakerIcon(tint: Color, size: Dp = 22.dp) {
     Canvas(modifier = Modifier.size(size)) {
         val s = this.size.minDimension
         val stroke = s * 0.09f
-        // Speaker body
         val body = Path().apply {
             moveTo(s * 0.25f, s * 0.35f)
             lineTo(s * 0.15f, s * 0.35f)
@@ -204,7 +255,6 @@ fun SpeakerIcon(tint: Color, size: Dp = 22.dp) {
             close()
         }
         drawPath(body, color = tint)
-        // Sound waves
         val wave1 = Path().apply {
             moveTo(s * 0.58f, s * 0.28f)
             cubicTo(s * 0.7f, s * 0.38f, s * 0.7f, s * 0.62f, s * 0.58f, s * 0.72f)
@@ -223,14 +273,12 @@ fun CastIcon(tint: Color, size: Dp = 22.dp) {
     Canvas(modifier = Modifier.size(size)) {
         val s = this.size.minDimension
         val stroke = s * 0.1f
-        // Screen rectangle
         drawRect(
             color = tint,
             topLeft = Offset(s * 0.15f, s * 0.12f),
             size = Size(s * 0.7f, s * 0.55f),
             style = Stroke(width = stroke),
         )
-        // Cast waves in bottom-right
         val wave1 = Path().apply {
             moveTo(s * 0.52f, s * 0.78f)
             cubicTo(s * 0.62f, s * 0.82f, s * 0.75f, s * 0.82f, s * 0.85f, s * 0.78f)
@@ -248,7 +296,6 @@ fun CastIcon(tint: Color, size: Dp = 22.dp) {
 fun PhoneIcon(tint: Color, size: Dp = 22.dp) {
     Canvas(modifier = Modifier.size(size)) {
         val s = this.size.minDimension
-        // Phone body
         drawRoundRect(
             color = tint,
             topLeft = Offset(s * 0.28f, s * 0.08f),
@@ -256,7 +303,6 @@ fun PhoneIcon(tint: Color, size: Dp = 22.dp) {
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(s * 0.08f, s * 0.08f),
             style = Stroke(width = s * 0.08f),
         )
-        // Screen
         drawRoundRect(
             color = tint,
             topLeft = Offset(s * 0.33f, s * 0.18f),
@@ -264,7 +310,6 @@ fun PhoneIcon(tint: Color, size: Dp = 22.dp) {
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(s * 0.02f, s * 0.02f),
             style = Stroke(width = s * 0.04f),
         )
-        // Home button
         drawCircle(
             color = tint,
             radius = s * 0.03f,

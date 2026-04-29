@@ -1,6 +1,7 @@
 package com.jamarr.android.auth
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -18,6 +19,7 @@ data class StoredSession(
     val serverUrl: String = "",
     val accessToken: String = "",
     val activeTabIndex: Int = 0,
+    val useDeviceUpnp: Boolean = false,
 )
 
 class SettingsStore(private val context: Context) {
@@ -26,6 +28,7 @@ class SettingsStore(private val context: Context) {
     private val activeTabKey = intPreferencesKey("active_tab")
     private val cookiesKey = stringSetPreferencesKey("cookies_v1")
     private val clientIdKey = stringPreferencesKey("client_id")
+    private val useDeviceUpnpKey = booleanPreferencesKey("use_device_upnp")
 
     suspend fun load(): StoredSession {
         val prefs = context.jamarrDataStore.data.first()
@@ -33,7 +36,12 @@ class SettingsStore(private val context: Context) {
             serverUrl = prefs[serverUrlKey].orEmpty(),
             accessToken = prefs[accessTokenKey].orEmpty(),
             activeTabIndex = prefs[activeTabKey] ?: 0,
+            useDeviceUpnp = prefs[useDeviceUpnpKey] ?: false,
         )
+    }
+
+    suspend fun saveUseDeviceUpnp(enabled: Boolean) {
+        context.jamarrDataStore.edit { prefs -> prefs[useDeviceUpnpKey] = enabled }
     }
 
     fun observeSession(): Flow<StoredSession> = context.jamarrDataStore.data
