@@ -99,7 +99,7 @@ dependencies {
     implementation("org.eclipse.jetty:jetty-server:9.4.53.v20231009")
     implementation("org.eclipse.jetty:jetty-servlet:9.4.53.v20231009")
     implementation("org.eclipse.jetty:jetty-client:9.4.53.v20231009")
-    implementation("javax.servlet:javax.servlet-api:3.1.0")
+    implementation("javax.servlet:javax.servlet-api:4.0.1")
     implementation("org.slf4j:slf4j-api:2.0.13")
     runtimeOnly("org.slf4j:slf4j-jdk14:2.0.13")
 
