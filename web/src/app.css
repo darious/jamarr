@@ -1,6 +1,46 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "@tailwindcss/forms";
+
+@theme {
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+
+  --shadow-glow: 0 18px 60px rgb(0 0 0 / 35%);
+
+  /* ported from @skeletonlabs/tw-plugin jamarr theme */
+  --color-primary-50:  rgb(239 246 255);
+  --color-primary-100: rgb(219 234 254);
+  --color-primary-200: rgb(191 219 254);
+  --color-primary-300: rgb(147 197 253);
+  --color-primary-400: rgb(96 165 250);
+  --color-primary-500: rgb(59 130 246);
+  --color-primary-600: rgb(37 99 235);
+  --color-primary-700: rgb(29 78 216);
+  --color-primary-800: rgb(30 64 175);
+  --color-primary-900: rgb(30 58 138);
+
+  --color-secondary-50:  rgb(245 243 255);
+  --color-secondary-100: rgb(237 233 254);
+  --color-secondary-200: rgb(221 214 254);
+  --color-secondary-300: rgb(196 181 253);
+  --color-secondary-400: rgb(167 139 250);
+  --color-secondary-500: rgb(139 92 246);
+  --color-secondary-600: rgb(124 58 237);
+  --color-secondary-700: rgb(109 40 217);
+  --color-secondary-800: rgb(91 33 182);
+  --color-secondary-900: rgb(76 29 149);
+
+  --color-surface-50:  rgb(15 17 25);
+  --color-surface-100: rgb(17 19 29);
+  --color-surface-200: rgb(20 23 35);
+  --color-surface-300: rgb(31 35 51);
+  --color-surface-400: rgb(44 50 73);
+  --color-surface-500: rgb(61 69 96);
+  --color-surface-600: rgb(89 96 120);
+  --color-surface-700: rgb(126 132 154);
+  --color-surface-800: rgb(170 173 190);
+  --color-surface-900: rgb(210 212 222);
+}
 
 /* ============================================
    SEMANTIC DESIGN TOKENS
@@ -8,9 +48,9 @@
 
 :root {
   color-scheme: dark;
-  
+
   /* Background Tokens */
-  --bg: rgb(var(--color-surface-50) / 100%);
+  --bg: var(--color-surface-50);
   --surface: rgb(255 255 255 / 5%);
   --surface-2: rgb(255 255 255 / 8%);
   --surface-3: rgb(255 255 255 / 12%);
@@ -261,7 +301,7 @@ body[data-theme="dark"] .hero-gradient {
 @media (prefers-reduced-transparency: reduce) {
   .surface-glass-panel,
   .surface-glass-popover {
-    background: rgb(var(--color-surface-200) / 100%);
+    background: var(--color-surface-200);
     backdrop-filter: none;
   }
 }
@@ -422,6 +462,10 @@ body[data-theme="dark"] .hero-gradient {
   
   /* Surface Utilities */
   .bg-surface {
+    background: var(--surface);
+  }
+
+  .bg-surface-1 {
     background: var(--surface);
   }
   

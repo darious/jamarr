@@ -1,5 +1,5 @@
 <script lang="ts">
-  import "../app.postcss";
+  import "../app.css";
   import PlayerBar from "$components/PlayerBar.svelte";
   import SearchBar from "$components/SearchBar.svelte";
   import DownloadManager from "$components/DownloadManager.svelte";
@@ -254,7 +254,7 @@
 <div class="min-h-screen text-default">
   {#if !isAuthPage}
     <header
-      class="sticky top-0 z-30 border-b border-white/5 bg-gradient-to-r from-black/70 via-surface-50/80 to-black/70 backdrop-blur-xl"
+      class="sticky top-0 z-30 border-b border-white/5 bg-black/10 backdrop-blur-xl"
     >
       <div
         class="mx-auto hidden w-full max-w-[1700px] items-center justify-between px-6 py-3 md:flex"
@@ -289,7 +289,7 @@
             >
               <span class="flex items-center gap-2 min-w-0">
                 <img
-                  class="h-[30px] w-[30px] rounded-sm object-contain"
+                  class="h-[30px] w-[30px] rounded-xs object-contain"
                   src={getRendererIcon(activeRendererItem)}
                   alt=""
                   loading="lazy"
@@ -335,7 +335,7 @@
                     >
                       <span class="flex items-center gap-2 min-w-0">
                         <img
-                          class="h-[30px] w-[30px] rounded-sm object-contain"
+                          class="h-[30px] w-[30px] rounded-xs object-contain"
                           src={getRendererIcon(renderer)}
                           alt=""
                           loading="lazy"
@@ -501,7 +501,7 @@
               }}
             >
               <img
-                class="h-6 w-6 rounded-sm object-contain"
+                class="h-6 w-6 rounded-xs object-contain"
                 src={getRendererIcon(activeRendererItem)}
                 alt=""
                 loading="lazy"
@@ -545,7 +545,7 @@
                 >
                   <span class="flex min-w-0 items-center gap-3">
                     <img
-                      class="h-8 w-8 rounded-sm object-contain"
+                      class="h-8 w-8 rounded-xs object-contain"
                       src={getRendererIcon(renderer)}
                       alt=""
                       loading="lazy"
@@ -611,7 +611,7 @@
     {#if showMobileSearch}
       <div class="fixed inset-0 z-[70] md:hidden">
         <div
-          class="absolute inset-0 bg-black/70 backdrop-blur-sm"
+          class="absolute inset-0 bg-black/70 backdrop-blur-xs"
           role="button"
           tabindex="0"
           aria-label="Close search"

@@ -1097,7 +1097,7 @@
       </label>
     </div>
 
-    <div class="rounded-2xl border border-subtle bg-surface-2/70 p-3 backdrop-blur-sm">
+    <div class="rounded-2xl border border-subtle bg-surface-2/70 p-3 backdrop-blur-xs">
       <div class="mb-2 flex items-center justify-between gap-3">
         <div>
           <div class="text-[11px] uppercase tracking-widest text-subtle">Range</div>
@@ -1167,7 +1167,7 @@
   </div>
 
   <!-- Stats -->
-  <div class="grid gap-6 items-stretch lg:grid-cols-[35%_1fr]">
+  <div class="grid gap-6 items-stretch lg:[grid-template-columns:35%_1fr]">
     <div class="glass-panel p-6 flex flex-col h-full">
       <div class="flex items-center justify-between">
         <div>
@@ -1192,7 +1192,7 @@
 
     <div class="grid gap-4 md:gap-6 lg:grid-cols-3">
       <div
-        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur h-full"
+        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur-sm h-full"
       >
         <h3 class="text-md font-semibold mb-3 text-default">Top Artists</h3>
         {#if data.stats.artists.length === 0}
@@ -1203,7 +1203,7 @@
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="h-9 w-9 rounded bg-surface-3 overflow-hidden flex-shrink-0"
+                    class="h-9 w-9 rounded-sm bg-surface-3 overflow-hidden flex-shrink-0"
                   >
                     <img
                       src={artist.art_sha1
@@ -1227,7 +1227,7 @@
         {/if}
       </div>
       <div
-        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur h-full"
+        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur-sm h-full"
       >
         <h3 class="text-md font-semibold mb-3 text-default">Top Albums</h3>
         {#if data.stats.albums.length === 0}
@@ -1238,7 +1238,7 @@
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="h-9 w-9 rounded bg-surface-3 overflow-hidden flex-shrink-0"
+                    class="h-9 w-9 rounded-sm bg-surface-3 overflow-hidden flex-shrink-0"
                   >
                     <img
                       src={album.art_sha1
@@ -1272,7 +1272,7 @@
         {/if}
       </div>
       <div
-        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur h-full"
+        class="rounded-2xl border border-subtle bg-surface-2 p-4 backdrop-blur-sm h-full"
       >
         <h3 class="text-md font-semibold mb-3 text-default">Top Tracks</h3>
         {#if data.stats.tracks.length === 0}
@@ -1283,7 +1283,7 @@
               <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
                   <div
-                    class="h-9 w-9 rounded bg-surface-3 overflow-hidden flex-shrink-0"
+                    class="h-9 w-9 rounded-sm bg-surface-3 overflow-hidden flex-shrink-0"
                   >
                     <img
                       src={track.art_sha1
@@ -1330,7 +1330,7 @@
           >
             <!-- Artwork -->
             <div
-              class="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded bg-surface-3 sm:h-14 sm:w-14"
+              class="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-sm bg-surface-3 sm:h-14 sm:w-14"
             >
               <img
                 src={entry.track.art_sha1

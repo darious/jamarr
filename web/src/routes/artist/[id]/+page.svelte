@@ -809,7 +809,7 @@
 </script>
 
 <div
-  class="min-h-screen bg-surface-900 pb-20 relative overflow-hidden"
+  class="min-h-screen bg-surface-50 pb-20 relative overflow-hidden"
   style={accentColor ? `--accent-color: ${accentColor.join(",")}` : ""}
 >
   <!-- Global Blurred Background -->
@@ -824,7 +824,7 @@
             : "/assets/default-artist-placeholder.svg"
       }')`}
     ></div>
-    <div class="absolute inset-0 bg-surface-900/80"></div>
+    <div class="absolute inset-0 bg-black/20"></div>
   </div>
 
   <!-- Hero Banner -->
@@ -836,7 +836,7 @@
     <!-- Mask Wrapper (Static - Keeps the fade fixed) -->
     <div
       class="absolute inset-0"
-      style="mask-image: linear-gradient(to bottom, black 50%, transparent 100%);"
+      style="mask-image: linear-gradient(to bottom, black 20%, transparent 95%);"
     >
       <!-- Sharp Top Layer (Fades into Global Background) -->
       <div
@@ -851,15 +851,10 @@
       >
         <!-- Gradient Fade to Bottom (Start of merge) - Inside scaling div to match atmosphere -->
         <div
-          class="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-surface-900/40"
+          class="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-transparent"
         ></div>
       </div>
     </div>
-
-    <!-- Bottom Gradient to Body Color (Seamless merge) -->
-    <div
-      class="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-surface-900 via-surface-900/60 to-transparent"
-    ></div>
 
     <!-- Hero Content -->
     <div class="absolute inset-0 flex items-end px-4 pb-8 md:px-12 md:pb-12 xl:px-16">
@@ -906,7 +901,7 @@
   </div>
 
   <main
-    class="relative z-10 mt-6 grid w-full grid-cols-1 gap-8 px-4 pb-20 md:mt-8 md:px-12 lg:grid-cols-[1fr_clamp(280px,22vw,360px)] lg:gap-16 xl:px-16"
+    class="relative z-10 mt-6 grid w-full grid-cols-1 gap-8 px-4 pb-20 md:mt-8 md:px-12 lg:[grid-template-columns:1fr_clamp(280px,22vw,360px)] lg:gap-16 xl:px-16"
   >
     <!-- Left Column: Main Content -->
     <div class="space-y-8 min-w-0">
@@ -985,9 +980,9 @@
         <!-- Tabs Header -->
         <div class="relative" style="margin-bottom: 24px !important;">
           <div class="lg:hidden space-y-4">
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+            <div class="grid grid-cols-1 gap-3 sm:[grid-template-columns:minmax(0,1fr)_auto] sm:items-center">
               <button
-                class="flex w-full items-center justify-between rounded-2xl border border-subtle bg-surface-2/70 px-4 py-3 text-left backdrop-blur-sm"
+                class="flex w-full items-center justify-between rounded-2xl border border-subtle bg-surface-2/70 px-4 py-3 text-left backdrop-blur-xs"
                 on:click={() => (showSectionPicker = !showSectionPicker)}
                 aria-expanded={showSectionPicker}
                 aria-label="Choose artist section"
@@ -1023,7 +1018,7 @@
             </div>
 
             {#if showSectionPicker}
-              <div class="rounded-2xl border border-subtle bg-surface-2/80 p-2 backdrop-blur-sm">
+              <div class="rounded-2xl border border-subtle bg-surface-2/80 p-2 backdrop-blur-xs">
                 <div class="grid grid-cols-1 gap-1 sm:grid-cols-2">
                   {#each allTabs as tab}
                     <button
@@ -1045,7 +1040,7 @@
             {/if}
 
             {#if isTrackTab}
-              <div class="rounded-2xl border border-subtle bg-surface-2/70 p-3 backdrop-blur-sm">
+              <div class="rounded-2xl border border-subtle bg-surface-2/70 p-3 backdrop-blur-xs">
                 <div class="mb-3 text-[11px] font-semibold uppercase tracking-widest text-subtle">
                   Track Actions
                 </div>
@@ -1335,7 +1330,7 @@
 
                       {#if !p.is_public}
                         <div
-                          class="absolute top-2 right-2 bg-surface-3 p-1 rounded-full backdrop-blur-sm z-10"
+                          class="absolute top-2 right-2 bg-surface-3 p-1 rounded-full backdrop-blur-xs z-10"
                         >
                           <svg
                             class="w-3 h-3 text-muted"
@@ -1628,7 +1623,7 @@
     </div>
 
     <!-- Right Column: Info Rail -->
-    <aside class="h-fit space-y-8 rounded-2xl border border-subtle bg-surface-2/35 p-4 backdrop-blur-sm sm:p-5 lg:sticky lg:top-8 lg:space-y-10 lg:border-0 lg:bg-transparent lg:p-0">
+    <aside class="h-fit space-y-8 rounded-2xl border border-subtle bg-surface-2/35 p-4 backdrop-blur-xs sm:p-5 lg:sticky lg:top-8 lg:space-y-10 lg:border-0 lg:bg-transparent lg:p-0">
       {#if message}
         <div class="rounded-xl border border-subtle bg-surface-3/70 px-3 py-3 text-sm text-muted">
           {message}

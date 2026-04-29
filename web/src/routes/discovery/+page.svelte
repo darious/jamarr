@@ -130,7 +130,7 @@
                     <button
                         class="whitespace-nowrap px-3 py-1.5 text-sm rounded-md transition-all {days ===
                         option.value
-                            ? 'bg-accent text-white shadow-sm'
+                            ? 'bg-accent text-white shadow-xs'
                             : 'text-muted hover:text-default hover:bg-surface-3'}"
                         on:click={() => changeDays(option.value)}
                     >
@@ -260,7 +260,7 @@
                                 />
                             </div>
                             <div
-                                class="absolute -bottom-1 -right-1 rounded-full border border-subtle bg-surface-1 px-2 py-1 text-[10px] text-subtle shadow-sm"
+                                class="absolute -bottom-1 -right-1 rounded-full border border-subtle bg-surface-1 px-2 py-1 text-[10px] text-subtle shadow-xs"
                                 title="Recommended by {artist.support_count} similar artists"
                             >
                                 +{artist.support_count}
@@ -299,7 +299,7 @@
                             </div>
                             <!-- Consensus Badge -->
                             <div
-                                class="absolute -bottom-2 -right-2 bg-surface-1 border border-subtle text-xs px-2 py-1 rounded-full shadow-sm text-subtle"
+                                class="absolute -bottom-2 -right-2 bg-surface-1 border border-subtle text-xs px-2 py-1 rounded-full shadow-xs text-subtle"
                                 title="Recommended by {artist.support_count} similar artists"
                             >
                                 +{artist.support_count}

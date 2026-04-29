@@ -25,7 +25,7 @@
     {disabled}
 >
     <div
-        class={`relative flex items-center justify-center w-5 h-5 rounded border transition-all duration-200 ${
+        class={`relative flex items-center justify-center w-5 h-5 rounded-sm border transition-all duration-200 ${
             checked
                 ? "bg-accent border-accent text-white"
                 : "bg-transparent border-subtle group-hover:border-accent/50"

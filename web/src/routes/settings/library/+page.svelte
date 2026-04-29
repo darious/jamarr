@@ -567,7 +567,7 @@
         <!-- Status + Logs -->
         <div class="space-y-4">
             <div
-                class="card bg-surface-2 border border-subtle p-6 backdrop-blur-sm"
+                class="card bg-surface-2 border border-subtle p-6 backdrop-blur-xs"
             >
                 <div class="flex justify-between items-start gap-4">
                     <div class="flex flex-col gap-1">

@@ -364,7 +364,7 @@
                             <!-- Private Indicator -->
                             {#if !p.is_public}
                                 <div
-                                    class="absolute top-2 right-2 bg-surface-3 p-1 rounded-full backdrop-blur-sm z-10"
+                                    class="absolute top-2 right-2 bg-surface-3 p-1 rounded-full backdrop-blur-xs z-10"
                                 >
                                     <svg
                                         class="w-3 h-3 text-muted"
@@ -445,7 +445,7 @@
     <!-- Create Modal -->
     {#if showCreateModal}
         <div
-            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
         >
             <div
                 class="surface-glass-popover rounded-2xl w-full max-w-md p-6 shadow-2xl scale-100 transition-all"

@@ -65,7 +65,7 @@
 
 <section class="mx-auto flex w-full flex-col gap-10 px-8 py-10">
   <div
-    class="section-head sticky top-0 z-20 rounded-b-2xl border-b border-subtle bg-surface-50/80 py-4 shadow-lg backdrop-blur-xl"
+    class="section-head sticky top-0 z-20 rounded-b-2xl border-b border-subtle bg-black/10 py-4 shadow-lg backdrop-blur-xl"
   >
     <!-- Left title, centre letters fill remaining width, right toggle -->
     <div class="hidden w-full items-center gap-6 md:flex">
@@ -146,7 +146,7 @@
         <h2 class="text-xl font-semibold text-default">Artists A–Z</h2>
       </div>
 
-      <div class="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+      <div class="grid [grid-template-columns:minmax(0,1fr)_auto] gap-3">
         <label class="min-w-0">
           <span class="mb-1 block text-[11px] uppercase tracking-widest text-subtle">
             Letter
@@ -237,11 +237,11 @@
       </div>
     {:else}
       <div
-        class="grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fit,minmax(220px,1fr))] sm:gap-4 lg:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]"
+        class="grid grid-cols-2 gap-4 sm:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] sm:gap-4 lg:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]"
       >
         {#each visibleArtists as artist}
           <a
-            class="group block cursor-pointer space-y-2 rounded-2xl transition-transform hover:-translate-y-1 focus:outline-none focus:ring-2 focus:ring-primary-400"
+            class="group block cursor-pointer space-y-2 rounded-2xl transition-transform hover:-translate-y-1 focus:outline-hidden focus:ring-2 focus:ring-primary-400"
             href={`/artist/${artist.mbid}`}
           >
             <div class="flex justify-center">

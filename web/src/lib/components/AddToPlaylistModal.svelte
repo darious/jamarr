@@ -83,7 +83,7 @@
 
 {#if visible}
     <div
-        class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 cursor-pointer"
+        class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 cursor-pointer"
         transition:fade
         on:click|self={close}
         role="button"
@@ -91,7 +91,7 @@
         on:keydown={(e) => e.key === "Escape" && close()}
     >
         <div
-            class="bg-surface-900 border border-white/10 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+            class="bg-surface-50 border border-white/10 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
             transition:scale
         >
             <div
@@ -149,7 +149,7 @@
                                 on:click={() => addToPlaylist(p)}
                             >
                                 <div
-                                    class="w-10 h-10 bg-white/5 rounded flex items-center justify-center text-white/20 group-hover:bg-white/10"
+                                    class="w-10 h-10 bg-white/5 rounded-sm flex items-center justify-center text-white/20 group-hover:bg-white/10"
                                 >
                                     <svg
                                         class="w-5 h-5"

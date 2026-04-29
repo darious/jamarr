@@ -152,7 +152,7 @@
             bind:this={inputElement}
             type="text"
             placeholder={mobile ? "Search artists, albums, tracks..." : "Search..."}
-            class={`w-full border border-white/10 bg-white/5 text-sm text-white placeholder-white/40 focus:border-white/20 focus:bg-white/10 focus:outline-none ${
+            class={`w-full border border-white/10 bg-white/5 text-sm text-white placeholder-white/40 focus:border-white/20 focus:bg-white/10 focus:outline-hidden ${
                 mobile
                     ? "rounded-2xl py-3 pl-10 pr-20"
                     : "rounded-full py-1.5 pl-9 pr-10"
@@ -263,7 +263,7 @@
                                 }
                             }}
                         >
-                            <div class="flex h-10 w-10 items-center justify-center overflow-hidden rounded bg-white/10 text-xs text-white/40">
+                            <div class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-sm bg-white/10 text-xs text-white/40">
                                 {#if album.art_sha1}
                                     <img
                                         src={getArtUrl(album.art_sha1, 100)}
@@ -320,7 +320,7 @@
                                 e.key === "Enter" &&
                                 navigateToAlbum(track.album, track.artist, track.mb_release_id)}
                         >
-                            <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded bg-white/10 text-xs text-white/40">
+                            <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-sm bg-white/10 text-xs text-white/40">
                                 {#if track.art_sha1}
                                     <img
                                         src={getArtUrl(track.art_sha1, 100)}

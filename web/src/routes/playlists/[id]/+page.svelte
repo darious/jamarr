@@ -315,7 +315,7 @@
         </div>
     {:else if playlist}
         <!-- Header -->
-        <div class="bg-gradient-to-b from-surface-2 to-surface-1 p-8">
+        <div class="bg-gradient-to-b from-white/5 to-transparent p-8">
             <div
                 class="container mx-auto flex flex-col md:flex-row gap-8 items-end"
             >

@@ -114,10 +114,10 @@
 
     $: isDisabled = track.id <= 0;
     $: gridCols = showIndex
-        ? "grid-cols-[auto,auto,1fr,auto]"
-        : "grid-cols-[auto,1fr,auto]";
+        ? "auto auto 1fr auto"
+        : "auto 1fr auto";
 
-    $: containerClass = `w-full grid ${gridCols} items-center gap-2 px-2 py-2 rounded-xl hover:bg-surface-2 group transition-colors text-left border relative cursor-pointer sm:gap-4 sm:px-3
+    $: containerClass = `w-full grid items-center gap-2 px-2 py-2 rounded-xl hover:bg-surface-2 group transition-colors text-left border relative cursor-pointer sm:gap-4 sm:px-3
         ${isCurrentlyPlaying ? "bg-accent/10 border-accent border-2 shadow-[0_0_20px_var(--accent-glow)]" : "border-transparent hover:border-subtle"}
         ${isDragging ? "opacity-30 grayscale" : ""}`;
 
@@ -138,6 +138,7 @@
     role="button"
     tabindex="0"
     class={containerClass}
+    style="grid-template-columns: {gridCols}"
     {draggable}
     on:click={handleClick}
     on:keydown={handleKeyDown}
@@ -161,7 +162,7 @@
     <!-- Artwork (84px - 50% larger than 56px) -->
     {#if showArtwork}
         <div
-            class="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded bg-surface-800 shadow-lg sm:h-[84px] sm:w-[84px]"
+            class="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-sm bg-surface-800 shadow-lg sm:h-[84px] sm:w-[84px]"
         >
             <img
                 src={getArtworkUrl()}

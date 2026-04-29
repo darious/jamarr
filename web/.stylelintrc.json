@@ -14,7 +14,14 @@
                     "responsive",
                     "screen",
                     "layer",
-                    "reference"
+                    "reference",
+                    "theme",
+                    "plugin",
+                    "config",
+                    "source",
+                    "utility",
+                    "variant",
+                    "custom-variant"
                 ]
             }
         ],
@@ -28,6 +35,8 @@
                 ]
             }
         ],
+        "import-notation": "string",
+        "custom-property-empty-line-before": null,
         "function-no-unknown": [
             true,
             {

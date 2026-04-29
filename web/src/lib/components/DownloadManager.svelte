@@ -67,7 +67,7 @@
             <div class="max-h-60 overflow-y-auto p-2 space-y-2">
                 {#each activeJobs as job (job.id)}
                     <div
-                        class="rounded bg-surface-base p-2 text-xs border-l-2 {job.status ===
+                        class="rounded-sm bg-surface-base p-2 text-xs border-l-2 {job.status ===
                         'error'
                             ? 'border-red-500'
                             : job.status === 'completed'
