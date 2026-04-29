@@ -304,14 +304,14 @@
       >
         <!-- Left: Square Art -->
         <div
-          class="relative w-full max-w-md lg:w-auto lg:max-w-[50vw] h-auto lg:h-[80vh] aspect-square rounded-3xl overflow-hidden shadow-2xl bg-surface-900/50 border border-white/5 order-2 lg:order-1 flex-shrink-0"
+          class="relative w-full max-w-md lg:w-auto lg:max-w-[50vw] h-auto lg:h-[80vh] aspect-square rounded-3xl overflow-hidden shadow-2xl bg-surface-50/50 border border-white/5 order-2 lg:order-1 flex-shrink-0"
         >
           <img
             class="absolute inset-0 w-full h-full object-cover"
             src={getArt($playerState.queue[$playerState.current_index])}
             alt={$playerState.queue[$playerState.current_index]?.title || "Art"}
           />
-          <!-- Inner shadow for depth -->
+          <!-- Inner shadow-sm for depth -->
           <div
             class="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.5)]"
           ></div>
@@ -403,7 +403,7 @@
                 >
                   <!-- Background Track -->
                   <div
-                    class="absolute w-full h-1 bg-white/20 rounded-full overflow-hidden backdrop-blur-sm"
+                    class="absolute w-full h-1 bg-white/20 rounded-full overflow-hidden backdrop-blur-xs"
                   >
                     <!-- Filled Track -->
                     <div

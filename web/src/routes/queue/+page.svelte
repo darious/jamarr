@@ -7,6 +7,6 @@
   const handleClear = () => clearQueue(true);
 </script>
 
-<div class="min-h-screen bg-surface-900">
+<div class="min-h-screen bg-surface-50">
   <QueueDrawer visible={true} on:close={handleClose} on:clear={handleClear} />
 </div>

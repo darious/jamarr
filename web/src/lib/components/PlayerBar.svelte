@@ -1070,7 +1070,7 @@
     <div class="flex items-center gap-4 w-1/3">
       {#if currentTrack}
         <div
-          class="relative h-14 w-14 flex-shrink-0 rounded bg-surface-3 overflow-hidden group"
+          class="relative h-14 w-14 flex-shrink-0 rounded-sm bg-surface-3 overflow-hidden group"
         >
           <img
             src={currentTrack.art_sha1
@@ -1278,7 +1278,7 @@
       <div class="flex items-center gap-3">
         <div class="h-[88px] w-[88px] rounded-lg bg-surface-3/70 p-1.5 shadow-inner">
           <img
-            class="h-full w-full rounded object-contain"
+            class="h-full w-full rounded-sm object-contain"
             src={getRendererIcon(activeRenderer)}
             alt=""
             loading="lazy"

@@ -106,7 +106,7 @@
       <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <!-- Artists Stats -->
         <div
-          class="md:col-span-2 lg:col-span-2 rounded-2xl border border-subtle bg-surface-2 p-6 backdrop-blur"
+          class="md:col-span-2 lg:col-span-2 rounded-2xl border border-subtle bg-surface-2 p-6 backdrop-blur-sm"
         >
           <div class="flex items-center justify-between mb-6">
             <h2 class="text-lg font-semibold text-default">
@@ -155,7 +155,7 @@
                     <div class="flex items-center justify-between text-sm">
                       <span class="text-muted capitalize">{source}</span>
                       <button
-                        class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-primary/20 hover:text-primary transition-colors"
+                        class="font-medium bg-surface-3 px-2 py-0.5 rounded-sm text-default hover:bg-primary/20 hover:text-primary transition-colors"
                         on:click={() => drillDown("all", "source", source)}
                       >
                         {count}
@@ -175,14 +175,14 @@
                       <span class="text-muted capitalize">{type}</span>
                       <div class="flex gap-2">
                         <button
-                          class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-primary/20 hover:text-primary transition-colors"
+                          class="font-medium bg-surface-3 px-2 py-0.5 rounded-sm text-default hover:bg-primary/20 hover:text-primary transition-colors"
                           on:click={() => drillDown("all", "link_type", type)}
                           title="View Artists with this link"
                         >
                           {count}
                         </button>
                         <button
-                          class="font-medium bg-red-500/10 px-2 py-0.5 rounded text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-colors"
+                          class="font-medium bg-red-500/10 px-2 py-0.5 rounded-sm text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-colors"
                           on:click={() =>
                             drillDown("all", "missing_link_type", type)}
                           title="View Artists missing this link"
@@ -237,7 +237,7 @@
                     <div class="flex items-center justify-between text-sm">
                       <span class="text-muted capitalize">{source}</span>
                       <button
-                        class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-primary/20 hover:text-primary transition-colors"
+                        class="font-medium bg-surface-3 px-2 py-0.5 rounded-sm text-default hover:bg-primary/20 hover:text-primary transition-colors"
                         on:click={() => drillDown("primary", "source", source)}
                       >
                         {count}
@@ -257,7 +257,7 @@
                       <span class="text-muted capitalize">{type}</span>
                       <div class="flex gap-2">
                         <button
-                          class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-primary/20 hover:text-primary transition-colors"
+                          class="font-medium bg-surface-3 px-2 py-0.5 rounded-sm text-default hover:bg-primary/20 hover:text-primary transition-colors"
                           on:click={() =>
                             drillDown("primary", "link_type", type)}
                           title="View Artists with this link"
@@ -265,7 +265,7 @@
                           {count}
                         </button>
                         <button
-                          class="font-medium bg-red-500/10 px-2 py-0.5 rounded text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-colors"
+                          class="font-medium bg-red-500/10 px-2 py-0.5 rounded-sm text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-colors"
                           on:click={() =>
                             drillDown("primary", "missing_link_type", type)}
                           title="View Artists missing this link"
@@ -283,7 +283,7 @@
 
         <!-- Album Stats -->
         <div
-          class="rounded-2xl border border-subtle bg-surface-2 p-6 backdrop-blur space-y-6"
+          class="rounded-2xl border border-subtle bg-surface-2 p-6 backdrop-blur-sm space-y-6"
         >
           <div class="flex items-center gap-3 mb-6">
             <div
@@ -370,14 +370,14 @@
                     <span class="text-muted capitalize">{type}</span>
                     <div class="flex gap-2">
                       <button
-                        class="font-medium bg-surface-3 px-2 py-0.5 rounded text-default hover:bg-purple-500/20 hover:text-purple-400 transition-colors"
+                        class="font-medium bg-surface-3 px-2 py-0.5 rounded-sm text-default hover:bg-purple-500/20 hover:text-purple-400 transition-colors"
                         on:click={() => drillDown("album", "link_type", type)}
                         title="View Albums with this link"
                       >
                         {count}
                       </button>
                       <button
-                        class="font-medium bg-red-500/10 px-2 py-0.5 rounded text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-colors"
+                        class="font-medium bg-red-500/10 px-2 py-0.5 rounded-sm text-red-200 hover:bg-red-500/20 hover:text-red-100 transition-colors"
                         on:click={() =>
                           drillDown("album", "missing_link_type", type)}
                         title="View Albums missing this link"
@@ -404,7 +404,7 @@
     <div
       role="button"
       tabindex="0"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
       on:click={closeModal}
       on:keydown|self={(e) => {
         if (e.key === "Escape") closeModal();

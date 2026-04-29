@@ -105,7 +105,7 @@
       <div class="text-white/60">Loading...</div>
     {:else if setupMode}
       <div
-        class="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur"
+        class="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur-sm"
       >
         <div class="mb-6 text-center">
           <p class="text-sm text-white/60">Welcome to</p>
@@ -192,7 +192,7 @@
       </div>
     {:else}
       <div
-        class="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur"
+        class="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur-sm"
       >
         <div class="mb-6 text-center">
           <p class="text-sm text-white/60">Welcome back to</p>

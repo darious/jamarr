@@ -205,20 +205,20 @@
   ></div>
   <!-- Gradient Overlay -->
   <div
-    class="absolute inset-0 bg-gradient-to-b from-surface-1/80 via-surface-1/95 to-surface-1"
+    class="absolute inset-0 bg-gradient-to-b from-surface-50/80 via-surface-50/95 to-surface-50"
   ></div>
 </div>
 
 <div class="relative z-10 w-full min-h-screen pb-20">
   <div class="max-w-[1700px] mx-auto px-4 pt-6 md:px-12 md:pt-20">
     <div
-      class="grid items-start gap-8 lg:grid-cols-[500px,1fr] lg:gap-16 xl:grid-cols-[600px,1fr]"
+      class="grid items-start gap-8 lg:[grid-template-columns:500px_1fr] lg:gap-16 xl:[grid-template-columns:600px_1fr]"
     >
       <!-- Left Column: Hero (Fixed-ish feel) -->
       <div class="flex flex-col gap-6 lg:sticky lg:top-20 lg:gap-8">
         <!-- Artwork -->
         <div
-          class="group relative mx-auto aspect-square w-full max-w-[420px] overflow-hidden rounded-2xl shadow-2xl transition-transform duration-500 hover:scale-105 lg:max-w-none lg:rounded"
+          class="group relative mx-auto aspect-square w-full max-w-[420px] overflow-hidden rounded-2xl shadow-2xl transition-transform duration-500 hover:scale-105 lg:max-w-none lg:rounded-sm"
         >
           <img
             src={albumArtUrl}
@@ -466,7 +466,7 @@
               <div class="space-y-2">
                 {#if groupedTracks.length > 1}
                   <div
-                    class="sticky z-20 -mx-2 mb-4 flex items-center justify-between border-b border-subtle bg-surface-1/75 px-3 py-3 backdrop-blur-md top-[64px] sm:-mx-4 sm:px-4 md:mx-0 md:rounded-t-lg md:top-[80px]"
+                    class="sticky z-20 -mx-2 mb-4 flex items-center justify-between border-b border-subtle bg-surface-50/75 px-3 py-3 backdrop-blur-md top-[64px] sm:-mx-4 sm:px-4 md:mx-0 md:rounded-t-lg md:top-[80px]"
                   >
                     <div class="flex items-center gap-3">
                       <img

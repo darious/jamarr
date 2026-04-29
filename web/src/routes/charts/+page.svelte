@@ -187,7 +187,7 @@
       <div class="group relative flex flex-col gap-3">
         <!-- Artwork Card -->
         <div
-          class="relative aspect-square rounded-lg overflow-hidden bg-surface-3 shadow-lg transition-transform duration-300 hover:scale-105 border border-transparent hover:border-subtle/30 cursor-pointer text-left w-full outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+          class="relative aspect-square rounded-lg overflow-hidden bg-surface-3 shadow-lg transition-transform duration-300 hover:scale-105 border border-transparent hover:border-subtle/30 cursor-pointer text-left w-full outline-hidden focus-visible:ring-2 focus-visible:ring-primary-500"
           role="button"
           tabindex="0"
           on:click={() => handleCardClick(entry)}
@@ -267,7 +267,7 @@
                   <span>Download</span>
                 </button>
               {:else}
-                <div class="bg-black/40 p-3 rounded-full backdrop-blur-sm">
+                <div class="bg-black/40 p-3 rounded-full backdrop-blur-xs">
                   <span class="loading loading-spinner text-secondary-500"
                   ></span>
                 </div>
@@ -298,7 +298,7 @@
                 class="badge {getStatusColor(entry.status).replace(
                   'text-',
                   'bg-',
-                )}/90 text-surface-900 text-[10px] font-bold shadow-lg backdrop-blur"
+                )}/90 text-surface-900 text-[10px] font-bold shadow-lg backdrop-blur-sm"
               >
                 {#if entry.status === "up"}
                   <svg

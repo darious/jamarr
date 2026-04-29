@@ -131,7 +131,7 @@
             ></progress>
 
             <div
-                class="mt-4 p-4 rounded bg-surface-2 border border-subtle font-mono text-xs text-muted h-32 overflow-y-auto space-y-1"
+                class="mt-4 p-4 rounded-sm bg-surface-2 border border-subtle font-mono text-xs text-muted h-32 overflow-y-auto space-y-1"
             >
                 {#each scanLogs as log}
                     <div class="truncate">{log}</div>
@@ -359,7 +359,7 @@
                                 {#each r.supported_mime_types.split(",") as mime}
                                     {#if mime.startsWith("audio/")}
                                         <span
-                                            class="inline-block rounded bg-surface-3 px-2 py-0.5 font-mono text-xs text-muted"
+                                            class="inline-block rounded-sm bg-surface-3 px-2 py-0.5 font-mono text-xs text-muted"
                                             >{mime}</span
                                         >
                                     {/if}
