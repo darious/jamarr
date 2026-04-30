@@ -19,17 +19,75 @@ Do not submit code, assets, generated output, or copied snippets unless you have
 
 ## Development
 
-Use the project scripts where possible:
+### Prerequisites
+
+- Python 3.14+
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
+- Docker + Docker Compose
+- Node.js (for frontend work)
+
+### Quick Start (Docker)
 
 ```bash
 ./dev.sh
-./test.sh
-./lint.sh
+```
+
+Starts all services in development mode:
+- **Backend API** (port 8111) — auto-reloads on Python changes
+- **Frontend** (port 5173) — Vite HMR for instant updates
+- **PostgreSQL** (port 8110)
+
+`dev.sh` auto-detects `HOST_IP` (or use `HOST_IP=... ./dev.sh`) and rebuilds if Python dependencies changed. See [Dev Mode Guide](docs/DEV_MODE.md).
+
+### Manual Development (Without Docker)
+
+#### Backend
+```bash
+uv sync
+docker compose up jamarr_db -d  # or use your own PostgreSQL
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8111
+```
+
+#### Frontend
+```bash
+cd web
+npm install
+npm run dev:host
 ```
 
 Backend dependencies are managed with `uv`. Frontend dependencies live in `web/`. Android code lives in `android/`.
 
-Useful checks:
+### Helper Scripts
+
+| Script | Description |
+|:---|:---|
+| `./dev.sh` | Start dev stack with hot-reload |
+| `./deploy.sh` | Full production deploy (backup → migrate → restart) |
+| `./test.sh` | Run backend tests in Docker test stack |
+| `./lint.sh [python\|svelte\|css\|all]` | Run Ruff and/or Svelte check |
+| `./scripts/test-build.sh` | Build frontend in CI-style test container |
+| `./scripts/test-ext-api.sh` | External API smoke checks |
+
+### Running Tests
+
+```bash
+./test.sh                # Full API test suite
+./test.sh -v             # Verbose output
+./test.sh -k "test_search"  # Run specific tests
+```
+
+See `tests/TESTING.md` for details on the test stack and troubleshooting.
+
+### Linting
+
+```bash
+./lint.sh         # Run all checks (Python, Svelte, CSS)
+./lint.sh python  # Run only Python checks (ruff)
+./lint.sh svelte  # Run only Svelte checks
+./lint.sh css     # Run only CSS checks
+```
+
+Useful checks before submitting:
 
 ```bash
 ./test.sh

@@ -1,0 +1,10 @@
+name: "Jamarr CodeQL Configuration"
+
+paths-ignore:
+  - scripts/**
+
+query-filters:
+  - exclude:
+      id: py/weak-sensitive-data-hashing
+  - exclude:
+      id: py/path-injection

@@ -2,12 +2,21 @@ import asyncio
 import httpx
 import logging
 import re
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup, Tag
 from app.scanner.services import wikidata
 from app.scanner.stats import get_api_tracker
 from app.config import get_user_agent
 
 logger = logging.getLogger("scanner.services.album")
+
+
+def _url_host_matches(url: str, domain: str) -> bool:
+    try:
+        host = urlparse(url).hostname
+        return host is not None and (host == domain or host.endswith("." + domain))
+    except Exception:
+        return False
 
 async def fetch_album_metadata(mbid: str, client: httpx.AsyncClient, dns_semaphore: asyncio.Semaphore = None):
     """
@@ -77,7 +86,7 @@ async def fetch_album_metadata(mbid: str, client: httpx.AsyncClient, dns_semapho
             # MusicBrainz sometimes has Wikipedia link directly!
             wikipedia_url = target
             result["external_links"].append(("wikipedia", target))
-        elif "discogs.com" in target:
+        elif _url_host_matches(target, "discogs.com"):
              result["external_links"].append(("discogs", target))
     
     # Ensure we store the MusicBrainz link itself

@@ -44,11 +44,11 @@ class QobuzClient:
                 # Signature for 'userlogin': md5("userlogin" + ts + secret)
                 # Signature for 'userlogin': md5("userlogin" + ts + secret)
                 msg = f"userlogin{timestamp}{self.secret}"
-                sig = hashlib.md5(msg.encode()).hexdigest()
+                sig = hashlib.new('md5', msg.encode(), usedforsecurity=False).hexdigest()
                 
                 params = {
                     "email": self.email,
-                    "password": hashlib.md5(self.password.encode()).hexdigest(),
+                    "password": hashlib.new('md5', self.password.encode(), usedforsecurity=False).hexdigest(),
                     "app_id": self.app_id,
                     "request_ts": timestamp,
                     "request_sig": sig,

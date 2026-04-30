@@ -7,8 +7,17 @@ from rapidfuzz import fuzz
 import logging
 from rich.console import Console
 from rich.logging import RichHandler
+from urllib.parse import urlparse
 
 from pathlib import Path as _Path
+
+
+def _url_host_matches(url: str, domain: str) -> bool:
+    try:
+        host = urlparse(url).hostname
+        return host is not None and (host == domain or host.endswith("." + domain))
+    except Exception:
+        return False
 
 ROOT = _Path(__file__).resolve().parent.parent.parent
 
@@ -69,11 +78,11 @@ class QobuzClient:
             timestamp = str(int(time.time()))
             # Signature for 'userlogin': md5("userlogin" + ts + secret)
             msg = f"userlogin{timestamp}{QOBUZ_SECRET}"
-            sig = hashlib.md5(msg.encode()).hexdigest()
+            sig = hashlib.new('md5', msg.encode(), usedforsecurity=False).hexdigest()
             
             params = {
                 "email": USER_EMAIL,
-                "password": hashlib.md5(USER_PASS.encode()).hexdigest(),
+                "password": hashlib.new('md5', USER_PASS.encode(), usedforsecurity=False).hexdigest(),
                 "app_id": self.app_id,
                 "request_ts": timestamp,
                 "request_sig": sig,
@@ -191,9 +200,6 @@ def format_qobuz_link(artist_name, artist_id):
 async def find_qobuz_artist(mbid):
     console.print(f"[bold blue]Processing MBID:[/bold blue] {mbid}")
     
-    # Return structure: (link, artist_name, source)
-    # Source: 'mb', 'wikidata', 'search'
-    
     async with httpx.AsyncClient() as http_client:
         # 1. MusicBrainz Lookup
         console.print("🔍 Checking MusicBrainz...", end=" ")
@@ -211,11 +217,11 @@ async def find_qobuz_artist(mbid):
         
         for rel in relations:
             target = rel.get("url", {}).get("resource", "")
-            if "qobuz.com" in target:
+            if _url_host_matches(target, "qobuz.com"):
                 console.print(f"✅ Found Direct on MB: [link={target}]{target}[/link]")
                 # We normalize/reformat found links? No, if on MB, keep as is.
                 return target, artist_name, 'mb'
-            if "wikidata.org" in target:
+            if _url_host_matches(target, "wikidata.org"):
                 wikidata_url = target
                 
         # 3. Check Wikidata
@@ -299,7 +305,7 @@ async def process_file(filepath):
         mbid = parts[0]
         current_link = parts[1] if len(parts) > 1 else None
         
-        if current_link and "qobuz.com" in current_link:
+        if current_link and _url_host_matches(current_link, "qobuz.com"):
             console.print(f"[dim]Line {i+1}: {mbid} already has link {current_link}[/dim]")
             continue
         

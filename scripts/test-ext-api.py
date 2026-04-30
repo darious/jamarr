@@ -205,12 +205,12 @@ def _qobuz_login(
     client: httpx.Client, app_id: str, secret: str, email: str, password: str
 ) -> Tuple[bool, str | None, str]:
     timestamp = str(int(time.time()))
-    sig = hashlib.md5(f"userlogin{timestamp}{secret}".encode()).hexdigest()
+    sig = hashlib.new('md5', f"userlogin{timestamp}{secret}".encode(), usedforsecurity=False).hexdigest()
     resp = client.get(
         "https://www.qobuz.com/api.json/0.2/user/login",
         params={
             "email": email,
-            "password": hashlib.md5(password.encode()).hexdigest(),
+            "password": hashlib.new('md5', password.encode(), usedforsecurity=False).hexdigest(),
             "app_id": app_id,
             "request_ts": timestamp,
             "request_sig": sig,
