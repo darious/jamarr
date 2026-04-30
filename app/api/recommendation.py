@@ -135,26 +135,19 @@ async def get_recommendations(conn, user_id: int, seeds: List[dict], days: int) 
     if not seeds:
         return []
 
-    # 1. Expand seeds to candidates
-    seed_values = []
-    for s in seeds:
-        # (mbid, score)
-        seed_values.append(f"('{s['artist_mbid']}', {s['score']})")
-    
-    values_clause = ",".join(seed_values)
-    
-    # Build the time filter clause based on days parameter
-    # The exclusion period should match the seed period
+    mbids = [s['artist_mbid'] for s in seeds]
+    scores = [float(s['score']) for s in seeds]
+
+    params = [mbids, scores, user_id]
     if days <= 0:
-        # All time - exclude ALL artists we've ever played
-        time_filter = ""  # No time constraint - exclude everything we've played
+        time_filter = ""
     else:
-        # Use the same time window as seeds
-        time_filter = f"AND cph.played_at >= (CURRENT_DATE - make_interval(days => {days} - 1))"
-    
+        time_filter = "AND cph.played_at >= (CURRENT_DATE - make_interval(days => $4 - 1))"
+        params.append(days)
+
     query = f"""
         WITH seeds(mbid, score) AS (
-            VALUES {values_clause}
+            SELECT * FROM unnest($1::text[], $2::float[]) AS t(mbid, score)
         ),
         candidates AS (
             SELECT
@@ -172,11 +165,9 @@ async def get_recommendations(conn, user_id: int, seeds: List[dict], days: int) 
         boosted AS (
             SELECT
                 c.*,
-                -- Boost score if we have local content (tracks) for this artist
-                -- Check existence of tracks for this artist in our library
-                CASE 
+                CASE
                     WHEN EXISTS (SELECT 1 FROM track t WHERE t.artist_mbid = c.mbid) THEN
-                        (c.base_score * (1 + LN(1 + c.support_count))) * 1.5 -- 50% boost
+                        (c.base_score * (1 + LN(1 + c.support_count))) * 1.5
                     ELSE
                         (c.base_score * (1 + LN(1 + c.support_count)))
                 END as final_score
@@ -187,21 +178,19 @@ async def get_recommendations(conn, user_id: int, seeds: List[dict], days: int) 
             FROM boosted b
             JOIN artist a ON b.mbid = a.mbid
             LEFT JOIN artwork art ON a.artwork_id = art.id
-            WHERE 
-            -- STRICT FILTER: Only show artists that have a primary album in our library
+            WHERE
             EXISTS (
-                SELECT 1 
+                SELECT 1
                 FROM artist_album aa
-                WHERE aa.artist_mbid = b.mbid 
+                WHERE aa.artist_mbid = b.mbid
                   AND aa.type = 'primary'
             )
             AND NOT EXISTS (
-                -- Exclude artists played in the same time window as seeds
-                SELECT 1 
+                SELECT 1
                 FROM combined_playback_history_mat cph
                 JOIN track t ON cph.track_id = t.id
                 WHERE t.artist_mbid = b.mbid
-                  AND cph.user_id = {user_id}
+                  AND cph.user_id = $3
                   {time_filter}
             )
             AND b.mbid NOT IN (SELECT mbid FROM seeds)
@@ -210,7 +199,7 @@ async def get_recommendations(conn, user_id: int, seeds: List[dict], days: int) 
         ORDER BY final_score DESC
         LIMIT 50
     """
-    return await conn.fetch(query)
+    return await conn.fetch(query, *params)
 
 # --- Endpoints ---
 
@@ -283,27 +272,22 @@ async def get_recommended_albums(
         if not top_artists:
             return []
 
-        # Create VALUES clause like: ('mbid1', 1), ('mbid2', 2)...
-        values_list = []
-        for i, r in enumerate(top_artists):
-            values_list.append(f"('{r['mbid']}', {i+1})")
-        
-        values_clause = ",".join(values_list)
-        
-        # Build album time filter to match seed period
+        artist_mbids = [r['mbid'] for r in top_artists]
+        artist_ranks = [i + 1 for i in range(len(top_artists))]
+
+        params = [artist_mbids, artist_ranks, user['id']]
         if days <= 0:
-            # All time - exclude all albums we've ever played
             album_time_filter = ""
         else:
-            # Use the same time window as seeds
-            album_time_filter = f"AND cph.played_at >= (CURRENT_DATE - make_interval(days => {days} - 1))"
-        
+            album_time_filter = "AND cph.played_at >= (CURRENT_DATE - make_interval(days => $4 - 1))"
+            params.append(days)
+
         query = f"""
             WITH target_artists(mbid, rank) AS (
-                VALUES {values_clause}
+                SELECT * FROM unnest($1::text[], $2::int[]) AS t(mbid, rank)
             ),
             track_scores AS (
-                SELECT 
+                SELECT
                     t.release_mbid,
                     SUM(CASE WHEN tt.type = 'top' THEN tt.popularity ELSE 0 END) as top_track_score,
                     COUNT(CASE WHEN tt.type = 'single' THEN 1 END) as single_count
@@ -332,12 +316,11 @@ async def get_recommended_albums(
                 LEFT JOIN artwork art ON a.artwork_id = art.id
                 LEFT JOIN track_scores ts ON a.mbid = ts.release_mbid
                 WHERE NOT EXISTS (
-                    -- Exclude albums played in the same time window as seeds
                     SELECT 1
                     FROM combined_playback_history_mat cph
                     JOIN track tr ON cph.track_id = tr.id
                     WHERE tr.release_mbid = a.mbid
-                      AND cph.user_id = {user['id']}
+                      AND cph.user_id = $3
                       {album_time_filter}
                 )
                 GROUP BY a.mbid, a.title, aa.artist_mbid, ar.name, art.sha1, a.release_date, ta.rank, ts.top_track_score, ts.single_count
@@ -345,11 +328,11 @@ async def get_recommended_albums(
             limited_albums AS (
                 SELECT *,
                     ROW_NUMBER() OVER (
-                        PARTITION BY artist_mbid 
-                        ORDER BY 
-                            top_track_score DESC,  -- Prioritize albums with popular top tracks
-                            single_count DESC,      -- Then albums with more singles
-                            release_date_sort DESC  -- Then most recent
+                        PARTITION BY artist_mbid
+                        ORDER BY
+                            top_track_score DESC,
+                            single_count DESC,
+                            release_date_sort DESC
                     ) as rn
                 FROM ranked_albums
             )
@@ -359,8 +342,8 @@ async def get_recommended_albums(
             ORDER BY rank ASC
             LIMIT 10
         """
-        
-        rows = await conn.fetch(query)
+
+        rows = await conn.fetch(query, *params)
         return [
             {
                 "mbid": r["mbid"],
@@ -391,16 +374,13 @@ async def get_recommended_tracks(
         if not artist_recs:
             return []
 
-        # Get top 10 artists to find tracks for (Strict 1:1 Coherence)
-        top_artist_mbids = [f"'{r['mbid']}'" for r in artist_recs[:10]]
+        top_artist_mbids = [r['mbid'] for r in artist_recs[:10]]
         if not top_artist_mbids:
             return []
-        
-        mbids_in = ",".join(top_artist_mbids)
 
-        query = f"""
+        query = """
             WITH candidate_tracks AS (
-                SELECT 
+                SELECT
                     t.id, t.title, t.duration_seconds, t.codec, t.bit_depth, t.sample_rate_hz, t.bitrate,
                     ar.name as artist_name, ar.mbid as artist_mbid,
                     al.title as album_name,
@@ -409,18 +389,16 @@ async def get_recommended_tracks(
                     al.release_date,
                     art.sha1 as art_sha1,
                     (RANDOM() * 20) as rec_score
-                    -- Add some randomness so we don't always get the same top tracks
                 FROM track t
                 JOIN artist ar ON t.artist_mbid = ar.mbid
                 LEFT JOIN album al ON t.release_mbid = al.mbid
                 LEFT JOIN artwork art ON t.artwork_id = art.id
-                WHERE t.artist_mbid IN ({mbids_in})
+                WHERE t.artist_mbid = ANY($1::text[])
                 AND NOT EXISTS (
-                    -- Exclude tracks played in last 30 days
                     SELECT 1
                     FROM combined_playback_history_mat cph
                     WHERE cph.track_id = t.id
-                      AND cph.user_id = {user['id']}
+                      AND cph.user_id = $2
                       AND cph.played_at > NOW() - INTERVAL '30 days'
                 )
             ),
@@ -435,8 +413,8 @@ async def get_recommended_tracks(
             ORDER BY rec_score DESC
             LIMIT 50
         """
-        
-        rows = await conn.fetch(query)
+
+        rows = await conn.fetch(query, top_artist_mbids, user['id'])
         
         results = []
         for r in rows:

@@ -1,11 +1,22 @@
 import httpx
 import logging
 import asyncio
+from urllib.parse import urlparse
 from app.config import get_musicbrainz_root_url, get_musicbrainz_rate_limit
 from app.scanner.stats import get_api_tracker
 from app.scanner.services.utils import RateLimiter
 
 logger = logging.getLogger("scanner.services.musicbrainz")
+
+
+def _url_host_matches(url: str, domain: str) -> bool:
+    """Check whether *url* belongs to *domain* (e.g. 'tidal.com')."""
+    try:
+        host = urlparse(url).hostname
+        return host is not None and (host == domain or host.endswith("." + domain))
+    except Exception:
+        return False
+
 
 MB_API_ROOT = f"{get_musicbrainz_root_url()}/ws/2"
 
@@ -58,13 +69,13 @@ async def fetch_core(artist_mbid: str, client: httpx.AsyncClient, artist_name: s
                         updates["homepage"] = target
                     elif type_ == "wikidata":
                         updates["wikidata_url"] = target
-                    elif "tidal.com" in target:
+                    elif _url_host_matches(target, "tidal.com"):
                         updates["tidal_url"] = target
-                    elif "qobuz.com" in target:
+                    elif _url_host_matches(target, "qobuz.com"):
                         updates["qobuz_url"] = target
-                    elif "discogs.com" in target:
+                    elif _url_host_matches(target, "discogs.com"):
                         updates["discogs_url"] = target
-                    elif "spotify.com" in target and type_ in ("streaming", "free streaming"):
+                    elif _url_host_matches(target, "spotify.com") and type_ in ("streaming", "free streaming"):
                         parts = target.split("/")
                         if parts:
                             cand_id = parts[-1].split("?")[0]
@@ -239,11 +250,11 @@ async def fetch_best_release_match(rg_id: str, client: httpx.AsyncClient):
                     continue
                 
                 l_type = None
-                if "tidal.com" in target:
+                if _url_host_matches(target, "tidal.com"):
                     l_type = "tidal"
-                elif "qobuz.com" in target:
+                elif _url_host_matches(target, "qobuz.com"):
                     l_type = "qobuz"
-                elif "musicbrainz.org" in target:
+                elif _url_host_matches(target, "musicbrainz.org"):
                     l_type = "musicbrainz"
                 
                 if l_type:

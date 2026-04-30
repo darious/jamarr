@@ -97,7 +97,7 @@ class ChartScraper:
         return entries
 
     def _extract_nuxt_payload(self, html: str) -> Optional[List]:
-        scripts = re.findall(r"<script(?:[^>]*)>(.*?)</script>", html, flags=re.DOTALL | re.IGNORECASE)
+        scripts = re.findall(r"<script(?:[^>]*)>(.*?)</script[^>]*>", html, flags=re.DOTALL | re.IGNORECASE)
         candidates = [s.strip() for s in scripts if s.strip().startswith("[")]
         
         if not candidates:

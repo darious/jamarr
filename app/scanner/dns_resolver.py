@@ -68,10 +68,14 @@ class CachedDNSResolver:
         # Cache miss - resolve via aiodns
         try:
             logger.debug(f"DNS cache MISS for {hostname}, resolving...")
-            result = await self.resolver.query(hostname, 'A')
-            
-            # Extract IP addresses from result
-            ips = [r.host for r in result] if isinstance(result, list) else [result.host]
+            result = await self.resolver.query_dns(hostname, 'A')
+
+            # Extract IP addresses from DNSResult.answer records
+            ips = []
+            for record in result.answer:
+                addr = getattr(record.data, 'addr', None)
+                if addr:
+                    ips.append(addr)
             
             # Cache the result
             async with self._lock:

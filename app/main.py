@@ -120,8 +120,14 @@ async def spa(path: str):
 
         raise HTTPException(status_code=404, detail="Not Found")
 
-    target = build_dir / path
-    if target.is_file():
+    if '..' in path or '\0' in path or '\\' in path:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    base = str(build_dir.resolve())
+    target = os.path.realpath(os.path.join(base, path.lstrip("/")))  # lgtm[py/path-injection]
+    if not target.startswith(base + os.sep) and target != base:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if os.path.isfile(target):
         return FileResponse(target)
 
     index_path = build_dir / "index.html"

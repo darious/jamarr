@@ -282,7 +282,7 @@ def _extract_status(item) -> str:
 
 
 def _extract_nuxt_payload(html: str) -> list | None:
-    scripts = re.findall(r"<script(?:[^>]*)>(.*?)</script>", html, flags=re.DOTALL | re.IGNORECASE)
+    scripts = re.findall(r"<script(?:[^>]*)>(.*?)</script[^>]*>", html, flags=re.DOTALL | re.IGNORECASE)
     candidates = [s.strip() for s in scripts if s.strip().startswith("[")]
     if not candidates:
         return None

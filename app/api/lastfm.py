@@ -273,11 +273,11 @@ async def sync_scrobbles(
         result = await sync_scrobbles_for_user(db, user, payload, manager)
         manager.complete_sync("success")
         return result
-    except HTTPException as exc:
-        manager.complete_sync("error", exc.detail)
+    except HTTPException:
+        manager.complete_sync("error")
         raise
     except RuntimeError as exc:
-        manager.complete_sync("error", str(exc))
+        manager.complete_sync("error")
         if str(exc) == "Last.fm account not connected":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

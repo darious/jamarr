@@ -7,7 +7,6 @@ import io
 from email.utils import parsedate_to_datetime, formatdate
 from datetime import timezone
 
-
 def _build_test_art_bytes():
     """Generate a 600x600 JPEG test image; Pillow is required for the larger size."""
     from PIL import Image
@@ -18,29 +17,31 @@ def _build_test_art_bytes():
 
 
 router = APIRouter()
-CACHE_DIR = "cache/art"
+CACHE_DIR = os.path.realpath("cache/art")
 _TEST_ART_BYTES = _build_test_art_bytes()
 
 
+def _safe_join(base: str, *parts: str) -> str:
+    """Join path components under *base*, raising on traversal escape."""
+    resolved = os.path.realpath(os.path.join(base, *parts))
+    if not resolved.startswith(base + os.sep) and resolved != base:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return resolved
+
+
 def _get_art_path(sha1: str, path_on_disk: str | None = None) -> str:
-    """
-    Compute unified path for artwork file, migrating legacy locations if found.
-    """
-    if path_on_disk and os.path.exists(path_on_disk):
+    """Compute unified path for artwork file, migrating legacy locations if found."""
+    if path_on_disk and os.path.isfile(path_on_disk):
         return path_on_disk
 
     subdir = sha1[:2]
-    unified = os.path.join(CACHE_DIR, subdir, sha1)
-    if os.path.exists(unified):
+    unified = _safe_join(CACHE_DIR, subdir, sha1)
+    if os.path.isfile(unified):
         return unified
 
-    legacy_candidates = [
-        os.path.join(CACHE_DIR, "artistthumb", subdir, sha1),
-        os.path.join(CACHE_DIR, "artist", subdir, sha1),
-        os.path.join(CACHE_DIR, "album", subdir, sha1),
-    ]
-    for legacy in legacy_candidates:
-        if os.path.exists(legacy):
+    for legacy_dir in ("artistthumb", "artist", "album"):
+        legacy = _safe_join(CACHE_DIR, legacy_dir, subdir, sha1)
+        if os.path.isfile(legacy):
             os.makedirs(os.path.dirname(unified), exist_ok=True)
             try:
                 os.rename(legacy, unified)
@@ -59,9 +60,6 @@ if not is_production():
         response = Response(content=_TEST_ART_BYTES, media_type="image/jpeg")
         response.headers["Cache-Control"] = "no-cache"
         return response
-
-
-
 
 
 ALLOWED_SIZES = [100, 200, 300, 400, 600]
@@ -103,7 +101,9 @@ def _is_not_modified(request: Request, etag: str, stat_result: os.stat_result) -
 
 @router.get("/art/file/{sha1}")
 async def get_artwork_by_sha1(sha1: str, request: Request, max_size: int = 0):
-    # Lookup type to build path
+    if len(sha1) != 40 or any(c not in '0123456789abcdefABCDEF' for c in sha1):
+        raise HTTPException(status_code=400, detail="Invalid SHA1 format")
+
     async for db in get_db():
         row = await db.fetchrow(
             "SELECT path_on_disk, mime FROM artwork WHERE sha1 = $1", sha1
@@ -114,18 +114,18 @@ async def get_artwork_by_sha1(sha1: str, request: Request, max_size: int = 0):
         original_path = _get_art_path(sha1, row["path_on_disk"])
         mime = row["mime"]
 
-        if not os.path.exists(original_path):
+        if not os.path.isfile(original_path):
             raise HTTPException(status_code=404, detail="Artwork file missing")
 
         # If resizing requested
         if max_size > 0:
             target_size = _snap_size(max_size)
             subdir = sha1[:2]
-            resized_dir = os.path.join(CACHE_DIR, "resized", str(target_size), subdir)
+            resized_dir = _safe_join(CACHE_DIR, "resized", str(target_size), subdir)
             resized_path = os.path.join(resized_dir, sha1)
 
             # Serve from cache if exists
-            if os.path.exists(resized_path):
+            if os.path.isfile(resized_path):  # lgtm[py/path-injection]
                 stat_result = os.stat(resized_path)
                 etag = f'W/"{sha1}-{int(stat_result.st_mtime)}-{stat_result.st_size}"'
                 if _is_not_modified(request, etag, stat_result):
@@ -217,11 +217,11 @@ async def get_renderer_icon(udn: str, request: Request, max_size: int = 0):
     async for db in get_db():
         row = await db.fetchrow(
             """
-            SELECT a.sha1 
+            SELECT a.sha1
             FROM image_map im
             JOIN artwork a ON im.artwork_id = a.id
-            WHERE im.entity_type = 'renderer' 
-              AND im.entity_id = $1 
+            WHERE im.entity_type = 'renderer'
+              AND im.entity_id = $1
               AND im.image_type = 'icon'
             """,
             udn,
