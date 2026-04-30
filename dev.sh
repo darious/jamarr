@@ -49,11 +49,11 @@ else
   echo "✨ Dependencies unchanged, skipping build."
 fi
 
-# Stop existing containers before clearing generated frontend state.
-docker compose down
+# Stop the same compose stack we start below, including the dev-only web service.
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down --remove-orphans
 
-# Clear generated frontend caches so route graph changes cannot leave
-# stale .svelte-kit / Vite artifacts behind across dev restarts.
+# Clear host-side generated frontend caches. The web service also clears its
+# Docker-owned .svelte-kit/.vite volumes at container startup.
 echo "🧽 Clearing frontend dev caches..."
 rm -rf web/.svelte-kit web/.vite
 

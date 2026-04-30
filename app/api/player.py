@@ -7,7 +7,6 @@ import time
 from typing import Optional
 import asyncpg
 from app.db import get_db
-from app.upnp import UPnPManager
 from app.api.deps import (
     get_current_admin_user_jwt,
     get_current_user_jwt,
@@ -26,12 +25,8 @@ from app.models.player import (
 from app.services.player.globals import (
     playback_monitors,
     monitor_start_times,
-    last_track_start_time,
 )
 from app.services.player.state import (
-    track_path_exists,
-    enrich_track_metadata,
-    get_active_renderer,
     get_renderer_state_db,
     update_renderer_state_db,
 )
@@ -41,16 +36,14 @@ from app.services.player.history import (
     update_now_playing_lastfm,
 )
 from app.services.player.monitor import (
-    monitor_upnp_playback,
     start_monitor_task,
-    _mark_monitor_starting,
-    _clear_monitor_starting,
     _is_monitor_starting,
 )
+from app.services.renderer import get_renderer_orchestrator
 
 router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
 logger = logging.getLogger(__name__)
-upnp = UPnPManager.get_instance()
+renderer_orchestrator = get_renderer_orchestrator()
 
 
 async def get_client_id(x_jamarr_client_id: Optional[str] = Header(None)) -> str:
@@ -68,7 +61,7 @@ async def get_client_ip_endpoint(request: Request):
 @router.get("/api/player/state", response_model=PlayerState)
 async def get_player_state(client_id: str = Depends(get_client_id)):
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
+        renderer_id, udn = await renderer_orchestrator.get_active(db, client_id)
         state = await get_renderer_state_db(db, udn)
 
         # If UPnP, sync live state
@@ -172,6 +165,8 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
             "position_seconds": state["position_seconds"],
             "is_playing": state["is_playing"],
             "renderer": udn,
+            "renderer_id": renderer_id,
+            "renderer_kind": renderer_id.split(":", 1)[0] if ":" in renderer_id else "upnp",
             "transport_state": state.get("transport_state", "STOPPED"),
             "volume": state.get("volume"),
         }
@@ -195,8 +190,6 @@ async def set_queue(
     user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
-        state = await get_renderer_state_db(db, udn)
         user_id = user["id"]
 
         enriched_queue = []
@@ -205,68 +198,24 @@ async def set_queue(
             if user_id is not None:
                 track_dict["user_id"] = user_id
             enriched_queue.append(track_dict)
-
-        state["queue"] = enriched_queue
-        state["current_index"] = max(
-            0, min(update.start_index, len(enriched_queue) - 1 if enriched_queue else 0)
-        )
-        state["position_seconds"] = 0
-        state["is_playing"] = True
-        state["transport_state"] = "PLAYING"
-
-        await update_renderer_state_db(db, udn, state)
-        reset_history_tracker(udn if not udn.startswith("local") else client_id)
         
         # Trigger Now Playing update for Last.fm
-        if enriched_queue and state["current_index"] >= 0:
-            current_track = enriched_queue[state["current_index"]]
+        if enriched_queue:
+            current_index = max(
+                0, min(update.start_index, len(enriched_queue) - 1)
+            )
+            current_track = enriched_queue[current_index]
             asyncio.create_task(
                 update_now_playing_lastfm(user_id, current_track["id"])
             )
-
-        # For UPnP, immediately play the selected track and restart monitor
-        if not udn.startswith("local:") and state["queue"]:
-            # pick first playable track from start_index onward
-            playable_idx = None
-            for idx in range(state["current_index"], len(state["queue"])):
-                candidate = await enrich_track_metadata(state["queue"][idx], db)
-                if track_path_exists(candidate):
-                    state["queue"][idx] = candidate
-                    playable_idx = idx
-                    break
-            if playable_idx is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No playable tracks found on disk for this queue.",
-                )
-            state["current_index"] = playable_idx
-            await update_renderer_state_db(db, udn, state)
-
-            # Cancel existing monitor
-            if udn in playback_monitors:
-                playback_monitors[udn].cancel()
-                try:
-                    await asyncio.wait([playback_monitors[udn]], timeout=1)
-                except Exception:
-                    pass
-
-            # Start playback in background to avoid blocking HTTP response
-            async def start_playback():
-                try:
-                    await upnp.set_renderer(udn)
-                    env_port = os.environ.get("HOST_PORT")
-                    port = env_port if env_port else (request.url.port or 8111)
-                    upnp.base_url = f"http://{upnp.local_ip}:{port}"
-                    track = state["queue"][state["current_index"]]
-                    await upnp.play_track(track["id"], track.get("path"), track)
-                    start_monitor_task(udn)
-                    last_track_start_time[udn] = time.time()
-                finally:
-                    _clear_monitor_starting(udn)
-
-            # Start playback in background
-            _mark_monitor_starting(udn)
-            asyncio.create_task(start_playback())
+        await renderer_orchestrator.set_queue(
+            db,
+            client_id,
+            enriched_queue,
+            update.start_index,
+            user_id,
+            request,
+        )
 
     return {"status": "ok"}
 
@@ -282,7 +231,7 @@ async def append_queue(
     user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
+        _, udn = await renderer_orchestrator.get_active(db, client_id)
         state = await get_renderer_state_db(db, udn)
         user_id = user["id"]
 
@@ -310,7 +259,7 @@ async def reorder_queue(
     Expects the same queue items in a new order.
     """
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
+        _, udn = await renderer_orchestrator.get_active(db, client_id)
         state = await get_renderer_state_db(db, udn)
         existing_queue = state.get("queue") or []
 
@@ -392,31 +341,7 @@ async def clear_queue(client_id: str = Depends(get_client_id)):
     Empty the active renderer queue and stop playback.
     """
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
-        state = await get_renderer_state_db(db, udn)
-
-        state["queue"] = []
-        state["current_index"] = -1
-        state["position_seconds"] = 0
-        state["is_playing"] = False
-        state["transport_state"] = "STOPPED"
-        await update_renderer_state_db(db, udn, state)
-        reset_history_tracker(client_id if udn.startswith("local") else udn)
-
-        if not udn.startswith("local:"):
-            try:
-                await upnp.set_renderer(udn)
-                await upnp.pause()
-            except Exception as e:
-                logger.warning(f"[Player] Failed to pause renderer {udn} on clear: {e}")
-
-            if udn in playback_monitors:
-                playback_monitors[udn].cancel()
-                try:
-                    await asyncio.wait([playback_monitors[udn]], timeout=1)
-                except Exception:
-                    pass
-                del playback_monitors[udn]
+        state, udn = await renderer_orchestrator.stop_or_clear(db, client_id)
 
         return {
             "status": "ok",
@@ -438,54 +363,7 @@ async def clear_queue(client_id: str = Depends(get_client_id)):
 )
 async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)):
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
-        state = await get_renderer_state_db(db, udn)
-
-        state["current_index"] = update.index
-        state["position_seconds"] = 0
-        state["is_playing"] = True  # Assume play on skip
-        state["transport_state"] = "PLAYING"
-
-        await update_renderer_state_db(db, udn, state)
-        reset_history_tracker(client_id if udn.startswith("local") else udn)
-
-        if not udn.startswith("local:"):
-            queue = state.get("queue") or []
-            if queue and 0 <= state["current_index"] < len(queue):
-                # find next playable track from requested index forward
-                playable_idx = None
-                for idx in range(state["current_index"], len(queue)):
-                    candidate = await enrich_track_metadata(queue[idx], db)
-                    if track_path_exists(candidate):
-                        state["queue"][idx] = candidate
-                        playable_idx = idx
-                        break
-                if playable_idx is None:
-                    raise HTTPException(
-                        status_code=404, detail="Selected track is missing on disk."
-                    )
-                state["current_index"] = playable_idx
-                await update_renderer_state_db(db, udn, state)
-
-                if udn in playback_monitors:
-                    playback_monitors[udn].cancel()
-                    try:
-                        await asyncio.wait([playback_monitors[udn]], timeout=1)
-                    except Exception:
-                        pass
-
-                await upnp.set_renderer(udn)
-                env_port = os.environ.get("HOST_PORT")
-                port = env_port if env_port else 8111
-                upnp.base_url = f"http://{upnp.local_ip}:{port}"
-                track = state["queue"][state["current_index"]]
-                _mark_monitor_starting(udn)
-                try:
-                    await upnp.play_track(track["id"], track.get("path"), track)
-                    start_monitor_task(udn)
-                    last_track_start_time[udn] = time.time()
-                finally:
-                    _clear_monitor_starting(udn)
+        state, udn = await renderer_orchestrator.skip_to_index(db, client_id, update.index)
     # Return the state so the client can sync immediately
     return {
         "status": "ok",
@@ -521,7 +399,7 @@ async def update_progress(
     user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
+        _, udn = await renderer_orchestrator.get_active(db, client_id)
         client_ip = get_client_ip(request)
         user_id = user["id"]
         if udn.startswith("local:"):
@@ -570,11 +448,13 @@ async def update_progress(
 
 @router.get("/api/scan-status", dependencies=[Depends(get_current_admin_user_jwt)])
 async def get_scan_status(client_id: str = Depends(get_client_id)):
+    upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
+    manager = getattr(upnp_backend, "manager", None)
     return {
-        "is_scanning": upnp.is_scanning_subnet,
-        "message": upnp.scan_msg,
-        "progress": upnp.scan_progress,
-        "logs": upnp.debug_log[-20:],
+        "is_scanning": getattr(manager, "is_scanning_subnet", False),
+        "message": getattr(manager, "scan_msg", ""),
+        "progress": getattr(manager, "scan_progress", 0),
+        "logs": getattr(manager, "debug_log", [])[-20:],
     }
 
 
@@ -587,16 +467,18 @@ async def get_renderers(
     if refresh:
         require_admin_user(user)
     
+    async for db in get_db():
+        renderers = await renderer_orchestrator.list_renderers(
+            db,
+            client_id,
+            refresh=refresh,
+        )
     if refresh:
-        await upnp.discover()
-        asyncio.create_task(upnp.scan_subnet())
-    renderers = await upnp.get_renderers()
-    local_device = {
-        "udn": f"local:{client_id}",
-        "name": "This Device (Web Browser)",
-        "type": "local",
-    }
-    return [local_device, *renderers]
+        upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
+        manager = getattr(upnp_backend, "manager", None)
+        if manager:
+            asyncio.create_task(manager.scan_subnet())
+    return renderers
 
 
 @router.post(
@@ -604,23 +486,13 @@ async def get_renderers(
     dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
-    udn = data.get("udn")
-    if not udn:
-        raise HTTPException(status_code=400, detail="Missing udn")
+    requested = data.get("renderer_id") or data.get("udn")
+    if not requested:
+        raise HTTPException(status_code=400, detail="Missing renderer_id")
 
     async for db in get_db():
-        await db.execute(
-            """
-            INSERT INTO client_session (client_id, active_renderer_udn, last_seen_at)
-            VALUES ($1, $2, NOW())
-            ON CONFLICT(client_id) DO UPDATE SET
-                active_renderer_udn = excluded.active_renderer_udn,
-                last_seen_at = NOW()
-        """,
-            client_id,
-            udn,
-        )
-    return {"active": udn}
+        renderer_id, state_key = await renderer_orchestrator.set_active(db, client_id, requested)
+    return {"active": state_key, "renderer_id": renderer_id}
 
 
 @router.post(
@@ -638,9 +510,6 @@ async def play_track(
     if not track_id:
         raise HTTPException(status_code=400, detail="Missing track_id")
 
-    udn = await get_active_renderer(db, client_id)
-
-    # Fetch track metadata
     # Fetch track metadata
     row = await db.fetchrow(
         """
@@ -695,120 +564,13 @@ async def play_track(
     track["mime"] = mime
     track["user_id"] = user_row["id"]
 
-    is_local = udn.startswith("local:") or udn == "local"
-
-    if not is_local:
-        # UPnP Playback
-        await upnp.set_renderer(udn)
-
-        env_port = os.environ.get("HOST_PORT")
-        port = env_port if env_port else (request.url.port or 8111)
-        upnp.base_url = f"http://{upnp.local_ip}:{port}"
-
-        state = await get_renderer_state_db(db, udn)
-
-        # Check if this track is already playing
-        current_track = None
-        if state.get("current_index") is not None and state.get("queue"):
-            queue = state["queue"]
-            if 0 <= state["current_index"] < len(queue):
-                current_track = queue[state["current_index"]]
-
-        if (
-            current_track
-            and current_track.get("id") == track["id"]
-            and state.get("is_playing")
-        ):
-            logger.info(f"play_track: Track {track_id} already playing. checking monitor...")
-            # Ensure monitor is running if it died
-            if udn not in playback_monitors or playback_monitors[udn].done():
-                logger.info(f"Restarting monitor for active track {track_id}")
-                start_monitor_task(udn)
-                last_track_start_time[udn] = time.time()
-            else:
-                 logger.info(f"play_track: Monitor already running for {udn}")
-            
-            logger.info(
-                f"Track {track_id} is already playing, ignoring duplicate play request"
-            )
-            return {"status": "already_playing", "renderer": udn}
-
-        # If paused, just resume
-        if (
-            current_track
-            and current_track.get("id") == track["id"]
-            and not state.get("is_playing")
-        ):
-            logger.info(f"Resuming track {track_id}")
-            await upnp.play()
-            state["is_playing"] = True
-            state["transport_state"] = "PLAYING"
-            await update_renderer_state_db(db, udn, state)
-            
-            # Start monitor
-            start_monitor_task(udn)
-            last_track_start_time[udn] = time.time()
-            
-            return {"status": "resumed", "renderer": udn}
-
-        # Different track or no track playing - start new playback
-        # Try to keep the existing queue if this track is in it; otherwise replace with single track
-        existing_queue = state.get("queue") or []
-        try:
-            current_index = next(
-                i for i, t in enumerate(existing_queue) if t.get("id") == track["id"]
-            )
-            existing_queue[current_index] = track
-        except StopIteration:
-            existing_queue = [track]
-            current_index = 0
-
-        state["queue"] = existing_queue
-        state["current_index"] = current_index
-        state["position_seconds"] = 0
-        state["is_playing"] = True
-        state["transport_state"] = "PLAYING"
-        await update_renderer_state_db(db, udn, state)
-        reset_history_tracker(udn)
-
-        # Stop existing monitor cleanly
-        if udn in playback_monitors:
-            playback_monitors[udn].cancel()
-            try:
-                await asyncio.wait([playback_monitors[udn]], timeout=1)
-            except Exception:
-                pass
-
-        _mark_monitor_starting(udn)
-        try:
-            await upnp.play_track(track["id"], track["path"], track)
-            # Start fresh monitor (only for UPnP)
-            start_monitor_task(udn)
-            last_track_start_time[udn] = time.time()
-        finally:
-            _clear_monitor_starting(udn)
-
-        return {"status": "streaming_started", "renderer": udn}
-    else:
-        state = await get_renderer_state_db(db, udn)
-        existing_queue = state.get("queue") or []
-        try:
-            current_index = next(
-                i for i, t in enumerate(existing_queue) if t.get("id") == track["id"]
-            )
-            existing_queue[current_index] = track
-        except StopIteration:
-            existing_queue = [track]
-            current_index = 0
-
-        state["queue"] = existing_queue
-        state["current_index"] = current_index
-        state["position_seconds"] = 0
-        state["is_playing"] = True
-        state["transport_state"] = "PLAYING"
-        await update_renderer_state_db(db, udn, state)
-
-        return {"status": "local_playback", "message": "Handle playback in browser"}
+    return await renderer_orchestrator.play_track(
+        db,
+        client_id,
+        track,
+        user_row["id"],
+        request,
+    )
 
 
 @router.post(
@@ -817,20 +579,7 @@ async def play_track(
 )
 async def pause_playback(client_id: str = Depends(get_client_id)):
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
-
-        state = await get_renderer_state_db(db, udn)
-        state["is_playing"] = False
-        await update_renderer_state_db(db, udn, state)
-
-        if not udn.startswith("local:"):
-            await upnp.set_renderer(udn)
-            await upnp.pause()
-
-            if udn in playback_monitors:
-                playback_monitors[udn].cancel()
-                del playback_monitors[udn]
-
+        await renderer_orchestrator.pause(db, client_id)
         return {"status": "ok"}
 
 
@@ -840,21 +589,7 @@ async def pause_playback(client_id: str = Depends(get_client_id)):
 )
 async def resume_playback(client_id: str = Depends(get_client_id)):
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
-
-        state = await get_renderer_state_db(db, udn)
-        state["is_playing"] = True
-        await update_renderer_state_db(db, udn, state)
-
-        if not udn.startswith("local:"):
-            await upnp.set_renderer(udn)
-            await upnp.resume()
-
-            if udn not in playback_monitors or playback_monitors[udn].done():
-                playback_monitors[udn] = asyncio.create_task(monitor_upnp_playback(udn))
-                import time
-
-                monitor_start_times[udn] = time.time()
+        await renderer_orchestrator.resume(db, client_id)
 
     return {"status": "ok"}
 
@@ -870,16 +605,7 @@ async def set_volume(data: dict, client_id: str = Depends(get_client_id)):
     percent = max(0, min(100, int(percent)))
 
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
-
-        # Persist volume
-        state = await get_renderer_state_db(db, udn)
-        state["volume"] = percent
-        await update_renderer_state_db(db, udn, state)
-
-        if not udn.startswith("local:"):
-            await upnp.set_renderer(udn)
-            await upnp.set_volume(percent)
+        await renderer_orchestrator.set_volume(db, client_id, percent)
 
     return {"status": "ok", "percent": percent}
 
@@ -894,18 +620,10 @@ async def seek_track(data: dict, client_id: str = Depends(get_client_id)):
         raise HTTPException(status_code=400, detail="Missing seconds")
 
     async for db in get_db():
-        udn = await get_active_renderer(db, client_id)
-
-        state = await get_renderer_state_db(db, udn)
-        state["position_seconds"] = float(seconds)
-        await update_renderer_state_db(db, udn, state)
-
-        if not udn.startswith("local:"):
-            await upnp.set_renderer(udn)
-            await upnp.seek(float(seconds))
+        target = await renderer_orchestrator.seek(db, client_id, float(seconds))
+        if target == "remote":
             return {"status": "ok", "target": seconds}
-        else:
-            return {"status": "local", "message": "Handle seek in browser"}
+        return {"status": "local", "message": "Handle seek in browser"}
 
 
 @router.post(
@@ -916,7 +634,7 @@ async def add_manual_renderer(data: dict):
     ip = data.get("ip")
     if not ip:
         raise HTTPException(status_code=400, detail="Missing ip")
-    found = await upnp.add_device_by_ip(ip)
+    found = await renderer_orchestrator.add_manual(ip)
     if found:
         return {"status": "found"}
     else:
@@ -930,6 +648,8 @@ if not is_production():
         dependencies=[Depends(get_current_admin_user_jwt)],
     )
     async def debug_info():
+        upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
+        upnp_manager = getattr(upnp_backend, "manager", None)
         monitors_status = {}
         for udn, task in playback_monitors.items():
             monitors_status[udn] = {
@@ -944,10 +664,10 @@ if not is_production():
                     monitors_status[udn]["error"] = str(e)
 
         return {
-            "log": upnp.debug_log,
-            "renderers": upnp.renderers,
-            "dmr_devices_keys": list(upnp.dmr_devices.keys()),
-            "local_ip": upnp.local_ip,
+            "log": getattr(upnp_manager, "debug_log", []),
+            "renderers": getattr(upnp_manager, "renderers", {}),
+            "dmr_devices_keys": list(getattr(upnp_manager, "dmr_devices", {}).keys()),
+            "local_ip": getattr(upnp_manager, "local_ip", None),
             "monitors": monitors_status,
             "monitor_start_times": monitor_start_times,
         }
@@ -957,6 +677,8 @@ if not is_production():
         dependencies=[Depends(get_current_admin_user_jwt)],
     )
     async def test_upnp():
-        if not upnp.active_renderer:
+        upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
+        upnp_manager = getattr(upnp_backend, "manager", None)
+        if not getattr(upnp_manager, "active_renderer", None):
             return {"error": "No active renderer"}
         return {"status": "ok", "message": "Check debug logs"}

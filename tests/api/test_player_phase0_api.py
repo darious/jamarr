@@ -38,8 +38,15 @@ async def test_phase0_remote_transport_controls_call_upnp_manager(
 ):
     fake_upnp = FakeUpnpManager()
     import app.api.player as player_api
+    import app.services.renderer.orchestrator as orchestrator_module
+    from app.services.renderer.upnp_backend import UpnpRendererBackend
 
-    monkeypatch.setattr(player_api, "upnp", fake_upnp)
+    monkeypatch.setitem(
+        player_api.renderer_orchestrator.registry.backends,
+        "upnp",
+        UpnpRendererBackend(fake_upnp),
+    )
+    monkeypatch.setattr(orchestrator_module, "start_monitor_task", lambda udn: None)
     headers = {"X-Jamarr-Client-Id": "phase0-client"}
 
     pause = await auth_client.post("/api/player/pause", headers=headers)
@@ -81,9 +88,15 @@ async def test_phase0_remote_play_route_sets_base_url_and_starts_monitor(
 ):
     fake_upnp = FakeUpnpManager()
     import app.api.player as player_api
+    import app.services.renderer.orchestrator as orchestrator_module
+    from app.services.renderer.upnp_backend import UpnpRendererBackend
 
-    monkeypatch.setattr(player_api, "upnp", fake_upnp)
-    monkeypatch.setattr(player_api, "start_monitor_task", lambda udn: None)
+    monkeypatch.setitem(
+        player_api.renderer_orchestrator.registry.backends,
+        "upnp",
+        UpnpRendererBackend(fake_upnp),
+    )
+    monkeypatch.setattr(orchestrator_module, "start_monitor_task", lambda udn: None)
     headers = {"X-Jamarr-Client-Id": "phase0-client"}
 
     response = await auth_client.post(

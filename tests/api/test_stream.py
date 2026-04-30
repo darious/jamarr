@@ -2,6 +2,10 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 import os
+from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
+
+from jose import jwt
 
 @pytest.fixture
 async def stream_data(db):
@@ -97,3 +101,15 @@ async def test_stream_url_token_access(client: AsyncClient, auth_client: AsyncCl
 
     token_response = await client.get(data["url"])
     assert token_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_stream_url_cast_token_uses_renderer_policy(auth_client: AsyncClient, db, stream_data):
+    response = await auth_client.get("/api/stream-url/999?renderer_kind=cast")
+
+    assert response.status_code == 200
+    token = parse_qs(urlparse(response.json()["url"]).query)["token"][0]
+    claims = jwt.get_unverified_claims(token)
+    issued_at = datetime.fromtimestamp(claims["iat"], tz=timezone.utc)
+    expires_at = datetime.fromtimestamp(claims["exp"], tz=timezone.utc)
+    assert (expires_at - issued_at).total_seconds() == 1800

@@ -9,7 +9,7 @@ from app.security import configure_security_middleware, fastapi_docs_config, is_
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    from app.upnp import UPnPManager
+    from app.services.renderer import get_renderer_registry
     from app.scanner.scan_manager import ScanManager
     from app.scanner.dns_resolver import warm_dns_cache
     from app.scheduler import Scheduler
@@ -17,13 +17,14 @@ async def lifespan(app: FastAPI):
     # Critical: Warm DNS cache and install monkey-patch BEFORE any clients are created
     await warm_dns_cache()
 
-    UPnPManager.get_instance().start_background_scan()
+    renderer_registry = get_renderer_registry()
+    await renderer_registry.start_all()
     # ScanManager is lazy initialized but good to have it ready
     ScanManager.get_instance()
     await Scheduler.get_instance().start()
     yield
     await Scheduler.get_instance().stop()
-    await UPnPManager.get_instance().stop_background_scan()
+    await renderer_registry.stop_all()
     await ScanManager.get_instance().shutdown()
     await close_db()
 

@@ -194,10 +194,35 @@ Delivery strategy: ship this in small slices with UPnP behavior preserved at
 each step. Do not add Chromecast control until UPnP works through the new
 orchestrator.
 
+### Phase 1 implementation status
+
+Implemented in this branch:
+
+- Protocol-neutral renderer contracts, registry, persistence helpers, and
+  orchestrator foundation
+- UPnP adapter wrapping the existing `UPnPManager`
+- `renderer.kind`, `renderer.native_id`, `renderer.renderer_id`, Cast metadata,
+  availability, and `client_session.active_renderer_id` migration/backfill
+- Backwards-compatible renderer selection: old `udn` input and
+  `active_renderer_udn` storage still work
+- `/api/renderers`, `/api/player/renderer`, and `/api/player/state` expose
+  canonical `renderer_id`/`kind` fields
+- Player endpoints route playback controls through the orchestrator instead of
+  importing `UPnPManager` directly
+- Renderer-kind stream token policy hook: default streams remain 300s; Cast-kind
+  stream URLs use duration-aware TTL capped by `CAST_STREAM_TOKEN_TTL_SECONDS`
+- Server verification passed: `./test.sh` -> 335 passed, 1 skipped
+
+Deferred to Phase 2/3:
+
+- Real Chromecast/AirPlay backends
+- Full callback-driven status pipeline for event-capable renderers
+- Android UI migration to prefer `renderer_id` everywhere
+
 ### 1.1 DB migration
 
 ```
-migrations/029_renderer_kind.sql
+migrations/029_renderer_backend.sql
 ```
 
 - Add `kind TEXT DEFAULT 'upnp'` to `renderer` table
