@@ -1,8 +1,10 @@
+from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from app.db import get_db
 from app.api.deps import get_current_user_jwt, get_optional_user_jwt
 from app.auth_tokens import create_stream_token, verify_stream_token
+from app.services.renderer.token_policy import stream_token_ttl_seconds
 import asyncpg
 import os
 from typing import Optional
@@ -15,13 +17,20 @@ import mimetypes  # noqa: E402
 @router.get("/api/stream-url/{track_id}")
 async def get_stream_url(
     track_id: int,
+    renderer_kind: Optional[str] = None,
     user: asyncpg.Record = Depends(get_current_user_jwt),
     db: asyncpg.Connection = Depends(get_db),
 ):
-    exists = await db.fetchval("SELECT 1 FROM track WHERE id = $1", track_id)
-    if not exists:
+    row = await db.fetchrow("SELECT duration_seconds FROM track WHERE id = $1", track_id)
+    if not row:
         raise HTTPException(status_code=404, detail="Track not found")
-    token = create_stream_token(track_id=track_id, user_id=user["id"])
+    ttl_seconds = stream_token_ttl_seconds(renderer_kind, row["duration_seconds"])
+    expires_delta = timedelta(seconds=ttl_seconds) if ttl_seconds is not None else None
+    token = create_stream_token(
+        track_id=track_id,
+        user_id=user["id"],
+        expires_delta=expires_delta,
+    )
     return {"url": f"/api/stream/{track_id}?token={token}"}
 
 

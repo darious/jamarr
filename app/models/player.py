@@ -31,6 +31,8 @@ class PlayerState(BaseModel):
     position_seconds: float
     is_playing: bool
     renderer: str  # UDN
+    renderer_id: Optional[str] = None
+    renderer_kind: Optional[str] = None
     transport_state: Optional[str] = "STOPPED"
     volume: Optional[int] = None
 

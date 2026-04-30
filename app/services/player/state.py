@@ -95,17 +95,18 @@ def strip_art_ids(queue: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 async def get_active_renderer(db: asyncpg.Connection, client_id: str) -> str:
     """Get active renderer UDN for client. Defaults to local:<client_id>."""
     row = await db.fetchrow(
-        "SELECT active_renderer_udn FROM client_session WHERE client_id = $1", client_id
+        "SELECT active_renderer_udn, active_renderer_id FROM client_session WHERE client_id = $1",
+        client_id,
     )
-    if row and row[0]:
-        return row[0]
+    if row and row["active_renderer_udn"]:
+        return row["active_renderer_udn"]
 
     # If no session found, implicitly create one for observability
     default_udn = f"local:{client_id}"
     await db.execute(
         """
-        INSERT INTO client_session (client_id, active_renderer_udn, last_seen_at)
-        VALUES ($1, $2, NOW())
+        INSERT INTO client_session (client_id, active_renderer_udn, active_renderer_id, last_seen_at)
+        VALUES ($1, $2, $2, NOW())
         ON CONFLICT (client_id) DO NOTHING
     """,
         client_id,

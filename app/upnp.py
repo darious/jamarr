@@ -164,7 +164,7 @@ class UPnPManager:
         return await self.discovery.verify_device(r)
 
     async def save_renderer(self, r: Dict[str, Any]):
-        # This one writes to DB, kept here or moved? 
+        # This one writes to DB, kept here or moved?
         # It was on Manager. Let's keep it here or move to a persistence module.
         # Discovery uses it. Let's keep it here to allow Discovery to call back.
         from app.db import get_db
@@ -172,12 +172,15 @@ class UPnPManager:
             await db.execute(
                 """
                 INSERT INTO renderer 
-                (udn, friendly_name, location_url, ip, control_url, rendering_control_url, 
+                (udn, kind, native_id, renderer_id, friendly_name, location_url, ip, control_url, rendering_control_url,
                  device_type, manufacturer, model_name, model_number, serial_number, 
                  firmware_version, supports_events, supports_gapless, supported_mime_types,
-                 icon_url, icon_mime, icon_width, icon_height, last_seen_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
+                 icon_url, icon_mime, icon_width, icon_height, last_discovered_by, available, enabled_by_default, last_seen_at)
+                VALUES ($1, 'upnp', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'server', TRUE, TRUE, NOW())
                 ON CONFLICT (udn) DO UPDATE SET
+                    kind = 'upnp',
+                    native_id = EXCLUDED.native_id,
+                    renderer_id = EXCLUDED.renderer_id,
                     friendly_name = EXCLUDED.friendly_name,
                     location_url = EXCLUDED.location_url,
                     ip = EXCLUDED.ip,
@@ -196,9 +199,13 @@ class UPnPManager:
                     icon_mime = EXCLUDED.icon_mime,
                     icon_width = EXCLUDED.icon_width,
                     icon_height = EXCLUDED.icon_height,
+                    last_discovered_by = EXCLUDED.last_discovered_by,
+                    available = TRUE,
+                    enabled_by_default = COALESCE(renderer.enabled_by_default, TRUE),
                     last_seen_at = NOW()
             """,
                 r["udn"],
+                f"upnp:{r['udn']}",
                 r.get("friendly_name"),
                 r.get("location"),
                 r.get("ip"),

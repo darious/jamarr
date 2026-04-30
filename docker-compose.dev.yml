@@ -34,7 +34,7 @@ services:
       # Keep generated dev artifacts inside Docker-owned volumes
       - jamarr_web_svelte_kit:/app/web/.svelte-kit
       - jamarr_web_vite_cache:/app/web/.vite
-    entrypoint: /bin/sh -c "npm install && npx svelte-kit sync && npm run dev:host -- --force"
+    entrypoint: /bin/sh -c "find .svelte-kit .vite -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true; npm install && npx svelte-kit sync && npm run dev:host -- --force"
     environment:
       - VITE_API_URL=${VITE_API_URL:-http://127.0.0.1:8111}
     restart: unless-stopped

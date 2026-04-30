@@ -201,6 +201,9 @@ async def init_db():
                 id BIGSERIAL PRIMARY KEY,
                 friendly_name TEXT,
                 udn TEXT UNIQUE NOT NULL,
+                kind TEXT DEFAULT 'upnp',
+                native_id TEXT,
+                renderer_id TEXT UNIQUE,
                 location_url TEXT,
                 ip TEXT,
                 control_url TEXT,
@@ -219,15 +222,74 @@ async def init_db():
                 icon_mime TEXT,
                 icon_width INTEGER,
                 icon_height INTEGER,
+                cast_uuid TEXT UNIQUE,
+                cast_type TEXT,
+                last_discovered_by TEXT DEFAULT 'server',
+                available BOOLEAN DEFAULT TRUE,
+                enabled_by_default BOOLEAN DEFAULT TRUE,
+                renderer_metadata JSONB DEFAULT '{}'::jsonb,
                 last_seen_at TIMESTAMPTZ DEFAULT NOW()
             );
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'upnp';
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS native_id TEXT;
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS renderer_id TEXT;
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS cast_uuid TEXT;
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS cast_type TEXT;
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS last_discovered_by TEXT DEFAULT 'server';
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS available BOOLEAN DEFAULT TRUE;
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS enabled_by_default BOOLEAN DEFAULT TRUE;
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS renderer_metadata JSONB DEFAULT '{}'::jsonb;
+            UPDATE renderer
+            SET
+                kind = COALESCE(kind, 'upnp'),
+                native_id = COALESCE(native_id, udn),
+                renderer_id = COALESCE(renderer_id, 'upnp:' || udn),
+                last_discovered_by = COALESCE(last_discovered_by, 'server'),
+                available = COALESCE(available, TRUE),
+                enabled_by_default = COALESCE(enabled_by_default, TRUE),
+                renderer_metadata = COALESCE(renderer_metadata, '{}'::jsonb)
+            WHERE udn IS NOT NULL;
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint c
+                    JOIN pg_class t ON t.oid = c.conrelid
+                    JOIN pg_attribute a
+                      ON a.attrelid = t.oid
+                     AND a.attnum = ANY(c.conkey)
+                    WHERE t.relname = 'renderer'
+                      AND c.contype = 'u'
+                      AND a.attname = 'renderer_id'
+                ) THEN
+                    ALTER TABLE renderer
+                        ADD CONSTRAINT renderer_renderer_id_unique UNIQUE (renderer_id);
+                END IF;
+            END $$;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_renderer_renderer_id
+                ON renderer(renderer_id)
+                WHERE renderer_id IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_renderer_cast_uuid
+                ON renderer(cast_uuid)
+                WHERE cast_uuid IS NOT NULL;
             
             -- Client sessions
             CREATE TABLE IF NOT EXISTS client_session (
                 client_id TEXT PRIMARY KEY,
                 active_renderer_udn TEXT,
+                active_renderer_id TEXT,
                 last_seen_at TIMESTAMPTZ DEFAULT NOW()
             );
+            ALTER TABLE client_session ADD COLUMN IF NOT EXISTS active_renderer_id TEXT;
+            UPDATE client_session
+            SET active_renderer_id = CASE
+                WHEN active_renderer_udn IS NULL THEN NULL
+                WHEN active_renderer_udn LIKE 'local:%' THEN active_renderer_udn
+                WHEN active_renderer_udn LIKE 'upnp:%' THEN active_renderer_udn
+                WHEN active_renderer_udn LIKE 'cast:%' THEN active_renderer_udn
+                ELSE 'upnp:' || active_renderer_udn
+            END
+            WHERE active_renderer_id IS NULL;
             
             -- Renderer state
             CREATE TABLE IF NOT EXISTS renderer_state (
