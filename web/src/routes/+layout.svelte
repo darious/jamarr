@@ -26,6 +26,14 @@
   import { initializeAuth } from "$lib/stores/auth";
   import { page } from "$app/stores";
   import { themeAccent, themeMode } from "$stores/theme";
+  import {
+    getRendererFallback,
+    getRendererIcon,
+    rendererKind,
+    rendererKindLabel,
+    rendererMatchesActive,
+    rendererSelectionId,
+  } from "$lib/renderer-utils";
 
   export let data;
 
@@ -60,42 +68,6 @@
     { href: "/history", label: "History", active: (pathname: string) => pathname.startsWith("/history") },
   ];
 
-  const DEFAULT_RENDERER_ICON = "/assets/icon-renderer.svg";
-  const LOCAL_RENDERER_ICON = "/assets/icon-browser.svg";
-
-  function getRendererFallback(renderer: any): string {
-    if (!renderer) return DEFAULT_RENDERER_ICON;
-    if (renderer.type === "local" || renderer.udn?.startsWith("local")) {
-      return LOCAL_RENDERER_ICON;
-    }
-    return DEFAULT_RENDERER_ICON;
-  }
-
-  function getRendererIcon(renderer: any): string {
-    if (renderer?.icon_url) return renderer.icon_url;
-    return getRendererFallback(renderer);
-  }
-
-  function rendererKind(renderer: any): string {
-    const raw = renderer?.kind || renderer?.type || renderer?.renderer_id?.split(":")[0] || "";
-    if (raw === "cast" || raw === "chromecast") return "cast";
-    if (raw === "upnp" || renderer?.udn?.startsWith("uuid:")) return "upnp";
-    if (raw === "local" || renderer?.udn?.startsWith("local:")) return "local";
-    return raw || "unknown";
-  }
-
-  function rendererKindLabel(renderer: any): string {
-    const kind = rendererKind(renderer);
-    if (kind === "cast") {
-      const castType = renderer?.cast_type;
-      if (!castType || castType === "cast") return "Cast";
-      return `Cast ${castType}`;
-    }
-    if (kind === "upnp") return "UPnP";
-    if (kind === "local") return "Local";
-    return kind.toUpperCase();
-  }
-
   function rendererKindClass(renderer: any): string {
     const kind = rendererKind(renderer);
     if (kind === "cast") return "border-sky-400/40 bg-sky-500/15 text-sky-300";
@@ -106,7 +78,7 @@
 
   // Track whether we're on an auth page
   $: isAuthPage = $page.url.pathname.startsWith("/login");
-  $: activeRendererItem = rendererList.find((r) => r.udn === activeRenderer);
+  $: activeRendererItem = rendererList.find((r) => rendererMatchesActive(r, activeRenderer));
   $: isAdmin = shouldShowAdminControls(user);
   $: settingsMenuItems = getSettingsMenuItems(user);
   $: if (isAuthPage) {
@@ -364,7 +336,7 @@
                         : ''}"
                       disabled={renderersLoading}
                       on:click={() => {
-                        changeRenderer(renderer.udn);
+                        changeRenderer(rendererSelectionId(renderer));
                         showRenderers = false;
                       }}
                     >
@@ -386,7 +358,7 @@
                           {rendererKindLabel(renderer)}
                         </span>
                       </span>
-                      {#if activeRenderer === renderer.udn}
+                      {#if rendererMatchesActive(renderer, activeRenderer)}
                         <svg
                           class="h-4 w-4 text-primary-400"
                           fill="none"
@@ -583,10 +555,10 @@
             <div class="max-h-80 overflow-y-auto p-2 space-y-1">
               {#each rendererList as renderer}
                 <button
-                  class="flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-sm transition-all hover:bg-white/5 {activeRenderer === renderer.udn ? 'text-default border border-accent/40 bg-accent/10' : 'text-muted border border-transparent'}"
+                  class="flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-sm transition-all hover:bg-white/5 {rendererMatchesActive(renderer, activeRenderer) ? 'text-default border border-accent/40 bg-accent/10' : 'text-muted border border-transparent'}"
                   disabled={renderersLoading}
                   on:click={() => {
-                    changeRenderer(renderer.udn);
+                    changeRenderer(rendererSelectionId(renderer));
                     showRenderers = false;
                   }}
                 >
@@ -608,7 +580,7 @@
                       {rendererKindLabel(renderer)}
                     </span>
                   </span>
-                  {#if activeRenderer === renderer.udn}
+                  {#if rendererMatchesActive(renderer, activeRenderer)}
                     <svg class="h-4 w-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                     </svg>
