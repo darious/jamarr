@@ -613,6 +613,34 @@ app/services/player/monitor.py (modify)
 
 Server discovers and controls Cast devices on same LAN. Useful for home-server deployments (Docker on NAS, Pi, etc.).
 
+### Phase 2 implementation status
+
+Implemented in this branch:
+
+- Added `pychromecast` and `zeroconf` dependencies
+- Added `CastRendererBackend` behind the Phase 1 `RendererBackend` contract
+- Cast discovery converts pychromecast devices into canonical `cast:<uuid>`
+  renderers and persists through shared renderer persistence
+- Manual Cast host/IP discovery is supported through the backend
+- Cast play/pause/resume/stop/seek/volume/mute/status commands route through
+  pychromecast
+- Cast playback uses the Default Media Receiver and Cast-safe stream token TTL
+  policy from the orchestrator
+- Cast media status callbacks dispatch back onto the asyncio loop and update
+  normalized renderer state; `IDLE` after `PLAYING` can auto-advance the queue
+- Registry registers Cast alongside UPnP when dependencies are available
+
+Verification so far:
+
+- Targeted server slice passed:
+  `./test.sh tests/unit/test_renderer_phase2_cast.py tests/api/test_renderer_phase2_api.py tests/unit/test_renderer_phase1.py tests/api/test_renderer_phase1_api.py tests/api/test_player.py tests/api/test_stream.py`
+  -> 41 passed
+- Full server gate passed: `./test.sh` -> 343 passed, 1 skipped
+
+Still required before calling Phase 2 fully delivered:
+
+- Real-device smoke on one Chromecast/Google Home
+
 ### 2.1 Dependencies
 
 ```

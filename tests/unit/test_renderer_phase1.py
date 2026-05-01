@@ -26,6 +26,10 @@ def test_phase1_renderer_device_api_shape_includes_backcompat_fields():
         native_id="uuid:test",
         udn="uuid:test",
         name="Living Room",
+        icon_url="/art/renderer/uuid:test",
+        icon_mime="image/png",
+        icon_width=64,
+        icon_height=64,
         capabilities=RendererCapabilities(supported_mime_types={"audio/flac"}),
     )
 
@@ -36,6 +40,10 @@ def test_phase1_renderer_device_api_shape_includes_backcompat_fields():
     assert data["native_id"] == "uuid:test"
     assert data["udn"] == "uuid:test"
     assert data["type"] == "upnp"
+    assert data["icon_url"] == "/art/renderer/uuid:test"
+    assert data["icon_mime"] == "image/png"
+    assert data["icon_width"] == 64
+    assert data["icon_height"] == 64
     assert data["capabilities"]["supported_mime_types"] == ["audio/flac"]
 
 
@@ -69,6 +77,12 @@ async def test_phase1_upnp_backend_lists_normalized_devices():
             "ip": "192.0.2.10",
             "manufacturer": "Test",
             "model_name": "Model",
+            "model_number": "One",
+            "device_type": "urn:schemas-upnp-org:device:MediaRenderer:1",
+            "icon_url": "/art/renderer/uuid:test",
+            "icon_mime": "image/png",
+            "icon_width": 64,
+            "icon_height": 64,
             "supported_mime_types": "audio/flac,audio/mpeg",
         }
     }
@@ -81,6 +95,12 @@ async def test_phase1_upnp_backend_lists_normalized_devices():
     assert device.renderer_id == "upnp:uuid:test"
     assert device.native_id == "uuid:test"
     assert device.name == "Kitchen"
+    assert device.icon_url == "/art/renderer/uuid:test"
+    assert device.icon_mime == "image/png"
+    assert device.icon_width == 64
+    assert device.icon_height == 64
+    assert device.model_number == "One"
+    assert device.device_type == "urn:schemas-upnp-org:device:MediaRenderer:1"
     assert device.capabilities.supported_mime_types == {"audio/flac", "audio/mpeg"}
 
 

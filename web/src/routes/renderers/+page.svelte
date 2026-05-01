@@ -46,6 +46,44 @@
         return getRendererFallback(renderer);
     }
 
+    function rendererKind(renderer: any): string {
+        const raw =
+            renderer?.kind ||
+            renderer?.type ||
+            renderer?.renderer_id?.split(":")[0] ||
+            "";
+        if (raw === "cast" || raw === "chromecast") return "cast";
+        if (raw === "upnp" || renderer?.udn?.startsWith("uuid:")) return "upnp";
+        if (raw === "local" || renderer?.udn?.startsWith("local:")) return "local";
+        return raw || "unknown";
+    }
+
+    function rendererKindLabel(renderer: any): string {
+        const kind = rendererKind(renderer);
+        if (kind === "cast") {
+            const castType = renderer?.cast_type;
+            if (!castType || castType === "cast") return "Cast";
+            return `Cast ${castType}`;
+        }
+        if (kind === "upnp") return "UPnP";
+        if (kind === "local") return "Local";
+        return kind.toUpperCase();
+    }
+
+    function rendererKindClass(renderer: any): string {
+        const kind = rendererKind(renderer);
+        if (kind === "cast") {
+            return "border-sky-400/40 bg-sky-500/15 text-sky-300";
+        }
+        if (kind === "upnp") {
+            return "border-emerald-400/40 bg-emerald-500/15 text-emerald-300";
+        }
+        if (kind === "local") {
+            return "border-zinc-400/30 bg-zinc-500/15 text-zinc-300";
+        }
+        return "border-subtle bg-surface-3 text-muted";
+    }
+
     let scanStatus = "";
     let scanProgress = 0;
     let scanLogs: string[] = [];
@@ -147,7 +185,7 @@
     {/if}
 
     <p class="mb-6 text-muted">
-        Discovered UPnP/DLNA media renderers on your network.
+        Discovered network media renderers.
     </p>
 
     <div class="grid gap-4 grid-cols-1">
@@ -194,9 +232,16 @@
                         >
                             {r.name}
                         </h3>
-                        <span class="text-xs text-subtle font-mono"
-                            >{r.ip || "Local"}</span
-                        >
+                        <div class="mt-1 flex flex-wrap items-center gap-2">
+                            <span
+                                class={`rounded-sm border px-2 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide ${rendererKindClass(r)}`}
+                            >
+                                {rendererKindLabel(r)}
+                            </span>
+                            <span class="text-xs text-subtle font-mono"
+                                >{r.ip || "Local"}</span
+                            >
+                        </div>
                     </div>
                 </div>
 
@@ -218,6 +263,16 @@
                                     <span class="text-subtle">Model</span>
                                     <span class="text-muted"
                                         >{r.model_name}</span
+                                    >
+                                </div>
+                            {/if}
+                            {#if r.renderer_id}
+                                <div class="flex flex-col gap-1 text-sm sm:flex-row sm:justify-between">
+                                    <span class="text-subtle">Renderer ID</span>
+                                    <span
+                                        class="text-muted font-mono text-xs truncate"
+                                        title={r.renderer_id}
+                                        >{r.renderer_id}</span
                                     >
                                 </div>
                             {/if}

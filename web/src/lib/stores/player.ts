@@ -4,8 +4,12 @@ import { fetchWithAuth } from '$lib/api';
 
 export interface Renderer {
     udn: string;
+    renderer_id?: string;
     name: string;
     type: string;
+    kind?: string;
+    native_id?: string;
+    cast_type?: string;
     icon_url?: string;
     icon_mime?: string;
     icon_width?: number;
@@ -141,7 +145,15 @@ export async function setRenderer(udn: string) {
         if (res.ok) {
             const data = await res.json();
             const active = data.active || udn;
-            playerState.update(s => ({ ...s, renderer: active }));
+            // Reset volume for remote renderers — device volume is unknown
+            // until the next sync_status poll fetches it.  Prevents stale
+            // volume from previous renderer leaking into the new one.
+            const isRemote = !active.startsWith("local");
+            playerState.update(s => ({
+                ...s,
+                renderer: active,
+                volume: isRemote ? null : s.volume,
+            }));
             await loadQueueFromServer();
         }
     } catch (e) {
@@ -336,13 +348,7 @@ export async function clearQueue(stopPlayback: boolean = true) {
                 transport_state: 'STOPPED'
             }));
 
-            if (stopPlayback) {
-                try {
-                    await pause();
-                } catch (err) {
-                    console.warn('[clearQueue] Failed to pause after clear:', err);
-                }
-            }
+            void stopPlayback;
         } else {
             console.error('[clearQueue] Failed, status:', res.status, await res.text());
         }

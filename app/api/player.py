@@ -64,8 +64,9 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
         renderer_id, udn = await renderer_orchestrator.get_active(db, client_id)
         state = await get_renderer_state_db(db, udn)
 
-        # If UPnP, sync live state
-        if udn != f"local:{client_id}" and not udn.startswith("local:"):
+        # UPnP uses the legacy polling monitor. Event-capable backends like Cast
+        # update state through the renderer orchestrator callback path.
+        if renderer_id.startswith("upnp:"):
             # For UPnP devices, we might want to check if monitor is running
             if state["is_playing"]:
                 if udn not in playback_monitors or playback_monitors[udn].done():
@@ -75,6 +76,8 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
                     if now - last_start > 5 and not _is_monitor_starting(udn):
                         logger.info(f"[Player] Auto-restarting monitor for {udn}")
                         start_monitor_task(udn)
+        elif not renderer_id.startswith("local:"):
+            state = await renderer_orchestrator.sync_status(db, renderer_id, udn, state)
 
         queue = state["queue"]
         track_ids = [

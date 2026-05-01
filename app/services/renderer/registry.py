@@ -13,6 +13,10 @@ from app.services.renderer.contracts import (
 )
 from app.services.renderer.persistence import register_or_update_renderer
 from app.services.renderer.upnp_backend import UpnpRendererBackend
+try:
+    from app.services.renderer.cast_backend import CastRendererBackend
+except Exception:
+    CastRendererBackend = None
 
 
 class RendererRegistry:
@@ -164,4 +168,6 @@ def get_renderer_registry() -> RendererRegistry:
     if _registry is None:
         _registry = RendererRegistry()
         _registry.register_backend(UpnpRendererBackend())
+        if CastRendererBackend is not None:
+            _registry.register_backend(CastRendererBackend())
     return _registry

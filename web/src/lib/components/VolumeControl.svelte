@@ -7,16 +7,18 @@
     export let sliderStyle = "";
     export let containerClass = "flex items-center gap-2 group";
 
-    let volume = 1.0;
+    let volume = ($playerState.volume != null) ? $playerState.volume / 100 : 0.5;
 
-    // Sync from store
+    // Sync from store (0-100 → 0-1). When store is null (e.g. remote
+    // renderer selected, device volume not yet known), default to 50%
+    // to avoid blasting full volume on first slider touch.
     $: if ($playerState.volume !== null && $playerState.volume !== undefined) {
-        // Store is 0-100, local is 0-1
         const newVol = $playerState.volume / 100;
         if (Math.abs(volume - newVol) > 0.01) {
             volume = newVol;
         }
     } else {
+        volume = 0.5;
     }
 
     function handleInput(e: Event) {

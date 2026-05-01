@@ -160,7 +160,7 @@ async def get_renderer_state_db(db: asyncpg.Connection, udn: str) -> Dict[str, A
 async def update_renderer_state_db(
     db: asyncpg.Connection, udn: str, state: Dict[str, Any]
 ):
-    """Upsert renderer state."""
+    """Upsert renderer state (all fields)."""
     queue_json = json.dumps(strip_art_ids(state.get("queue", [])))
     volume = state.get("volume")
     await db.execute(
@@ -183,4 +183,44 @@ async def update_renderer_state_db(
         bool(state.get("is_playing")),
         state.get("transport_state", "STOPPED"),
         volume,
+    )
+
+
+async def update_playback_progress_db(
+    db: asyncpg.Connection, udn: str, state: Dict[str, Any]
+):
+    """Update only progress fields — never current_index or queue.
+    Safe to call concurrently from status listeners and polling.
+    """
+    await db.execute(
+        """
+        INSERT INTO renderer_state (renderer_udn, queue, current_index, position_seconds, is_playing, transport_state, volume, updated_at)
+        VALUES ($1, '[]'::jsonb, 0, $2, $3, $4, $5, NOW())
+        ON CONFLICT(renderer_udn) DO UPDATE SET
+            position_seconds = excluded.position_seconds,
+            is_playing = excluded.is_playing,
+            transport_state = excluded.transport_state,
+            volume = excluded.volume,
+            updated_at = NOW()
+    """,
+        udn,
+        state.get("position_seconds", 0),
+        bool(state.get("is_playing")),
+        state.get("transport_state", "STOPPED"),
+        state.get("volume"),
+    )
+
+
+async def update_queue_logged_db(
+    db: asyncpg.Connection, udn: str, state: Dict[str, Any]
+):
+    """Update only the queue column (used after setting track logged flag)."""
+    queue_json = json.dumps(strip_art_ids(state.get("queue", [])))
+    await db.execute(
+        """
+        UPDATE renderer_state SET queue = $2, updated_at = NOW()
+        WHERE renderer_udn = $1
+    """,
+        udn,
+        queue_json,
     )
