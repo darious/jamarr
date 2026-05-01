@@ -156,13 +156,15 @@ fun RendererPicker(
                         }
                     }
                 } else {
-                    items(serverRenderers.filter { !it.isLocal }, key = { "srv:" + it.udn }) { r ->
+                    items(serverRenderers.filter { !it.isLocal }, key = { "srv:" + it.activeKey }) { r ->
                         RendererRow(
                             name = r.name,
-                            subtitle = r.ip ?: r.manufacturer ?: "Network Device",
-                            isSelected = r.udn == activeUdn,
+                            subtitle = listOfNotNull(r.rendererKind.uppercase(), r.ip ?: r.manufacturer)
+                                .joinToString(" · ")
+                                .ifBlank { "Network Device" },
+                            isSelected = r.activeKey == activeUdn || r.udn == activeUdn,
                             icon = { SpeakerIcon(tint = JamarrColors.Text, size = 22.dp) },
-                            onClick = { onSelectServer(r.udn) },
+                            onClick = { onSelectServer(r.activeKey) },
                         )
                     }
                     if (serverRenderers.none { !it.isLocal }) {

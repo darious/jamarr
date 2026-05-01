@@ -82,7 +82,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         if (!isRemoteMode) return "This Device"
         return when (activeRendererSource) {
             RendererSource.DEVICE -> deviceRenderers.find { it.udn == activeRendererUdn }?.name ?: "Network Renderer"
-            RendererSource.SERVER -> renderers.find { it.udn == activeRendererUdn }?.name ?: "Network Renderer"
+            RendererSource.SERVER -> renderers.find { it.activeKey == activeRendererUdn || it.udn == activeRendererUdn }?.name ?: "Network Renderer"
         }
     }
 
@@ -225,42 +225,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             while (true) {
                 if (isRemoteMode && !isDeviceUpnp) {
-                    runCatching {
-                        val state = apiClient.getPlayerState(serverUrl, clientId)
-                        playbackPosition = (state.positionSeconds * 1000).toLong()
-                        remoteVolume = state.volume ?: 0
-
-                        isPlaying = state.isPlaying
-
-                        val q = state.queue.map { t ->
-                            ResolvedTrack(
-                                track = SearchTrack(
-                                    id = t.id,
-                                    title = t.title,
-                                    artist = t.artist,
-                                    album = t.album,
-                                    artSha1 = t.artSha1,
-                                    durationSeconds = t.durationSeconds,
-                                    mbReleaseId = t.mbReleaseId,
-                                ),
-                                streamUrl = "",
-                                artworkUrl = t.artSha1?.let { apiClient.artworkUrl(serverUrl, it) },
-                            )
-                        }
-                        if (q != playbackQueue) playbackQueue = q
-
-                        val currentTrack = q.getOrNull(state.currentIndex)
-                        if (currentTrack != null) {
-                            val dur = ((currentTrack.track.durationSeconds ?: 0.0) * 1000).toLong()
-                            if (dur > 0) playbackDuration = dur
-                            if (currentTrack.track.id != nowPlayingTrack?.id) {
-                                nowPlayingTrack = currentTrack.track
-                                nowPlayingArtworkUrl = currentTrack.artworkUrl
-                            }
-                        }
-                    }.onFailure {
-                        status = "Remote poll: ${it.message}"
-                    }
+                    refreshServerPlaybackState()
                 }
                 delay(2000)
             }
@@ -284,6 +249,60 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         super.onCleared()
         playbackController.release()
         upnpController.stop()
+    }
+
+    private suspend fun refreshServerPlaybackState() {
+        runCatching {
+            apiClient.getPlayerState(serverUrl, clientId)
+        }.onSuccess { state ->
+            applyServerPlaybackState(state)
+        }.onFailure {
+            status = "Remote poll: ${it.message}"
+        }
+    }
+
+    private fun applyServerPlaybackState(state: PlayerStateResponse) {
+        val active = state.rendererId ?: state.renderer
+        if (active.isNotBlank()) {
+            activeRendererUdn = active
+            activeRendererSource = RendererSource.SERVER
+        }
+
+        playbackPosition = (state.positionSeconds * 1000).toLong()
+        remoteVolume = state.volume ?: remoteVolume
+        isPlaying = state.isPlaying
+
+        val q = state.queue.map { t ->
+            ResolvedTrack(
+                track = SearchTrack(
+                    id = t.id,
+                    title = t.title,
+                    artist = t.artist,
+                    album = t.album,
+                    artSha1 = t.artSha1,
+                    durationSeconds = t.durationSeconds,
+                    mbReleaseId = t.mbReleaseId,
+                ),
+                streamUrl = "",
+                artworkUrl = t.artSha1?.let { apiClient.artworkUrl(serverUrl, it) },
+            )
+        }
+        if (q != playbackQueue) playbackQueue = q
+
+        val currentTrack = q.getOrNull(state.currentIndex)
+        if (currentTrack != null) {
+            val dur = ((currentTrack.track.durationSeconds ?: 0.0) * 1000).toLong()
+            if (dur > 0) playbackDuration = dur
+            if (currentTrack.track.id != nowPlayingTrack?.id) {
+                nowPlayingTrack = currentTrack.track
+                nowPlayingArtworkUrl = currentTrack.artworkUrl
+            }
+        } else if (q.isEmpty()) {
+            nowPlayingTrack = null
+            nowPlayingArtworkUrl = null
+            playbackDuration = 0L
+            playbackPosition = 0L
+        }
     }
 
     fun refreshHome() {
@@ -354,6 +373,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             playbackDuration = ((startTrack.durationSeconds ?: 0.0) * 1000).toLong()
             if (clientId.isNotBlank()) {
                 apiClient.remotePlay(serverUrl, clientId, startTrack.id)
+                refreshServerPlaybackState()
             }
         } else {
             val resolved = queue.map { queueTrack ->
@@ -439,6 +459,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             isDeviceUpnp -> viewModelScope.launch { runCatching { upnpController.stopPlayback() } }
             isRemoteMode -> viewModelScope.launch {
                 runCatching { apiClient.remoteClearQueue(serverUrl, clientId) }
+                    .onSuccess { refreshServerPlaybackState() }
             }
             else -> playbackController.stop()
         }
@@ -459,10 +480,16 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             isRemoteMode -> viewModelScope.launch {
                 if (isPlaying) {
                     runCatching { apiClient.remotePause(serverUrl, clientId) }
-                        .onSuccess { isPlaying = false }
+                        .onSuccess {
+                            isPlaying = false
+                            refreshServerPlaybackState()
+                        }
                 } else {
                     runCatching { apiClient.remoteResume(serverUrl, clientId) }
-                        .onSuccess { isPlaying = true }
+                        .onSuccess {
+                            isPlaying = true
+                            refreshServerPlaybackState()
+                        }
                 }
             }
             else -> playbackController.togglePlayPause()
@@ -476,6 +503,10 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             }
             isRemoteMode -> viewModelScope.launch {
                 runCatching { apiClient.remoteSeek(serverUrl, clientId, positionMs / 1000.0) }
+                    .onSuccess {
+                        playbackPosition = positionMs.coerceAtLeast(0L)
+                        refreshServerPlaybackState()
+                    }
             }
             else -> playbackController.seekTo(positionMs)
         }
@@ -492,6 +523,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                 if (nextIndex != currentIndex) {
                     viewModelScope.launch {
                         runCatching { apiClient.reportIndex(serverUrl, clientId, nextIndex) }
+                            .onSuccess { refreshServerPlaybackState() }
                     }
                 }
             }
@@ -510,6 +542,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                 if (prevIndex != currentIndex) {
                     viewModelScope.launch {
                         runCatching { apiClient.reportIndex(serverUrl, clientId, prevIndex) }
+                            .onSuccess { refreshServerPlaybackState() }
                     }
                 }
             }
@@ -522,6 +555,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             isDeviceUpnp -> viewModelScope.launch { runCatching { upnpController.jumpTo(index) } }
             isRemoteMode -> viewModelScope.launch {
                 runCatching { apiClient.reportIndex(serverUrl, clientId, index) }
+                    .onSuccess { refreshServerPlaybackState() }
             }
             else -> playbackController.playQueueItem(index)
         }
@@ -581,6 +615,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                             activeRendererSource = RendererSource.SERVER
                             remoteVolume = 0
                             showRendererPicker = false
+                            refreshServerPlaybackState()
                         }
                         .onFailure { status = it.message ?: "Failed to set renderer" }
                 }
@@ -592,6 +627,9 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         activeRendererUdn = "local:$clientId"
         activeRendererSource = RendererSource.SERVER
         showRendererPicker = false
+        viewModelScope.launch {
+            runCatching { apiClient.setRenderer(serverUrl, clientId, "local:$clientId") }
+        }
     }
 
     fun toggleUseDeviceUpnp(enabled: Boolean) {
@@ -616,6 +654,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                     .onFailure { status = "Volume: ${it.message}" }
             } else {
                 runCatching { apiClient.remoteVolume(serverUrl, clientId, percent) }
+                    .onSuccess { refreshServerPlaybackState() }
                     .onFailure { status = "Volume: ${it.message}" }
             }
         }
