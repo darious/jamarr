@@ -18,9 +18,10 @@ async def register_or_update_renderer(
         INSERT INTO renderer (
             renderer_id, kind, native_id, udn, friendly_name, ip, manufacturer,
             model_name, cast_type, last_discovered_by, available,
-            enabled_by_default, supported_mime_types, last_seen_at
+            enabled_by_default, supported_mime_types, icon_url, icon_mime,
+            icon_width, icon_height, last_seen_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
         ON CONFLICT (renderer_id) DO UPDATE SET
             kind = EXCLUDED.kind,
             native_id = EXCLUDED.native_id,
@@ -34,6 +35,10 @@ async def register_or_update_renderer(
             available = EXCLUDED.available,
             enabled_by_default = EXCLUDED.enabled_by_default,
             supported_mime_types = EXCLUDED.supported_mime_types,
+            icon_url = EXCLUDED.icon_url,
+            icon_mime = EXCLUDED.icon_mime,
+            icon_width = EXCLUDED.icon_width,
+            icon_height = EXCLUDED.icon_height,
             last_seen_at = NOW()
         """,
         device.renderer_id,
@@ -49,6 +54,10 @@ async def register_or_update_renderer(
         device.available,
         device.enabled_by_default,
         ",".join(sorted(device.capabilities.supported_mime_types)),
+        device.icon_url,
+        device.icon_mime,
+        device.icon_width,
+        device.icon_height,
     )
 
 
@@ -105,6 +114,10 @@ def renderer_row_to_api(row: asyncpg.Record | dict[str, Any]) -> dict[str, Any]:
         "manufacturer": _row_get(row, "manufacturer"),
         "model_name": _row_get(row, "model_name"),
         "cast_type": _row_get(row, "cast_type"),
+        "icon_url": _row_get(row, "icon_url"),
+        "icon_mime": _row_get(row, "icon_mime"),
+        "icon_width": _row_get(row, "icon_width"),
+        "icon_height": _row_get(row, "icon_height"),
         "discovered_by": _row_get(row, "last_discovered_by", "server"),
         "available": _row_get(row, "available", True),
         "enabled_by_default": _row_get(row, "enabled_by_default", True),

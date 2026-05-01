@@ -76,6 +76,34 @@
     return getRendererFallback(renderer);
   }
 
+  function rendererKind(renderer: any): string {
+    const raw = renderer?.kind || renderer?.type || renderer?.renderer_id?.split(":")[0] || "";
+    if (raw === "cast" || raw === "chromecast") return "cast";
+    if (raw === "upnp" || renderer?.udn?.startsWith("uuid:")) return "upnp";
+    if (raw === "local" || renderer?.udn?.startsWith("local:")) return "local";
+    return raw || "unknown";
+  }
+
+  function rendererKindLabel(renderer: any): string {
+    const kind = rendererKind(renderer);
+    if (kind === "cast") {
+      const castType = renderer?.cast_type;
+      if (!castType || castType === "cast") return "Cast";
+      return `Cast ${castType}`;
+    }
+    if (kind === "upnp") return "UPnP";
+    if (kind === "local") return "Local";
+    return kind.toUpperCase();
+  }
+
+  function rendererKindClass(renderer: any): string {
+    const kind = rendererKind(renderer);
+    if (kind === "cast") return "border-sky-400/40 bg-sky-500/15 text-sky-300";
+    if (kind === "upnp") return "border-emerald-400/40 bg-emerald-500/15 text-emerald-300";
+    if (kind === "local") return "border-zinc-400/30 bg-zinc-500/15 text-zinc-300";
+    return "border-subtle bg-surface-3 text-muted";
+  }
+
   // Track whether we're on an auth page
   $: isAuthPage = $page.url.pathname.startsWith("/login");
   $: activeRendererItem = rendererList.find((r) => r.udn === activeRenderer);
@@ -301,6 +329,13 @@
                 <span class="truncate max-w-[170px]">
                   {activeRendererItem?.name || "Select Player"}
                 </span>
+                {#if activeRendererItem}
+                  <span
+                    class={`hidden shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide sm:inline-flex ${rendererKindClass(activeRendererItem)}`}
+                  >
+                    {rendererKindLabel(activeRendererItem)}
+                  </span>
+                {/if}
               </span>
               <svg
                 class={`h-4 w-4 opacity-50 ${renderersLoading ? "animate-pulse" : ""}`}
@@ -344,7 +379,12 @@
                               getRendererFallback(renderer);
                           }}
                         />
-                        <span class="truncate">{renderer.name}</span>
+                        <span class="min-w-0 flex-1 truncate">{renderer.name}</span>
+                        <span
+                          class={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide ${rendererKindClass(renderer)}`}
+                        >
+                          {rendererKindLabel(renderer)}
+                        </span>
                       </span>
                       {#if activeRenderer === renderer.udn}
                         <svg
@@ -513,6 +553,13 @@
               <span class="max-w-[72px] truncate text-left">
                 {activeRendererItem?.name || "Player"}
               </span>
+              {#if activeRendererItem}
+                <span
+                  class={`hidden shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide sm:inline-flex ${rendererKindClass(activeRendererItem)}`}
+                >
+                  {rendererKindLabel(activeRendererItem)}
+                </span>
+              {/if}
             </button>
             {/if}
             <button
@@ -554,7 +601,12 @@
                           getRendererFallback(renderer);
                       }}
                     />
-                    <span class="truncate">{renderer.name}</span>
+                    <span class="min-w-0 flex-1 truncate">{renderer.name}</span>
+                    <span
+                      class={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide ${rendererKindClass(renderer)}`}
+                    >
+                      {rendererKindLabel(renderer)}
+                    </span>
                   </span>
                   {#if activeRenderer === renderer.udn}
                     <svg class="h-4 w-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

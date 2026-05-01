@@ -49,7 +49,13 @@ class RendererDevice:
     ip: str | None = None
     manufacturer: str | None = None
     model_name: str | None = None
+    model_number: str | None = None
+    device_type: str | None = None
     cast_type: str | None = None
+    icon_url: str | None = None
+    icon_mime: str | None = None
+    icon_width: int | None = None
+    icon_height: int | None = None
     discovered_by: str = "server"
     capabilities: RendererCapabilities = field(default_factory=RendererCapabilities)
     available: bool = True
@@ -68,7 +74,13 @@ class RendererDevice:
             "ip": self.ip,
             "manufacturer": self.manufacturer,
             "model_name": self.model_name,
+            "model_number": self.model_number,
+            "device_type": self.device_type,
             "cast_type": self.cast_type,
+            "icon_url": self.icon_url,
+            "icon_mime": self.icon_mime,
+            "icon_width": self.icon_width,
+            "icon_height": self.icon_height,
             "discovered_by": self.discovered_by,
             "capabilities": self.capabilities.as_dict(),
             "available": self.available,

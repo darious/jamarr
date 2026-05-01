@@ -28,6 +28,8 @@ dependencies = [
     "croniter",
     "python-jose[cryptography]",
     "slowapi",
+    "pychromecast>=14.0.0",
+    "zeroconf>=0.130.0",
 ]
 
 

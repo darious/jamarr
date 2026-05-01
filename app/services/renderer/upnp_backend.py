@@ -133,6 +133,12 @@ class UpnpRendererBackend(RendererBackend):
             ip=renderer.get("ip"),
             manufacturer=renderer.get("manufacturer"),
             model_name=renderer.get("model_name"),
+            model_number=renderer.get("model_number"),
+            device_type=renderer.get("device_type"),
+            icon_url=renderer.get("icon_url"),
+            icon_mime=renderer.get("icon_mime"),
+            icon_width=renderer.get("icon_width"),
+            icon_height=renderer.get("icon_height"),
             capabilities=RendererCapabilities(
                 supported_mime_types=supported_mimes,
                 supports_events=bool(renderer.get("supports_events", False)),

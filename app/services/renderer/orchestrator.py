@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import mimetypes
+import logging
 import os
 import time
 from typing import Any
@@ -9,8 +9,13 @@ from typing import Any
 import asyncpg
 from fastapi import HTTPException, Request
 
+from app.db import get_pool
 from app.services.player.globals import last_track_start_time, monitor_start_times, playback_monitors
-from app.services.player.history import reset_history_tracker
+from app.services.player.history import (
+    log_history,
+    reset_history_tracker,
+    should_log_history,
+)
 from app.services.player.monitor import (
     _clear_monitor_starting,
     _mark_monitor_starting,
@@ -20,16 +25,22 @@ from app.services.player.state import (
     enrich_track_metadata,
     get_renderer_state_db,
     track_path_exists,
+    update_playback_progress_db,
+    update_queue_logged_db,
     update_renderer_state_db,
 )
-from app.services.renderer.contracts import PlaybackContext, is_local_renderer
+from app.services.renderer.contracts import PlaybackContext, RendererStatus, is_local_renderer
 from app.services.renderer.registry import RendererRegistry, get_renderer_registry
 from app.services.renderer.token_policy import stream_token_ttl_seconds
+
+logger = logging.getLogger(__name__)
 
 
 class RendererOrchestrator:
     def __init__(self, registry: RendererRegistry | None = None) -> None:
         self.registry = registry or get_renderer_registry()
+        self._status_unsubscribers: dict[str, Any] = {}
+        self._last_ended_at: dict[str, float] = {}
 
     async def get_active(self, db: asyncpg.Connection, client_id: str) -> tuple[str, str]:
         return await self.registry.get_active(db, client_id)
@@ -40,7 +51,11 @@ class RendererOrchestrator:
         client_id: str,
         renderer_id_or_udn: str,
     ) -> tuple[str, str]:
-        return await self.registry.set_active(db, client_id, renderer_id_or_udn)
+        previous_renderer_id, previous_state_key = await self.get_active(db, client_id)
+        renderer_id, state_key = await self.registry.set_active(db, client_id, renderer_id_or_udn)
+        if previous_renderer_id.startswith("cast:") and previous_renderer_id != renderer_id:
+            await self._stop_previous_cast(previous_renderer_id, previous_state_key)
+        return renderer_id, state_key
 
     async def list_renderers(
         self,
@@ -113,7 +128,10 @@ class RendererOrchestrator:
         state = await get_renderer_state_db(db, state_key)
         current_track = self._current_track(state)
         if current_track and current_track.get("id") == track["id"] and state.get("is_playing"):
-            if state_key not in playback_monitors or playback_monitors[state_key].done():
+            backend = self.registry.get_backend(renderer_id)
+            if hasattr(backend, "register_status_listener"):
+                self._register_status_listener(backend, renderer_id, state_key)
+            elif state_key not in playback_monitors or playback_monitors[state_key].done():
                 start_monitor_task(state_key)
                 last_track_start_time[state_key] = time.time()
             return {"status": "already_playing", "renderer": state_key}
@@ -150,8 +168,11 @@ class RendererOrchestrator:
         state["is_playing"] = True
         await update_renderer_state_db(db, state_key, state)
         if not is_local_renderer(renderer_id):
-            await self.registry.get_backend(renderer_id).resume(renderer_id)
-            if state_key not in playback_monitors or playback_monitors[state_key].done():
+            backend = self.registry.get_backend(renderer_id)
+            await backend.resume(renderer_id)
+            if hasattr(backend, "register_status_listener"):
+                self._register_status_listener(backend, renderer_id, state_key)
+            elif state_key not in playback_monitors or playback_monitors[state_key].done():
                 start_monitor_task(state_key)
                 monitor_start_times[state_key] = time.time()
 
@@ -253,9 +274,13 @@ class RendererOrchestrator:
                     track.get("duration_seconds"),
                 ),
             )
-            await self.registry.get_backend(renderer_id).play_track(renderer_id, track, context)
-            start_monitor_task(state_key)
-            last_track_start_time[state_key] = time.time()
+            backend = self.registry.get_backend(renderer_id)
+            await backend.play_track(renderer_id, track, context)
+            if hasattr(backend, "register_status_listener"):
+                self._register_status_listener(backend, renderer_id, state_key)
+            else:
+                start_monitor_task(state_key)
+                last_track_start_time[state_key] = time.time()
         finally:
             _clear_monitor_starting(state_key)
 
@@ -268,6 +293,72 @@ class RendererOrchestrator:
                 pass
             if remove:
                 playback_monitors.pop(state_key, None)
+
+    async def _stop_previous_cast(self, renderer_id: str, state_key: str) -> None:
+        unsubscribe = self._status_unsubscribers.pop(state_key, None)
+        if unsubscribe:
+            try:
+                unsubscribe()
+            except Exception:
+                logger.debug("Cast status listener cleanup failed for %s", renderer_id, exc_info=True)
+        try:
+            await self.registry.get_backend(renderer_id).stop_playback(renderer_id)
+        except Exception:
+            logger.warning("Failed to close previous Cast session %s", renderer_id, exc_info=True)
+
+    async def _log_history_if_due(
+        self,
+        db: asyncpg.Connection,
+        state_key: str,
+        renderer_id: str,
+        state: dict[str, Any],
+        allow_stopped: bool = False,
+    ) -> None:
+        if not state.get("is_playing") and not allow_stopped:
+            return
+        current_index = state.get("current_index")
+        queue = state.get("queue") or []
+        if current_index is None or current_index < 0 or current_index >= len(queue):
+            return
+        track = queue[current_index]
+        if not isinstance(track, dict) or track.get("logged"):
+            return
+        track_id = track.get("id")
+        if not track_id:
+            return
+        duration = track.get("duration_seconds") or 0
+        if not should_log_history(
+            state_key, track_id, state.get("position_seconds") or 0, duration
+        ):
+            return
+        renderer_ip = await self._renderer_ip(db, renderer_id, state_key)
+        await log_history(
+            db,
+            track_id,
+            client_ip=renderer_ip or "unknown",
+            client_id=state_key,
+            user_id=track.get("user_id"),
+        )
+        track["logged"] = True
+        await update_queue_logged_db(db, state_key, state)
+
+    @staticmethod
+    async def _renderer_ip(
+        db: asyncpg.Connection,
+        renderer_id: str,
+        state_key: str,
+    ) -> str | None:
+        return await db.fetchval(
+            """
+            SELECT ip
+            FROM renderer
+            WHERE renderer_id = $1 OR udn = $2
+            ORDER BY last_seen_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            renderer_id,
+            state_key,
+        )
 
     async def _first_playable_index(
         self,
@@ -289,6 +380,127 @@ class RendererOrchestrator:
         env_port = os.environ.get("HOST_PORT")
         port = env_port if env_port else ((request.url.port if request else None) or 8111)
         return f"http://{local_ip}:{port}"
+
+    def _register_status_listener(self, backend: Any, renderer_id: str, state_key: str) -> None:
+        unsubscribe = self._status_unsubscribers.pop(state_key, None)
+        if unsubscribe:
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+
+        async def callback(status: RendererStatus) -> None:
+            await self.handle_status(state_key, status)
+
+        self._status_unsubscribers[state_key] = backend.register_status_listener(
+            renderer_id,
+            callback,
+        )
+
+    async def handle_status(self, state_key: str, status: RendererStatus) -> None:
+        async with get_pool().acquire() as db:
+            state = await get_renderer_state_db(db, state_key)
+            await self._apply_status(db, state_key, state, status)
+
+    async def sync_status(
+        self,
+        db: asyncpg.Connection,
+        renderer_id: str,
+        state_key: str,
+        state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        backend = self.registry.get_backend(renderer_id)
+        try:
+            status = await backend.get_status(renderer_id)
+        except Exception:
+            logger.debug("Renderer status sync failed for %s", renderer_id, exc_info=True)
+            return state or await get_renderer_state_db(db, state_key)
+        current_state = state or await get_renderer_state_db(db, state_key)
+        return await self._apply_status(db, state_key, current_state, status)
+
+    async def _apply_status(
+        self,
+        db: asyncpg.Connection,
+        state_key: str,
+        state: dict[str, Any],
+        status: RendererStatus,
+    ) -> dict[str, Any]:
+        if status.state == "UNKNOWN" and not status.current_media_url:
+            return state
+        prev_position = state.get("position_seconds") or 0
+        if status.position_seconds is not None:
+            state["position_seconds"] = status.position_seconds
+        if status.volume_percent is not None:
+            state["volume"] = status.volume_percent
+        if status.state != "UNKNOWN":
+            state["transport_state"] = status.state
+            state["is_playing"] = status.state == "PLAYING"
+        await update_playback_progress_db(db, state_key, state)
+        await self._log_history_if_due(
+            db,
+            state_key,
+            status.renderer_id,
+            state,
+            allow_stopped=status.ended,
+        )
+        if status.ended or self._detect_track_ended(state, status, prev_position):
+            await self._advance_queue_from_status(db, state_key, state)
+            state = await get_renderer_state_db(db, state_key)
+        return state
+
+    @staticmethod
+    def _detect_track_ended(
+        state: dict[str, Any],
+        status: RendererStatus,
+        prev_position: float,
+    ) -> bool:
+        """Detect track completion from position vs duration.
+
+        Uses the larger of previous and current position because some
+        devices reset position to 0 on idle.  Only triggers when the
+        device is not actively playing or paused.
+        """
+        if status.state in ("PLAYING", "PAUSED"):
+            return False
+        queue = state.get("queue") or []
+        idx = state.get("current_index", -1)
+        if idx < 0 or idx >= len(queue):
+            return False
+        track = queue[idx]
+        if not isinstance(track, dict):
+            return False
+        duration = track.get("duration_seconds") or 0
+        if duration <= 0:
+            return False
+        position = max(prev_position, state.get("position_seconds") or 0)
+        return position >= duration - 5
+
+    async def _advance_queue_from_status(
+        self,
+        db: asyncpg.Connection,
+        state_key: str,
+        state: dict[str, Any],
+    ) -> None:
+        now = time.time()
+        if now - self._last_ended_at.get(state_key, 0) < 3:
+            return
+        self._last_ended_at[state_key] = now
+        reset_history_tracker(state_key)
+        queue = state.get("queue") or []
+        next_index = int(state.get("current_index", -1)) + 1
+        if next_index >= len(queue):
+            state["is_playing"] = False
+            state["transport_state"] = "STOPPED"
+            await update_renderer_state_db(db, state_key, state)
+            return
+        state["current_index"] = next_index
+        state["position_seconds"] = 0
+        state["is_playing"] = True
+        state["transport_state"] = "PLAYING"
+        await update_renderer_state_db(db, state_key, state)
+        track = queue[next_index]
+        renderer_id = self.registry.state_key_to_renderer_id(state_key)
+        await self._play_remote(renderer_id, state_key, track, track.get("user_id"), None)
 
     @staticmethod
     def _current_track(state: dict[str, Any]) -> dict[str, Any] | None:

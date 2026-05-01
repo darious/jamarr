@@ -525,11 +525,10 @@
 
     // Initial Volume Sync: Capture browser-restored volume
     if (audio) {
-      // Only update store if it has NOT been initialized yet (null)
-      // This prevents overwriting a server-fetched value with a default/local value
-      if ($playerState.volume === null) {
-
-        // We update the store, and rely on `player.ts` to NOT overwrite this with null.
+      // Only seed browser volume for local playback.
+      // Remote renderers must pull volume from the device — defaulting
+      // to 100 would blast full volume on first slider touch.
+      if ($playerState.volume === null && $playerState.renderer.includes("local")) {
         playerState.update((s) => ({
           ...s,
           volume: Math.round(audio.volume * 100),
@@ -680,10 +679,10 @@
     let lastTransportState = "";
 
     const interval = setInterval(async () => {
-      if (
+      const shouldPollRemote =
         !$playerState.renderer.startsWith("local") &&
-        $playerState.is_playing
-      ) {
+        ($playerState.is_playing || Boolean(currentTrack));
+      if (shouldPollRemote) {
         try {
           const res = await fetchWithAuth("/api/player/state", {
             headers: getHeaders(),
@@ -729,6 +728,16 @@
               // Optional: Sync queue if needed (e.g. length changed)
               if (s.queue.length !== state.queue.length) {
                 newState.queue = state.queue;
+                changed = true;
+              }
+
+              // Sync volume from device for remote renderers
+              if (
+                state.volume !== null &&
+                state.volume !== undefined &&
+                s.volume !== state.volume
+              ) {
+                newState.volume = state.volume;
                 changed = true;
               }
 
