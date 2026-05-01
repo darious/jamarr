@@ -67,8 +67,11 @@ class JamarrDtosTest {
             """
             {
               "udn": "uuid:1234-5678",
-              "friendly_name": "Living Room Speaker",
+              "renderer_id": "upnp:uuid:1234-5678",
+              "name": "Living Room Speaker",
               "type": "upnp",
+              "kind": "upnp",
+              "native_id": "uuid:1234-5678",
               "ip": "192.168.1.100",
               "icon_url": "https://example.test/icon.png",
               "manufacturer": "Sonos",
@@ -76,6 +79,7 @@ class JamarrDtosTest {
               "model_number": "P5G2",
               "serial_number": "SN-001",
               "firmware_version": "2.0.1",
+              "cast_type": null,
               "supports_events": true,
               "supports_gapless": false,
               "supported_mime_types": "audio/flac,audio/mpeg"
@@ -84,8 +88,13 @@ class JamarrDtosTest {
         )
 
         assertEquals("uuid:1234-5678", renderer.udn)
+        assertEquals("upnp:uuid:1234-5678", renderer.rendererId)
+        assertEquals("upnp:uuid:1234-5678", renderer.activeKey)
         assertEquals("Living Room Speaker", renderer.name)
         assertEquals("upnp", renderer.type)
+        assertEquals("upnp", renderer.kind)
+        assertEquals("upnp", renderer.rendererKind)
+        assertEquals("uuid:1234-5678", renderer.nativeId)
         assertEquals("192.168.1.100", renderer.ip)
         assertEquals("https://example.test/icon.png", renderer.iconUrl)
         assertEquals("Sonos", renderer.manufacturer)
@@ -118,6 +127,12 @@ class JamarrDtosTest {
     }
 
     @Test
+    fun rendererFallsBackToLegacyFriendlyName() {
+        val renderer = json.decodeFromString<Renderer>("""{"udn":"uuid:1","friendly_name":"Legacy Speaker"}""")
+        assertEquals("Legacy Speaker", renderer.name)
+    }
+
+    @Test
     fun playerStateResponseDecodesAllFields() {
         val state = json.decodeFromString<PlayerStateResponse>(
             """
@@ -137,6 +152,8 @@ class JamarrDtosTest {
               "position_seconds": 45.2,
               "is_playing": true,
               "renderer": "Living Room",
+              "renderer_id": "cast:abc",
+              "renderer_kind": "cast",
               "transport_state": "PLAYING",
               "volume": 75
             }
@@ -155,6 +172,8 @@ class JamarrDtosTest {
         assertEquals(45.2, state.positionSeconds, 0.0)
         assertEquals(true, state.isPlaying)
         assertEquals("Living Room", state.renderer)
+        assertEquals("cast:abc", state.rendererId)
+        assertEquals("cast", state.rendererKind)
         assertEquals("PLAYING", state.transportState)
         assertEquals(75, state.volume)
     }

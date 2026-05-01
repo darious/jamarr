@@ -548,9 +548,9 @@ class JamarrApiClient(
     suspend fun setRenderer(
         serverUrl: String,
         clientId: String,
-        udn: String,
+        rendererIdOrUdn: String,
     ): Unit = withContext(Dispatchers.IO) {
-        val payload = buildJsonObject { put("udn", udn) }
+        val payload = buildJsonObject { put("renderer_id", rendererIdOrUdn) }
         val body = payload.toString().toRequestBody(jsonMediaType)
         val request = Request.Builder()
             .url(apiUrl(serverUrl, "/api/player/renderer"))

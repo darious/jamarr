@@ -335,8 +335,12 @@ data class PlaybackHistoryTrack(
 @Serializable
 data class Renderer(
     val udn: String,
-    @SerialName("friendly_name") val name: String = "",
+    @SerialName("renderer_id") val rendererId: String? = null,
+    @SerialName("name") private val apiName: String = "",
+    @SerialName("friendly_name") private val friendlyName: String? = null,
     val type: String = "upnp",
+    val kind: String? = null,
+    @SerialName("native_id") val nativeId: String? = null,
     val ip: String? = null,
     @SerialName("icon_url") val iconUrl: String? = null,
     val manufacturer: String? = null,
@@ -344,11 +348,15 @@ data class Renderer(
     @SerialName("model_number") val modelNumber: String? = null,
     @SerialName("serial_number") val serialNumber: String? = null,
     @SerialName("firmware_version") val firmwareVersion: String? = null,
+    @SerialName("cast_type") val castType: String? = null,
     @SerialName("supports_events") val supportsEvents: Boolean? = null,
     @SerialName("supports_gapless") val supportsGapless: Boolean? = null,
     @SerialName("supported_mime_types") val supportedMimeTypes: String? = null,
 ) {
-    val isLocal: Boolean get() = udn.startsWith("local:")
+    val name: String get() = apiName.ifBlank { friendlyName.orEmpty() }
+    val activeKey: String get() = rendererId ?: udn
+    val rendererKind: String get() = kind ?: type
+    val isLocal: Boolean get() = activeKey.startsWith("local:") || udn.startsWith("local:")
 }
 
 @Serializable
@@ -358,6 +366,8 @@ data class PlayerStateResponse(
     @SerialName("position_seconds") val positionSeconds: Double = 0.0,
     @SerialName("is_playing") val isPlaying: Boolean = false,
     val renderer: String = "",
+    @SerialName("renderer_id") val rendererId: String? = null,
+    @SerialName("renderer_kind") val rendererKind: String? = null,
     @SerialName("transport_state") val transportState: String? = null,
     val volume: Int? = null,
 )

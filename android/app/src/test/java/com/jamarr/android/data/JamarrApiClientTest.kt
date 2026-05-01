@@ -147,7 +147,7 @@ class JamarrApiClientTest {
         server.enqueue(
             MockResponse.Builder()
                 .code(200)
-                .body("""[{"udn":"uuid:1","friendly_name":"Speaker","type":"upnp","ip":"10.0.0.1"}]""")
+                .body("""[{"udn":"uuid:1","renderer_id":"upnp:uuid:1","name":"Speaker","kind":"upnp","type":"upnp","ip":"10.0.0.1"}]""")
                 .addHeader("Content-Type", "application/json")
                 .build()
         )
@@ -160,6 +160,7 @@ class JamarrApiClientTest {
         assertEquals("GET", request.method)
         assertEquals(1, renderers.size)
         assertEquals("uuid:1", renderers.single().udn)
+        assertEquals("upnp:uuid:1", renderers.single().activeKey)
         assertEquals("Speaker", renderers.single().name)
     }
 
@@ -182,7 +183,7 @@ class JamarrApiClientTest {
     }
 
     @Test
-    fun setRendererPostsUdnWithClientIdHeader() = runTest {
+    fun setRendererPostsRendererIdWithClientIdHeader() = runTest {
         server.enqueue(
             MockResponse.Builder()
                 .code(200)
@@ -191,13 +192,13 @@ class JamarrApiClientTest {
         )
         val client = JamarrApiClient(TokenHolder("token"))
 
-        client.setRenderer(server.url("/").toString(), "client-123", "uuid:speaker-1")
+        client.setRenderer(server.url("/").toString(), "client-123", "upnp:uuid:speaker-1")
         val request = server.takeRequest()
 
         assertEquals("/api/player/renderer", request.url.encodedPath)
         assertEquals("POST", request.method)
         assertEquals("client-123", request.headers["X-Jamarr-Client-Id"])
-        assertEquals("""{"udn":"uuid:speaker-1"}""", request.body?.utf8())
+        assertEquals("""{"renderer_id":"upnp:uuid:speaker-1"}""", request.body?.utf8())
     }
 
     @Test
