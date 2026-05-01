@@ -20,7 +20,7 @@ trap cleanup EXIT
 echo "🧹 Cleaning up any existing test stack..."
 docker compose -f docker-compose.test.yml down --remove-orphans >/dev/null 2>&1 || true
 
-echo "🏗️  Starting Frontend Build Check..."
+echo "🏗️  Starting Frontend Checks..."
 
 # We use 'run --rm' to spin up the container, execute the command, and remove it.
 # No need to start it in detached mode first.
@@ -39,12 +39,24 @@ else
     fi
 fi
 
-echo "🔨 Running Production Build (npm run build)..."
-# This runs the actual SvelteKit/Vite build process
+echo "🧪 Running frontend unit tests (npm run test)..."
+if ! docker compose -f docker-compose.test.yml run --rm jamarr_test_web npm run test; then
+    echo ""
+    echo "❌ FRONTEND TESTS FAILED!"
+    exit 1
+fi
+
+echo "🔎 Running Svelte type/check pass (npm run check)..."
+if ! docker compose -f docker-compose.test.yml run --rm jamarr_test_web npm run check; then
+    echo ""
+    echo "❌ FRONTEND CHECK FAILED!"
+    exit 1
+fi
+
+echo "🔨 Running production build (npm run build)..."
 if docker compose -f docker-compose.test.yml run --rm jamarr_test_web npm run build; then
     echo ""
-    echo "✅ PRODUCTION BUILD SUCCEEDED!"
-    echo "   The frontend code compiles correctly."
+    echo "✅ FRONTEND CHECKS PASSED!"
 else
     echo ""
     echo "❌ PRODUCTION BUILD FAILED!"

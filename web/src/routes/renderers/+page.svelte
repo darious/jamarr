@@ -2,6 +2,12 @@
     import { onMount } from "svelte";
     import { fetchWithAuth, triggerScan } from "$lib/api";
     import TabButton from "$lib/components/TabButton.svelte";
+    import {
+        getRendererFallback,
+        getRendererIcon,
+        rendererKind,
+        rendererKindLabel,
+    } from "$lib/renderer-utils";
 
     let renderers: any[] = [];
     let loading = false;
@@ -29,46 +35,6 @@
         fetchRenderers(false);
         checkScanStatus();
     });
-
-    const DEFAULT_RENDERER_ICON = "/assets/icon-renderer.svg";
-    const LOCAL_RENDERER_ICON = "/assets/icon-browser.svg";
-
-    function getRendererFallback(renderer: any): string {
-        if (!renderer) return DEFAULT_RENDERER_ICON;
-        if (renderer.type === "local" || renderer.udn?.startsWith("local")) {
-            return LOCAL_RENDERER_ICON;
-        }
-        return DEFAULT_RENDERER_ICON;
-    }
-
-    function getRendererIcon(renderer: any): string {
-        if (renderer?.icon_url) return renderer.icon_url;
-        return getRendererFallback(renderer);
-    }
-
-    function rendererKind(renderer: any): string {
-        const raw =
-            renderer?.kind ||
-            renderer?.type ||
-            renderer?.renderer_id?.split(":")[0] ||
-            "";
-        if (raw === "cast" || raw === "chromecast") return "cast";
-        if (raw === "upnp" || renderer?.udn?.startsWith("uuid:")) return "upnp";
-        if (raw === "local" || renderer?.udn?.startsWith("local:")) return "local";
-        return raw || "unknown";
-    }
-
-    function rendererKindLabel(renderer: any): string {
-        const kind = rendererKind(renderer);
-        if (kind === "cast") {
-            const castType = renderer?.cast_type;
-            if (!castType || castType === "cast") return "Cast";
-            return `Cast ${castType}`;
-        }
-        if (kind === "upnp") return "UPnP";
-        if (kind === "local") return "Local";
-        return kind.toUpperCase();
-    }
 
     function rendererKindClass(renderer: any): string {
         const kind = rendererKind(renderer);

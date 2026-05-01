@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 import type { Track } from '$api';
 import { fetchWithAuth } from '$lib/api';
+import { rendererMatchesActive, rendererSelectionId } from '$lib/renderer-utils';
 
 export interface Renderer {
     udn: string;
@@ -19,6 +20,8 @@ export interface Renderer {
 export interface PlayerState {
     renderers: Renderer[];
     renderer: string;
+    renderer_id?: string;
+    renderer_kind?: string;
     queue: Track[];
     current_index: number;
     is_playing: boolean;
@@ -121,7 +124,7 @@ export async function refreshRenderers(force: boolean = false) {
 
             playerState.update(s => {
                 const currentRenderer =
-                    s.renderer && finalRenderers.some((r: Renderer) => r.udn === s.renderer)
+                    s.renderer && finalRenderers.some((r: Renderer) => rendererMatchesActive(r, s.renderer))
                         ? s.renderer
                         : `local:${myId}`;
                 return { ...s, renderers: finalRenderers, renderer: currentRenderer };
@@ -135,16 +138,16 @@ export async function refreshRenderers(force: boolean = false) {
     }
 }
 
-export async function setRenderer(udn: string) {
+export async function setRenderer(rendererIdOrUdn: string) {
     try {
         const res = await fetchWithAuth('/api/player/renderer', {
             method: 'POST',
             headers: getHeaders(),
-            body: JSON.stringify({ udn })
+            body: JSON.stringify({ renderer_id: rendererIdOrUdn })
         });
         if (res.ok) {
             const data = await res.json();
-            const active = data.active || udn;
+            const active = data.renderer_id || data.active || rendererIdOrUdn;
             // Reset volume for remote renderers — device volume is unknown
             // until the next sync_status poll fetches it.  Prevents stale
             // volume from previous renderer leaking into the new one.
@@ -152,6 +155,7 @@ export async function setRenderer(udn: string) {
             playerState.update(s => ({
                 ...s,
                 renderer: active,
+                renderer_id: data.renderer_id || active,
                 volume: isRemote ? null : s.volume,
             }));
             await loadQueueFromServer();
@@ -204,7 +208,9 @@ export async function loadQueueFromServer() {
                 current_index: data.current_index,
                 position_seconds: data.position_seconds,
                 is_playing: data.is_playing,
-                renderer: data.renderer || `local:${getClientId()}`,
+                renderer: data.renderer_id || data.renderer || `local:${getClientId()}`,
+                renderer_id: data.renderer_id,
+                renderer_kind: data.renderer_kind,
                 // If server returns null (no history), keep existing volume (e.g. locally restored)
                 // If server returns value, use it.
                 volume: (data.volume !== null && data.volume !== undefined) ? data.volume : s.volume
@@ -216,6 +222,10 @@ export async function loadQueueFromServer() {
     } catch (e) {
         console.error('[loadQueueFromServer] Exception:', e);
     }
+}
+
+export function selectionIdForRenderer(renderer: Renderer): string {
+    return rendererSelectionId(renderer);
 }
 
 export async function setQueue(tracks: Track[], startIndex: number = 0) {

@@ -1022,8 +1022,22 @@ Web app already talks to server REST API. Cast devices discovered by Phase 2 app
 
 ### 4.4 Delivery gate
 
-- Web UI needs no protocol-specific control path beyond icon/label rendering
-- Existing web playback behavior unchanged for local and UPnP
+- [x] Web UI needs no protocol-specific control path beyond icon/label rendering
+- [x] Existing web playback behavior unchanged for local and UPnP
+
+### 4.5 Implementation status
+
+Completed on `feature/chromecast-android`:
+
+- Web renderer UI uses shared renderer helpers for `kind`, labels, fallback icons, and canonical selection IDs.
+- Cast renderers get a Cast-specific SVG fallback icon while UPnP/local fallback behavior remains unchanged.
+- Web renderer selection posts `renderer_id` and still matches legacy `udn` values for compatibility.
+- Player store accepts `renderer_id` and `renderer_kind` from `/api/player/state`.
+- Frontend Docker build script now runs `npm run test`, `npm run check`, and `npm run build`.
+
+Validated:
+
+- `CI=true scripts/test-build.sh` passes in Docker.
 
 **Files touched:** ~2
 **New files:** ~1
