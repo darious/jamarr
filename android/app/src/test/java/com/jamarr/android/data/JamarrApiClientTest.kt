@@ -143,6 +143,24 @@ class JamarrApiClientTest {
     }
 
     @Test
+    fun streamUrlSendsRendererKindForCastTokenPolicy() = runTest {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .body("""{"url":"/api/stream/42?token=cast-token"}""")
+                .addHeader("Content-Type", "application/json")
+                .build()
+        )
+        val client = JamarrApiClient(TokenHolder("token"))
+
+        val url = client.streamUrl(server.url("/").toString(), "ignored", 42, rendererKind = "cast")
+        val request = server.takeRequest()
+
+        assertEquals("/api/stream-url/42?renderer_kind=cast", request.url.encodedPath + "?" + request.url.encodedQuery)
+        assertEquals(server.url("/api/stream/42?token=cast-token").toString(), url)
+    }
+
+    @Test
     fun getRenderersFetchesListWithRefreshParam() = runTest {
         server.enqueue(
             MockResponse.Builder()
@@ -333,6 +351,39 @@ class JamarrApiClientTest {
             error
         }
         assertEquals(400, error.statusCode)
+    }
+
+    @Test
+    fun reportIndexSendsClientScopedIndexUpdate() = runTest {
+        server.enqueue(MockResponse.Builder().code(200).body("{}").build())
+        val client = JamarrApiClient(TokenHolder("token"))
+
+        client.reportIndex(server.url("/").toString(), "client-device", 3)
+        val request = server.takeRequest()
+
+        assertEquals("/api/player/index", request.url.encodedPath)
+        assertEquals("POST", request.method)
+        assertEquals("client-device", request.headers["X-Jamarr-Client-Id"])
+        assertEquals("""{"index":3}""", request.body?.utf8())
+    }
+
+    @Test
+    fun reportProgressSendsClientScopedPlaybackProgress() = runTest {
+        server.enqueue(MockResponse.Builder().code(200).body("{}").build())
+        val client = JamarrApiClient(TokenHolder("token"))
+
+        client.reportProgress(
+            server.url("/").toString(),
+            "client-device",
+            positionSeconds = 42.5,
+            isPlaying = true,
+        )
+        val request = server.takeRequest()
+
+        assertEquals("/api/player/progress", request.url.encodedPath)
+        assertEquals("POST", request.method)
+        assertEquals("client-device", request.headers["X-Jamarr-Client-Id"])
+        assertEquals("""{"position_seconds":42.5,"is_playing":true}""", request.body?.utf8())
     }
 
     @Test

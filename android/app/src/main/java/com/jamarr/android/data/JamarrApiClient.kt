@@ -326,9 +326,19 @@ class JamarrApiClient(
         serverUrl: String,
         accessToken: String,
         trackId: Long,
+        rendererKind: String? = null,
     ): String = withContext(Dispatchers.IO) {
+        val url = apiUrl(serverUrl, "/api/stream-url/$trackId")
+            .toHttpUrl()
+            .newBuilder()
+            .apply {
+                if (!rendererKind.isNullOrBlank()) {
+                    addQueryParameter("renderer_kind", rendererKind)
+                }
+            }
+            .build()
         val request = Request.Builder()
-            .url(apiUrl(serverUrl, "/api/stream-url/$trackId"))
+            .url(url)
             .get()
             .build()
 

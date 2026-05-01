@@ -1,5 +1,6 @@
 package com.jamarr.android.upnp
 
+import com.jamarr.android.renderer.QueuedTrack
 import org.junit.Assert.assertTrue
 import org.junit.Test
 

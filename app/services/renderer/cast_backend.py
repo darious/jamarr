@@ -40,6 +40,7 @@ class _CastStatusListener:
         renderer_status = self.backend.status_from_media_status(
             self.renderer_id,
             status,
+            receiver_status=self.backend.receiver_status_for_renderer(self.renderer_id),
             previous_state=self.last_state,
             started_at=self.started_at,
         )
@@ -200,7 +201,12 @@ class CastRendererBackend(RendererBackend):
         controller = cast.media_controller
         await asyncio.to_thread(self._refresh_controller_status, controller, renderer_id)
         status = getattr(controller, "status", None)
-        return self.status_from_media_status(renderer_id, status, trust_idle=True)
+        return self.status_from_media_status(
+            renderer_id,
+            status,
+            receiver_status=getattr(cast, "status", None),
+            trust_idle=True,
+        )
 
     def register_status_listener(
         self,
@@ -244,6 +250,7 @@ class CastRendererBackend(RendererBackend):
         self,
         renderer_id: str,
         status: Any,
+        receiver_status: Any | None = None,
         previous_state: str = "UNKNOWN",
         started_at: float | None = None,
         *,
@@ -255,7 +262,12 @@ class CastRendererBackend(RendererBackend):
         if current_time is None:
             current_time = getattr(status, "current_time", 0) or 0
         duration = getattr(status, "duration", None)
-        volume = getattr(status, "volume_level", None)
+        volume = self._status_attr(receiver_status, "volume_level")
+        if volume is None:
+            volume = self._status_attr(status, "volume_level")
+        volume_muted = self._status_attr(receiver_status, "volume_muted")
+        if volume_muted is None:
+            volume_muted = self._status_attr(status, "volume_muted")
         ended = (
             state == "IDLE"
             and previous_state == "PLAYING"
@@ -269,10 +281,18 @@ class CastRendererBackend(RendererBackend):
             position_seconds=float(current_time or 0),
             duration_seconds=float(duration) if duration is not None else None,
             volume_percent=round(float(volume) * 100) if volume is not None else None,
-            volume_muted=getattr(status, "volume_muted", None),
+            volume_muted=volume_muted,
             current_media_url=getattr(status, "content_id", None),
             ended=ended,
         )
+
+    def receiver_status_for_renderer(self, renderer_id: str) -> Any | None:
+        _, uuid = split_renderer_id(renderer_id)
+        return getattr(self.casts.get(uuid), "status", None)
+
+    @staticmethod
+    def _status_attr(status: Any, name: str) -> Any | None:
+        return getattr(status, name, None) if status is not None else None
 
     @staticmethod
     def normalize_player_state(player_state: str | None) -> str:

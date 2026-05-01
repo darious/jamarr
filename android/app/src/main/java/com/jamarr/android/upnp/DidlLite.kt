@@ -1,5 +1,7 @@
 package com.jamarr.android.upnp
 
+import com.jamarr.android.renderer.QueuedTrack
+
 object DidlLite {
     fun build(track: QueuedTrack): String {
         val title = escape(track.title)

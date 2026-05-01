@@ -69,6 +69,10 @@ class FakeCast:
             cast_type=self.cast_type,
         )
         self.media_controller = FakeMediaController()
+        self.status = SimpleNamespace(
+            volume_level=0.4,
+            volume_muted=False,
+        )
         self.calls = []
 
     def wait(self, timeout=None) -> None:
@@ -196,6 +200,29 @@ def test_phase2_cast_status_mapping_and_end_detection():
     assert mapped.position_seconds == 180
     assert mapped.duration_seconds == 180
     assert mapped.volume_percent == 50
+
+
+def test_phase2_cast_status_prefers_receiver_volume_over_media_stream_volume():
+    backend = CastRendererBackend()
+    renderer_id = "cast:11111111-1111-1111-1111-111111111111"
+    media_status = SimpleNamespace(
+        player_state="PLAYING",
+        adjusted_current_time=12,
+        duration=120,
+        volume_level=1.0,
+        volume_muted=False,
+        content_id="http://media",
+    )
+    receiver_status = SimpleNamespace(volume_level=0.27, volume_muted=True)
+
+    mapped = backend.status_from_media_status(
+        renderer_id,
+        media_status,
+        receiver_status=receiver_status,
+    )
+
+    assert mapped.volume_percent == 27
+    assert mapped.volume_muted is True
 
 
 def test_phase2_cast_early_idle_does_not_stop_playback():

@@ -425,7 +425,8 @@ class RendererOrchestrator:
         state: dict[str, Any],
         status: RendererStatus,
     ) -> dict[str, Any]:
-        if status.state == "UNKNOWN" and not status.current_media_url:
+        has_volume_update = status.volume_percent is not None or status.volume_muted is not None
+        if status.state == "UNKNOWN" and not status.current_media_url and not has_volume_update:
             return state
         prev_position = state.get("position_seconds") or 0
         if status.position_seconds is not None:

@@ -35,7 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.jamarr.android.data.Renderer
-import com.jamarr.android.upnp.UpnpRendererInfo
+import com.jamarr.android.renderer.DeviceRendererInfo
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrShapes
 import com.jamarr.android.ui.theme.JamarrType
@@ -45,7 +45,7 @@ import com.jamarr.android.ui.theme.JamarrType
 fun RendererPicker(
     visible: Boolean,
     serverRenderers: List<Renderer>,
-    deviceRenderers: List<UpnpRendererInfo>,
+    deviceRenderers: List<DeviceRendererInfo>,
     activeUdn: String,
     useDeviceUpnp: Boolean,
     onDismiss: () -> Unit,
@@ -107,7 +107,7 @@ fun RendererPicker(
                         color = JamarrColors.Text,
                     )
                     Text(
-                        text = if (useDeviceUpnp) "Phone discovers UPnP renderers on Wi-Fi"
+                        text = if (useDeviceUpnp) "Phone discovers Cast and UPnP renderers on Wi-Fi"
                         else "Server discovers and drives renderers",
                         style = JamarrType.CaptionSmall,
                         color = JamarrColors.Muted,
@@ -136,19 +136,40 @@ fun RendererPicker(
                 }
 
                 if (useDeviceUpnp) {
-                    items(deviceRenderers, key = { "dev:" + it.udn }) { r ->
+                    val upnpRenderers = deviceRenderers.filter { it.kind == "upnp" }
+                    val castRenderers = deviceRenderers.filter { it.kind == "cast" }
+                    if (castRenderers.isNotEmpty()) {
+                        item(key = "cast-header") {
+                            RendererSectionHeader("Cast")
+                        }
+                    }
+                    items(castRenderers, key = { "dev:" + it.rendererId }) { r ->
+                        RendererRow(
+                            name = r.name,
+                            subtitle = r.status ?: r.modelName ?: "Cast Device",
+                            isSelected = r.rendererId == activeUdn,
+                            icon = { CastIcon(tint = JamarrColors.Text, size = 22.dp) },
+                            onClick = { onSelectDevice(r.rendererId) },
+                        )
+                    }
+                    if (upnpRenderers.isNotEmpty()) {
+                        item(key = "upnp-header") {
+                            RendererSectionHeader("UPnP")
+                        }
+                    }
+                    items(upnpRenderers, key = { "dev:" + it.rendererId }) { r ->
                         RendererRow(
                             name = r.name,
                             subtitle = r.ip ?: r.manufacturer ?: "Network Device",
-                            isSelected = r.udn == activeUdn,
+                            isSelected = r.rendererId == activeUdn,
                             icon = { SpeakerIcon(tint = JamarrColors.Text, size = 22.dp) },
-                            onClick = { onSelectDevice(r.udn) },
+                            onClick = { onSelectDevice(r.rendererId) },
                         )
                     }
                     if (deviceRenderers.isEmpty()) {
                         item(key = "empty-dev") {
                             Text(
-                                text = "Searching for UPnP renderers on Wi-Fi…\nTap refresh to scan again.",
+                                text = "Searching for Cast and UPnP renderers on Wi-Fi…\nTap refresh to scan again.",
                                 style = JamarrType.Caption,
                                 color = JamarrColors.Muted,
                                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
@@ -240,6 +261,16 @@ private fun RendererRow(
             )
         }
     }
+}
+
+@Composable
+private fun RendererSectionHeader(label: String) {
+    Text(
+        text = label,
+        style = JamarrType.CaptionSmall,
+        color = JamarrColors.Muted,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+    )
 }
 
 @Composable

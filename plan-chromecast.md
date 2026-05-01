@@ -954,10 +954,34 @@ Android Cast SDK includes `MediaRouteButton` for discovery. Can add to PlayerBar
 
 ### 3.11 Delivery gate
 
-- Android can choose device-direct Cast without server LAN discovery
-- Device-direct Cast logs history/scrobbles via existing progress path
-- Android device-UPnP remains working through the new controller contract
-- App handles no Play Services and failed Cast session without crash
+- [x] Android can choose device-direct Cast without server LAN discovery
+- [x] Device-direct Cast logs history/scrobbles via existing progress path
+- [x] Android device-UPnP remains working through the new controller contract
+- [x] App handles no Play Services and failed Cast session without crash
+
+### 3.12 Implementation status
+
+Completed on `feature/chromecast-android`:
+
+- Added shared Android `DeviceRendererController` contract and moved device-UPnP onto it.
+- Added Google Cast SDK setup, `OptionsProvider`, manifest metadata, and device-direct `CastDeviceController`.
+- Device mode now discovers Cast and UPnP renderers side by side.
+- Renderer picker shows separate Cast and UPnP device sections and stores canonical `renderer_id` values.
+- Device-direct Cast playback loads Cast-safe stream URLs with `renderer_kind=cast`.
+- Device-direct Cast reports queue, index, and progress through the existing local-client server path for history/scrobbling.
+- Local Cast volume now uses the selected media route volume and avoids stale `CastSession.volume` snapping the slider back to full.
+- Server-driven Cast volume status prefers receiver volume over media stream volume and accepts volume-only status updates.
+
+Validated:
+
+- Android compile and unit tests pass.
+- `git diff --check` passes.
+- Manual device smoke passed for Cast discovery, playback, controls, volume, skip, queue advance, and history logging.
+
+Remaining hardening:
+
+- Refactor `JamarrViewModel` to inject fake device controllers, then add direct ViewModel routing tests for Cast vs UPnP dispatch.
+- Add Cast controller tests around MediaRouter/RemoteMediaClient via fakes or Robolectric if the project adopts it.
 
 **Files touched:** ~5
 **New files:** ~3
