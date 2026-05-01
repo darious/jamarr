@@ -3,6 +3,10 @@ package com.jamarr.android.upnp
 import android.content.Context
 import android.net.wifi.WifiManager
 import android.util.Log
+import com.jamarr.android.renderer.DeviceRendererController
+import com.jamarr.android.renderer.DeviceRendererInfo
+import com.jamarr.android.renderer.DeviceRendererPlaybackState
+import com.jamarr.android.renderer.QueuedTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -47,48 +51,19 @@ import kotlin.coroutines.suspendCoroutine
 
 private const val TAG = "UpnpDeviceController"
 
-data class UpnpRendererInfo(
-    val udn: String,
-    val name: String,
-    val manufacturer: String?,
-    val modelName: String?,
-    val ip: String?,
-)
-
-data class QueuedTrack(
-    val id: Long,
-    val title: String,
-    val artist: String,
-    val album: String,
-    val mime: String,
-    val durationSeconds: Double,
-    val streamUrl: String,
-    val artUrl: String?,
-)
-
-data class UpnpPlaybackState(
-    val activeUdn: String? = null,
-    val queue: List<QueuedTrack> = emptyList(),
-    val currentIndex: Int = -1,
-    val positionSeconds: Double = 0.0,
-    val durationSeconds: Double = 0.0,
-    val isPlaying: Boolean = false,
-    val transportState: String = "STOPPED",
-    val volumePercent: Int = 0,
-)
-
-class UpnpDeviceController(private val appContext: Context) {
+class UpnpDeviceController(private val appContext: Context) : DeviceRendererController {
+    override val kind: String = "upnp"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var upnpService: UpnpService? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private var pollJob: Job? = null
 
-    private val _renderers = MutableStateFlow<List<UpnpRendererInfo>>(emptyList())
-    val renderers: StateFlow<List<UpnpRendererInfo>> = _renderers.asStateFlow()
+    private val _renderers = MutableStateFlow<List<DeviceRendererInfo>>(emptyList())
+    override val renderers: StateFlow<List<DeviceRendererInfo>> = _renderers.asStateFlow()
 
-    private val _state = MutableStateFlow(UpnpPlaybackState())
-    val state: StateFlow<UpnpPlaybackState> = _state.asStateFlow()
+    private val _state = MutableStateFlow(DeviceRendererPlaybackState())
+    override val state: StateFlow<DeviceRendererPlaybackState> = _state.asStateFlow()
 
     private val devicesByUdn = mutableMapOf<String, RemoteDevice>()
 
@@ -121,7 +96,7 @@ class UpnpDeviceController(private val appContext: Context) {
         override fun localDeviceRemoved(registry: Registry, device: LocalDevice) {}
     }
 
-    fun start() {
+    override fun start() {
         if (upnpService != null) return
         try {
             val wifi = appContext.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
@@ -147,7 +122,7 @@ class UpnpDeviceController(private val appContext: Context) {
         }
     }
 
-    fun stop() {
+    override fun stop() {
         pollJob?.cancel()
         pollJob = null
         try { upnpService?.shutdown() } catch (_: Throwable) {}
@@ -158,7 +133,7 @@ class UpnpDeviceController(private val appContext: Context) {
         _renderers.value = emptyList()
     }
 
-    fun search() {
+    override fun search() {
         val cp = upnpService?.controlPoint ?: return
         cp.search()
         cp.search(UDADeviceTypeHeader(mediaRendererType))
@@ -173,16 +148,18 @@ class UpnpDeviceController(private val appContext: Context) {
     private fun removeDevice(udn: String) {
         devicesByUdn.remove(udn)
         publishRenderers()
-        if (_state.value.activeUdn == udn) {
+        if (_state.value.activeRendererId == "upnp:$udn") {
             stopPolling()
-            _state.value = _state.value.copy(activeUdn = null, isPlaying = false)
+            _state.value = _state.value.copy(activeRendererId = null, isPlaying = false)
         }
     }
 
     private fun publishRenderers() {
         val list = devicesByUdn.values.map { d ->
-            UpnpRendererInfo(
-                udn = d.identity.udn.identifierString,
+            val udn = d.identity.udn.identifierString
+            DeviceRendererInfo(
+                rendererId = "upnp:$udn",
+                kind = kind,
                 name = d.details?.friendlyName ?: d.displayString ?: "Renderer",
                 manufacturer = d.details?.manufacturerDetails?.manufacturer,
                 modelName = d.details?.modelDetails?.modelName,
@@ -195,13 +172,15 @@ class UpnpDeviceController(private val appContext: Context) {
         }
     }
 
-    fun selectRenderer(udn: String) {
+    override fun selectRenderer(rendererId: String) {
+        val udn = rendererId.removePrefix("upnp:")
         if (devicesByUdn[udn] == null) return
-        _state.value = _state.value.copy(activeUdn = udn)
+        _state.value = _state.value.copy(activeRendererId = "upnp:$udn")
         startPolling()
     }
 
-    private fun activeDevice(): RemoteDevice? = _state.value.activeUdn?.let { devicesByUdn[it] }
+    private fun activeDevice(): RemoteDevice? =
+        _state.value.activeRendererId?.removePrefix("upnp:")?.let { devicesByUdn[it] }
 
     private fun avtService(): UpnpModelService<*, *>? =
         activeDevice()?.findService(UDAServiceId("AVTransport"))
@@ -209,7 +188,7 @@ class UpnpDeviceController(private val appContext: Context) {
     private fun rcService(): UpnpModelService<*, *>? =
         activeDevice()?.findService(UDAServiceId("RenderingControl"))
 
-    suspend fun playQueue(tracks: List<QueuedTrack>, startIndex: Int) {
+    override suspend fun playQueue(tracks: List<QueuedTrack>, startIndex: Int) {
         if (tracks.isEmpty()) return
         val idx = startIndex.coerceIn(0, tracks.lastIndex)
         _state.value = _state.value.copy(
@@ -238,19 +217,19 @@ class UpnpDeviceController(private val appContext: Context) {
         startPolling()
     }
 
-    suspend fun pause() {
+    override suspend fun pause() {
         val service = avtService() ?: return
         runCatching { pauseInternal(service) }
         _state.value = _state.value.copy(isPlaying = false, transportState = "PAUSED_PLAYBACK")
     }
 
-    suspend fun resume() {
+    override suspend fun resume() {
         val service = avtService() ?: return
         runCatching { play(service) }
         _state.value = _state.value.copy(isPlaying = true, transportState = "PLAYING")
     }
 
-    suspend fun stopPlayback() {
+    override suspend fun stopPlayback() {
         val service = avtService()
         if (service != null) runCatching { stopInternal(service) }
         stopPolling()
@@ -263,21 +242,21 @@ class UpnpDeviceController(private val appContext: Context) {
         )
     }
 
-    suspend fun seek(seconds: Double) {
+    override suspend fun seek(seconds: Double) {
         val service = avtService() ?: return
         val target = formatHms(seconds.toLong())
         runCatching { seekInternal(service, target) }
         _state.value = _state.value.copy(positionSeconds = seconds)
     }
 
-    suspend fun setVolumePercent(percent: Int) {
+    override suspend fun setVolumePercent(percent: Int) {
         val service = rcService() ?: return
         val v = percent.coerceIn(0, 100)
         runCatching { setVolumeInternal(service, v.toLong()) }
         _state.value = _state.value.copy(volumePercent = v)
     }
 
-    suspend fun next() {
+    override suspend fun next() {
         val s = _state.value
         if (s.queue.isEmpty()) return
         val nextIdx = (s.currentIndex + 1).coerceAtMost(s.queue.lastIndex)
@@ -287,7 +266,7 @@ class UpnpDeviceController(private val appContext: Context) {
         playTrackAt(nextIdx)
     }
 
-    suspend fun previous() {
+    override suspend fun previous() {
         val s = _state.value
         if (s.queue.isEmpty()) return
         val prevIdx = (s.currentIndex - 1).coerceAtLeast(0)
@@ -297,7 +276,7 @@ class UpnpDeviceController(private val appContext: Context) {
         playTrackAt(prevIdx)
     }
 
-    suspend fun jumpTo(index: Int) {
+    override suspend fun jumpTo(index: Int) {
         val s = _state.value
         if (s.queue.isEmpty()) return
         val target = index.coerceIn(0, s.queue.lastIndex)

@@ -68,6 +68,28 @@ async def test_phase2_renderers_can_return_cast_devices(
 
 
 @pytest.mark.asyncio
+async def test_phase2_cast_state_syncs_receiver_volume_without_media(
+    auth_client: AsyncClient,
+    selected_cast_renderer,
+    fake_cast_backend,
+):
+    _, cast, _ = fake_cast_backend
+    headers = {"X-Jamarr-Client-Id": "phase2-client"}
+    cast.media_controller.status.player_state = None
+    cast.media_controller.status.volume_level = 1.0
+    cast.media_controller.status.volume_muted = False
+    cast.media_controller.status.content_id = None
+    cast.status.volume_level = 0.25
+    cast.status.volume_muted = False
+
+    state = await auth_client.get("/api/player/state", headers=headers)
+
+    assert state.status_code == 200, state.text
+    assert state.json()["renderer_id"] == selected_cast_renderer
+    assert state.json()["volume"] == 25
+
+
+@pytest.mark.asyncio
 async def test_phase2_player_controls_route_to_cast_backend(
     auth_client: AsyncClient,
     phase2_cast_track,
