@@ -39,6 +39,12 @@ else
     fi
 fi
 
+echo "🔧 Syncing SvelteKit generated files (npx svelte-kit sync)..."
+if ! docker compose -f docker-compose.test.yml run --rm jamarr_test_web npx svelte-kit sync; then
+    echo "❌ SvelteKit sync failed."
+    exit 1
+fi
+
 echo "🧪 Running frontend unit tests (npm run test)..."
 if ! docker compose -f docker-compose.test.yml run --rm jamarr_test_web npm run test; then
     echo ""
