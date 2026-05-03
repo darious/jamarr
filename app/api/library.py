@@ -78,22 +78,27 @@ async def get_missing_albums(mbid: str, db: asyncpg.Connection = Depends(get_db)
 async def download_pearlarr(req: PearlarrDownloadRequest):
     pearlarr_url = get_pearlarr_url()
     if not pearlarr_url:
-        raise HTTPException(status_code=500, detail="Pearlarr URL not configured")
+        raise HTTPException(
+            status_code=503, detail="Pearlarr integration not configured"
+        )
 
     try:
-        async with httpx.AsyncClient() as client:
-            # Pearlarr expects {"url": "MBID"}
-            payload = {"url": req.mbid}
-            resp = await client.post(pearlarr_url, json=payload, timeout=5.0)
-            
-            if resp.status_code >= 400:
-                 logger.error(f"Pearlarr returned {resp.status_code}: {resp.text}")
-                 raise HTTPException(status_code=500, detail=f"Pearlarr error: {resp.status_code}")
-                 
-            return {"status": "queued", "message": "Download queued via Pearlarr"}
-    except Exception as e:
-        logger.error(f"Failed to trigger Pearlarr download: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(pearlarr_url, json={"url": req.mbid})
+    except httpx.TimeoutException:
+        logger.warning("Pearlarr request timed out: url=%s mbid=%s", pearlarr_url, req.mbid)
+        raise HTTPException(status_code=504, detail="Pearlarr did not respond in time")
+    except httpx.HTTPError as e:
+        logger.warning("Pearlarr request failed: %s", e)
+        raise HTTPException(status_code=502, detail="Pearlarr unreachable")
+
+    if resp.status_code >= 400:
+        logger.warning(
+            "Pearlarr returned %s: %s", resp.status_code, resp.text[:500]
+        )
+        raise HTTPException(status_code=502, detail="Pearlarr rejected request")
+
+    return {"status": "queued", "message": "Download queued via Pearlarr"}
 
 
 @router.get("/api/artists/index")

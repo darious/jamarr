@@ -99,7 +99,7 @@ def _is_not_modified(request: Request, etag: str, stat_result: os.stat_result) -
     return False
 
 
-@router.get("/art/file/{sha1}")
+@router.api_route("/art/file/{sha1}", methods=["GET", "HEAD"])
 async def get_artwork_by_sha1(sha1: str, request: Request, max_size: int = 0):
     if len(sha1) != 40 or any(c not in '0123456789abcdefABCDEF' for c in sha1):
         raise HTTPException(status_code=400, detail="Invalid SHA1 format")

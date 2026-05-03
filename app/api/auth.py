@@ -255,6 +255,7 @@ async def logout(
 
 
 @router.post("/api/auth/refresh")
+@limiter.limit("10/minute")
 async def refresh(
     request: Request, response: Response, db: asyncpg.Connection = Depends(get_db)
 ):
