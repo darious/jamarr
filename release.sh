@@ -102,15 +102,15 @@ else
         sleep "$SLEEP_SECONDS"
     done
     echo
-    echo "APK attached. Renaming release to: $NAME"
+    echo "APK attached. Renaming release to: $VERSION - $NAME"
 fi
 
 # 6. Set the human-readable name. The workflow seeds title=tag, but it can
 # get overwritten or shown as just the tag in some UIs; force it here.
 if (( DRY_RUN )); then
-    echo "[dry-run] would run: gh release edit $VERSION --title \"$NAME\""
+    echo "[dry-run] would run: gh release edit $VERSION --title \"$VERSION - $NAME\""
 else
-    gh release edit "$VERSION" --title "$NAME"
+    gh release edit "$VERSION" --title "$VERSION - $NAME"
 fi
 
 echo "Done."
