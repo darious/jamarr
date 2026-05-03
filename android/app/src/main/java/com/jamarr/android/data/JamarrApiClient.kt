@@ -47,6 +47,11 @@ class JamarrApiClient(
     private val refreshLock = Any()
     private val callbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // Cooldown after a refresh fails to prevent loops (e.g. background loops
+    // that keep firing requests while the refresh token is permanently invalid).
+    @Volatile private var refreshFailedAtMs: Long = 0L
+    private val refreshCooldownMs: Long = 60_000L
+
     private val authInterceptor = Interceptor { chain ->
         val original = chain.request()
         val path = original.url.encodedPath
@@ -92,6 +97,13 @@ class JamarrApiClient(
             if (current.isNotBlank() && current != failedToken) {
                 return current
             }
+            val now = System.currentTimeMillis()
+            val sinceFailure = now - refreshFailedAtMs
+            if (refreshFailedAtMs > 0L && sinceFailure < refreshCooldownMs) {
+                // Recent refresh failure — don't hammer the server. Caller
+                // should treat this as an auth failure and stop retrying.
+                return null
+            }
             val refreshUrl = originalUrl.newBuilder()
                 .encodedPath("/api/auth/refresh")
                 .query(null)
@@ -109,10 +121,12 @@ class JamarrApiClient(
                 }
             }.getOrNull()
             return if (newToken.isNullOrBlank()) {
+                refreshFailedAtMs = System.currentTimeMillis()
                 tokenHolder.clear()
                 callbackScope.launch { onRefreshFailed() }
                 null
             } else {
+                refreshFailedAtMs = 0L
                 tokenHolder.set(newToken)
                 callbackScope.launch { onTokenRefreshed(newToken) }
                 newToken

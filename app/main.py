@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 import os
+import re
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from app.db import init_db, close_db
 from app.security import configure_security_middleware, fastapi_docs_config, is_production
 
@@ -108,17 +109,34 @@ else:
     print("Warning: web/build directory not found. Frontend will not be served.")
 
 
+# Paths that must never fall through to the SPA index. Scanners probe these and
+# a 200 (even if just the SvelteKit shell) lands the host in public exposure DBs.
+_BLOCKED_PATH_PATTERNS = re.compile(
+    r"""(?ix)
+    (^|/) \.git(/|$)
+    | (^|/) \.env (\.|/|$)
+    | (^|/) \.htaccess$
+    | (^|/) \.htpasswd$
+    | \.(php|phtml|asp|aspx|jsp|cgi)(/|$)
+    | (^|/) wp-(admin|login|content|includes|json) (/|$|\.)
+    | (^|/) phpmyadmin (/|$)
+    | (^|/) phpinfo (/|$|\.)
+    | (^|/) administrator (/|$)
+    | (^|/) \.well-known/ (?! security\.txt$ | acme-challenge/ )
+    """
+)
+
+
 @app.get("/{path:path}")
 async def spa(path: str):
     # Let API and art routes fall through to their handlers
     if path.startswith("api/") or path.startswith("art/"):
-        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Not Found")
 
+    if _BLOCKED_PATH_PATTERNS.search(path):
         raise HTTPException(status_code=404, detail="Not Found")
 
     if is_production() and path.rstrip("/") in {"docs", "redoc", "openapi.json"}:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Not Found")
 
     if '..' in path or '\0' in path or '\\' in path:
@@ -134,7 +152,5 @@ async def spa(path: str):
     index_path = build_dir / "index.html"
     if index_path.exists():
         return FileResponse(index_path)
-
-    from fastapi import HTTPException
 
     raise HTTPException(status_code=404, detail="Not Found")

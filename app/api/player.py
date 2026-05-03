@@ -53,6 +53,22 @@ async def get_client_id(x_jamarr_client_id: Optional[str] = Header(None)) -> str
     return x_jamarr_client_id
 
 
+def _translate_renderer_error(action: str, exc: Exception) -> HTTPException:
+    """Map renderer/backend exceptions to client-facing HTTP errors.
+
+    ValueError comes from the registry when no backend matches the active
+    renderer (stale session or removed backend) — return 409.
+    Anything else is a transport/control failure on the device side — return 502.
+    """
+    logger.warning("Renderer %s failed: %s", action, exc, exc_info=True)
+    if isinstance(exc, ValueError):
+        return HTTPException(
+            status_code=409,
+            detail="Active renderer is unavailable. Re-select a device.",
+        )
+    return HTTPException(status_code=502, detail=f"Renderer {action} failed")
+
+
 @router.get("/api/client-ip")
 async def get_client_ip_endpoint(request: Request):
     return {"ip": get_client_ip(request)}
@@ -344,7 +360,12 @@ async def clear_queue(client_id: str = Depends(get_client_id)):
     Empty the active renderer queue and stop playback.
     """
     async for db in get_db():
-        state, udn = await renderer_orchestrator.stop_or_clear(db, client_id)
+        try:
+            state, udn = await renderer_orchestrator.stop_or_clear(db, client_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise _translate_renderer_error("clear", e)
 
         return {
             "status": "ok",
@@ -366,7 +387,12 @@ async def clear_queue(client_id: str = Depends(get_client_id)):
 )
 async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)):
     async for db in get_db():
-        state, udn = await renderer_orchestrator.skip_to_index(db, client_id, update.index)
+        try:
+            state, udn = await renderer_orchestrator.skip_to_index(db, client_id, update.index)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise _translate_renderer_error("skip", e)
     # Return the state so the client can sync immediately
     return {
         "status": "ok",
@@ -582,7 +608,12 @@ async def play_track(
 )
 async def pause_playback(client_id: str = Depends(get_client_id)):
     async for db in get_db():
-        await renderer_orchestrator.pause(db, client_id)
+        try:
+            await renderer_orchestrator.pause(db, client_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise _translate_renderer_error("pause", e)
         return {"status": "ok"}
 
 
@@ -592,7 +623,12 @@ async def pause_playback(client_id: str = Depends(get_client_id)):
 )
 async def resume_playback(client_id: str = Depends(get_client_id)):
     async for db in get_db():
-        await renderer_orchestrator.resume(db, client_id)
+        try:
+            await renderer_orchestrator.resume(db, client_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise _translate_renderer_error("resume", e)
 
     return {"status": "ok"}
 
