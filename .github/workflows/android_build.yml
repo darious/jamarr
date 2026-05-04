@@ -28,7 +28,7 @@ jobs:
         working-directory: android
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6
 
       - name: Set up JDK
         uses: actions/setup-java@v5.2.0
