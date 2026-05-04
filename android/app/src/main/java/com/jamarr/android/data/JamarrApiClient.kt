@@ -336,6 +336,46 @@ class JamarrApiClient(
         }
     }
 
+    suspend fun castPlaybackUrl(
+        serverUrl: String,
+        rendererId: String,
+        trackId: Long,
+        excludedProfiles: Collection<String> = emptyList(),
+    ): CastPlaybackPlan = withContext(Dispatchers.IO) {
+        val builder = apiUrl(serverUrl, "/api/cast/playback/url").toHttpUrl().newBuilder()
+            .addQueryParameter("track_id", trackId.toString())
+            .addQueryParameter("renderer_id", rendererId)
+        if (excludedProfiles.isNotEmpty()) {
+            builder.addQueryParameter("excluded", excludedProfiles.joinToString(","))
+        }
+        val request = Request.Builder().url(builder.build()).get().build()
+        val plan: CastPlaybackPlan = execute(request)
+        plan.copy(url = resolveUrl(serverUrl, plan.url))
+    }
+
+    suspend fun castPlaybackFeedback(
+        serverUrl: String,
+        rendererId: String,
+        trackId: Long,
+        profile: String,
+        success: Boolean,
+        reason: String? = null,
+    ): Unit = withContext(Dispatchers.IO) {
+        val payload = json.encodeToString(
+            CastFeedbackRequest(rendererId, trackId, profile, success, reason),
+        ).toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/cast/playback/feedback"))
+            .post(payload)
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                val b = response.body.string()
+                throw JamarrApiException(response.code, errorMessage(response.code, b))
+            }
+        }
+    }
+
     suspend fun streamUrl(
         serverUrl: String,
         accessToken: String,

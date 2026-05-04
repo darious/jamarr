@@ -18,6 +18,8 @@ import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.images.WebImage
+import com.jamarr.android.data.CastPlaybackPlan
+import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.renderer.DeviceRendererController
 import com.jamarr.android.renderer.DeviceRendererInfo
 import com.jamarr.android.renderer.DeviceRendererPlaybackState
@@ -28,11 +30,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val TAG = "CastDeviceController"
 
-class CastDeviceController(private val appContext: Context) : DeviceRendererController {
+class CastDeviceController(
+    private val appContext: Context,
+    private val apiClient: JamarrApiClient? = null,
+    private val serverUrlProvider: () -> String = { "" },
+) : DeviceRendererController {
     override val kind: String = "cast"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -47,6 +54,22 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
     private var currentSession: CastSession? = null
     private var started = false
     private var ignoreRemoteVolumeUntilMs = 0L
+
+    /**
+     * Per-track playback attempt state. Keyed by track id. Tracks which
+     * profiles have already been refused by this Cast renderer in the
+     * current playback session, the active plan handed back by the
+     * backend, and whether a success-feedback ping has been sent.
+     */
+    private data class CastAttempt(
+        val trackId: Long,
+        val attempted: MutableSet<String> = mutableSetOf(),
+        var current: CastPlaybackPlan? = null,
+        var successReported: Boolean = false,
+    )
+
+    private val attempts = HashMap<Long, CastAttempt>()
+    private var lastErrorTrackId: Long? = null
 
     private val selector = MediaRouteSelector.Builder()
         .addControlCategory(
@@ -135,6 +158,8 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
         started = false
         _renderers.value = emptyList()
         _state.value = DeviceRendererPlaybackState()
+        attempts.clear()
+        lastErrorTrackId = null
     }
 
     override fun search() {
@@ -156,6 +181,9 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
     override suspend fun playQueue(tracks: List<QueuedTrack>, startIndex: Int) {
         if (tracks.isEmpty()) return
         val idx = startIndex.coerceIn(0, tracks.lastIndex)
+        attempts.clear()
+        lastErrorTrackId = null
+        setStatus("Starting playback…")
         _state.value = _state.value.copy(
             queue = tracks,
             currentIndex = idx,
@@ -163,8 +191,8 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
             durationSeconds = tracks[idx].durationSeconds,
             isPlaying = true,
             transportState = "BUFFERING",
-            status = null,
         )
+        prepareInitialPlan(tracks[idx])
         loadQueue(idx)
     }
 
@@ -187,6 +215,8 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
             isPlaying = false,
             transportState = "STOPPED",
         )
+        attempts.clear()
+        lastErrorTrackId = null
     }
 
     override suspend fun seek(seconds: Double) {
@@ -227,6 +257,7 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
         val s = _state.value
         if (s.queue.isEmpty()) return
         val target = index.coerceIn(0, s.queue.lastIndex)
+        setStatus("Starting playback…")
         _state.value = s.copy(
             currentIndex = target,
             positionSeconds = 0.0,
@@ -234,6 +265,7 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
             isPlaying = true,
             transportState = "BUFFERING",
         )
+        prepareInitialPlan(s.queue[target])
         loadQueue(target)
     }
 
@@ -272,7 +304,121 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
                 .setQueueData(queueData)
                 .setAutoplay(true)
                 .build()
-            load(request)
+            val pending = load(request)
+            pending.setResultCallback { result ->
+                if (!result.status.isSuccess) {
+                    val activeTrack = _state.value.queue.getOrNull(_state.value.currentIndex)
+                    val reason = result.status.statusMessage ?: "Cast load rejected (${result.status.statusCode})"
+                    if (activeTrack != null) {
+                        scope.launch { handleLoadFailure(activeTrack, reason) }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Asks the backend for the next profile to attempt for [track] and
+     * mutates the in-memory queue entry's URL/mime so subsequent
+     * MediaInfo builds use it. The first call for a track exposes the
+     * cached best-known profile; later calls (after Cast load failures)
+     * supply the failed profile via `excluded`.
+     */
+    private suspend fun prepareInitialPlan(track: QueuedTrack) {
+        val rendererId = _state.value.activeRendererId ?: return
+        val client = apiClient ?: return
+        val server = serverUrlProvider().takeIf { it.isNotBlank() } ?: return
+        val state = attempts.getOrPut(track.id) { CastAttempt(track.id) }
+        if (state.current != null && state.current?.profile !in state.attempted) {
+            // Already have a candidate for this track; skip refetch.
+            applyPlanToQueueEntry(track.id, state.current!!)
+            return
+        }
+        runCatching {
+            client.castPlaybackUrl(server, rendererId, track.id, state.attempted)
+        }.onSuccess { plan ->
+            state.current = plan
+            applyPlanToQueueEntry(track.id, plan)
+            announcePlan(plan, isRetry = state.attempted.isNotEmpty())
+        }.onFailure {
+            Log.w(TAG, "castPlaybackUrl failed track=${track.id}", it)
+            // Leave the existing streamUrl in place — Cast will try
+            // whatever the ViewModel pre-resolved (original FLAC by
+            // default).
+        }
+    }
+
+    private fun applyPlanToQueueEntry(trackId: Long, plan: CastPlaybackPlan) {
+        val current = _state.value
+        val updated = current.queue.map {
+            if (it.id == trackId) it.copy(streamUrl = plan.url, mime = plan.mime) else it
+        }
+        _state.value = current.copy(queue = updated)
+    }
+
+    private fun announcePlan(plan: CastPlaybackPlan, isRetry: Boolean) {
+        when {
+            plan.isEmergencyFallback ->
+                setStatus("Emergency compatibility mode (MP3 320 kbps)")
+            isRetry ->
+                setStatus("Finding a compatible audio format…")
+            else ->
+                setStatus("Starting playback…")
+        }
+    }
+
+    private suspend fun handleLoadFailure(track: QueuedTrack, reason: String) {
+        val rendererId = _state.value.activeRendererId ?: return
+        val client = apiClient ?: return
+        val server = serverUrlProvider().takeIf { it.isNotBlank() } ?: return
+        val state = attempts.getOrPut(track.id) { CastAttempt(track.id) }
+        val failedProfile = state.current?.profile
+        if (failedProfile != null && state.attempted.add(failedProfile)) {
+            runCatching {
+                client.castPlaybackFeedback(server, rendererId, track.id, failedProfile, success = false, reason = reason)
+            }.onFailure { Log.w(TAG, "castPlaybackFeedback (failure) failed track=${track.id}", it) }
+        }
+        setStatus("Finding a compatible audio format…")
+        val nextPlan = runCatching {
+            client.castPlaybackUrl(server, rendererId, track.id, state.attempted)
+        }.getOrNull()
+        if (nextPlan == null) {
+            setStatus("Could not play this track on Cast.")
+            return
+        }
+        state.current = nextPlan
+        state.successReported = false
+        applyPlanToQueueEntry(track.id, nextPlan)
+        announcePlan(nextPlan, isRetry = true)
+        // Reload single item against the active session.
+        val info = mediaInfo(_state.value.queue.first { it.id == track.id })
+        withRemote {
+            val request = MediaLoadRequestData.Builder()
+                .setMediaInfo(info)
+                .setAutoplay(true)
+                .build()
+            val pending = load(request)
+            pending.setResultCallback { result ->
+                if (!result.status.isSuccess) {
+                    val r = result.status.statusMessage ?: "Cast reload rejected (${result.status.statusCode})"
+                    scope.launch { handleLoadFailure(track, r) }
+                }
+            }
+        }
+    }
+
+    private fun reportSuccessIfNeeded(track: QueuedTrack) {
+        val rendererId = _state.value.activeRendererId ?: return
+        val client = apiClient ?: return
+        val server = serverUrlProvider().takeIf { it.isNotBlank() } ?: return
+        val state = attempts[track.id] ?: return
+        val plan = state.current ?: return
+        if (state.successReported) return
+        state.successReported = true
+        scope.launch {
+            runCatching {
+                client.castPlaybackFeedback(server, rendererId, track.id, plan.profile, success = true)
+            }.onFailure { Log.w(TAG, "castPlaybackFeedback (success) failed track=${track.id}", it) }
         }
     }
 
@@ -291,11 +437,24 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
             else -> _state.value.transportState
         }
         val current = _state.value
+        val activeTrack = current.queue.getOrNull(activeIndex)
         val idleFinished = playerState == MediaStatus.PLAYER_STATE_IDLE &&
             mediaStatus?.idleReason == MediaStatus.IDLE_REASON_FINISHED
+        val idleError = playerState == MediaStatus.PLAYER_STATE_IDLE &&
+            mediaStatus?.idleReason == MediaStatus.IDLE_REASON_ERROR
         if (idleFinished && activeIndex >= current.queue.lastIndex) {
             _state.value = current.copy(isPlaying = false, transportState = "STOPPED")
             return
+        }
+        if (idleError && activeTrack != null && lastErrorTrackId != activeTrack.id) {
+            lastErrorTrackId = activeTrack.id
+            scope.launch {
+                handleLoadFailure(activeTrack, "Cast receiver reported playback error")
+            }
+        }
+        if (playerState == MediaStatus.PLAYER_STATE_PLAYING && activeTrack != null) {
+            lastErrorTrackId = null
+            reportSuccessIfNeeded(activeTrack)
         }
         _state.value = current.copy(
             currentIndex = activeIndex,

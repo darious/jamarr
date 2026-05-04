@@ -70,6 +70,28 @@ data class StreamUrlResponse(
     val url: String,
 )
 
+@Serializable
+data class CastPlaybackPlan(
+    val profile: String,
+    val mime: String,
+    val url: String,
+    @SerialName("is_emergency_fallback")
+    val isEmergencyFallback: Boolean = false,
+    @SerialName("remaining_profiles")
+    val remainingProfiles: List<String> = emptyList(),
+)
+
+@Serializable
+data class CastFeedbackRequest(
+    @SerialName("renderer_id")
+    val rendererId: String,
+    @SerialName("track_id")
+    val trackId: Long,
+    val profile: String,
+    val success: Boolean,
+    val reason: String? = null,
+)
+
 data class HomeContent(
     val newReleases: List<HomeAlbum> = emptyList(),
     val recentlyAddedAlbums: List<HomeAlbum> = emptyList(),

@@ -45,7 +45,11 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     )
     val playbackController = JamarrPlaybackController(application)
     val upnpController = UpnpDeviceController(application)
-    val castController = CastDeviceController(application)
+    val castController = CastDeviceController(
+        appContext = application,
+        apiClient = apiClient,
+        serverUrlProvider = { serverUrl },
+    )
 
     // Auth state
     var serverUrl by mutableStateOf(BuildConfig.DEFAULT_SERVER_URL)

@@ -10,6 +10,15 @@ from datetime import timedelta
 from typing import Any, Awaitable, Callable
 
 from app.auth_tokens import create_stream_token
+from app.services.renderer.cast_capability import (
+    PROFILE_MIME,
+    CastProfile,
+    get_capability,
+    plan_attempts,
+    record_failure,
+    record_success,
+    track_quality_from_track,
+)
 from app.services.renderer.contracts import (
     PlaybackContext,
     RendererBackend,
@@ -68,6 +77,14 @@ class CastRendererBackend(RendererBackend):
         self._listeners: dict[str, list[_CastStatusListener]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._discovery_lock = asyncio.Lock()
+        # Per-renderer transient progress message (e.g. "Finding a
+        # compatible audio format…"). Surfaced through the orchestrator
+        # so UIs can render it without re-deriving it from internal state.
+        self._progress_messages: dict[str, str] = {}
+        # Per-renderer "load chain settled" event. Set when the current
+        # capability-walk has either succeeded or exhausted every
+        # profile. Tests await this; production code ignores it.
+        self._load_settled: dict[str, asyncio.Event] = {}
 
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -132,19 +149,108 @@ class CastRendererBackend(RendererBackend):
         track: dict[str, Any],
         context: PlaybackContext,
     ) -> RendererStatus:
+        """Issue a Cast load and return PLAYING immediately.
+
+        The capability-hierarchy walk runs as a background callback chain:
+        every ``play_media`` invocation passes a callback that, on
+        failure, persists the failed profile and re-issues ``play_media``
+        with the next profile in the plan. This keeps the player API
+        responsive (no blocking on Cast receiver round-trips) and matches
+        pychromecast's natural load-then-callback semantics.
+        """
+
         cast = await self._get_ready_cast(renderer_id)
-        await asyncio.to_thread(cast.start_app, self._media_receiver_app_id(), True, self.launch_timeout)
-        media_url = self._stream_url(track, context)
-        mime_type = self._mime_type(track)
+        await asyncio.to_thread(
+            cast.start_app, self._media_receiver_app_id(), True, self.launch_timeout
+        )
+
+        self._set_progress_message(renderer_id, "Starting playback…")
+        # Reset settled-event for this play call so tests/observers can
+        # await chain completion without seeing stale state.
+        self._load_settled[renderer_id] = asyncio.Event()
+
+        pool = self._safe_pool()
+        if pool is None:
+            # No DB available (test environments, transient init); fall
+            # back to the legacy single-attempt original-FLAC path.
+            status = await self._submit_attempt(
+                cast=cast,
+                renderer_id=renderer_id,
+                track=track,
+                context=context,
+                profile=CastProfile.ORIGINAL_FLAC,
+                remaining=[],
+                quality=None,
+                pool=None,
+            )
+            self._load_settled[renderer_id].set()
+            return status
+
+        quality = track_quality_from_track(track)
+        async with pool.acquire() as db:
+            cap = await get_capability(db, renderer_id)
+        decision = plan_attempts(quality, cap, [])
+        if not decision.plan:
+            self._load_settled[renderer_id].set()
+            raise RuntimeError(
+                f"No Cast playback profiles available for renderer {renderer_id}"
+            )
+
+        first_profile = decision.plan[0]
+        if first_profile == CastProfile.MP3_320:
+            self._set_progress_message(
+                renderer_id,
+                "Using emergency compatibility mode (MP3 320 kbps)",
+            )
+
+        return await self._submit_attempt(
+            cast=cast,
+            renderer_id=renderer_id,
+            track=track,
+            context=context,
+            profile=first_profile,
+            remaining=decision.plan[1:],
+            quality=quality,
+            pool=pool,
+        )
+
+    async def _submit_attempt(
+        self,
+        cast: Any,
+        renderer_id: str,
+        track: dict[str, Any],
+        context: PlaybackContext,
+        profile: CastProfile,
+        remaining: list[CastProfile],
+        quality: Any,
+        pool: Any,
+    ) -> RendererStatus:
+        media_url = self._stream_url(track, context, profile)
+        mime_type = PROFILE_MIME[profile]
         metadata = self._media_metadata(track, context)
         thumb = self._art_url(track, context)
         logger.info(
-            "Cast play requested renderer=%s track_id=%s mime=%s url=%s",
+            "Cast play attempt renderer=%s track_id=%s profile=%s mime=%s url=%s",
             renderer_id,
             track.get("id"),
+            profile.value,
             mime_type,
             media_url.split("?", 1)[0],
         )
+
+        loop = asyncio.get_running_loop()
+        callback = self._make_load_callback(
+            cast=cast,
+            renderer_id=renderer_id,
+            track=track,
+            context=context,
+            profile=profile,
+            remaining=remaining,
+            quality=quality,
+            pool=pool,
+            loop=loop,
+        )
+
         await asyncio.to_thread(
             cast.media_controller.play_media,
             media_url,
@@ -153,9 +259,199 @@ class CastRendererBackend(RendererBackend):
             thumb=thumb,
             metadata=metadata,
             stream_type=self._stream_type(),
-            callback_function=self._load_callback(renderer_id, int(track["id"])),
+            callback_function=callback,
         )
-        return RendererStatus(renderer_id=renderer_id, state="PLAYING", current_media_url=media_url)
+
+        return RendererStatus(
+            renderer_id=renderer_id,
+            state="PLAYING",
+            current_media_url=media_url,
+        )
+
+    def _make_load_callback(
+        self,
+        cast: Any,
+        renderer_id: str,
+        track: dict[str, Any],
+        context: PlaybackContext,
+        profile: CastProfile,
+        remaining: list[CastProfile],
+        quality: Any,
+        pool: Any,
+        loop: asyncio.AbstractEventLoop,
+    ) -> Callable[[bool, Any], None]:
+        track_id = int(track["id"])
+
+        def callback(success: bool, response: Any) -> None:
+            if success:
+                logger.info(
+                    "Cast load accepted renderer=%s track_id=%s profile=%s",
+                    renderer_id,
+                    track_id,
+                    profile.value,
+                )
+            else:
+                logger.warning(
+                    "Cast load failed renderer=%s track_id=%s profile=%s response=%s",
+                    renderer_id,
+                    track_id,
+                    profile.value,
+                    response,
+                )
+            if pool is None or quality is None:
+                # Legacy / DB-less path: nothing to record, no retry.
+                self._signal_settled(renderer_id, loop)
+                return
+            coro = self._handle_load_result(
+                cast=cast,
+                renderer_id=renderer_id,
+                track=track,
+                context=context,
+                profile=profile,
+                remaining=remaining,
+                quality=quality,
+                pool=pool,
+                success=bool(success),
+                response=response,
+            )
+            try:
+                loop.call_soon_threadsafe(asyncio.ensure_future, coro)
+            except RuntimeError:
+                # Event loop already closed; nothing else to do.
+                logger.debug(
+                    "Cast load callback dropped (loop closed) renderer=%s",
+                    renderer_id,
+                )
+
+        return callback
+
+    async def _handle_load_result(
+        self,
+        cast: Any,
+        renderer_id: str,
+        track: dict[str, Any],
+        context: PlaybackContext,
+        profile: CastProfile,
+        remaining: list[CastProfile],
+        quality: Any,
+        pool: Any,
+        success: bool,
+        response: Any,
+    ) -> None:
+        try:
+            async with pool.acquire() as db:
+                if success:
+                    await record_success(db, renderer_id, profile, quality)
+                else:
+                    await record_failure(
+                        db,
+                        renderer_id,
+                        profile,
+                        quality,
+                        self._extract_failure_reason(response),
+                    )
+        except Exception:
+            logger.exception(
+                "Cast capability persistence failed renderer=%s profile=%s",
+                renderer_id,
+                profile.value,
+            )
+
+        if success:
+            # Spec: "If MP3 is used: make clear it is emergency
+            # compatibility mode." Persist the emergency message so the
+            # UI can keep it visible while playback runs; otherwise
+            # clear the transient "Starting…" / "Finding…" message.
+            if profile != CastProfile.MP3_320:
+                self._clear_progress_message(renderer_id)
+            self._signal_settled(renderer_id, asyncio.get_running_loop())
+            return
+
+        if not remaining:
+            self._set_progress_message(
+                renderer_id, "Could not play this track on Cast"
+            )
+            self._signal_settled(renderer_id, asyncio.get_running_loop())
+            return
+
+        next_profile = remaining[0]
+        rest = remaining[1:]
+        if next_profile == CastProfile.MP3_320:
+            self._set_progress_message(
+                renderer_id,
+                "Using emergency compatibility mode (MP3 320 kbps)",
+            )
+        else:
+            self._set_progress_message(
+                renderer_id, "Finding a compatible audio format…"
+            )
+
+        await self._submit_attempt(
+            cast=cast,
+            renderer_id=renderer_id,
+            track=track,
+            context=context,
+            profile=next_profile,
+            remaining=rest,
+            quality=quality,
+            pool=pool,
+        )
+
+    def _signal_settled(
+        self, renderer_id: str, loop: asyncio.AbstractEventLoop
+    ) -> None:
+        event = self._load_settled.get(renderer_id)
+        if event is None:
+            return
+        if loop.is_running():
+            loop.call_soon_threadsafe(event.set)
+        else:
+            event.set()
+
+    async def wait_for_load_settled(
+        self, renderer_id: str, timeout: float = 5.0
+    ) -> bool:
+        """Test/diagnostic helper: wait until the current capability walk
+        finishes (success or exhaustion). Returns True when settled."""
+
+        event = self._load_settled.get(renderer_id)
+        if event is None:
+            return True
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    @staticmethod
+    def _extract_failure_reason(response: Any) -> str:
+        if response is None:
+            return "Cast load failed"
+        if isinstance(response, dict):
+            for key in ("reason", "error", "type", "detailedErrorCode", "errorReason"):
+                value = response.get(key)
+                if value:
+                    return str(value)
+        return str(response)[:200]
+
+    def _set_progress_message(self, renderer_id: str, message: str) -> None:
+        self._progress_messages[renderer_id] = message
+        logger.info("Cast progress renderer=%s message=%s", renderer_id, message)
+
+    def _clear_progress_message(self, renderer_id: str) -> None:
+        self._progress_messages.pop(renderer_id, None)
+
+    def get_progress_message(self, renderer_id: str) -> str | None:
+        return self._progress_messages.get(renderer_id)
+
+    @staticmethod
+    def _safe_pool():
+        try:
+            from app.db import get_pool
+
+            return get_pool()
+        except Exception:
+            return None
 
     async def pause(self, renderer_id: str) -> RendererStatus:
         cast = await self._get_ready_cast(renderer_id)
@@ -425,7 +721,11 @@ class CastRendererBackend(RendererBackend):
         return guessed or "audio/flac"
 
     @staticmethod
-    def _stream_url(track: dict[str, Any], context: PlaybackContext) -> str:
+    def _stream_url(
+        track: dict[str, Any],
+        context: PlaybackContext,
+        profile: CastProfile | None = None,
+    ) -> str:
         expires_delta = (
             timedelta(seconds=context.token_ttl_seconds)
             if context.token_ttl_seconds
@@ -436,7 +736,10 @@ class CastRendererBackend(RendererBackend):
             user_id=context.user_id or track.get("user_id"),
             expires_delta=expires_delta,
         )
-        return f"{context.base_url}/api/stream/{track['id']}?token={token}"
+        url = f"{context.base_url}/api/stream/{track['id']}?token={token}"
+        if profile is not None and profile != CastProfile.ORIGINAL_FLAC:
+            url = f"{url}&profile={profile.value}"
+        return url
 
     @staticmethod
     def _art_url(track: dict[str, Any], context: PlaybackContext) -> str | None:
