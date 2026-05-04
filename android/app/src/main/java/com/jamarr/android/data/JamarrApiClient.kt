@@ -38,19 +38,26 @@ class JamarrApiClient(
     cookieJar: CookieJar = CookieJar.NO_COOKIES,
     private val onTokenRefreshed: suspend (String) -> Unit = {},
     private val onRefreshFailed: suspend () -> Unit = {},
+    private val onForceLogout: suspend () -> Unit = {},
     private val json: Json = Json {
         ignoreUnknownKeys = true
         coerceInputValues = true
     },
 ) {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val refreshLock = Any()
     private val callbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Cooldown after a refresh fails to prevent loops (e.g. background loops
     // that keep firing requests while the refresh token is permanently invalid).
     @Volatile private var refreshFailedAtMs: Long = 0L
     private val refreshCooldownMs: Long = 60_000L
+
+    companion object {
+        private val globalRefreshLock = Any()
+        private const val MAX_REFRESH_FAILURES = 2
+        @Volatile
+        var consecutiveRefreshFailures: Int = 0
+    }
 
     private val authInterceptor = Interceptor { chain ->
         val original = chain.request()
@@ -81,10 +88,7 @@ class JamarrApiClient(
         val req = response.request
         val path = req.url.encodedPath
         if (path.endsWith("/api/auth/login") || path.endsWith("/api/auth/refresh")) return null
-        if (response.priorResponse != null) {
-            callbackScope.launch { onRefreshFailed() }
-            return null
-        }
+        if (response.priorResponse != null) return null
         val failedAuth = req.header("Authorization")
         val failedToken = failedAuth?.removePrefix("Bearer ")?.trim()
         val newToken = refreshTokenSync(req.url, failedToken) ?: return null
@@ -92,7 +96,7 @@ class JamarrApiClient(
     }
 
     private fun refreshTokenSync(originalUrl: HttpUrl, failedToken: String?): String? {
-        synchronized(refreshLock) {
+        synchronized(globalRefreshLock) {
             val current = tokenHolder.get()
             if (current.isNotBlank() && current != failedToken) {
                 return current
@@ -122,11 +126,17 @@ class JamarrApiClient(
             }.getOrNull()
             return if (newToken.isNullOrBlank()) {
                 refreshFailedAtMs = System.currentTimeMillis()
+                consecutiveRefreshFailures++
                 tokenHolder.clear()
-                callbackScope.launch { onRefreshFailed() }
+                if (consecutiveRefreshFailures >= MAX_REFRESH_FAILURES) {
+                    callbackScope.launch { onForceLogout() }
+                } else {
+                    callbackScope.launch { onRefreshFailed() }
+                }
                 null
             } else {
                 refreshFailedAtMs = 0L
+                consecutiveRefreshFailures = 0
                 tokenHolder.set(newToken)
                 callbackScope.launch { onTokenRefreshed(newToken) }
                 newToken
@@ -145,7 +155,9 @@ class JamarrApiClient(
             .post(body)
             .build()
 
-        execute(request)
+        val response = execute<LoginResponse>(request)
+        consecutiveRefreshFailures = 0
+        response
     }
 
     suspend fun search(

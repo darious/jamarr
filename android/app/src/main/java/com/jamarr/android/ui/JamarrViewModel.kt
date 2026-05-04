@@ -7,11 +7,10 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jamarr.android.BuildConfig
+import com.jamarr.android.JamarrApplication
 import com.jamarr.android.auth.SettingsStore
-import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.HomeContent
 import com.jamarr.android.data.JamarrApiClient
-import com.jamarr.android.data.JamarrCookieJar
 import com.jamarr.android.data.PlayerStateResponse
 import com.jamarr.android.data.Renderer
 import com.jamarr.android.data.SearchResponse
@@ -31,14 +30,18 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class JamarrViewModel(application: Application) : AndroidViewModel(application) {
+    private val app = application as JamarrApplication
     private val settingsStore = SettingsStore(application)
-    val tokenHolder = TokenHolder()
-    private val cookieJar = JamarrCookieJar(settingsStore)
+    val tokenHolder = app.tokenHolder
+    private val cookieJar = app.cookieJar
     val apiClient = JamarrApiClient(
         tokenHolder = tokenHolder,
         cookieJar = cookieJar,
         onTokenRefreshed = { newToken -> settingsStore.saveAccessToken(newToken) },
         onRefreshFailed = {
+            settingsStore.clearAccessToken()
+        },
+        onForceLogout = {
             settingsStore.clearAccessToken()
             cookieJar.clear()
         },
