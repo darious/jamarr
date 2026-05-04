@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional
 import asyncio
 import logging
+import time
 import aiohttp
 from urllib.parse import urlparse
 from async_upnp_client.search import async_search
@@ -15,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 SSDP_TARGET_MEDIA_RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
 
+# Cooldown steps for persistently unreachable renderers (seconds).
+_FAILURE_COOLDOWN_STEPS = [120, 300, 900, 3600]
+
 class UPnPDiscovery:
     def __init__(self, manager):
         self.manager = manager
@@ -23,6 +27,8 @@ class UPnPDiscovery:
         self.is_scanning_subnet = False
         self.scan_msg = ""
         self.scan_progress = 0
+        # location -> {"failures": int, "cooldown_until": float}
+        self._failure_state: Dict[str, dict] = {}
 
     def start_background_scan(self):
         """Start background discovery loop."""
@@ -82,8 +88,12 @@ class UPnPDiscovery:
                 search_target=SSDP_TARGET_MEDIA_RENDERER,
             )
 
-            # Process discovered devices
+            # Process discovered devices, skipping those in cooldown
+            now = time.time()
             for location in discovered_locations:
+                state = self._failure_state.get(location)
+                if state and state.get("cooldown_until", 0) > now:
+                    continue
                 await self._add_renderer(location)
 
             self.manager.log(f"Discovery complete. Found {len(self.manager.renderers)} renderer(s)")
@@ -201,9 +211,11 @@ class UPnPDiscovery:
                 self.manager.renderers[udn] = renderer_info
 
             self.manager.log(f"Added renderer: {renderer_info['friendly_name']} ({udn})")
+            self._failure_state.pop(location, None)  # success resets failure tracking
 
         except Exception as e:
             logger.error(f"Error adding renderer from {location}: {e}")
+            self._track_failure(location)
             self.manager.log(f"Error adding renderer: {e}")
 
     async def load_persisted_renderers(self):
@@ -224,7 +236,10 @@ class UPnPDiscovery:
                 location = r.get("location") or r.get("location_url")
                 if location:
                     r["location"] = location
-                
+                    state = self._failure_state.get(location)
+                    if state and state.get("cooldown_until", 0) > time.time():
+                        continue
+
                 if await self.verify_device(r):
                     self.manager.renderers[r["udn"]] = r
                     if r.get("location"):
@@ -232,6 +247,19 @@ class UPnPDiscovery:
                             await self._add_renderer(r["location"])
                         except Exception as e:
                             logger.debug(f"Could not recreate DMR for {r['udn']}: {e}")
+
+    def _track_failure(self, location: str) -> None:
+        now = time.time()
+        entry = self._failure_state.get(location)
+        if entry is None:
+            self._failure_state[location] = {"failures": 1, "cooldown_until": now + _FAILURE_COOLDOWN_STEPS[0]}
+            return
+        failures = entry["failures"] + 1
+        step_idx = min(failures, len(_FAILURE_COOLDOWN_STEPS)) - 1
+        self._failure_state[location] = {
+            "failures": failures,
+            "cooldown_until": now + _FAILURE_COOLDOWN_STEPS[step_idx],
+        }
 
     async def verify_device(self, r: Dict[str, Any]) -> bool:
         """Quick check if device is reachable."""
