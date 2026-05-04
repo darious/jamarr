@@ -52,6 +52,7 @@ async def monitor_upnp_playback(udn: str):
 
     was_playing = False  # Initialize to prevent UnboundLocalError
     consecutive_errors = 0
+    error_started_at = 0.0  # when the first error in the current streak occurred
     try:
         while True:
             # 1. Fetch position & transport from UPnP
@@ -61,19 +62,26 @@ async def monitor_upnp_playback(udn: str):
                 transport_state = await upnp.get_transport_info(udn)
                 logger.info(f"[Player] Monitor {udn}: Got pos={rel_time}, state={transport_state}")
                 consecutive_errors = 0  # Reset on success
+                error_started_at = 0.0
             except Exception as e:
+                now = time.time()
                 consecutive_errors += 1
-                logger.error(
-                    f"[Player] Monitor {udn}: Error fetching state (attempt {consecutive_errors}/10): {e}",
-                    exc_info=True,
-                )
-                if consecutive_errors > 10:
+                if error_started_at == 0.0:
+                    error_started_at = now
+                error_duration = now - error_started_at
+                # Kill only after 5 minutes of continuous errors
+                if error_duration > 300:
                     logger.error(
-                        f"[Player] Monitor {udn}: Too many consecutive errors, stopping"
+                        f"[Player] Monitor {udn}: Errors persisted {error_duration:.0f}s, stopping"
                     )
                     break
-                # Use last known values and continue
-                await asyncio.sleep(1)
+                # Exponential backoff: 1s → 2s → 4s → 8s → 16s → cap 30s
+                backoff = min(1 << (consecutive_errors - 1), 30)
+                logger.error(
+                    f"[Player] Monitor {udn}: Error fetching state (#{consecutive_errors}, "
+                    f"backoff {backoff}s, streak {error_duration:.0f}s): {e}"
+                )
+                await asyncio.sleep(backoff)
                 continue
 
             # 2. Update DB

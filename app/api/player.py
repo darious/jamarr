@@ -25,6 +25,7 @@ from app.models.player import (
 from app.services.player.globals import (
     playback_monitors,
     monitor_start_times,
+    _monitor_restart_history,
 )
 from app.services.player.state import (
     get_renderer_state_db,
@@ -83,14 +84,20 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
         # UPnP uses the legacy polling monitor. Event-capable backends like Cast
         # update state through the renderer orchestrator callback path.
         if renderer_id.startswith("upnp:"):
-            # For UPnP devices, we might want to check if monitor is running
             if state["is_playing"]:
                 if udn not in playback_monitors or playback_monitors[udn].done():
-                    # Only restart if it's been at least 5 seconds since last start
                     now = time.time()
                     last_start = monitor_start_times.get(udn, 0)
-                    if now - last_start > 5 and not _is_monitor_starting(udn):
+                    # Throttle rapid restarts: if 3+ restarts in 2 min, wait 60s
+                    history = _monitor_restart_history.setdefault(udn, [])
+                    history[:] = [t for t in history if now - t < 120]
+                    if len(history) >= 3:
+                        if now - last_start < 60:
+                            continue
+                        history.clear()
+                    if now - last_start > 30 and not _is_monitor_starting(udn):
                         logger.info(f"[Player] Auto-restarting monitor for {udn}")
+                        history.append(now)
                         start_monitor_task(udn)
         elif not renderer_id.startswith("local:"):
             state = await renderer_orchestrator.sync_status(db, renderer_id, udn, state)
