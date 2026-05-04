@@ -32,11 +32,14 @@ class JamarrCookieJar(
     private val store = mutableMapOf<String, MutableList<Cookie>>()
     private val json = Json { ignoreUnknownKeys = true }
     private val persistScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var primed = false
 
     suspend fun prime() {
+        if (primed) return
         val stored = settingsStore.loadCookies()
         val now = System.currentTimeMillis()
         synchronized(lock) {
+            if (primed) return
             store.clear()
             for (raw in stored) {
                 val parsed = runCatching { json.decodeFromString<StoredCookie>(raw) }.getOrNull()
@@ -54,6 +57,7 @@ class JamarrCookieJar(
                 store.getOrPut(parsed.domain) { mutableListOf() }.add(builder.build())
             }
         }
+        primed = true
     }
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
@@ -94,6 +98,7 @@ class JamarrCookieJar(
 
     suspend fun clear() {
         synchronized(lock) { store.clear() }
+        primed = false
         settingsStore.saveCookies(emptyList())
     }
 

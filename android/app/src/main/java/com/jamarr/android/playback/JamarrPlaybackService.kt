@@ -16,14 +16,15 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import com.jamarr.android.JamarrApplication
 import com.jamarr.android.MainActivity
 import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.JamarrApiClient
-import com.jamarr.android.data.JamarrCookieJar
 import com.jamarr.android.data.SearchTrack
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +34,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
 @OptIn(markerClass = [UnstableApi::class])
@@ -56,14 +56,26 @@ class JamarrPlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
 
+        val app = applicationContext as JamarrApplication
+        tokenHolder = app.tokenHolder
+        val cookieJar = app.cookieJar
         settingsStore = SettingsStore(applicationContext)
-        tokenHolder = TokenHolder()
-        val cookieJar = JamarrCookieJar(settingsStore)
+
+        val authFailed = AtomicBoolean(false)
+
         apiClient = JamarrApiClient(
             tokenHolder = tokenHolder,
             cookieJar = cookieJar,
             onTokenRefreshed = { token -> settingsStore.saveAccessToken(token) },
-            onRefreshFailed = { settingsStore.clearAccessToken() },
+            onRefreshFailed = {
+                settingsStore.clearAccessToken()
+                authFailed.set(true)
+            },
+            onForceLogout = {
+                settingsStore.clearAccessToken()
+                cookieJar.clear()
+                authFailed.set(true)
+            },
         )
 
         val clientId = runBlocking {
@@ -77,7 +89,6 @@ class JamarrPlaybackService : MediaLibraryService() {
         serviceScope.launch {
             settingsStore.observeSession().collectLatest { session ->
                 serverUrl.set(session.serverUrl)
-                tokenHolder.set(session.accessToken)
             }
         }
 
@@ -108,7 +119,8 @@ class JamarrPlaybackService : MediaLibraryService() {
             var lastReportedMediaId: String? = null
             while (true) {
                 val url = serverUrl.get()
-                if (url.isNotBlank() && clientId.isNotBlank()) {
+                val token = tokenHolder.get()
+                if (url.isNotBlank() && clientId.isNotBlank() && token.isNotBlank() && !authFailed.get()) {
                     val qKey = queueKey(player)
                     if (qKey != null && qKey != lastReportedQueueKey) {
                         lastReportedQueueKey = qKey
@@ -122,7 +134,7 @@ class JamarrPlaybackService : MediaLibraryService() {
                                 serviceScope.launch(Dispatchers.IO) {
                                     runCatching {
                                         withTimeout(5000) {
-                                            apiClient.streamUrl(url, tokenHolder.get(), tid)
+                                            apiClient.streamUrl(url, token, tid)
                                         }
                                     }.onSuccess { resolved ->
                                         streamUrlCache[tid] = CachedStreamUrl(
