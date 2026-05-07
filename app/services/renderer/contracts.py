@@ -111,6 +111,9 @@ class PlaybackContext:
     user_id: int | None
     username: str | None = None
     token_ttl_seconds: int | None = None
+    stream_url: str | None = None
+    stream_mime_type: str | None = None
+    stream_claims: dict[str, Any] = field(default_factory=dict)
 
 
 class RendererBackend(Protocol):

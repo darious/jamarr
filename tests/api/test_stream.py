@@ -1,4 +1,5 @@
 import pytest
+import json
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 import os
@@ -6,6 +7,29 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
 from jose import jwt
+from app.api.stream import _calculate_normalization_gain_db
+from app.audio_normalization import calculate_album_gain_db
+
+
+def test_calculate_normalization_gain_attenuates_loud_track():
+    gain = _calculate_normalization_gain_db(-6.0, -0.2)
+    assert gain == pytest.approx(-10.0)
+
+
+def test_calculate_normalization_gain_caps_quiet_track_boost():
+    gain = _calculate_normalization_gain_db(-30.0, -12.0)
+    assert gain == pytest.approx(6.0)
+
+
+def test_calculate_normalization_gain_respects_true_peak_ceiling():
+    gain = _calculate_normalization_gain_db(-20.0, 2.7)
+    assert gain == pytest.approx(-3.7)
+
+
+def test_calculate_album_gain_respects_hottest_album_true_peak():
+    gain = calculate_album_gain_db(1.49, -0.2)
+    assert gain == pytest.approx(-0.8)
+
 
 @pytest.fixture
 async def stream_data(db):
@@ -113,3 +137,145 @@ async def test_stream_url_cast_token_uses_renderer_policy(auth_client: AsyncClie
     issued_at = datetime.fromtimestamp(claims["iat"], tz=timezone.utc)
     expires_at = datetime.fromtimestamp(claims["exp"], tz=timezone.utc)
     assert (expires_at - issued_at).total_seconds() == 1800
+
+
+@pytest.mark.asyncio
+async def test_stream_url_uses_album_gain_for_album_sequence(auth_client: AsyncClient, db):
+    await db.execute(
+        """
+        INSERT INTO track (id, title, artist, album, album_artist, track_no, disc_no, path, duration_seconds)
+        VALUES
+            (1001, 'One', 'Album Artist', 'Album', 'Album Artist', 1, 1, '/tmp/one.flac', 100),
+            (1002, 'Two', 'Album Artist', 'Album', 'Album Artist', 2, 1, '/tmp/two.flac', 100)
+        """
+    )
+    await db.execute(
+        """
+        INSERT INTO track_audio_analysis (
+            track_id, status, loudness_lufs, true_peak_db, replaygain_album_gain_db
+        )
+        VALUES
+            (1001, 'complete', -19.4, -3.1, 1.49),
+            (1002, 'complete', -18.9, -2.8, 1.49)
+        """
+    )
+    queue = [
+        {
+            "id": 1001,
+            "title": "One",
+            "artist": "Album Artist",
+            "album": "Album",
+            "album_artist": "Album Artist",
+            "track_no": 1,
+            "disc_no": 1,
+            "duration_seconds": 100,
+        },
+        {
+            "id": 1002,
+            "title": "Two",
+            "artist": "Album Artist",
+            "album": "Album",
+            "album_artist": "Album Artist",
+            "track_no": 2,
+            "disc_no": 1,
+            "duration_seconds": 100,
+        },
+    ]
+    await db.execute(
+        """
+        INSERT INTO client_session (client_id, active_renderer_udn, active_renderer_id)
+        VALUES ('album-client', 'local:album-client', 'local:album-client')
+        """
+    )
+    await db.execute(
+        """
+        INSERT INTO renderer_state (renderer_udn, queue, current_index, is_playing)
+        VALUES ('local:album-client', $1, 0, true)
+        """,
+        json.dumps(queue),
+    )
+
+    response = await auth_client.get(
+        "/api/stream-url/1001",
+        headers={"X-Jamarr-Client-Id": "album-client"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["loudness_gain_mode"] == "album"
+    assert data["loudness_gain_db"] == pytest.approx(1.49)
+    token = parse_qs(urlparse(data["url"]).query)["token"][0]
+    claims = jwt.get_unverified_claims(token)
+    assert claims["loudness_gain_mode"] == "album"
+    assert claims["loudness_gain_db"] == pytest.approx(1.49)
+
+
+@pytest.mark.asyncio
+async def test_stream_url_clamps_album_gain_by_album_sequence_true_peak(auth_client: AsyncClient, db):
+    await db.execute(
+        """
+        INSERT INTO track (id, title, artist, album, album_artist, track_no, disc_no, path, duration_seconds)
+        VALUES
+            (1011, 'One', 'Album Artist', 'Hot Album', 'Album Artist', 1, 1, '/tmp/one.flac', 100),
+            (1012, 'Two', 'Album Artist', 'Hot Album', 'Album Artist', 2, 1, '/tmp/two.flac', 100)
+        """
+    )
+    await db.execute(
+        """
+        INSERT INTO track_audio_analysis (
+            track_id, status, loudness_lufs, true_peak_db, replaygain_album_gain_db
+        )
+        VALUES
+            (1011, 'complete', -19.4, -3.1, 1.49),
+            (1012, 'complete', -18.9, -0.2, 1.49)
+        """
+    )
+    queue = [
+        {
+            "id": 1011,
+            "title": "One",
+            "artist": "Album Artist",
+            "album": "Hot Album",
+            "album_artist": "Album Artist",
+            "track_no": 1,
+            "disc_no": 1,
+            "duration_seconds": 100,
+        },
+        {
+            "id": 1012,
+            "title": "Two",
+            "artist": "Album Artist",
+            "album": "Hot Album",
+            "album_artist": "Album Artist",
+            "track_no": 2,
+            "disc_no": 1,
+            "duration_seconds": 100,
+        },
+    ]
+    await db.execute(
+        """
+        INSERT INTO client_session (client_id, active_renderer_udn, active_renderer_id)
+        VALUES ('hot-album-client', 'local:hot-album-client', 'local:hot-album-client')
+        """
+    )
+    await db.execute(
+        """
+        INSERT INTO renderer_state (renderer_udn, queue, current_index, is_playing)
+        VALUES ('local:hot-album-client', $1, 0, true)
+        """,
+        json.dumps(queue),
+    )
+
+    response = await auth_client.get(
+        "/api/stream-url/1011",
+        headers={"X-Jamarr-Client-Id": "hot-album-client"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["loudness_gain_mode"] == "album"
+    assert data["loudness_gain_db"] == pytest.approx(-0.8)
+    token = parse_qs(urlparse(data["url"]).query)["token"][0]
+    claims = jwt.get_unverified_claims(token)
+    assert claims["loudness_gain_mode"] == "album"
+    assert claims["loudness_gain_db"] == pytest.approx(-0.8)

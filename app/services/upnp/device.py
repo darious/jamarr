@@ -74,12 +74,14 @@ class UPnPDeviceControl:
         if not dmr:
             raise ValueError(f"DMR device not found for {self.manager.active_renderer}")
 
-        # Build media URL with a short-lived stream token
-        stream_token = create_stream_token(track_id, user_id=metadata.get("user_id"))
-        media_url = (
-            f"{self.manager.base_url}/api/stream/{track_id}"
-            f"?token={stream_token}"
-        )
+        # Prefer the generic renderer stack URL; fallback keeps legacy direct calls working.
+        media_url = metadata.get("stream_url")
+        if not media_url:
+            stream_token = create_stream_token(track_id, user_id=metadata.get("user_id"))
+            media_url = (
+                f"{self.manager.base_url}/api/stream/{track_id}"
+                f"?token={stream_token}"
+            )
 
         # Get MIME type from metadata
         mime_type = metadata.get("mime", "audio/flac")

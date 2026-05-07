@@ -135,7 +135,7 @@ class CastRendererBackend(RendererBackend):
         cast = await self._get_ready_cast(renderer_id)
         await asyncio.to_thread(cast.start_app, self._media_receiver_app_id(), True, self.launch_timeout)
         media_url = self._stream_url(track, context)
-        mime_type = self._mime_type(track)
+        mime_type = context.stream_mime_type or self._mime_type(track)
         metadata = self._media_metadata(track, context)
         thumb = self._art_url(track, context)
         logger.info(
@@ -426,6 +426,8 @@ class CastRendererBackend(RendererBackend):
 
     @staticmethod
     def _stream_url(track: dict[str, Any], context: PlaybackContext) -> str:
+        if context.stream_url:
+            return context.stream_url
         expires_delta = (
             timedelta(seconds=context.token_ttl_seconds)
             if context.token_ttl_seconds

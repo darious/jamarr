@@ -6,6 +6,14 @@ import logging
 import time
 from typing import Optional
 import asyncpg
+from app.audio_normalization import (
+    TARGET_LOUDNESS_LUFS,
+    album_sequence_track_ids,
+    calculate_album_gain_db,
+    calculate_track_gain_db,
+    env_flag_enabled,
+    is_album_sequence_item,
+)
 from app.db import get_db
 from app.api.deps import (
     get_current_admin_user_jwt,
@@ -147,8 +155,27 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
                     for r in meta_rows
                 }
 
+            analysis_rows = await db.fetch(
+                """
+                SELECT
+                    track_id,
+                    status,
+                    loudness_lufs,
+                    true_peak_db,
+                    replaygain_album_gain_db
+                FROM track_audio_analysis
+                WHERE track_id = ANY($1::bigint[])
+                """,
+                track_ids,
+            )
+            normalization_enabled = env_flag_enabled(
+                "JAMARR_LOUDNESS_NORMALIZATION",
+                True,
+            )
+            analysis_map = {row["track_id"]: row for row in analysis_rows}
+
             # 3. Apply updates
-            for t in queue:
+            for queue_index, t in enumerate(queue):
                 if isinstance(t, dict) and t.get("id"):
                     tid = t["id"]
                     
@@ -184,6 +211,61 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
                                 else:
                                     mime = "audio/flac"
                             t["mime"] = mime
+
+                    analysis = analysis_map.get(tid)
+                    can_normalize = (
+                        normalization_enabled
+                        and analysis is not None
+                        and analysis["status"] == "complete"
+                        and analysis["loudness_lufs"] is not None
+                    )
+                    if can_normalize:
+                        loudness_lufs = float(analysis["loudness_lufs"])
+                        true_peak_db = (
+                            float(analysis["true_peak_db"])
+                            if analysis["true_peak_db"] is not None
+                            else None
+                        )
+                        use_album_gain = (
+                            analysis["replaygain_album_gain_db"] is not None
+                            and is_album_sequence_item(queue, queue_index)
+                        )
+                        if use_album_gain:
+                            album_track_ids = album_sequence_track_ids(
+                                queue,
+                                queue_index,
+                            )
+                            album_true_peak_db = max(
+                                (
+                                    float(album_analysis["true_peak_db"])
+                                    for album_track_id in album_track_ids
+                                    if (album_analysis := analysis_map.get(album_track_id))
+                                    and album_analysis["true_peak_db"] is not None
+                                ),
+                                default=None,
+                            )
+                            gain_db = calculate_album_gain_db(
+                                float(analysis["replaygain_album_gain_db"]),
+                                album_true_peak_db,
+                            )
+                            gain_mode = "album"
+                        else:
+                            gain_db = calculate_track_gain_db(
+                                loudness_lufs,
+                                true_peak_db,
+                            )
+                            gain_mode = "track"
+                        t["loudness_lufs"] = loudness_lufs
+                        t["true_peak_db"] = true_peak_db
+                        t["loudness_gain_db"] = gain_db
+                        t["loudness_gain_mode"] = gain_mode
+                        t["loudness_target_lufs"] = TARGET_LOUDNESS_LUFS
+                        t["loudness_normalized"] = True
+                    else:
+                        t["loudness_gain_db"] = None
+                        t["loudness_gain_mode"] = "raw"
+                        t["loudness_target_lufs"] = TARGET_LOUDNESS_LUFS
+                        t["loudness_normalized"] = False
 
         return {
             "queue": queue,

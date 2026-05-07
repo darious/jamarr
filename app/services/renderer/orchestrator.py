@@ -29,6 +29,7 @@ from app.services.player.state import (
     update_queue_logged_db,
     update_renderer_state_db,
 )
+from app.services.audio_streaming import build_stream_url
 from app.services.renderer.contracts import PlaybackContext, RendererStatus, is_local_renderer
 from app.services.renderer.registry import RendererRegistry, get_renderer_registry
 from app.services.renderer.token_policy import stream_token_ttl_seconds
@@ -266,13 +267,30 @@ class RendererOrchestrator:
     ) -> None:
         _mark_monitor_starting(state_key)
         try:
+            renderer_kind = renderer_id.split(":", 1)[0] if ":" in renderer_id else None
+            stream = None
+            async with get_pool().acquire() as db:
+                state = await get_renderer_state_db(db, state_key)
+                stream = await build_stream_url(
+                    db,
+                    track_id=int(track["id"]),
+                    base_url=self._base_url(request),
+                    user_id=user_id or track.get("user_id"),
+                    duration_seconds=track.get("duration_seconds"),
+                    renderer_kind=renderer_kind,
+                    queue=state.get("queue") or [],
+                    queue_index=state.get("current_index"),
+                )
             context = PlaybackContext(
                 base_url=self._base_url(request),
                 user_id=user_id or track.get("user_id"),
                 token_ttl_seconds=stream_token_ttl_seconds(
-                    renderer_id.split(":", 1)[0] if ":" in renderer_id else None,
+                    renderer_kind,
                     track.get("duration_seconds"),
                 ),
+                stream_url=stream.url,
+                stream_mime_type=stream.mime_type,
+                stream_claims=stream.claims,
             )
             backend = self.registry.get_backend(renderer_id)
             await backend.play_track(renderer_id, track, context)

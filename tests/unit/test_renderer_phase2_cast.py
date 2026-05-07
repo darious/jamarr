@@ -176,6 +176,37 @@ async def test_phase2_cast_play_and_controls_call_pychromecast_shape():
     assert ("quit_app", 10) in cast.calls
 
 
+@pytest.mark.asyncio
+async def test_phase2_cast_prefers_context_stream_url_and_mime_type():
+    cast = FakeCast()
+    backend = CastRendererBackend(chromecast_getter=lambda **_: ([cast], FakeBrowser()))
+    await backend.discover(refresh=True)
+    renderer_id = "cast:11111111-1111-1111-1111-111111111111"
+
+    await backend.play_track(
+        renderer_id,
+        {
+            "id": 903,
+            "path": "/music/song.mp3",
+            "title": "Song",
+            "artist": "Artist",
+            "album": "Album",
+            "mime": "audio/mpeg",
+            "duration_seconds": 180,
+        },
+        PlaybackContext(
+            base_url="http://127.0.0.1:8111",
+            user_id=42,
+            stream_url="http://127.0.0.1:8111/api/stream/903?token=normalized",
+            stream_mime_type="audio/flac",
+        ),
+    )
+
+    play_call = cast.media_controller.calls[0]
+    assert play_call[1][0] == "http://127.0.0.1:8111/api/stream/903?token=normalized"
+    assert play_call[1][1] == "audio/flac"
+
+
 def test_phase2_cast_status_mapping_and_end_detection():
     backend = CastRendererBackend()
     renderer_id = "cast:11111111-1111-1111-1111-111111111111"

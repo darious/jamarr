@@ -102,6 +102,7 @@ def create_stream_token(
     track_id: int,
     user_id: Optional[int] = None,
     expires_delta: Optional[timedelta] = None,
+    stream_claims: Optional[dict] = None,
 ) -> str:
     """Create a short-lived stream token bound to a specific track."""
     settings = _get_stream_jwt_settings()
@@ -123,6 +124,8 @@ def create_stream_token(
     }
     if user_id is not None:
         claims["user_id"] = user_id
+    if stream_claims:
+        claims.update(stream_claims)
 
     return jwt.encode(
         claims,

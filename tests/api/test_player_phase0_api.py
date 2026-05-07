@@ -1,5 +1,7 @@
 import pytest
 from httpx import AsyncClient
+from jose import jwt
+from urllib.parse import parse_qs, urlparse
 
 from tests.helpers.fake_renderers import FakeUpnpManager
 
@@ -119,3 +121,49 @@ async def test_phase0_remote_play_route_sets_base_url_and_starts_monitor(
     assert data["queue"][0]["id"] == 501
     assert data["is_playing"] is True
     assert data["transport_state"] == "PLAYING"
+
+
+@pytest.mark.asyncio
+async def test_phase0_remote_play_uses_generic_normalized_stream_url(
+    auth_client: AsyncClient,
+    db,
+    monkeypatch,
+    phase0_tracks,
+    selected_remote_renderer,
+):
+    await db.execute(
+        """
+        INSERT INTO track_audio_analysis (
+            track_id, status, loudness_lufs, true_peak_db
+        )
+        VALUES (501, 'complete', -20.0, -8.0)
+        """
+    )
+    fake_upnp = FakeUpnpManager()
+    import app.api.player as player_api
+    import app.services.renderer.orchestrator as orchestrator_module
+    from app.services.renderer.upnp_backend import UpnpRendererBackend
+
+    monkeypatch.setitem(
+        player_api.renderer_orchestrator.registry.backends,
+        "upnp",
+        UpnpRendererBackend(fake_upnp),
+    )
+    monkeypatch.setattr(orchestrator_module, "start_monitor_task", lambda udn: None)
+    headers = {"X-Jamarr-Client-Id": "phase0-client"}
+
+    response = await auth_client.post(
+        "/api/player/play",
+        json={"track_id": 501},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    metadata = fake_upnp.commands[1].args[2]
+    assert metadata["mime"] == "audio/flac"
+    assert metadata["stream_url"].startswith("http://127.0.0.1:8111/api/stream/501?token=")
+    token = parse_qs(urlparse(metadata["stream_url"]).query)["token"][0]
+    claims = jwt.get_unverified_claims(token)
+    assert claims["loudness_normalized"] is True
+    assert claims["loudness_gain_mode"] == "track"
+    assert claims["loudness_gain_db"] == pytest.approx(4.0)
