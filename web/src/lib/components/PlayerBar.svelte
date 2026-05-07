@@ -22,6 +22,7 @@
   import VolumeControl from "$components/VolumeControl.svelte";
   import QueueDrawer from "$components/QueueDrawer.svelte";
   import ArtistLinks from "$components/ArtistLinks.svelte";
+  import LoudnessGainBadge from "$components/LoudnessGainBadge.svelte";
   import {
     registerActionHandlers,
     clearAll as clearMediaSession,
@@ -73,14 +74,25 @@
     return getRendererFallback(renderer);
   }
 
+  function finiteDuration(value: unknown): number {
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+      ? value
+      : 0;
+  }
+
+  function effectiveDuration(el?: HTMLAudioElement | null): number {
+    return (
+      finiteDuration(currentTrack?.duration_seconds) ||
+      finiteDuration(el?.duration) ||
+      0
+    );
+  }
+
   // Subscribe to store
   $: currentTrack = $playerState.queue[$playerState.current_index];
   $: isPlaying = $playerState.is_playing;
-  $: if (!$playerState.renderer.startsWith("local") && currentTrack) {
-    duration = currentTrack.duration_seconds;
-  } else if (currentTrack && (!audio || !audio.duration)) {
-    // Fallback for local if audio not ready
-    duration = currentTrack.duration_seconds;
+  $: if (currentTrack) {
+    duration = effectiveDuration(audio);
   }
   $: activeRenderer = $playerState.renderers.find(
     (r) => r.udn === $playerState.renderer,
@@ -240,7 +252,7 @@
 
     armingInFlight = true;
     try {
-      const url = await getStreamUrl(target.track.id);
+      const url = await getStreamUrl(target.track.id, getHeaders());
       // The user may have skipped while we were awaiting: re-check.
       const stillWanted = computeNextTrackToArm(
         $playerState.queue,
@@ -360,7 +372,8 @@
 
     const oldProgress = progress;
     progress = el.currentTime;
-    duration = el.duration;
+    const totalDuration = effectiveDuration(el);
+    duration = totalDuration;
     playerState.update((s) => ({
       ...s,
       position_seconds: progress,
@@ -381,8 +394,8 @@
 
     const nowMs =
       typeof performance !== "undefined" ? performance.now() : Date.now();
-    if (currentTrack && el.duration && nowMs - lastPositionReportAt > 500) {
-      setMediaSessionPositionState(el.currentTime, el.duration, 1);
+    if (currentTrack && totalDuration && nowMs - lastPositionReportAt > 500) {
+      setMediaSessionPositionState(el.currentTime, totalDuration, 1);
       lastPositionReportAt = nowMs;
     }
 
@@ -393,8 +406,8 @@
     // the new audio inherits the existing media activation context.
     if (
       !preEmptiveSwapDone &&
-      el.duration > 0 &&
-      el.currentTime >= el.duration - PRE_EMPTIVE_SWAP_LEAD_SECONDS &&
+      totalDuration > 0 &&
+      el.currentTime >= totalDuration - PRE_EMPTIVE_SWAP_LEAD_SECONDS &&
       armedTrackId !== null &&
       standbyAudio &&
       standbyAudio.src
@@ -456,7 +469,7 @@
     );
 
     // Use duration from current track
-    const duration = currentTrack?.duration_seconds || audio?.duration || 0;
+    const duration = effectiveDuration(audio);
     if (!duration) return;
 
     const time = percent * duration;
@@ -479,7 +492,7 @@
   }
 
   function handleSeekKeyDown(event: KeyboardEvent) {
-    const totalDuration = currentTrack?.duration_seconds || audio?.duration || 0;
+    const totalDuration = effectiveDuration(audio);
     if (!totalDuration) return;
 
     let nextTime: number | null = null;
@@ -512,7 +525,7 @@
 
     // Use 'progress' which handles both local (updated via timeupdate) and remote (updated via polling)
     const playedSeconds = progress;
-    const totalSeconds = currentTrack.duration_seconds || audio?.duration || 0;
+    const totalSeconds = effectiveDuration(audio);
 
     if (!totalSeconds || totalSeconds === 0) return;
 
@@ -550,7 +563,7 @@
       const currentSrc = audio.src;
       let newSrc = `/api/stream/${track.id}`;
       try {
-        newSrc = await getStreamUrl(track.id);
+        newSrc = await getStreamUrl(track.id, getHeaders());
       } catch (e) {
         console.error("[PlayerBar] Failed to fetch stream URL:", e);
         return;
@@ -908,11 +921,18 @@
               separatorClass="text-muted"
             />
           </div>
-          <div class="mt-0.5 text-[11px] text-subtle">
+          <div class="mt-0.5 flex items-center gap-2 text-[11px] text-subtle">
+            <LoudnessGainBadge
+              gainDb={currentTrack.loudness_gain_db}
+              mode={currentTrack.loudness_gain_mode}
+              normalized={currentTrack.loudness_normalized}
+              targetLufs={currentTrack.loudness_target_lufs}
+              compact={true}
+            />
             {#if $playerState.queue.length > 0}
-              {$playerState.current_index + 1} of {$playerState.queue.length}
+              <span>{$playerState.current_index + 1} of {$playerState.queue.length}</span>
             {:else}
-              Ready to play
+              <span>Ready to play</span>
             {/if}
           </div>
         </div>
@@ -1145,6 +1165,13 @@
                   .length}</span
               >
             {/if}
+            <span>•</span>
+            <LoudnessGainBadge
+              gainDb={currentTrack.loudness_gain_db}
+              mode={currentTrack.loudness_gain_mode}
+              normalized={currentTrack.loudness_normalized}
+              targetLufs={currentTrack.loudness_target_lufs}
+            />
           </div>
         </div>
       {:else}

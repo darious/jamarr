@@ -124,6 +124,12 @@ export interface Track {
     bitrate: number | null;
     sample_rate_hz: number | null;
     bit_depth: number | null;
+    loudness_lufs?: number | null;
+    true_peak_db?: number | null;
+    loudness_gain_db?: number | null;
+    loudness_gain_mode?: string | null;
+    loudness_target_lufs?: number | null;
+    loudness_normalized?: boolean;
     mb_release_id?: string | null;
     mb_release_group_id?: string | null;
     artist_mbid?: string | null;
@@ -296,8 +302,8 @@ export async function fetchTracks(params: { album?: string, artist?: string, alb
     return await res.json();
 }
 
-export async function getStreamUrl(trackId: number): Promise<string> {
-    const res = await fetchWithAuth(`/api/stream-url/${trackId}`);
+export async function getStreamUrl(trackId: number, headers?: HeadersInit): Promise<string> {
+    const res = await fetchWithAuth(`/api/stream-url/${trackId}`, { headers });
     if (!res.ok) throw new Error('Failed to fetch stream URL');
     const data = await res.json();
     return data.url;

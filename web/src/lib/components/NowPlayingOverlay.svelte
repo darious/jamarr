@@ -16,6 +16,7 @@
   import TrackCard from "$components/TrackCard.svelte";
   import ArtistLinks from "$components/ArtistLinks.svelte";
   import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
+  import LoudnessGainBadge from "$components/LoudnessGainBadge.svelte";
   import { onMount, onDestroy } from "svelte";
 
   onMount(() => {
@@ -378,6 +379,18 @@
                       ?.sample_rate_hz / 1000}kHz</span
                   >
                 {/if}
+                <span>•</span>
+                <LoudnessGainBadge
+                  gainDb={$playerState.queue[$playerState.current_index]
+                    ?.loudness_gain_db}
+                  mode={$playerState.queue[$playerState.current_index]
+                    ?.loudness_gain_mode}
+                  normalized={$playerState.queue[$playerState.current_index]
+                    ?.loudness_normalized}
+                  targetLufs={$playerState.queue[$playerState.current_index]
+                    ?.loudness_target_lufs}
+                  tone="overlay"
+                />
               </div>
             </div>
 

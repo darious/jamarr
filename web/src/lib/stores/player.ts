@@ -47,16 +47,33 @@ export const nowPlayingVisible = writable<boolean>(false);
 
 function mergeQueueArt(prev: Track[], next: Track[]): Track[] {
     if (!prev.length || !next.length) return next;
-    const artById = new Map<number, string | null | undefined>();
+    const metadataById = new Map<number, Partial<Track>>();
     for (const t of prev) {
-        if (t?.id) artById.set(t.id, t.art_sha1 ?? null);
+        if (!t?.id) continue;
+        metadataById.set(t.id, {
+            art_sha1: t.art_sha1 ?? null,
+            loudness_lufs: t.loudness_lufs,
+            true_peak_db: t.true_peak_db,
+            loudness_gain_db: t.loudness_gain_db,
+            loudness_gain_mode: t.loudness_gain_mode,
+            loudness_target_lufs: t.loudness_target_lufs,
+            loudness_normalized: t.loudness_normalized,
+        });
     }
     return next.map((t) => {
         if (!t?.id) return t;
-        if (!t.art_sha1 && artById.has(t.id)) {
-            return { ...t, art_sha1: artById.get(t.id) ?? null };
-        }
-        return t;
+        const previous = metadataById.get(t.id);
+        if (!previous) return t;
+        return {
+            ...t,
+            art_sha1: t.art_sha1 || previous.art_sha1 || null,
+            loudness_lufs: t.loudness_lufs ?? previous.loudness_lufs,
+            true_peak_db: t.true_peak_db ?? previous.true_peak_db,
+            loudness_gain_db: t.loudness_gain_db ?? previous.loudness_gain_db,
+            loudness_gain_mode: t.loudness_gain_mode ?? previous.loudness_gain_mode,
+            loudness_target_lufs: t.loudness_target_lufs ?? previous.loudness_target_lufs,
+            loudness_normalized: t.loudness_normalized ?? previous.loudness_normalized,
+        };
     });
 }
 
