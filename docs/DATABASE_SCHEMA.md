@@ -84,6 +84,7 @@ erDiagram
     playlist_track }|..|| track : "refers"
 
     playback_history }|..|| track : "plays"
+    track ||--o| track_audio_analysis : "has analysis"
     renderer_state }|..|| renderer : "state"
 
     lastfm_scrobble_match }|..|| lastfm_scrobble : "matches"
@@ -129,6 +130,42 @@ Stores metadata for individual audio files.
 | `quick_hash` | BYTEA | Partial hash for quick comparison. |
 | `mtime` | DOUBLE PRECISION | Modification time. |
 | `fts_vector` | TSVECTOR | Full-text search vector (title/artist/album). |
+
+### `track_audio_analysis`
+Stores locally derived audio analysis for tracks. Rows are invalidated when
+`track.quick_hash` changes or the analyzer version increases.
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `track_id` | BIGINT | Primary key. Foreign key `track.id`. |
+| `track_quick_hash` | BYTEA | `track.quick_hash` value when analysis was run. |
+| `analysis_version` | INTEGER | Analyzer version used for invalidation. |
+| `status` | TEXT | `complete`, `error`, or transient job state. |
+| `error` | TEXT | Last analyzer error, if any. |
+| `analyzed_at` | TIMESTAMPTZ | Last successful analysis timestamp. |
+| `phase1_analyzed_at` | TIMESTAMPTZ | Phase 1 analysis timestamp. |
+| `phase2_analyzed_at` | TIMESTAMPTZ | Phase 2 analysis timestamp. |
+| `phase3_analyzed_at` | TIMESTAMPTZ | Phase 3 analysis timestamp. |
+| `phase4_analyzed_at` | TIMESTAMPTZ | Phase 4 analysis timestamp. |
+| `loudness_lufs` | DOUBLE PRECISION | Integrated loudness in LUFS. |
+| `loudness_range_lu` | DOUBLE PRECISION | Loudness range in LU. |
+| `sample_peak_db` | DOUBLE PRECISION | Sample peak in dBFS. |
+| `true_peak_db` | DOUBLE PRECISION | True peak in dBFS. |
+| `silence_start_seconds` | DOUBLE PRECISION | Legacy raw leading silence end position. |
+| `silence_end_seconds` | DOUBLE PRECISION | Legacy raw trailing silence start position. |
+| `first_audio_start_seconds` | DOUBLE PRECISION | First non-silent audio position in seconds. |
+| `last_audio_end_seconds` | DOUBLE PRECISION | Last non-silent audio position in seconds. |
+| `leading_silence_seconds` | DOUBLE PRECISION | Leading silence duration in seconds. |
+| `trailing_silence_seconds` | DOUBLE PRECISION | Trailing silence duration in seconds. |
+| `replaygain_track_gain_db` | DOUBLE PRECISION | Locally computed track ReplayGain gain. |
+| `replaygain_track_peak` | DOUBLE PRECISION | Locally computed track ReplayGain peak. |
+| `replaygain_album_gain_db` | DOUBLE PRECISION | Locally computed album ReplayGain gain. |
+| `replaygain_album_peak` | DOUBLE PRECISION | Locally computed album ReplayGain peak. |
+| `bpm` | DOUBLE PRECISION | Locally estimated BPM. |
+| `bpm_confidence` | DOUBLE PRECISION | BPM estimate confidence. |
+| `gapless_hint` | TEXT | Derived gapless playback hint. |
+| `transition_hint` | TEXT | Derived transition hint. |
+| `energy_score_local` | DOUBLE PRECISION | Locally derived energy score. |
 
 ### `artist`
 Stores rich metadata for artists.

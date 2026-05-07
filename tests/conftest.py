@@ -117,6 +117,7 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
             "client_session",
             "renderer_state",
             "playback_history",
+            "track_audio_analysis",
             'track',
             'artist',
             'album',
