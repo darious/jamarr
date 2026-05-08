@@ -353,13 +353,25 @@ class JamarrApiClient(
         accessToken: String,
         trackId: Long,
         rendererKind: String? = null,
-    ): String = withContext(Dispatchers.IO) {
+        quality: String? = null,
+    ): String = streamUrlInfo(serverUrl, accessToken, trackId, rendererKind, quality).url
+
+    suspend fun streamUrlInfo(
+        serverUrl: String,
+        accessToken: String,
+        trackId: Long,
+        rendererKind: String? = null,
+        quality: String? = null,
+    ): StreamUrlResponse = withContext(Dispatchers.IO) {
         val url = apiUrl(serverUrl, "/api/stream-url/$trackId")
             .toHttpUrl()
             .newBuilder()
             .apply {
                 if (!rendererKind.isNullOrBlank()) {
                     addQueryParameter("renderer_kind", rendererKind)
+                }
+                if (!quality.isNullOrBlank()) {
+                    addQueryParameter("quality", quality)
                 }
             }
             .build()
@@ -368,7 +380,8 @@ class JamarrApiClient(
             .get()
             .build()
 
-        resolveUrl(serverUrl, execute<StreamUrlResponse>(request).url)
+        val response = execute<StreamUrlResponse>(request)
+        response.copy(url = resolveUrl(serverUrl, response.url))
     }
 
     suspend fun favoriteArtists(

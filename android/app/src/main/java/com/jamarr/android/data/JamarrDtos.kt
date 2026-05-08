@@ -68,6 +68,14 @@ data class SearchTrack(
 @Serializable
 data class StreamUrlResponse(
     val url: String,
+    @SerialName("stream_quality")
+    val streamQuality: String = "original",
+    @SerialName("stream_quality_label")
+    val streamQualityLabel: String = "Original",
+    @SerialName("stream_mime_type")
+    val streamMimeType: String? = null,
+    @SerialName("original_quality_label")
+    val originalQualityLabel: String = "Original",
 )
 
 data class HomeContent(

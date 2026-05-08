@@ -43,6 +43,8 @@ fun MiniPlayer(
     seedName: String,
     progressMs: Long,
     durationMs: Long,
+    originalQualityLabel: String = "Original",
+    playbackQualityLabel: String = "Original",
     shuffleEnabled: Boolean = false,
     repeatMode: Int = 0,
     onToggle: () -> Unit,
@@ -104,6 +106,13 @@ fun MiniPlayer(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                Text(
+                    text = "$originalQualityLabel -> $playbackQualityLabel",
+                    style = JamarrType.CaptionSmall,
+                    color = JamarrColors.Muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             if (shuffleEnabled || repeatMode != 0) {
                 Spacer(Modifier.width(4.dp))

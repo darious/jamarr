@@ -46,8 +46,17 @@ class JamarrPlaybackService : MediaLibraryService() {
     // Resolved /api/stream/<id>?token=<jwt> URLs. The stream token expires
     // (default 300s server-side) so cached URLs must not outlive the token,
     // otherwise ExoPlayer reopens with a stale token and gets 401.
-    private data class CachedStreamUrl(val url: String, val expiresAtMs: Long)
-    private val streamUrlCache = ConcurrentHashMap<Long, CachedStreamUrl>()
+    private data class CachedStreamUrl(
+        val url: String,
+        val quality: String,
+        val qualityLabel: String,
+        val originalQualityLabel: String,
+        val expiresAtMs: Long,
+    )
+    private val streamUrlCache = ConcurrentHashMap<String, CachedStreamUrl>()
+    private val activeQuality = AtomicReference("original")
+    private val adaptiveQualityPolicy = AdaptiveStreamQualityPolicy()
+    private val downgradeInFlight = AtomicBoolean(false)
     private lateinit var settingsStore: SettingsStore
     private lateinit var tokenHolder: TokenHolder
     private lateinit var apiClient: JamarrApiClient
@@ -113,6 +122,14 @@ class JamarrPlaybackService : MediaLibraryService() {
             .setLoadControl(loadControl)
             .build()
 
+        player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_BUFFERING && player.playWhenReady) {
+                    recordBufferingEvent(player)
+                }
+            }
+        })
+
         serviceScope.launch(Dispatchers.Main) {
             var lastProgressReport = 0L
             var lastReportedQueueKey: String? = null
@@ -130,15 +147,18 @@ class JamarrPlaybackService : MediaLibraryService() {
                         }
                         for (i in 0 until player.mediaItemCount) {
                             val tid = extractTrackId(player.getMediaItemAt(i).mediaId)
-                            if (tid > 0L && !isStreamUrlFresh(tid)) {
+                            if (tid > 0L && !isStreamUrlFresh(tid, activeQuality.get())) {
                                 serviceScope.launch(Dispatchers.IO) {
                                     runCatching {
                                         withTimeout(5000) {
-                                            apiClient.streamUrl(url, token, tid)
+                                            apiClient.streamUrlInfo(url, token, tid, quality = activeQuality.get())
                                         }
-                                    }.onSuccess { resolved ->
-                                        streamUrlCache[tid] = CachedStreamUrl(
-                                            url = resolved,
+                                    }.onSuccess { response ->
+                                        streamUrlCache[cacheKey(tid, response.streamQuality)] = CachedStreamUrl(
+                                            url = response.url,
+                                            quality = response.streamQuality,
+                                            qualityLabel = response.streamQualityLabel,
+                                            originalQualityLabel = response.originalQualityLabel,
                                             expiresAtMs = System.currentTimeMillis() + STREAM_URL_TTL_MS,
                                         )
                                     }
@@ -193,28 +213,78 @@ class JamarrPlaybackService : MediaLibraryService() {
         if (server.isBlank()) throw IOException("Jamarr server URL not set")
 
         val now = System.currentTimeMillis()
-        streamUrlCache[trackId]?.let { cached ->
+        val quality = activeQuality.get()
+        streamUrlCache[cacheKey(trackId, quality)]?.let { cached ->
             if (cached.expiresAtMs > now) {
+                updateCurrentStreamLabels(cached)
                 return spec.withUri(Uri.parse(cached.url))
             }
-            streamUrlCache.remove(trackId)
+            streamUrlCache.remove(cacheKey(trackId, quality))
         }
 
-        val resolved = runBlocking {
+        val response = runBlocking {
             withTimeout(5000) {
-                apiClient.streamUrl(server, tokenHolder.get(), trackId)
+                apiClient.streamUrlInfo(server, tokenHolder.get(), trackId, quality = quality)
             }
         }
-        streamUrlCache[trackId] = CachedStreamUrl(
-            url = resolved,
+        val cached = CachedStreamUrl(
+            url = response.url,
+            quality = response.streamQuality,
+            qualityLabel = response.streamQualityLabel,
+            originalQualityLabel = response.originalQualityLabel,
             expiresAtMs = System.currentTimeMillis() + STREAM_URL_TTL_MS,
         )
-        return spec.withUri(Uri.parse(resolved))
+        streamUrlCache[cacheKey(trackId, response.streamQuality)] = cached
+        updateCurrentStreamLabels(cached)
+        return spec.withUri(Uri.parse(response.url))
     }
 
-    private fun isStreamUrlFresh(trackId: Long): Boolean {
-        val cached = streamUrlCache[trackId] ?: return false
+    private fun isStreamUrlFresh(trackId: Long, quality: String): Boolean {
+        val cached = streamUrlCache[cacheKey(trackId, quality)] ?: return false
         return cached.expiresAtMs > System.currentTimeMillis()
+    }
+
+    private fun cacheKey(trackId: Long, quality: String): String = "$trackId:$quality"
+
+    private fun updateCurrentStreamLabels(cached: CachedStreamUrl) {
+        currentStreamQuality.set(cached.quality)
+        currentStreamQualityLabel.set(cached.qualityLabel)
+        currentOriginalQualityLabel.set(cached.originalQualityLabel)
+    }
+
+    private fun recordBufferingEvent(player: ExoPlayer) {
+        val now = System.currentTimeMillis()
+        val next = adaptiveQualityPolicy.recordBufferingEvent(activeQuality.get(), now)
+        if (next != null) {
+            downgradeForBuffering(player, next)
+        }
+    }
+
+    private fun downgradeForBuffering(player: ExoPlayer, next: String) {
+        if (!downgradeInFlight.compareAndSet(false, true)) return
+        val current = activeQuality.get()
+        if (next == current) {
+            downgradeInFlight.set(false)
+            return
+        }
+        serviceScope.launch(Dispatchers.Main) {
+            try {
+                val position = player.currentPosition.coerceAtLeast(0L)
+                val index = player.currentMediaItemIndex.coerceAtLeast(0)
+                val items = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+                activeQuality.set(next)
+                currentStreamQuality.set(next)
+                currentStreamQualityLabel.set(qualityLabel(next))
+                if (items.isNotEmpty()) {
+                    player.setMediaItems(items, index.coerceIn(items.indices), position)
+                    player.prepare()
+                    player.play()
+                }
+                adaptiveQualityPolicy.reset()
+            } finally {
+                downgradeInFlight.set(false)
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -267,7 +337,15 @@ class JamarrPlaybackService : MediaLibraryService() {
         // pre-warmed URL still has ~60s of validity when ExoPlayer opens it.
         const val STREAM_URL_TTL_MS = 240_000L
 
+        val currentStreamQuality = AtomicReference("original")
+        val currentStreamQualityLabel = AtomicReference("Original")
+        val currentOriginalQualityLabel = AtomicReference("Original")
+
         fun trackUri(trackId: Long): Uri =
             Uri.parse("$JAMARR_SCHEME://track/$trackId")
+
+        fun nextLowerQuality(current: String): String = StreamQualityLadder.nextLower(current)
+
+        fun qualityLabel(quality: String): String = StreamQualityLadder.label(quality)
     }
 }
