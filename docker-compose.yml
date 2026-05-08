@@ -32,6 +32,11 @@ services:
         read_only: true
         volume:
           nocopy: true
+      - type: volume
+        source: music_cache
+        target: /app/music-cache
+        volume:
+          nocopy: true
       - ${CACHE_PATH:-/mnt/config/q-jamarr/jamarr}:/app/cache
       - ./config.yaml:/app/config.yaml
     restart: unless-stopped
@@ -44,6 +49,7 @@ services:
       DB_USER: ${DB_USER:-jamarr}
       DB_PASS: ${DB_PASS:-jamarr}
       DB_NAME: ${DB_NAME:-jamarr}
+      JAMARR_STREAM_CACHE_DIR: ${JAMARR_STREAM_CACHE_DIR:-/app/music-cache/cache}
 
 
 volumes:
@@ -52,3 +58,8 @@ volumes:
       type: "nfs"
       o: "addr=${MUSIC_NFS_ADDR:-REDACTED_IP},nolock,soft,rw"
       device: ":${MUSIC_NFS_PATH:-/mnt/tank/music/library}"
+  music_cache:
+    driver_opts:
+      type: "nfs"
+      o: "addr=${MUSIC_NFS_ADDR:-REDACTED_IP},nolock,soft,rw"
+      device: ":${MUSIC_CACHE_NFS_PATH:-/mnt/tank/music}"
