@@ -1475,7 +1475,12 @@
                 track={{
                   id: single.localId || 0,
                   title: single.title,
-                  duration_seconds: single.tracksToPlay?.[0]?.duration_seconds,
+                  duration_seconds:
+                    single.tracksToPlay?.[0]?.duration_seconds ??
+                    single.duration_seconds ??
+                    (single.duration_ms
+                      ? Math.round(single.duration_ms / 1000)
+                      : undefined),
                   codec: single.codec,
                   bit_depth: single.bit_depth,
                   sample_rate_hz: single.sample_rate_hz,

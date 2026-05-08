@@ -10,6 +10,7 @@ on:
       - ".github/workflows/pr_test.yml"
       - "app/**"
       - "tests/**"
+      - "tui/**"
       - "migrations/**"
       - "config.yaml"
       - "docker-compose.test.yml"

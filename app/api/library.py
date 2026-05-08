@@ -384,7 +384,7 @@ async def get_artists(
             # Fetch singles
             singles_query = """
                 SELECT tt.*, t.id as local_track_id, t.title, t.album, t.codec,
-                    t.bit_depth, t.sample_rate_hz,
+                    t.bit_depth, t.sample_rate_hz, t.duration_seconds,
                     a.sha1 as art_sha1, t.artwork_id, t.release_mbid as mb_release_id
                 FROM top_track tt
                 LEFT JOIN track t ON tt.track_id = t.id
@@ -398,6 +398,8 @@ async def get_artists(
                     "mbid": s_row["external_mbid"],
                     "title": s_row["external_name"],
                     "date": s_row["external_date"],
+                    "duration_ms": s_row["external_duration_ms"],
+                    "duration_seconds": s_row["duration_seconds"],
                     "artist": row["name"],
                     "local_track_id": s_row["local_track_id"],
                     "codec": s_row["codec"],

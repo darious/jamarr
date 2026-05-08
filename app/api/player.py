@@ -10,7 +10,6 @@ from app.db import get_db
 from app.api.deps import (
     get_current_admin_user_jwt,
     get_current_user_jwt,
-    require_admin_user,
 )
 from app.security import get_client_ip, is_production
 
@@ -207,7 +206,6 @@ async def get_player_state(client_id: str = Depends(get_client_id)):
 
 @router.post(
     "/api/player/queue",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def set_queue(
     update: QueueUpdate,
@@ -248,7 +246,6 @@ async def set_queue(
 
 @router.post(
     "/api/player/queue/append",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def append_queue(
     update: AppendQueue,
@@ -275,7 +272,6 @@ async def append_queue(
 
 @router.post(
     "/api/player/queue/reorder",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def reorder_queue(
     update: QueueUpdate, client_id: str = Depends(get_client_id)
@@ -360,7 +356,6 @@ async def reorder_queue(
 
 @router.post(
     "/api/player/queue/clear",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def clear_queue(client_id: str = Depends(get_client_id)):
     """
@@ -390,7 +385,6 @@ async def clear_queue(client_id: str = Depends(get_client_id)):
 
 @router.post(
     "/api/player/index",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)):
     async for db in get_db():
@@ -482,7 +476,7 @@ async def update_progress(
     return {"status": "ok"}
 
 
-@router.get("/api/scan-status", dependencies=[Depends(get_current_admin_user_jwt)])
+@router.get("/api/scan-status")
 async def get_scan_status(client_id: str = Depends(get_client_id)):
     upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
     manager = getattr(upnp_backend, "manager", None)
@@ -498,11 +492,7 @@ async def get_scan_status(client_id: str = Depends(get_client_id)):
 async def get_renderers(
     refresh: bool = False,
     client_id: str = Depends(get_client_id),
-    user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    if refresh:
-        require_admin_user(user)
-    
     async for db in get_db():
         renderers = await renderer_orchestrator.list_renderers(
             db,
@@ -519,7 +509,6 @@ async def get_renderers(
 
 @router.post(
     "/api/player/renderer",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
     requested = data.get("renderer_id") or data.get("udn")
@@ -533,7 +522,6 @@ async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
 
 @router.post(
     "/api/player/play",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def play_track(
     data: dict,
@@ -611,7 +599,6 @@ async def play_track(
 
 @router.post(
     "/api/player/pause",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def pause_playback(client_id: str = Depends(get_client_id)):
     async for db in get_db():
@@ -626,7 +613,6 @@ async def pause_playback(client_id: str = Depends(get_client_id)):
 
 @router.post(
     "/api/player/resume",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def resume_playback(client_id: str = Depends(get_client_id)):
     async for db in get_db():
@@ -642,7 +628,6 @@ async def resume_playback(client_id: str = Depends(get_client_id)):
 
 @router.post(
     "/api/player/volume",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def set_volume(data: dict, client_id: str = Depends(get_client_id)):
     percent = data.get("percent")
@@ -658,7 +643,6 @@ async def set_volume(data: dict, client_id: str = Depends(get_client_id)):
 
 @router.post(
     "/api/player/seek",
-    dependencies=[Depends(get_current_admin_user_jwt)],
 )
 async def seek_track(data: dict, client_id: str = Depends(get_client_id)):
     seconds = data.get("seconds")
@@ -666,7 +650,12 @@ async def seek_track(data: dict, client_id: str = Depends(get_client_id)):
         raise HTTPException(status_code=400, detail="Missing seconds")
 
     async for db in get_db():
-        target = await renderer_orchestrator.seek(db, client_id, float(seconds))
+        try:
+            target = await renderer_orchestrator.seek(db, client_id, float(seconds))
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise _translate_renderer_error("seek", e)
         if target == "remote":
             return {"status": "ok", "target": seconds}
         return {"status": "local", "message": "Handle seek in browser"}

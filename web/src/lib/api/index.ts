@@ -52,6 +52,8 @@ export interface Artist {
         title: string;
         date: string;
         artist: string;
+        duration_seconds?: number | null;
+        duration_ms?: number | null;
         local_track_id?: number | null;
         codec?: string | null;
         bit_depth?: number | null;
