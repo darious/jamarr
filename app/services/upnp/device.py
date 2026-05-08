@@ -202,11 +202,9 @@ class UPnPDeviceControl:
 
         dmr = self.manager.dmr_devices.get(self.manager.active_renderer)
         if dmr:
-            # Format as H:MM:SS
-            h = int(target_seconds // 3600)
-            m = int((target_seconds % 3600) // 60)
-            s = int(target_seconds % 60)
-            target = f"{h}:{m:02d}:{s:02d}"
+            from datetime import timedelta
+
+            target = timedelta(seconds=max(0.0, target_seconds))
             await dmr.async_seek_rel_time(target)
             self.manager.log(f"Seeked to {target}")
 
