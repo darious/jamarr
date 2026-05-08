@@ -17,7 +17,12 @@
     advanceIndexLocal,
     computeNextTrackToArm,
   } from "$stores/player";
-  import { fetchWithAuth, getStreamUrl, getArtUrl } from "$lib/api";
+  import { fetchWithAuth, getStreamUrlInfo, getArtUrl } from "$lib/api";
+  import {
+    canDowngradeQuality,
+    nextLowerQuality,
+    recordPlaybackHealthEvent,
+  } from "$lib/adaptive-quality";
   import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
   import VolumeControl from "$components/VolumeControl.svelte";
   import QueueDrawer from "$components/QueueDrawer.svelte";
@@ -56,9 +61,102 @@
   let hasAttemptedAutoResume = false; // Track if we've already tried to auto-resume
   let showQueue = false;
   let activeRenderer: any = null;
+  let activeQuality = "original";
+  let downgradeInFlight = false;
+  let stallEvents: number[] = [];
+  let adaptiveWatchdog: ReturnType<typeof setTimeout> | null = null;
 
   const DEFAULT_RENDERER_ICON = "/assets/icon-renderer.svg";
   const LOCAL_RENDERER_ICON = "/assets/icon-browser.svg";
+
+  function applyStreamInfo(trackId: number, info: any) {
+    if (!currentTrack || currentTrack.id !== trackId) return;
+    playerState.update((s) => ({
+      ...s,
+      stream_quality: info.stream_quality,
+      stream_quality_label: info.stream_quality_label,
+      original_quality_label: info.original_quality_label,
+    }));
+  }
+
+  function clearAdaptiveWatchdog() {
+    if (adaptiveWatchdog) {
+      clearTimeout(adaptiveWatchdog);
+      adaptiveWatchdog = null;
+    }
+  }
+
+  function armAdaptiveWatchdog(trackId: number, quality: string, resumeAt: number) {
+    clearAdaptiveWatchdog();
+    adaptiveWatchdog = setTimeout(() => {
+      adaptiveWatchdog = null;
+      if (!$playerState.renderer.startsWith("local")) return;
+      if (!currentTrack || currentTrack.id !== trackId) return;
+      if (activeQuality !== quality) return;
+      if (!canDowngradeQuality(activeQuality)) return;
+
+      const hasAdvanced =
+        audio &&
+        Number.isFinite(audio.currentTime) &&
+        audio.currentTime > resumeAt + 0.75;
+      if (!hasAdvanced) {
+        void downgradeCurrentStream("no progress after adaptive downgrade");
+      }
+    }, 10_000);
+  }
+
+  async function downgradeCurrentStream(reason: string, targetQuality?: string) {
+    if (!$playerState.renderer.startsWith("local")) return;
+    if (!audio || !currentTrack || downgradeInFlight || !canDowngradeQuality(activeQuality)) return;
+    downgradeInFlight = true;
+    const nextQuality = targetQuality || nextLowerQuality(activeQuality);
+    const resumeAt = Number.isFinite(audio.currentTime) ? audio.currentTime : progress || 0;
+    const shouldPlay = !audio.paused;
+    try {
+      const info = await getStreamUrlInfo(currentTrack.id, nextQuality);
+      activeQuality = info.stream_quality || nextQuality;
+      applyStreamInfo(currentTrack.id, info);
+      isRestoringPosition = true;
+      audio.addEventListener(
+        "loadedmetadata",
+        () => {
+          try {
+            audio.currentTime = resumeAt;
+          } catch {
+            /* ignore */
+          }
+          isRestoringPosition = false;
+        },
+        { once: true },
+      );
+      audio.src = info.url;
+      audio.load();
+      if (shouldPlay) {
+        const playPromise = audio.play();
+        Promise.resolve(playPromise).catch((e) => {
+          console.warn("[PlayerBar] adaptive quality play failed:", e);
+        });
+      }
+      stallEvents = [];
+      armAdaptiveWatchdog(currentTrack.id, activeQuality, resumeAt);
+      console.info(`[PlayerBar] downgraded stream to ${activeQuality} after ${reason}`);
+      void armNextTrack();
+    } catch (e) {
+      console.warn("[PlayerBar] adaptive quality downgrade failed:", e);
+      isRestoringPosition = false;
+    } finally {
+      downgradeInFlight = false;
+    }
+  }
+
+  function handlePlaybackHealthEvent(reason: string) {
+    if (!$playerState.renderer.startsWith("local") || !isPlaying) return;
+    const decision = recordPlaybackHealthEvent(stallEvents, activeQuality);
+    stallEvents = decision.events;
+    if (decision.downgradeTo) {
+      void downgradeCurrentStream(reason, decision.downgradeTo);
+    }
+  }
 
   function getRendererFallback(renderer: any): string {
     if (!renderer) return DEFAULT_RENDERER_ICON;
@@ -240,7 +338,7 @@
 
     armingInFlight = true;
     try {
-      const url = await getStreamUrl(target.track.id);
+      const info = await getStreamUrlInfo(target.track.id, activeQuality);
       // The user may have skipped while we were awaiting: re-check.
       const stillWanted = computeNextTrackToArm(
         $playerState.queue,
@@ -251,7 +349,7 @@
         armedTrackId = null;
         return;
       }
-      standbyAudio.src = url;
+      standbyAudio.src = info.url;
       standbyAudio.preload = "auto";
       try {
         standbyAudio.load();
@@ -360,6 +458,9 @@
 
     const oldProgress = progress;
     progress = el.currentTime;
+    if (progress > oldProgress + 0.25) {
+      clearAdaptiveWatchdog();
+    }
     duration = el.duration;
     playerState.update((s) => ({
       ...s,
@@ -550,7 +651,9 @@
       const currentSrc = audio.src;
       let newSrc = `/api/stream/${track.id}`;
       try {
-        newSrc = await getStreamUrl(track.id);
+        const info = await getStreamUrlInfo(track.id, activeQuality);
+        newSrc = info.url;
+        applyStreamInfo(track.id, info);
       } catch (e) {
         console.error("[PlayerBar] Failed to fetch stream URL:", e);
         return;
@@ -667,12 +770,16 @@
     if (audioA) {
       audioA.addEventListener("timeupdate", handleTimeUpdate);
       audioA.addEventListener("ended", handleActiveEnded);
+      audioA.addEventListener("waiting", () => handlePlaybackHealthEvent("waiting"));
+      audioA.addEventListener("stalled", () => handlePlaybackHealthEvent("stalled"));
     } else {
       console.error("[PlayerBar] audioA element not found in onMount!");
     }
     if (audioB) {
       audioB.addEventListener("timeupdate", handleTimeUpdate);
       audioB.addEventListener("ended", handleActiveEnded);
+      audioB.addEventListener("waiting", () => handlePlaybackHealthEvent("waiting"));
+      audioB.addEventListener("stalled", () => handlePlaybackHealthEvent("stalled"));
     }
 
     // Polling for remote playback
@@ -915,6 +1022,11 @@
               Ready to play
             {/if}
           </div>
+          {#if $playerState.original_quality_label || $playerState.stream_quality_label}
+            <div class="mt-0.5 truncate text-[11px] text-subtle">
+              {$playerState.original_quality_label || "Original"} -> {$playerState.stream_quality_label || "Original"}
+            </div>
+          {/if}
         </div>
       {:else}
         <div class="min-w-0 flex-1">
@@ -1146,6 +1258,11 @@
               >
             {/if}
           </div>
+          {#if $playerState.original_quality_label || $playerState.stream_quality_label}
+            <div class="mt-0.5 truncate text-xs text-subtle">
+              {$playerState.original_quality_label || "Original"} -> {$playerState.stream_quality_label || "Original"}
+            </div>
+          {/if}
         </div>
       {:else}
         <div class="text-muted">No track playing</div>

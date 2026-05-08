@@ -134,6 +134,14 @@ export interface Track {
     artists?: { name: string; mbid?: string; sort_name?: string }[];
 }
 
+export interface StreamUrlInfo {
+    url: string;
+    stream_quality: string;
+    stream_quality_label: string;
+    stream_mime_type?: string | null;
+    original_quality_label: string;
+}
+
 export interface User {
     id: number;
     username: string;
@@ -296,11 +304,17 @@ export async function fetchTracks(params: { album?: string, artist?: string, alb
     return await res.json();
 }
 
-export async function getStreamUrl(trackId: number): Promise<string> {
-    const res = await fetchWithAuth(`/api/stream-url/${trackId}`);
+export async function getStreamUrlInfo(trackId: number, quality: string = "original"): Promise<StreamUrlInfo> {
+    const q = new URLSearchParams();
+    if (quality) q.set("quality", quality);
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    const res = await fetchWithAuth(`/api/stream-url/${trackId}${suffix}`);
     if (!res.ok) throw new Error('Failed to fetch stream URL');
-    const data = await res.json();
-    return data.url;
+    return await res.json();
+}
+
+export async function getStreamUrl(trackId: number, quality: string = "original"): Promise<string> {
+    return (await getStreamUrlInfo(trackId, quality)).url;
 }
 
 export async function triggerScan(forceRescan: boolean = false): Promise<void> {
