@@ -69,6 +69,8 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     var playbackPosition by mutableStateOf(0L)
     var playbackDuration by mutableStateOf(0L)
     var playbackQueue by mutableStateOf<List<ResolvedTrack>>(emptyList())
+    var originalQualityLabel by mutableStateOf("Original")
+    var playbackQualityLabel by mutableStateOf("Original")
     var shuffleEnabled by mutableStateOf(false)
     var repeatMode by mutableStateOf(0)
     var showNowPlaying by mutableStateOf(false)
@@ -183,6 +185,8 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                 isPlaying = playbackController.isPlaying
                 playbackPosition = playbackController.currentPosition
                 playbackDuration = playbackController.duration
+                originalQualityLabel = playbackController.originalQualityLabel
+                playbackQualityLabel = playbackController.streamQualityLabel
                 shuffleEnabled = playbackController.shuffleEnabled
                 repeatMode = playbackController.repeatMode
                 val controllerCount = playbackController.mediaItemCount

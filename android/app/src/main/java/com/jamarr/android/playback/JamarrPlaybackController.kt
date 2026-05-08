@@ -96,6 +96,12 @@ class JamarrPlaybackController(context: Context) {
     val repeatMode: Int
         get() = controller?.repeatMode ?: Player.REPEAT_MODE_OFF
 
+    val streamQualityLabel: String
+        get() = JamarrPlaybackService.currentStreamQualityLabel.get()
+
+    val originalQualityLabel: String
+        get() = JamarrPlaybackService.currentOriginalQualityLabel.get()
+
     init {
         val sessionToken = SessionToken(
             appContext,

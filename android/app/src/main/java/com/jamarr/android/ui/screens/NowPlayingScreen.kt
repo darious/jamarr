@@ -78,6 +78,8 @@ fun NowPlayingSheet(
     isPlaying: Boolean,
     progressMs: Long,
     durationMs: Long,
+    originalQualityLabel: String = "Original",
+    playbackQualityLabel: String = "Original",
     shuffleEnabled: Boolean,
     repeatMode: Int,
     queue: List<ResolvedTrack>,
@@ -155,6 +157,10 @@ fun NowPlayingSheet(
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             TrackInfo(track = track, onArtistClick = onArtistClick)
+                            QualityInfo(
+                                originalQualityLabel = originalQualityLabel,
+                                playbackQualityLabel = playbackQualityLabel,
+                            )
                             Spacer(Modifier.height(28.dp))
                             ScrubBar(
                                 progressMs = progressMs,
@@ -201,6 +207,13 @@ fun NowPlayingSheet(
                             modifier = Modifier.weight(1f),
                         )
                     }
+
+                    // Progress bar
+                    QualityInfo(
+                        originalQualityLabel = originalQualityLabel,
+                        playbackQualityLabel = playbackQualityLabel,
+                    )
+                    Spacer(Modifier.height(8.dp))
 
                     // Progress bar
                     ScrubBar(
@@ -457,6 +470,22 @@ private fun TrackInfo(
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+@Composable
+private fun QualityInfo(
+    originalQualityLabel: String,
+    playbackQualityLabel: String,
+) {
+    Spacer(Modifier.height(6.dp))
+    Text(
+        text = "$originalQualityLabel -> $playbackQualityLabel",
+        style = JamarrType.CaptionSmall,
+        color = JamarrColors.Muted,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable
@@ -806,4 +835,3 @@ private fun VolumeBar(
         )
     }
 }
-
