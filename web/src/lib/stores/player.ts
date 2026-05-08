@@ -29,6 +29,9 @@ export interface PlayerState {
     volume: number | null;
     transport_state?: string;
     repeatMode: 'off' | 'all' | 'one';
+    stream_quality?: string;
+    stream_quality_label?: string;
+    original_quality_label?: string;
 }
 
 export const playerState = writable<PlayerState>({

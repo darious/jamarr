@@ -379,6 +379,11 @@
                   >
                 {/if}
               </div>
+              {#if $playerState.original_quality_label || $playerState.stream_quality_label}
+                <div class="text-xs text-white/50 truncate px-8">
+                  {$playerState.original_quality_label || "Original"} -> {$playerState.stream_quality_label || "Original"}
+                </div>
+              {/if}
             </div>
 
             <!-- Middle: Controls -->
