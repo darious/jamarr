@@ -65,7 +65,7 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.04.01")
+    val composeBom = platform("androidx.compose:compose-bom:2026.05.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
@@ -83,34 +83,34 @@ dependencies {
     implementation("androidx.mediarouter:mediarouter:1.8.1")
     implementation("io.coil-kt.coil3:coil-compose:3.4.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.4.0")
-    implementation("com.google.android.gms:play-services-cast:21.5.0")
-    implementation("com.google.android.gms:play-services-cast-framework:21.5.0")
+    implementation("com.google.android.gms:play-services-cast:22.3.1")
+    implementation("com.google.android.gms:play-services-cast-framework:22.3.1")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
-    implementation("org.jupnp:org.jupnp:3.0.3") {
+    implementation("org.jupnp:org.jupnp:3.0.4") {
         exclude(group = "org.osgi")
     }
-    implementation("org.jupnp:org.jupnp.support:3.0.3") {
+    implementation("org.jupnp:org.jupnp.support:3.0.4") {
         exclude(group = "org.osgi")
     }
-    implementation("org.jupnp:org.jupnp.android:3.0.3") {
+    implementation("org.jupnp:org.jupnp.android:3.0.4") {
         exclude(group = "org.osgi")
     }
     implementation("org.eclipse.jetty:jetty-server:9.4.53.v20231009")
     implementation("org.eclipse.jetty:jetty-servlet:9.4.53.v20231009")
     implementation("org.eclipse.jetty:jetty-client:9.4.53.v20231009")
     implementation("javax.servlet:javax.servlet-api:3.1.0")
-    implementation("org.slf4j:slf4j-api:2.0.13")
-    runtimeOnly("org.slf4j:slf4j-jdk14:2.0.13")
+    implementation("org.slf4j:slf4j-api:2.0.17")
+    runtimeOnly("org.slf4j:slf4j-jdk14:2.0.17")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     testImplementation("com.squareup.okhttp3:mockwebserver3:5.3.2")
 
     androidTestImplementation("junit:junit:4.13.2")
@@ -119,6 +119,6 @@ dependencies {
     androidTestImplementation("androidx.test:rules:1.7.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
-    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.3.2")
 }
