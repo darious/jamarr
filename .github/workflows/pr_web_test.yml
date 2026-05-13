@@ -1,0 +1,29 @@
+name: Web Test
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/pr_web_test.yml"
+      - "web/**"
+      - "docker-compose.ci.yml"
+      - "Dockerfile.node-ci"
+      - "test-web.sh"
+
+jobs:
+  web-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Make scripts executable
+        run: chmod +x test-web.sh
+
+      - name: Run Frontend Tests
+        env:
+          CI: "true"
+        run: ./test-web.sh
