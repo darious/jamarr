@@ -287,6 +287,8 @@ async def enrich_entries(entries: List[ChartEntry]):
                             for candidate in data.get("releases", []):
                                 rg = candidate.get("release-group") or {}
                                 primary_type = (rg.get("primary-type") or "").lower()
+                                if primary_type == "single":
+                                    continue
                                 score = _score_candidate(entry, candidate)
                                 hit = {
                                     "score": score,
@@ -303,13 +305,11 @@ async def enrich_entries(entries: List[ChartEntry]):
                         logger.warning(f"Chart enrich: MB error for '{entry.title}' ({query}): {e}")
                         continue
 
-                # Prefer album, but let a clearly-better non-album (EP/Single) win when
-                # it scores noticeably higher (exact title match beating a near-miss album).
+                # Album chart: always prefer album when one matches; fall back to
+                # EP/other only if no album candidate cleared the threshold.
                 album_score = best_album["score"] if best_album else 0
                 other_score = best_other["score"] if best_other else 0
-                if best_other and other_score >= 75 and other_score >= album_score + 3:
-                    best = best_other
-                elif best_album and album_score > 60:
+                if best_album and album_score > 60:
                     best = best_album
                 elif best_other and other_score > 75:
                     best = best_other
@@ -340,6 +340,8 @@ async def enrich_entries(entries: List[ChartEntry]):
                                 data = resp.json()
                                 for rg in data.get("release-groups", []):
                                     ptype = (rg.get("primary-type") or "").lower()
+                                    if ptype == "single":
+                                        continue
                                     score = _score_rg_candidate(entry, rg)
                                     hit = {"score": score, "rg_id": rg.get("id", "")}
                                     if ptype == "album" or not ptype:
@@ -354,9 +356,7 @@ async def enrich_entries(entries: List[ChartEntry]):
 
                     album_score = best_album["score"] if best_album else 0
                     other_score = best_other["score"] if best_other else 0
-                    if best_other and other_score >= 75 and other_score >= album_score + 3:
-                        best = best_other
-                    elif best_album and album_score > 60:
+                    if best_album and album_score > 60:
                         best = best_album
                     elif best_other and other_score > 75:
                         best = best_other
