@@ -28,10 +28,23 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-echo "==> Building schema (init_db + migrations)"
-$COMPOSE run --rm "$RUNNER" env PYTHONPATH=/app uv run python -c \
-  "import asyncio; from app.db import init_db, close_db; asyncio.run(init_db()); asyncio.run(close_db())"
-$COMPOSE run --rm "$RUNNER" env PYTHONPATH=/app uv run python migrations/apply_migrations.py
+# init_db() creates the full current schema — it is what the test suite builds
+# on (see tests/conftest.py). Migrations are historical upgrade steps for
+# existing databases and must NOT be replayed on a fresh schema.
+echo "==> Building schema (init_db)"
+$COMPOSE run --rm "$RUNNER" env PYTHONPATH=/app uv run python -c "$(cat <<'PY'
+import asyncio
+from app.db import init_db, close_db
+
+
+async def main():
+    await init_db()
+    await close_db()
+
+
+asyncio.run(main())
+PY
+)"
 
 echo "==> Generating schema docs with tbls"
 # Load TEST_DB_* so the .tbls.yml DSN resolves.
