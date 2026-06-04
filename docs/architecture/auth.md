@@ -1,6 +1,11 @@
-# Jamarr Authentication & API Security (Recommended Approach)
+# Jamarr Authentication & API Security
 
-This document proposes a **pragmatic, homelab-friendly auth design** for Jamarr’s **FastAPI (uvicorn) backend** and **SvelteKit frontend**, based on the current architecture and deployment model. 
+> **Status:** Implemented. This started as a design proposal and is now the live
+> auth model; the "Definition of done" checklist at the end is all shipped. The
+> condensed rationale lives in
+> [ADR-0001](decisions/0001-jwt-auth.md).
+
+This document describes the **pragmatic, homelab-friendly auth design** for Jamarr’s **FastAPI (uvicorn) backend** and **SvelteKit frontend**. 
 
 The goals are:
 
@@ -218,7 +223,7 @@ Jamarr already distinguishes dev/prod via compose stacks and scripts.
   - `HttpOnly=true`
   - `Secure=true`
   - `SameSite=Lax` (start here)
-  - `Path=/api/auth` (optional; limits exposure)
+  - `Path=/api` (current implementation; scopes the cookie to the API)
 - Consider HSTS if you’re always HTTPS.
 
 ### 6.2 Development options

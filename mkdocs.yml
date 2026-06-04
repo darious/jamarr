@@ -1,0 +1,94 @@
+site_name: Jamarr
+site_description: Self-hosted web-based music controller
+repo_url: https://github.com/darious/jamarr
+repo_name: jamarr
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/logo.png
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+    - toc.follow
+
+extra_css:
+  - stylesheets/brand.css
+
+plugins:
+  - search
+  - swagger-ui-tag
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Install: getting-started/install.md
+      - Configuration: getting-started/configuration.md
+      - Dev Mode: getting-started/dev-mode.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Authentication: architecture/auth.md
+      - Renderers & Playback: architecture/renderers.md
+      - Scanner Pipeline: architecture/scanner-pipeline.md
+      - Artwork: architecture/artwork.md
+      - Decisions (ADRs):
+          - architecture/decisions/index.md
+          - architecture/decisions/0001-jwt-auth.md
+          - architecture/decisions/0002-renderer-orchestration.md
+          - architecture/decisions/0003-cast-stream-token-policy.md
+          - architecture/decisions/0004-cast-dual-control-path.md
+          - architecture/decisions/0005-scanner-two-phase.md
+          - Template: architecture/decisions/template.md
+  - Reference:
+      - API: reference/api.md
+      - Database Schema: reference/schema/README.md
+      - Scanner CLI: reference/scanner-cli.md
+      - Environment Variables: reference/env-vars.md
+  - Clients:
+      - Web: clients/web.md
+      - TUI: clients/tui.md
+      - Android: clients/android.md
+  - Guides:
+      - Scanning a Library: guides/scanning.md
+      - Last.fm: guides/lastfm.md
+      - Playlists: guides/playlists.md
+  - Roadmap: roadmap.md
+  - Contributing: contributing.md

@@ -1,0 +1,38 @@
+/* Jamarr brand palette — purple → magenta, matching the logo. */
+
+:root {
+  --jamarr-purple: #7b2ff7;
+  --jamarr-magenta: #d6249f;
+  --jamarr-pink: #ff2d9b;
+}
+
+[data-md-color-scheme="default"],
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--jamarr-purple);
+  --md-primary-fg-color--light: #9a5cff;
+  --md-primary-fg-color--dark: #5a17c0;
+  --md-accent-fg-color: var(--jamarr-magenta);
+  --md-accent-fg-color--transparent: rgba(214, 36, 159, 0.1);
+}
+
+/* Gradient header bar to echo the logo's spectrum. */
+.md-header,
+.md-tabs {
+  background: linear-gradient(
+    90deg,
+    var(--jamarr-purple) 0%,
+    var(--jamarr-magenta) 60%,
+    #2f7ff7 100%
+  );
+}
+
+/* Home page wordmark hero. */
+.jamarr-hero {
+  text-align: center;
+  margin: 1.5rem 0 2.5rem;
+}
+.jamarr-hero img {
+  max-width: 420px;
+  width: 70%;
+  height: auto;
+}

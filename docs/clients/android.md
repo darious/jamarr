@@ -49,7 +49,7 @@ Exit criteria:
 - There is a known existing endpoint path to find or select a track.
 - There is a known existing endpoint path to generate a playable stream URL.
 
-Stage 0 output: [api.md](api.md).
+Stage 0 output: [API Reference](../reference/api.md).
 
 ### Stage 1: Phone Playback Prototype
 

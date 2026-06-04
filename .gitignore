@@ -221,3 +221,12 @@ web-build/
 
 # dev container check
 .deps.sha256
+
+# MkDocs
+/site/
+# Generated docs (built in CI)
+/docs/reference/openapi.json
+/docs/reference/schema/
+
+# Serena MCP
+.serena/

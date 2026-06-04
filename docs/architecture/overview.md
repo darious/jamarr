@@ -8,7 +8,7 @@ Jamarr is a web-based music controller focused on fast library browsing and reli
 ### 1. Backend (Python/FastAPI)
 The backend is the brain of the operation, responsible for:
 -   **Library Scanning**: Recursively scans the filesystem, extracts tags (mutagen), and caches metadata in PostgreSQL.
--   **Metadata Enrichment**: Uses a v3 pipeline architecture to fetch high-quality metadata (artist bios, images, album details, external links) from MusicBrainz, Wikidata, Last.fm, Fanart.tv, Spotify, and Qobuz. See [Scanner V3 Documentation](scanner_v3.md) for details.
+-   **Metadata Enrichment**: Uses a v3 pipeline architecture to fetch high-quality metadata (artist bios, images, album details, external links) from MusicBrainz, Wikidata, Last.fm, Fanart.tv, Spotify, and Qobuz. See [Scanner Pipeline](scanner-pipeline.md) for details.
 -   **Playback & Streaming**: Issues short-lived stream URLs via `/api/stream-url/{track_id}` and streams local files from `/api/stream/{track_id}?token=...` while managing playback state for both local and UPnP renderers.
 -   **UPnP Control**: Acts as a Control Point, managing playback state, volume, and queue for UPnP devices.
 -   **Queue Management**: Maintains the active play queue and playback state in the database (`renderer_state`) to ensure persistence and reliability even if the frontend disconnects.
@@ -127,17 +127,19 @@ The frontend provides a polished, app-like user experience:
 │   ├── test-build.sh     # Frontend CI build check
 │   └── test-ext-api.sh   # External API smoke tests
 ├── cache/                # App runtime cache (scanner state, artwork)
-├── docs/                 # Documentation
-│   ├── DEV_MODE.md       # Development setup guide
-│   ├── DATABASE_SCHEMA.md # Database schema reference
-│   ├── scanner_v3.md     # V3 pipeline architecture
-│   ├── api.md            # API endpoint reference
-│   ├── auth.md           # Authentication system
-│   ├── android.md        # Android app documentation
-│   ├── artwork-audit.md  # Artwork system audit
-│   ├── plan-mobile.md    # Mobile development plan
-│   ├── playlist--spec.md # Playlist feature spec (pre-implementation)
-│   └── outline.md        # System architecture
+├── docs/                 # MkDocs documentation site (see mkdocs.yml for nav)
+│   ├── getting-started/  # Install, configuration, dev mode
+│   ├── architecture/     # Overview, auth, renderers, scanner, artwork, ADRs
+│   ├── reference/        # API (generated), schema (generated), CLI, env vars
+│   ├── clients/          # Web, TUI, Android
+│   └── guides/           # Scanning, Last.fm, playlists
+├── mkdocs.yml            # Docs site config + navigation
+├── docker-compose.yml    # Production Docker Compose
+├── docker-compose.dev.yml # Development overrides
+├── Dockerfile            # Production container build
+├── dev.sh                # Development mode startup script
+├── deploy.sh             # Production deploy (backup → migrate → restart)
+└── config.yaml           # Application configuration
 ├── docker-compose.yml    # Production Docker Compose
 ├── docker-compose.dev.yml # Development overrides
 ├── Dockerfile            # Production container build

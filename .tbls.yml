@@ -1,0 +1,21 @@
+# tbls config — generates docs/reference/schema/ from the live test database.
+# DSN points at the dockerised test Postgres (docker-compose.test.yml, host
+# port 8109). Credentials come from .env (TEST_DB_USER / TEST_DB_PASSWORD).
+dsn: postgres://${TEST_DB_USER}:${TEST_DB_PASSWORD}@127.0.0.1:8109/${TEST_DB_NAME:-jamarr_test}?sslmode=disable
+
+docPath: docs/reference/schema
+
+format:
+  adjust: true
+  hideColumnsWithoutValues: false
+
+er:
+  format: svg
+  comment: true
+
+# Generated views appear without a primary key; silence that lint.
+lint:
+  requireTableComment:
+    enabled: false
+  requireColumnComment:
+    enabled: false
