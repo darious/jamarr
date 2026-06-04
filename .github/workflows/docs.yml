@@ -41,9 +41,13 @@ jobs:
         run: uv python install 3.14
 
       - name: Install tbls
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -sL https://github.com/k1LoW/tbls/releases/latest/download/tbls_linux_amd64.tar.gz \
-            | sudo tar xz -C /usr/local/bin tbls
+          url=$(gh api repos/k1LoW/tbls/releases/latest \
+            --jq '.assets[] | select(.name | test("linux_amd64.tar.gz$")) | .browser_download_url')
+          curl -sL "$url" | sudo tar xz -C /usr/local/bin tbls
+          tbls version
 
       - name: Create dummy .env
         run: |
