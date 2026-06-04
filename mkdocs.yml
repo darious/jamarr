@@ -37,6 +37,17 @@ theme:
 extra_css:
   - stylesheets/brand.css
 
+# tbls generates one page per table under reference/schema/; only the index is in
+# the nav, so exclude the rest from the "not in nav" strict check.
+not_in_nav: |
+  /reference/schema/*
+
+# tbls view pages link to CTE/quoted-identifier names that aren't real pages, so
+# don't fail the build on missing link targets. Other validations stay strict.
+validation:
+  links:
+    not_found: ignore
+
 plugins:
   - search
   - swagger-ui-tag
