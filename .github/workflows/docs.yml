@@ -1,0 +1,79 @@
+name: Docs
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".tbls.yml"
+      - "scripts/docs/**"
+      - "app/**"
+      - "migrations/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".tbls.yml"
+      - "scripts/docs/**"
+      - "app/**"
+      - "migrations/**"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: false
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install tbls
+        run: |
+          curl -sL https://github.com/k1LoW/tbls/releases/latest/download/tbls_linux_amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin tbls
+
+      - name: Create dummy .env
+        run: |
+          cat <<EOF > .env
+          POSTGRES_USER=jamarr
+          POSTGRES_PASSWORD=jamarr_secret
+          DB_USER=jamarr
+          DB_PASS=jamarr_secret
+          TEST_DB_USER=jamarr_test
+          TEST_DB_PASSWORD=jamarr_test_secret
+          TEST_DB_NAME=jamarr_test
+          JWT_SECRET_KEY=docs-build-placeholder
+          LASTFM_API_KEY=dummy_lastfm_key
+          LASTFM_SHARED_SECRET=dummy_lastfm_secret
+          EOF
+
+      - name: Generate OpenAPI schema
+        run: uv run --with fastapi --with pydantic python scripts/docs/gen_openapi.py
+
+      - name: Generate database schema docs
+        run: |
+          chmod +x scripts/docs/gen_schema.sh
+          ./scripts/docs/gen_schema.sh
+
+      - name: Build site
+        run: uv run --with mkdocs-material --with mkdocs-swagger-ui-tag mkdocs build --strict
+
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          uv run --with mkdocs-material --with mkdocs-swagger-ui-tag mkdocs gh-deploy --force

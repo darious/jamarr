@@ -40,6 +40,10 @@ dev = [
     "httpx",
     "ruff",
 ]
+docs = [
+    "mkdocs-material",
+    "mkdocs-swagger-ui-tag",
+]
 
 [tool.uv]
 package = false

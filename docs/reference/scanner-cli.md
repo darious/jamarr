@@ -78,4 +78,4 @@ uv run python -m app.scanner.cli full
 
 ## Architecture
 
-For details on the v3 metadata pipeline architecture, see [Scanner V3 Documentation](scanner_v3.md).
+For details on the v3 metadata pipeline architecture, see [Scanner Pipeline](../architecture/scanner-pipeline.md).

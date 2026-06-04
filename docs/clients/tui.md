@@ -5,8 +5,9 @@ SvelteKit web UI: login, search, browse, queue, history, playlists, and dual
 local + UPnP playback. Runs against the same `/api/*` endpoints as the web and
 Android clients — no backend changes.
 
-This document is the v1 design plan. Code lives under `tui/` once
-implementation starts.
+The TUI is implemented under `tui/` (a `uv` workspace member). Run it with
+`uv run --package jamarr-tui jamarr-tui`. The sections below describe its design
+and behaviour.
 
 ---
 
