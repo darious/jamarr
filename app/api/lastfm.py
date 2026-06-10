@@ -473,10 +473,9 @@ async def sync_scrobbles_for_user(
                     page += 1
                     if sleep_between_pages > 0:
                         await asyncio.sleep(sleep_between_pages)
-                except Exception as e:
-                    error_msg = f"Error fetching page {page}: {str(e)}"
-                    add_log(error_msg)
-                    logger.error(error_msg, exc_info=True)
+                except Exception:
+                    logger.error(f"Error fetching page {page}", exc_info=True)
+                    add_log(f"Error fetching page {page}; stopped fetching. See server logs.")
                     break
 
         log_msg = f"Fetched {fetched} new scrobbles"
