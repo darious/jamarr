@@ -9,8 +9,8 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import jwt
 from fastapi import HTTPException, status
-from jose import JWTError, jwt
 
 
 # JWT Configuration from environment
@@ -147,10 +147,15 @@ def verify_stream_token(token: str, track_id: int) -> dict:
             issuer=settings["issuer"],
             audience=settings["audience"],
         )
-    except JWTError as e:
+    except jwt.ExpiredSignatureError:
+        detail = "Stream token has expired"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError:
         detail = "Invalid stream token"
-        if "expired" in str(e).lower():
-            detail = "Stream token has expired"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=detail,
@@ -191,18 +196,29 @@ def verify_access_token(token: str) -> dict:
             audience=settings["audience"],
         )
         return payload
-    except JWTError as e:
-        # Handle specific JWT errors
-        error_msg = str(e).lower()
-        if "expired" in error_msg:
-            detail = "Access token has expired"
-        elif "signature" in error_msg:
-            detail = "Invalid token signature"
-        elif "issuer" in error_msg or "audience" in error_msg:
-            detail = "Invalid token issuer or audience"
-        else:
-            detail = "Invalid access token"
-        
+    except jwt.ExpiredSignatureError:
+        detail = "Access token has expired"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidSignatureError:
+        detail = "Invalid token signature"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except (jwt.InvalidIssuerError, jwt.InvalidAudienceError):
+        detail = "Invalid token issuer or audience"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError:
+        detail = "Invalid access token"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=detail,

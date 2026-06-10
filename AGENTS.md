@@ -29,7 +29,7 @@ app/                 backend (Python)
     player/ renderer/ upnp/
   matching/          fuzzy match (rapidfuzz) for charts/metadata
   media/             artwork / media handling
-  auth.py auth_tokens.py security.py    JWT auth (python-jose, argon2, slowapi)
+  auth.py auth_tokens.py security.py    JWT auth (pyjwt, argon2, slowapi)
   db.py config.py logging_conf.py scheduler.py charts.py lastfm*.py playlist.py upnp.py
 web/src/             SvelteKit: routes/ (album,artist,charts,discovery,history,
                      login,playlists,queue,renderers,settings) + lib/

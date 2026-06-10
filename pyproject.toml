@@ -26,7 +26,7 @@ dependencies = [
     "rapidfuzz",
     "pylast>=7.0.1",
     "croniter",
-    "python-jose[cryptography]",
+    "pyjwt[crypto]",
     "slowapi",
     "pychromecast>=14.0.0",
     "zeroconf>=0.130.0",
