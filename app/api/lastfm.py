@@ -283,9 +283,10 @@ async def sync_scrobbles(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Last.fm account not connected. Please connect your Last.fm account in settings.",
             )
+        logger.exception("Last.fm sync failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            detail="Last.fm sync failed. Check server logs for details.",
         )
 
 
