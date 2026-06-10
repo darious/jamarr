@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 
-from jose import jwt
+import jwt
 
 
 def test_phase0_stream_token_default_ttl_is_300_seconds():
     from app.auth_tokens import create_stream_token
 
     token = create_stream_token(track_id=901, user_id=42)
-    claims = jwt.get_unverified_claims(token)
+    claims = jwt.decode(token, options={"verify_signature": False})
 
     issued_at = datetime.fromtimestamp(claims["iat"], tz=timezone.utc)
     expires_at = datetime.fromtimestamp(claims["exp"], tz=timezone.utc)

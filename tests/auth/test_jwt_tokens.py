@@ -2,7 +2,7 @@
 import os
 from datetime import timedelta, datetime, timezone
 import pytest
-from jose import jwt
+import jwt
 
 
 # We'll import these after creating the module
@@ -10,7 +10,7 @@ from jose import jwt
 
 
 # Test configuration
-TEST_SECRET = "test-secret-key-for-jwt-testing"
+TEST_SECRET = "test-secret-key-for-jwt-testing-0"
 TEST_ISSUER = "jamarr-test"
 TEST_AUDIENCE = "jamarr-api-test"
 
@@ -39,7 +39,7 @@ def test_create_access_token_valid_structure():
     token = create_access_token(user_id=user_id, expires_delta=expires_delta)
     
     # Decode without verification to inspect structure
-    unverified = jwt.get_unverified_claims(token)
+    unverified = jwt.decode(token, options={"verify_signature": False})
     
     assert "sub" in unverified
     assert unverified["sub"] == str(user_id)

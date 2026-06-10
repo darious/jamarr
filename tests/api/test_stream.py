@@ -6,7 +6,7 @@ import wave
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
-from jose import jwt
+import jwt
 
 from app.services.stream_profiles import (
     cleanup_stream_cache,
@@ -117,7 +117,7 @@ async def test_stream_url_cast_token_uses_renderer_policy(auth_client: AsyncClie
 
     assert response.status_code == 200
     token = parse_qs(urlparse(response.json()["url"]).query)["token"][0]
-    claims = jwt.get_unverified_claims(token)
+    claims = jwt.decode(token, options={"verify_signature": False})
     issued_at = datetime.fromtimestamp(claims["iat"], tz=timezone.utc)
     expires_at = datetime.fromtimestamp(claims["exp"], tz=timezone.utc)
     assert (expires_at - issued_at).total_seconds() == 1800
@@ -142,7 +142,7 @@ async def test_stream_url_quality_claims(auth_client: AsyncClient, db, stream_da
     assert data["stream_mime_type"] == "audio/flac"
     assert data["original_quality_label"] == "FLAC 24 bit 96 kHz"
     token = parse_qs(urlparse(data["url"]).query)["token"][0]
-    claims = jwt.get_unverified_claims(token)
+    claims = jwt.decode(token, options={"verify_signature": False})
     assert claims["stream_quality"] == "flac_16_48"
 
 
