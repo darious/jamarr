@@ -60,7 +60,9 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 ## Conventions
 
 - Python: ruff (config in `pyproject.toml` / `lint.sh`). Async-first (asyncpg, httpx, aiofiles).
-- DB changes = new `migrations/NNN_*.sql`, never edit old ones. Update `docs/DATABASE_SCHEMA.md`.
+- DB changes = new `migrations/NNN_*.sql` (existing installs) **and** the matching
+  DDL in `app/db.py` `init_db` (fresh installs + tests). Never edit old migrations.
+  Schema docs are generated (`docs/reference/schema/`) — don't hand-edit.
 - Config: secrets in `.env` (see `.env.example`); non-secret app config in `config.yaml`.
 - Commits: Conventional Commits (`feat(scope):`, `fix(charts):`, `chore(ci):`). **No AI co-author/attribution trailers.**
 - Ports (dev): API 8111, Vite 5173, Postgres 8110, CloudBeaver 8978.

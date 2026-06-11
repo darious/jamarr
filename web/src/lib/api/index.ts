@@ -804,6 +804,7 @@ export interface ChartAlbum {
     artist_mbid?: string;
     art_sha1?: string;
     musicbrainz_url?: string;
+    overridden: boolean;
 }
 
 export async function fetchChart(fetchFn: any = fetchWithAuth): Promise<ChartAlbum[]> {
@@ -815,6 +816,27 @@ export async function fetchChart(fetchFn: any = fetchWithAuth): Promise<ChartAlb
 export async function refreshChart(): Promise<void> {
     const res = await fetchWithAuth('/api/charts/refresh', { method: 'POST' });
     if (!res.ok) throw new Error('Failed to refresh chart');
+}
+
+export async function setChartOverride(artist: string, title: string, releaseGroupMbid: string): Promise<void> {
+    const res = await fetchWithAuth('/api/charts/override', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist, title, release_group_mbid: releaseGroupMbid })
+    });
+    if (!res.ok) {
+        const detail = (await res.json().catch(() => null))?.detail;
+        throw new Error(detail || 'Failed to set chart override');
+    }
+}
+
+export async function deleteChartOverride(artist: string, title: string): Promise<void> {
+    const res = await fetchWithAuth('/api/charts/override', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist, title })
+    });
+    if (!res.ok) throw new Error('Failed to remove chart override');
 }
 
 // Scheduler

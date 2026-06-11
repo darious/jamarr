@@ -4,12 +4,21 @@
   import { refreshChart, triggerPearlarrDownload, fetchTracks } from "$api";
   import { goto, invalidateAll } from "$app/navigation";
   import { setQueue, addToQueue } from "$stores/player";
+  import { currentUser } from "$stores/user";
   import IconButton from "$lib/components/IconButton.svelte";
+  import ChartOverrideModal from "$lib/components/ChartOverrideModal.svelte";
 
   export let data: { chart: ChartAlbum[] };
 
   let refreshing = false;
   let downloadingMbids = new Set<string>();
+  let overrideEntry: ChartAlbum | null = null;
+  let overrideModalVisible = false;
+
+  function openOverrideModal(entry: ChartAlbum) {
+    overrideEntry = entry;
+    overrideModalVisible = true;
+  }
 
   async function handleRefresh() {
     refreshing = true;
@@ -355,6 +364,35 @@
               <span class="w-0.5 h-0.5 bg-current rounded-full"></span>
             {/if}
             <span>{entry.weeks} Wks</span>
+            {#if entry.overridden}
+              <span
+                class="badge variant-soft-primary text-[9px]"
+                title="MusicBrainz match set manually">Manual</span
+              >
+            {/if}
+            {#if $currentUser?.is_admin}
+              <button
+                type="button"
+                class="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-muted hover:text-default"
+                title="Fix MusicBrainz match"
+                aria-label="Fix MusicBrainz match for {title}"
+                on:click={() => openOverrideModal(entry)}
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                  />
+                </svg>
+              </button>
+            {/if}
           </div>
         </div>
       </div>
@@ -383,3 +421,9 @@
     {/if}
   </div>
 </section>
+
+<ChartOverrideModal
+  bind:visible={overrideModalVisible}
+  entry={overrideEntry}
+  on:saved={() => invalidateAll()}
+/>
