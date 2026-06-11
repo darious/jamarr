@@ -126,6 +126,25 @@ _BLOCKED_PATH_PATTERNS = re.compile(
     """
 )
 
+# Top-level paths owned by the SvelteKit client router. Unknown paths that are
+# not real files in web/build get a 404 instead of the index shell, so probes
+# (/.env_production, /exceptions.zip, ...) can't elicit a 200. Keep in sync
+# with the top-level directories under web/src/routes/.
+_SPA_ROUTE_PREFIXES = frozenset({
+    "",
+    "album",
+    "artist",
+    "artists",
+    "charts",
+    "discovery",
+    "history",
+    "login",
+    "playlists",
+    "queue",
+    "renderers",
+    "settings",
+})
+
 
 @app.get("/{path:path}")
 async def spa(path: str):
@@ -148,6 +167,9 @@ async def spa(path: str):
         raise HTTPException(status_code=404, detail="Not Found")
     if os.path.isfile(target):
         return FileResponse(target)
+
+    if path.strip("/").split("/", 1)[0] not in _SPA_ROUTE_PREFIXES:
+        raise HTTPException(status_code=404, detail="Not Found")
 
     index_path = build_dir / "index.html"
     if index_path.exists():

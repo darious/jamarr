@@ -71,6 +71,8 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 - UPnP needs host networking — discovery won't work in bridged containers.
 - `HOST_IP` auto-derived in `dev.sh`/`deploy.sh` via route lookup; override by exporting it.
 - Frontend dev caches (`web/.svelte-kit`, `web/.vite`) are cleared on `dev.sh` start.
+- New top-level route under `web/src/routes/` must also be added to
+  `_SPA_ROUTE_PREFIXES` in `app/main.py`, or the backend 404s it.
 - `android/test.sh` defaults `ANDROID_HOME=/opt/android-sdk` and caps gradle/kotlin
   heaps when <4 GiB memory available; instrumentation tests only run with a device attached.
 
