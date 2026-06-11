@@ -456,6 +456,18 @@ async def init_db():
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
             CREATE INDEX IF NOT EXISTS idx_chart_album_rg_mbid ON chart_album(release_group_mbid);
+
+            -- Manual MB release-group overrides for chart entries; keyed by
+            -- entry text so they survive the weekly chart_album wipe.
+            CREATE TABLE IF NOT EXISTS chart_match_override (
+                artist TEXT NOT NULL,
+                title TEXT NOT NULL,
+                release_group_mbid TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_chart_match_override_key
+                ON chart_match_override (lower(artist), lower(title));
         """)
 
         # Create indexes

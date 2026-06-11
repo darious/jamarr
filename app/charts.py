@@ -237,12 +237,44 @@ class ChartScraper:
 
 MB_API_URL = get_musicbrainz_root_url()
 
+
+async def load_match_overrides() -> dict:
+    """Manual release-group overrides keyed by (lower(artist), lower(title))."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT artist, title, release_group_mbid FROM chart_match_override"
+        )
+    return {
+        (r["artist"].casefold(), r["title"].casefold()): r["release_group_mbid"]
+        for r in rows
+    }
+
+
+def apply_match_overrides(entries: List[ChartEntry], overrides: dict) -> List[ChartEntry]:
+    """Set overridden MBIDs and return only the entries still needing MB lookup."""
+    remaining = []
+    for entry in entries:
+        rg_mbid = overrides.get((entry.artist.casefold(), entry.title.casefold()))
+        if rg_mbid:
+            entry.release_group_mbid = rg_mbid
+            entry.release_mbid = ""
+            entry.confidence = 100
+            logger.info(
+                f"Chart enrich: manual override for '{entry.title}' - '{entry.artist}' -> {rg_mbid}"
+            )
+        else:
+            remaining.append(entry)
+    return remaining
+
+
 async def enrich_entries(entries: List[ChartEntry]):
     # Limit enrichment to top 100 to save time/API limits
     # User-Agent matching scripts/chart.py exactly is crucial for the Official Charts API
     headers = {"User-Agent": "jamarr-chart/1.0 (+https://www.officialcharts.com/)"}
 
-    needs_enrichment = list(entries)
+    overrides = await load_match_overrides()
+    needs_enrichment = apply_match_overrides(list(entries), overrides)
 
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers=headers) as client:
 
