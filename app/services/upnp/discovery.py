@@ -19,6 +19,12 @@ SSDP_TARGET_MEDIA_RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
 # Cooldown steps for persistently unreachable renderers (seconds).
 _FAILURE_COOLDOWN_STEPS = [120, 300, 900, 3600]
 
+# After this many consecutive failures the renderer is suspended: probed at
+# most every _SUSPENDED_RETRY_INTERVAL, or immediately if it re-announces with
+# a new BOOTID (i.e. its UPnP stack actually restarted).
+_SUSPEND_AFTER_FAILURES = 5
+_SUSPENDED_RETRY_INTERVAL = 6 * 3600
+
 class UPnPDiscovery:
     def __init__(self, manager):
         self.manager = manager
@@ -27,7 +33,8 @@ class UPnPDiscovery:
         self.is_scanning_subnet = False
         self.scan_msg = ""
         self.scan_progress = 0
-        # location -> {"failures": int, "cooldown_until": float}
+        # location -> {"failures": int, "cooldown_until": float,
+        #              "bootid": Optional[str], "suspended": bool}
         self._failure_state: Dict[str, dict] = {}
 
     def start_background_scan(self):
@@ -68,7 +75,7 @@ class UPnPDiscovery:
         """
         await self.manager._ensure_session()
         self.manager.log(f"Starting UPnP discovery (timeout={timeout}s)...")
-        discovered_locations = []
+        discovered: Dict[str, Optional[str]] = {}
 
         async def search_callback(headers: CaseInsensitiveDict):
             """Callback for each discovered device."""
@@ -77,8 +84,8 @@ class UPnPDiscovery:
 
             # Filter for MediaRenderer devices
             if location and st and "MediaRenderer" in st:
-                if location not in discovered_locations:
-                    discovered_locations.append(location)
+                if location not in discovered:
+                    discovered[location] = headers.get("BOOTID.UPNP.ORG")
 
         try:
             # Perform search with callback
@@ -89,12 +96,10 @@ class UPnPDiscovery:
             )
 
             # Process discovered devices, skipping those in cooldown
-            now = time.time()
-            for location in discovered_locations:
-                state = self._failure_state.get(location)
-                if state and state.get("cooldown_until", 0) > now:
+            for location, bootid in discovered.items():
+                if not self._should_attempt(location, bootid):
                     continue
-                await self._add_renderer(location)
+                await self._add_renderer(location, bootid=bootid)
 
             self.manager.log(f"Discovery complete. Found {len(self.manager.renderers)} renderer(s)")
 
@@ -102,7 +107,7 @@ class UPnPDiscovery:
             logger.error(f"Discovery error: {e}")
             self.manager.log(f"Discovery error: {e}")
 
-    async def _add_renderer(self, location: str):
+    async def _add_renderer(self, location: str, bootid: Optional[str] = None):
         """
         Add or update a renderer from its description URL.
         """
@@ -211,12 +216,14 @@ class UPnPDiscovery:
                 self.manager.renderers[udn] = renderer_info
 
             self.manager.log(f"Added renderer: {renderer_info['friendly_name']} ({udn})")
-            self._failure_state.pop(location, None)  # success resets failure tracking
+            prior = self._failure_state.pop(location, None)  # success resets failure tracking
+            if prior:
+                logger.info(
+                    f"Renderer at {location} reachable again after {prior['failures']} failure(s)"
+                )
 
         except Exception as e:
-            logger.error(f"Error adding renderer from {location}: {e}")
-            self._track_failure(location)
-            self.manager.log(f"Error adding renderer: {e}")
+            self._track_failure(location, e, bootid)
 
     async def load_persisted_renderers(self):
         """Load previously discovered renderers from database."""
@@ -236,8 +243,7 @@ class UPnPDiscovery:
                 location = r.get("location") or r.get("location_url")
                 if location:
                     r["location"] = location
-                    state = self._failure_state.get(location)
-                    if state and state.get("cooldown_until", 0) > time.time():
+                    if not self._should_attempt(location, None):
                         continue
 
                 if await self.verify_device(r):
@@ -248,17 +254,47 @@ class UPnPDiscovery:
                         except Exception as e:
                             logger.debug(f"Could not recreate DMR for {r['udn']}: {e}")
 
-    def _track_failure(self, location: str) -> None:
+    def _should_attempt(self, location: str, bootid: Optional[str]) -> bool:
+        """Whether a probe of this location is due, given its failure history."""
+        state = self._failure_state.get(location)
+        if state is None:
+            return True
+        if state.get("suspended") and bootid and bootid != state.get("bootid"):
+            # Device re-announced with a new BOOTID: its UPnP stack restarted,
+            # so give it a fresh start.
+            self._failure_state.pop(location, None)
+            return True
+        return state.get("cooldown_until", 0) <= time.time()
+
+    def _track_failure(self, location: str, error: Exception, bootid: Optional[str] = None) -> None:
         now = time.time()
-        entry = self._failure_state.get(location)
-        if entry is None:
-            self._failure_state[location] = {"failures": 1, "cooldown_until": now + _FAILURE_COOLDOWN_STEPS[0]}
-            return
-        failures = entry["failures"] + 1
-        step_idx = min(failures, len(_FAILURE_COOLDOWN_STEPS)) - 1
+        entry = self._failure_state.get(location) or {}
+        failures = entry.get("failures", 0) + 1
+
+        # ERROR on the first failure only; repeats are expected (TVs in standby
+        # answer SSDP but refuse HTTP) and logged at DEBUG.
+        if failures == 1:
+            logger.error(f"Error adding renderer from {location}: {error}")
+            self.manager.log(f"Error adding renderer: {error}")
+        else:
+            logger.debug(f"Error adding renderer from {location} (failure {failures}): {error}")
+
+        suspended = failures >= _SUSPEND_AFTER_FAILURES
+        if suspended:
+            cooldown = _SUSPENDED_RETRY_INTERVAL
+            if not entry.get("suspended"):
+                logger.warning(
+                    f"Renderer at {location} failed {failures} times; probing at most "
+                    f"every {_SUSPENDED_RETRY_INTERVAL // 3600}h until it re-announces"
+                )
+        else:
+            cooldown = _FAILURE_COOLDOWN_STEPS[min(failures, len(_FAILURE_COOLDOWN_STEPS)) - 1]
+
         self._failure_state[location] = {
             "failures": failures,
-            "cooldown_until": now + _FAILURE_COOLDOWN_STEPS[step_idx],
+            "cooldown_until": now + cooldown,
+            "bootid": bootid if bootid is not None else entry.get("bootid"),
+            "suspended": suspended,
         }
 
     async def verify_device(self, r: Dict[str, Any]) -> bool:
