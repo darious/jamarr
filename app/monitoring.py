@@ -5,6 +5,7 @@ import time
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_admin_user_jwt
 from app.security import (
@@ -61,6 +62,7 @@ def _resolve_log_file(key: str) -> Path:
 
 
 def tail_log_lines(path: Path, line_count: int) -> list[str]:
+    """Read the last *line_count* lines of a log. Blocking — reads whole file."""
     if not path.exists():
         return []
     with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -92,7 +94,9 @@ async def monitoring_summary():
                 modified_at=stat.st_mtime if stat else None,
             )
         )
-    return MonitoringSummary(logs=logs, alerts=recent_security_alerts())
+    return MonitoringSummary(
+        logs=logs, alerts=await run_in_threadpool(recent_security_alerts)
+    )
 
 
 @router.get("/logs", response_model=LogResponse)
@@ -104,7 +108,7 @@ async def monitoring_logs(
     return LogResponse(
         key=file,
         name=LOG_FILES[file],
-        lines=tail_log_lines(path, lines),
+        lines=await run_in_threadpool(tail_log_lines, path, lines),
     )
 
 

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from app.db import get_db
+from starlette.concurrency import run_in_threadpool
+from app.db import get_pool
 from app.security import is_production
 import os
 import io
@@ -99,122 +100,121 @@ def _is_not_modified(request: Request, etag: str, stat_result: os.stat_result) -
     return False
 
 
+def _create_resized(original_path: str, resized_path: str, target_size: int) -> None:
+    """Resize *original_path* to fit target_size and save as JPEG. Blocking."""
+    from PIL import Image
+
+    os.makedirs(os.path.dirname(resized_path), exist_ok=True)
+    with Image.open(original_path) as img:
+        # Convert to RGB if needed (handles PNG with transparency)
+        if img.mode in ("RGBA", "LA", "P"):
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            background.paste(
+                img,
+                mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None,
+            )
+            img = background
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+
+        width, height = img.size
+        if width > target_size or height > target_size:
+            if width > height:
+                new_width = target_size
+                new_height = int(height * (target_size / width))
+            else:
+                new_height = target_size
+                new_width = int(width * (target_size / height))
+
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+        img.save(resized_path, format="JPEG", quality=85, optimize=True)
+
+
+def _sniff_mime(path: str) -> str | None:
+    """Guess image mime from file magic bytes. Blocking."""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(12)
+            if header.startswith(b"\xff\xd8\xff"):
+                return "image/jpeg"
+            elif header.startswith(b"\x89PNG\r\n\x1a\n"):
+                return "image/png"
+            elif header.startswith(b"GIF8"):
+                return "image/gif"
+            elif header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+                return "image/webp"
+    except Exception:
+        pass
+    return None
+
+
+def _cached_file_response(
+    request: Request, path: str, sha1: str, media_type: str | None
+) -> Response:
+    stat_result = os.stat(path)
+    etag = f'W/"{sha1}-{int(stat_result.st_mtime)}-{stat_result.st_size}"'
+    if _is_not_modified(request, etag, stat_result):
+        return Response(status_code=304, headers=_build_cache_headers(stat_result, etag))
+    response = FileResponse(path, media_type=media_type)
+    response.headers.update(_build_cache_headers(stat_result, etag))
+    return response
+
+
 @router.api_route("/art/file/{sha1}", methods=["GET", "HEAD"])
 async def get_artwork_by_sha1(sha1: str, request: Request, max_size: int = 0):
     if len(sha1) != 40 or any(c not in '0123456789abcdefABCDEF' for c in sha1):
         raise HTTPException(status_code=400, detail="Invalid SHA1 format")
 
-    async for db in get_db():
+    # Acquire briefly: the connection must not stay checked out while we do
+    # file IO, image resizing, or send the response.
+    async with get_pool().acquire() as db:
         row = await db.fetchrow(
             "SELECT path_on_disk, mime FROM artwork WHERE sha1 = $1", sha1
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="Artwork not found")
+    if not row:
+        raise HTTPException(status_code=404, detail="Artwork not found")
 
-        original_path = _get_art_path(sha1, row["path_on_disk"])
-        mime = row["mime"]
+    original_path = _get_art_path(sha1, row["path_on_disk"])
+    mime = row["mime"]
 
-        if not os.path.isfile(original_path):
-            raise HTTPException(status_code=404, detail="Artwork file missing")
+    if not os.path.isfile(original_path):
+        raise HTTPException(status_code=404, detail="Artwork file missing")
 
-        # If resizing requested
-        if max_size > 0:
-            target_size = _snap_size(max_size)
-            subdir = sha1[:2]
-            resized_dir = _safe_join(CACHE_DIR, "resized", str(target_size), subdir)
-            resized_path = os.path.join(resized_dir, sha1)
+    # If resizing requested
+    if max_size > 0:
+        target_size = _snap_size(max_size)
+        subdir = sha1[:2]
+        resized_dir = _safe_join(CACHE_DIR, "resized", str(target_size), subdir)
+        resized_path = os.path.join(resized_dir, sha1)
 
-            # Serve from cache if exists
-            if os.path.isfile(resized_path):  # lgtm[py/path-injection]
-                stat_result = os.stat(resized_path)
-                etag = f'W/"{sha1}-{int(stat_result.st_mtime)}-{stat_result.st_size}"'
-                if _is_not_modified(request, etag, stat_result):
-                    return Response(status_code=304, headers=_build_cache_headers(stat_result, etag))
-                response = FileResponse(resized_path, media_type="image/jpeg")
-                response.headers.update(_build_cache_headers(stat_result, etag))
-                return response
+        # Serve from cache if exists
+        if os.path.isfile(resized_path):  # lgtm[py/path-injection]
+            return _cached_file_response(request, resized_path, sha1, "image/jpeg")
 
-            # Create if missing
-            from PIL import Image
+        # Create if missing; Pillow decode/resize is CPU-bound, keep it off
+        # the event loop.
+        try:
+            await run_in_threadpool(
+                _create_resized, original_path, resized_path, target_size
+            )
+            return _cached_file_response(request, resized_path, sha1, "image/jpeg")
+        except Exception:
+            # Fallback to original file on error
+            pass
 
-            try:
-                os.makedirs(resized_dir, exist_ok=True)
-                with Image.open(original_path) as img:
-                    # Convert to RGB if needed (handles PNG with transparency)
-                    if img.mode in ("RGBA", "LA", "P"):
-                        background = Image.new("RGB", img.size, (255, 255, 255))
-                        if img.mode == "P":
-                            img = img.convert("RGBA")
-                        background.paste(
-                            img,
-                            mask=img.split()[-1]
-                            if img.mode in ("RGBA", "LA")
-                            else None,
-                        )
-                        img = background
-                    elif img.mode != "RGB":
-                        img = img.convert("RGB")
+    # Fallback
+    if not mime:
+        mime = await run_in_threadpool(_sniff_mime, original_path)
 
-                    width, height = img.size
-                    should_resize = width > target_size or height > target_size
-
-                    if should_resize:
-                        if width > height:
-                            new_width = target_size
-                            new_height = int(height * (target_size / width))
-                        else:
-                            new_height = target_size
-                            new_width = int(width * (target_size / height))
-
-                        img = img.resize(
-                            (new_width, new_height), Image.Resampling.LANCZOS
-                        )
-
-                    # Save to cache
-                    img.save(resized_path, format="JPEG", quality=85, optimize=True)
-
-                    stat_result = os.stat(resized_path)
-                    etag = f'W/"{sha1}-{int(stat_result.st_mtime)}-{stat_result.st_size}"'
-                    if _is_not_modified(request, etag, stat_result):
-                        return Response(status_code=304, headers=_build_cache_headers(stat_result, etag))
-                    response = FileResponse(resized_path, media_type="image/jpeg")
-                    response.headers.update(_build_cache_headers(stat_result, etag))
-                    return response
-            except Exception:
-                # Fallback to original file on error
-                pass
-
-        # Fallback
-        if not mime:
-            # Try to sniff mime from file header
-            try:
-                with open(original_path, "rb") as f:
-                    header = f.read(12)
-                    if header.startswith(b"\xff\xd8\xff"):
-                        mime = "image/jpeg"
-                    elif header.startswith(b"\x89PNG\r\n\x1a\n"):
-                        mime = "image/png"
-                    elif header.startswith(b"GIF8"):
-                        mime = "image/gif"
-                    elif header.startswith(b"RIFF") and header[8:12] == b"WEBP":
-                        mime = "image/webp"
-            except Exception:
-                pass
-
-        stat_result = os.stat(original_path)
-        etag = f'W/"{sha1}-{int(stat_result.st_mtime)}-{stat_result.st_size}"'
-        if _is_not_modified(request, etag, stat_result):
-            return Response(status_code=304, headers=_build_cache_headers(stat_result, etag))
-        response = FileResponse(original_path, media_type=mime)
-        response.headers.update(_build_cache_headers(stat_result, etag))
-        return response
-
-    raise HTTPException(status_code=500, detail="Database error")
+    return _cached_file_response(request, original_path, sha1, mime)
 
 
 @router.get("/art/renderer/{udn}")
 async def get_renderer_icon(udn: str, request: Request, max_size: int = 0):
-    async for db in get_db():
+    async with get_pool().acquire() as db:
         row = await db.fetchrow(
             """
             SELECT a.sha1
@@ -226,7 +226,7 @@ async def get_renderer_icon(udn: str, request: Request, max_size: int = 0):
             """,
             udn,
         )
-        if not row:
-            raise HTTPException(status_code=404, detail="Renderer icon not found")
+    if not row:
+        raise HTTPException(status_code=404, detail="Renderer icon not found")
 
-        return await get_artwork_by_sha1(row["sha1"], max_size=max_size, request=request)
+    return await get_artwork_by_sha1(row["sha1"], max_size=max_size, request=request)
