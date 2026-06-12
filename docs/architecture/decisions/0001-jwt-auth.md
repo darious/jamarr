@@ -35,6 +35,8 @@ signed URL is used instead of cookie auth (see streaming flow / ADR-0003).
 - Stolen access tokens expire fast; refresh reuse hard-fails (401) and can be
   globally revoked per user (`/api/auth/logout-all`).
 - Cost: clients must implement refresh-on-401, and endpoints that can't send
-  headers (`<img>`, `EventSource`) need the `access_token=` query fallback.
+  headers (`EventSource`) authenticate via the refresh cookie instead. (An
+  earlier `access_token=` query fallback was removed: tokens in URLs leak into
+  proxy logs and browser history.)
 - Stateless access tokens can't be individually revoked before expiry — accepted,
   given the short TTL.

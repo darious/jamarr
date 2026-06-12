@@ -12,7 +12,7 @@
         triggerOptimize,
         syncLastfmScrobbles,
     } from "$lib/api";
-    import { getAccessToken, refreshAccessToken } from "$lib/stores/auth";
+    import { refreshAccessToken } from "$lib/stores/auth";
     import TabButton from "$lib/components/TabButton.svelte";
     import Checkbox from "$lib/components/Checkbox.svelte";
 
@@ -97,11 +97,10 @@
 
     onMount(async () => {
         await refreshAccessToken();
-        const token = getAccessToken();
-        const tokenParam = token ? `?access_token=${encodeURIComponent(token)}` : "";
 
-        // Connect to SSE
-        eventSource = new EventSource(`/api/library/events${tokenParam}`);
+        // Connect to SSE; authenticated by the httponly refresh cookie, since
+        // EventSource cannot send an Authorization header.
+        eventSource = new EventSource(`/api/library/events`);
 
         eventSource.onopen = () => {
             addLog("Connected to scan server.");
@@ -124,7 +123,7 @@
         };
 
         // Connect to Last.fm SSE
-        lastfmEventSource = new EventSource(`/api/lastfm/events${tokenParam}`);
+        lastfmEventSource = new EventSource(`/api/lastfm/events`);
 
         lastfmEventSource.onmessage = (event) => {
             try {

@@ -3,12 +3,14 @@ import os
 import re
 
 from fastapi import FastAPI, HTTPException
+from app.auth_tokens import validate_jwt_secret_at_startup
 from app.db import init_db, close_db
 from app.security import configure_security_middleware, fastapi_docs_config, is_production
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_jwt_secret_at_startup()
     await init_db()
     from app.services.renderer import get_renderer_registry
     from app.scanner.scan_manager import ScanManager
@@ -78,6 +80,7 @@ app.include_router(stream.router)
 app.include_router(player.router)
 app.include_router(search.router)
 app.include_router(scan.router)
+app.include_router(scan.events_router)
 app.include_router(auth.router)
 app.include_router(media_quality.router)
 app.include_router(playlist.router)

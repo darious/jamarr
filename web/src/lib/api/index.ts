@@ -156,13 +156,6 @@ export interface User {
     last_login?: string | null;
 }
 
-export function withAccessToken(url: string): string {
-    const token = getAccessToken();
-    if (!token || url.includes("access_token=")) return url;
-    const sep = url.includes("?") ? "&" : "?";
-    return `${url}${sep}access_token=${encodeURIComponent(token)}`;
-}
-
 export function getArtUrl(sha1: string | null | undefined, size?: number): string {
     if (!sha1) return "";
     let url = `/api/art/file/${sha1}`;

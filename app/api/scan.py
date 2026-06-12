@@ -5,9 +5,18 @@ from typing import Optional
 import json
 
 from app.scanner.scan_manager import ScanManager
-from app.api.deps import get_current_admin_user_jwt
+from app.api.deps import (
+    get_current_admin_user_jwt,
+    get_current_admin_user_jwt_or_cookie,
+)
 
 router = APIRouter(dependencies=[Depends(get_current_admin_user_jwt)])
+
+# EventSource cannot send an Authorization header, so the SSE endpoint lives on
+# its own router and authenticates via the refresh cookie as a fallback.
+events_router = APIRouter(
+    dependencies=[Depends(get_current_admin_user_jwt_or_cookie)]
+)
 
 
 class ScanRequest(BaseModel):
@@ -163,7 +172,7 @@ async def get_scan_status():
     }
 
 
-@router.get("/api/library/events")
+@events_router.get("/api/library/events")
 async def sse_events():
     manager = ScanManager.get_instance()
 

@@ -5,8 +5,12 @@ from typing import Optional
 import asyncpg
 from fastapi import Depends, Header, HTTPException, Request, status
 
-from app.auth import get_user_by_id
-from app.auth_tokens import verify_access_token
+from app.auth import get_refresh_session, get_user_by_id
+from app.auth_tokens import (
+    REFRESH_COOKIE_NAME,
+    hash_refresh_token,
+    verify_access_token,
+)
 from app.db import get_db
 from app.security import log_security_event
 
@@ -17,25 +21,20 @@ async def get_current_user_jwt(
     db: asyncpg.Connection = Depends(get_db),
 ) -> asyncpg.Record:
     """Dependency to require JWT authentication.
-    
+
     Extracts and validates JWT from Authorization header.
     Returns user record from database.
-    
+
     Args:
         authorization: Authorization header value (should be "Bearer <token>")
         db: Database connection
-        
+
     Returns:
         User record from database
-        
+
     Raises:
         HTTPException: 401 if token is missing, invalid, or expired
     """
-    if not authorization and request is not None:
-        token = request.query_params.get("access_token")
-        if token:
-            authorization = f"Bearer {token}"
-
     if not authorization:
         log_security_event("auth_missing", request, level=logging.INFO)
         raise HTTPException(
@@ -146,15 +145,73 @@ async def get_optional_user_jwt(
     Returns:
         User record if valid token provided, None otherwise
     """
-    if not authorization and request is not None:
-        token = request.query_params.get("access_token")
-        if token:
-            authorization = f"Bearer {token}"
-
     if not authorization:
         return None
-    
+
     try:
         return await get_current_user_jwt(authorization, request, db)
     except HTTPException:
         return None
+
+
+async def get_user_from_refresh_cookie(
+    request: Request, db: asyncpg.Connection
+) -> asyncpg.Record:
+    """Authenticate via the refresh-token cookie.
+
+    For requests that cannot carry an Authorization header: EventSource (SSE)
+    connections and external OAuth callback redirects. The cookie is httponly
+    and scoped to /api, so it never appears in URLs or proxy logs.
+    """
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        log_security_event("auth_missing", request, level=logging.INFO)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
+    session = await get_refresh_session(db, hash_refresh_token(refresh_token))
+    if not session:
+        log_security_event("auth_invalid_token", request, level=logging.WARNING)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
+    user = await get_user_by_id(db, session["user_id"])
+    if not user or not user.get("is_active", True):
+        log_security_event(
+            "auth_inactive_user",
+            request,
+            level=logging.WARNING,
+            user_id=session["user_id"],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
+    return user
+
+
+async def get_current_user_jwt_or_cookie(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    db: asyncpg.Connection = Depends(get_db),
+) -> asyncpg.Record:
+    """Require auth via Bearer header, falling back to the refresh cookie.
+
+    Only for endpoints that browsers must reach without custom headers (SSE).
+    """
+    if authorization:
+        return await get_current_user_jwt(authorization, request, db)
+    return await get_user_from_refresh_cookie(request, db)
+
+
+async def get_current_admin_user_jwt_or_cookie(
+    request: Request,
+    user: asyncpg.Record = Depends(get_current_user_jwt_or_cookie),
+) -> asyncpg.Record:
+    """Require admin auth via Bearer header or refresh cookie (SSE endpoints)."""
+    return require_admin_user(user, request)
