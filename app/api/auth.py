@@ -14,7 +14,7 @@ from app.auth import (
     verify_password,
     get_user_by_username_or_email,
     create_refresh_session,
-    get_refresh_session,
+    get_refresh_session_state,
     revoke_refresh_session,
     revoke_all_user_sessions,
 )
@@ -22,6 +22,7 @@ from app.auth_tokens import (
     create_access_token,
     generate_refresh_token,
     hash_refresh_token,
+    REFRESH_COOKIE_NAME,
     REFRESH_TOKEN_TTL_DAYS,
 )
 from app.api.deps import get_current_admin_user_jwt, get_current_user_jwt
@@ -36,11 +37,14 @@ limiter = Limiter(
 )
 
 # Configuration
-REFRESH_COOKIE_NAME = os.getenv("REFRESH_COOKIE_NAME", "jamarr_refresh")
 if "REFRESH_COOKIE_SECURE" in os.environ:
     REFRESH_COOKIE_SECURE = os.getenv("REFRESH_COOKIE_SECURE", "false").lower() == "true"
 else:
     REFRESH_COOKIE_SECURE = ENV == "production"
+
+# Replays of a rotated refresh token within this window are treated as a benign
+# concurrent-refresh race; older replays trigger revocation of all sessions.
+REFRESH_REUSE_GRACE = timedelta(seconds=30)
 
 
 class CreateUserBody(BaseModel):
@@ -194,6 +198,18 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials."
         )
 
+    if not user.get("is_active", True):
+        log_security_event(
+            "login_inactive_user",
+            request,
+            level=logging.WARNING,
+            user_id=user["id"],
+            username=user["username"],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled."
+        )
+
     # Update last login timestamp
     await db.execute(
         'UPDATE "user" SET last_login_at = $1 WHERE id = $2',
@@ -269,20 +285,61 @@ async def refresh(
             detail="Missing refresh token",
         )
     
-    # Lookup refresh session
+    # Lookup refresh session (including revoked/expired, for reuse detection)
     token_hash = hash_refresh_token(refresh_token)
-    session = await get_refresh_session(db, token_hash)
-    
+    session = await get_refresh_session_state(db, token_hash)
+
     if not session:
-        # Token is either revoked, expired, or doesn't exist
         log_security_event("refresh_invalid", request, level=logging.WARNING)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
         )
-    
+
     user_id = session["user_id"]
-    
+    now = datetime.now(timezone.utc)
+
+    if session["revoked_at"] is not None:
+        # A rotated token was replayed. Within a short grace window this is a
+        # benign race (two tabs refreshing concurrently); beyond it, assume the
+        # token was stolen and revoke every session for the user.
+        if now - session["revoked_at"] > REFRESH_REUSE_GRACE:
+            await revoke_all_user_sessions(db, user_id)
+            log_security_event(
+                "refresh_reuse_detected",
+                request,
+                level=logging.WARNING,
+                user_id=user_id,
+                username=session["username"],
+            )
+        else:
+            log_security_event(
+                "refresh_race", request, level=logging.INFO, user_id=user_id
+            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    if session["expires_at"] <= now:
+        log_security_event("refresh_expired", request, level=logging.INFO)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    if not session.get("is_active", True):
+        log_security_event(
+            "refresh_inactive_user",
+            request,
+            level=logging.WARNING,
+            user_id=user_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
     # Rotate refresh token (revoke old, create new)
     await revoke_refresh_session(db, token_hash)
     

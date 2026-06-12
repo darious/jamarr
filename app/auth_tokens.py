@@ -22,6 +22,36 @@ ACCESS_TOKEN_TTL_MINUTES = int(os.getenv("ACCESS_TOKEN_TTL_MINUTES", "10"))
 REFRESH_TOKEN_TTL_DAYS = int(os.getenv("REFRESH_TOKEN_TTL_DAYS", "21"))
 STREAM_TOKEN_TTL_SECONDS = int(os.getenv("STREAM_TOKEN_TTL_SECONDS", "300"))
 STREAM_TOKEN_AUDIENCE = os.getenv("STREAM_TOKEN_AUDIENCE", "jamarr-stream")
+REFRESH_COOKIE_NAME = os.getenv("REFRESH_COOKIE_NAME", "jamarr_refresh")
+
+# Known non-secrets that must never be accepted as JWT_SECRET_KEY in production.
+_PLACEHOLDER_SECRETS = {
+    "change-this-to-a-random-secret-key",  # .env.example placeholder
+    "dev-secret",  # development fallback
+}
+
+
+def validate_jwt_secret_at_startup() -> None:
+    """Fail fast in production when JWT_SECRET_KEY is missing or a placeholder.
+
+    Without this the app boots fine and only returns 500s once the first
+    token is created or verified.
+    """
+    if os.getenv("ENV", "development").lower() != "production":
+        return
+    secret = os.getenv("JWT_SECRET_KEY", "")
+    if not secret or secret in _PLACEHOLDER_SECRETS:
+        raise RuntimeError(
+            "JWT_SECRET_KEY must be set to a strong random value in production. "
+            "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+    if len(secret) < 32:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "JWT_SECRET_KEY is shorter than 32 characters; consider regenerating "
+            "with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
 
 
 def _get_jwt_settings() -> dict:
