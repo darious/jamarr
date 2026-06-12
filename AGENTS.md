@@ -70,6 +70,10 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 ## Gotchas
 
 - Python 3.14 required.
+- Auth is Bearer-header only; no `access_token=` query fallback. SSE endpoints
+  (`/api/library/events`, `/api/lastfm/events`) auth via the refresh cookie.
+- `DB_PASS` has no compose default — must be set in `.env`. Production startup
+  fails fast if `JWT_SECRET_KEY` is unset or a placeholder.
 - UPnP needs host networking — discovery won't work in bridged containers.
 - `HOST_IP` auto-derived in `dev.sh`/`deploy.sh` via route lookup; override by exporting it.
 - Frontend dev caches (`web/.svelte-kit`, `web/.vite`) are cleared on `dev.sh` start.
