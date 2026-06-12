@@ -1,7 +1,7 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
-from app.db import get_db
+from app.db import get_db, get_pool
 from app.api.deps import get_current_user_jwt, get_optional_user_jwt
 from app.auth_tokens import create_stream_token, verify_stream_token
 from app.services.renderer.token_policy import stream_token_ttl_seconds
@@ -56,26 +56,34 @@ async def get_stream_url(
 
 @router.api_route("/api/stream/{track_id}", methods=["GET", "HEAD"])
 async def stream_track(
+    request: Request,
     track_id: int,
     token: Optional[str] = None,
     quality: Optional[str] = None,
-    user: Optional[asyncpg.Record] = Depends(get_optional_user_jwt),
-    db: asyncpg.Connection = Depends(get_db),
 ):
+    # Deliberately no Depends(get_db): dependencies with yield are only torn
+    # down after the response finishes, which would pin a pool connection for
+    # the whole file transfer. Acquire briefly instead.
+    pool = get_pool()
     if token:
         stream_claims = verify_stream_token(token, track_id)
-    elif not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     else:
+        async with pool.acquire() as db:
+            user = await get_optional_user_jwt(
+                request.headers.get("authorization"), request, db
+            )
+        if not user:
+            raise HTTPException(status_code=401, detail="Not authenticated")
         stream_claims = {}
-    row = await db.fetchrow(
-        """
-        SELECT id, path, codec, sample_rate_hz, bit_depth, bitrate, quick_hash
-        FROM track
-        WHERE id = $1
-        """,
-        track_id,
-    )
+    async with pool.acquire() as db:
+        row = await db.fetchrow(
+            """
+            SELECT id, path, codec, sample_rate_hz, bit_depth, bitrate, quick_hash
+            FROM track
+            WHERE id = $1
+            """,
+            track_id,
+        )
     if not row:
         raise HTTPException(status_code=404, detail="Track not found")
 
