@@ -119,6 +119,30 @@ async def get_refresh_session(
     return row
 
 
+async def get_refresh_session_state(
+    db: asyncpg.Connection, token_hash: str
+) -> Optional[asyncpg.Record]:
+    """Get refresh session by token hash regardless of revocation or expiry.
+
+    Unlike get_refresh_session, this returns revoked/expired sessions so the
+    caller can distinguish "unknown token" from "rotated token replayed",
+    which is the signal for refresh-token theft detection.
+    """
+    return await db.fetchrow(
+        """
+        SELECT
+            s.*,
+            u.username,
+            u.is_active
+        FROM auth_refresh_session s
+        JOIN "user" u ON u.id = s.user_id
+        WHERE s.token_hash = $1
+        LIMIT 1
+        """,
+        token_hash,
+    )
+
+
 async def revoke_refresh_session(db: asyncpg.Connection, token_hash: str) -> None:
     """Revoke a refresh session by setting revoked_at timestamp.
     

@@ -130,3 +130,17 @@ async def test_login_rate_limiting(client: AsyncClient, test_user):
     
     # Should have at least one 429 (rate limit exceeded)
     assert 429 in status_codes, f"Expected rate limiting (429), got: {status_codes}"
+
+
+@pytest.mark.asyncio
+async def test_login_rejected_for_inactive_user(client: AsyncClient, test_user, db):
+    """Deactivated users must not be able to log in, even with valid credentials."""
+    await db.execute(
+        'UPDATE "user" SET is_active = FALSE WHERE id = $1', test_user["id"]
+    )
+
+    response = await client.post(
+        "/api/auth/login",
+        json={"username": "testuser_jwt", "password": "password123"},
+    )
+    assert response.status_code == 403

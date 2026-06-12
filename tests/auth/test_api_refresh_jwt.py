@@ -151,6 +151,87 @@ async def test_refresh_token_reuse_detection(client: AsyncClient, test_user):
     # Try to reuse the old (now revoked) refresh token
     client.cookies.set("jamarr_refresh", first_refresh)
     refresh2 = await client.post("/api/auth/refresh")
-    
+
     # Should be rejected
     assert refresh2.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_within_grace_keeps_other_sessions(
+    client: AsyncClient, test_user, db
+):
+    """A replay right after rotation (benign race) must not nuke the new session."""
+    login_response = await client.post(
+        "/api/auth/login",
+        json={"username": "testuser_jwt", "password": "password123"},
+    )
+    assert login_response.status_code == 200
+    first_refresh = login_response.cookies["jamarr_refresh"]
+
+    refresh1 = await client.post("/api/auth/refresh")
+    assert refresh1.status_code == 200
+
+    # Replay the just-rotated token immediately
+    client.cookies.set("jamarr_refresh", first_refresh)
+    refresh2 = await client.post("/api/auth/refresh")
+    assert refresh2.status_code == 401
+
+    # The rotated session must survive
+    active = await db.fetchval(
+        "SELECT COUNT(*) FROM auth_refresh_session WHERE user_id = $1 AND revoked_at IS NULL",
+        test_user["id"],
+    )
+    assert active == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_reuse_after_grace_revokes_all_sessions(
+    client: AsyncClient, test_user, db
+):
+    """A replay of an old rotated token is treated as theft: revoke everything."""
+    from app.auth_tokens import hash_refresh_token
+
+    login_response = await client.post(
+        "/api/auth/login",
+        json={"username": "testuser_jwt", "password": "password123"},
+    )
+    assert login_response.status_code == 200
+    first_refresh = login_response.cookies["jamarr_refresh"]
+
+    refresh1 = await client.post("/api/auth/refresh")
+    assert refresh1.status_code == 200
+
+    # Pretend the rotation happened well outside the grace window
+    await db.execute(
+        "UPDATE auth_refresh_session SET revoked_at = NOW() - INTERVAL '10 minutes' "
+        "WHERE token_hash = $1",
+        hash_refresh_token(first_refresh),
+    )
+
+    client.cookies.set("jamarr_refresh", first_refresh)
+    refresh2 = await client.post("/api/auth/refresh")
+    assert refresh2.status_code == 401
+
+    # Every session for the user must now be revoked
+    active = await db.fetchval(
+        "SELECT COUNT(*) FROM auth_refresh_session WHERE user_id = $1 AND revoked_at IS NULL",
+        test_user["id"],
+    )
+    assert active == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejected_for_inactive_user(client: AsyncClient, test_user, db):
+    """Refresh must fail once the user is deactivated."""
+    login_response = await client.post(
+        "/api/auth/login",
+        json={"username": "testuser_jwt", "password": "password123"},
+    )
+    assert login_response.status_code == 200
+
+    await db.execute(
+        'UPDATE "user" SET is_active = FALSE WHERE id = $1', test_user["id"]
+    )
+
+    response = await client.post("/api/auth/refresh")
+    assert response.status_code == 401
