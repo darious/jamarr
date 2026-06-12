@@ -47,7 +47,7 @@ services:
       DB_HOST: ${DB_HOST:-127.0.0.1}
       DB_PORT: ${DB_PORT:-8110}
       DB_USER: ${DB_USER:-jamarr}
-      DB_PASS: ${DB_PASS:-jamarr}
+      DB_PASS: ${DB_PASS:?DB_PASS must be set in .env}
       DB_NAME: ${DB_NAME:-jamarr}
       JAMARR_STREAM_CACHE_DIR: ${JAMARR_STREAM_CACHE_DIR:-/app/music-cache/cache}
 
