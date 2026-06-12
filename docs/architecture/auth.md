@@ -117,7 +117,7 @@ Recommended endpoints:
 4. On API 401:
    - attempt `/api/auth/refresh` once, then retry the request.
    - if refresh fails, redirect to login.
-5. For endpoints that cannot send headers (EventSource, `<img>`), append `access_token=<jwt>` as a query param.
+5. Endpoints that cannot send headers (EventSource/SSE) authenticate via the httponly refresh cookie instead; access tokens are never placed in URLs (they would leak into reverse-proxy logs and browser history).
 
 ### 4.3 Script / curl flow
 
