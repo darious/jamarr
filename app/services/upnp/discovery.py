@@ -271,10 +271,11 @@ class UPnPDiscovery:
         entry = self._failure_state.get(location) or {}
         failures = entry.get("failures", 0) + 1
 
-        # ERROR on the first failure only; repeats are expected (TVs in standby
-        # answer SSDP but refuse HTTP) and logged at DEBUG.
+        # WARNING on the first failure only; repeats are expected (TVs in standby
+        # answer SSDP but refuse HTTP) and logged at DEBUG. The failure state is
+        # in-memory, so each process restart logs one line per dead location.
         if failures == 1:
-            logger.error(f"Error adding renderer from {location}: {error}")
+            logger.warning(f"Error adding renderer from {location}: {error}")
             self.manager.log(f"Error adding renderer: {error}")
         else:
             logger.debug(f"Error adding renderer from {location} (failure {failures}): {error}")

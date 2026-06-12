@@ -27,10 +27,10 @@ def _fail(discovery, n=1, bootid=None):
         discovery._track_failure(LOCATION, RuntimeError("boom"), bootid)
 
 
-def test_first_failure_logs_error(discovery, caplog):
+def test_first_failure_logs_warning(discovery, caplog):
     with caplog.at_level(logging.DEBUG, logger="app.services.upnp.discovery"):
         _fail(discovery)
-    assert [r.levelno for r in caplog.records] == [logging.ERROR]
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
     discovery.manager.log.assert_called_once()
 
 
@@ -67,9 +67,14 @@ def test_suspension_after_max_failures(discovery, caplog):
     assert state["cooldown_until"] == pytest.approx(
         time.time() + _SUSPENDED_RETRY_INTERVAL, abs=5
     )
-    # Exactly one WARNING at the moment of suspension, not on later failures.
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warnings) == 1
+    # Exactly one suspension WARNING at the moment of suspension (the first
+    # failure logs its own WARNING), not on later failures.
+    suspensions = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "probing at most" in r.message
+    ]
+    assert len(suspensions) == 1
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="app.services.upnp.discovery"):
         _fail(discovery)
@@ -97,14 +102,14 @@ def test_bootid_preserved_when_failure_has_none(discovery):
     assert discovery._failure_state[LOCATION]["bootid"] == "1"
 
 
-def test_success_reset_makes_next_failure_error_again(discovery, caplog):
+def test_success_reset_makes_next_failure_warning_again(discovery, caplog):
     _fail(discovery, n=3)
     # _add_renderer pops state on success.
     discovery._failure_state.pop(LOCATION, None)
     caplog.clear()
     with caplog.at_level(logging.DEBUG, logger="app.services.upnp.discovery"):
         _fail(discovery)
-    assert [r.levelno for r in caplog.records] == [logging.ERROR]
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
 
 
 def test_unknown_location_always_attempted(discovery):
