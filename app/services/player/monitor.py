@@ -9,6 +9,7 @@ from app.services.player.globals import (
     monitor_start_times,
     monitor_starting,
     last_track_start_time,
+    last_playing_seen,
 )
 from app.services.player.state import (
     get_renderer_state_db,
@@ -85,10 +86,17 @@ async def monitor_upnp_playback(udn: str):
                 continue
 
             # 2. Update DB
+            finished_reason = None
             async for db in get_db():
                 # What the DB currently thinks (may differ from the device)
                 state = await get_renderer_state_db(db, udn)
                 was_playing = state["is_playing"]
+
+                # Raw device-reported position, before the keep-moving hack below.
+                device_position = rel_time
+
+                if transport_state == "PLAYING":
+                    last_playing_seen[udn] = time.time()
 
                 # Update live stats from the device
                 if transport_state == "PLAYING" and (rel_time is None or rel_time == 0):
@@ -103,11 +111,17 @@ async def monitor_upnp_playback(udn: str):
                 ]
 
                 # Auto-advance logic:
-                # If we think we are playing but the device reports STOPPED/NO_MEDIA_PRESENT and position ~0,
-                # assume the track finished. Keep this separate from the normal play/pause flow so we do not
-                # overwrite queue/volume fields while a user action is in flight.
-                if was_playing:
-                    if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
+                # Treat STOPPED as track-finished if the DB thought we were playing OR the
+                # device reported PLAYING within the last few seconds. The latter covers
+                # renderers that signal end-of-track as PLAYING -> PAUSED_PLAYBACK -> STOPPED:
+                # the PAUSED poll clears is_playing in the DB, so was_playing alone misses it.
+                # Keep this separate from the normal play/pause flow so we do not overwrite
+                # queue/volume fields while a user action is in flight.
+                if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
+                    recently_playing = was_playing or (
+                        time.time() - last_playing_seen.get(udn, 0) <= 5.0
+                    )
+                    if recently_playing:
                         # Ignore STOPPED if it arrives immediately after a Play/Skip (renderer churn).
                         time_since_start = time.time() - last_track_start_time.get(
                             udn, 0
@@ -116,18 +130,14 @@ async def monitor_upnp_playback(udn: str):
                             logger.info(
                                 f"[Player] Ignoring STOPPED state during transition (started {time_since_start:.1f}s ago)"
                             )
-                            continue
-                        logger.info(
-                            f"[Player] Track finished detection: State={transport_state}, Expected=Playing"
-                        )
-                        # Trigger next track outside DB loop; helper opens its own connection.
+                        else:
+                            logger.info(
+                                f"[Player] Track finished detection: State={transport_state}, Expected=Playing"
+                            )
+                            # Trigger next track outside DB loop; helper opens its own connection.
+                            finished_reason = "stopped"
                     else:
-                        # Still playing or paused/buffering. If user paused via remote, sync is_playing to False.
-                        if "PAUSE" in transport_state:
-                            state["is_playing"] = False
-
-                        # Race Condition Fix: status-only UPDATE so we do not overwrite queue/volume changes
-                        # that might have happened via API while this UPnP poll was in flight.
+                        # Genuinely idle; just persist snapshot of state.
                         await db.execute(
                             """
                             UPDATE renderer_state
@@ -140,7 +150,12 @@ async def monitor_upnp_playback(udn: str):
                             udn,
                         )
                 else:
-                    # Not previously playing; just persist snapshot of state.
+                    # Still playing or paused/buffering. If user paused via remote, sync is_playing to False.
+                    if "PAUSE" in transport_state:
+                        state["is_playing"] = False
+
+                    # Race Condition Fix: status-only UPDATE so we do not overwrite queue/volume changes
+                    # that might have happened via API while this UPnP poll was in flight.
                     await db.execute(
                         """
                         UPDATE renderer_state
@@ -152,6 +167,29 @@ async def monitor_upnp_playback(udn: str):
                         bool(state["is_playing"]),
                         udn,
                     )
+
+                    # Watchdog: some renderers get stuck reporting PLAYING at position 0
+                    # after the audio actually ended, never emitting STOPPED. If the device
+                    # has reported no real position for longer than the track's duration
+                    # plus a margin, assume the track finished.
+                    if was_playing and transport_state == "PLAYING":
+                        started = last_track_start_time.get(udn)
+                        duration = 0
+                        queue = state.get("queue") or []
+                        idx = state.get("current_index")
+                        if idx is not None and 0 <= idx < len(queue):
+                            duration = queue[idx].get("duration_seconds") or 0
+                        if (
+                            started
+                            and duration > 0
+                            and (device_position or 0) <= 1
+                            and time.time() - started > duration + 60
+                        ):
+                            logger.warning(
+                                f"[Player] Watchdog: renderer stuck PLAYING at position 0 for "
+                                f"{time.time() - started:.0f}s (track is {duration:.0f}s); assuming finished"
+                            )
+                            finished_reason = "watchdog"
 
                 # History logging for remote playback (based on renderer state queue)
                 if (
@@ -194,7 +232,7 @@ async def monitor_upnp_playback(udn: str):
                                 )
 
             # Execute side effects outside DB context (avoids holding a transaction open)
-            if was_playing and transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
+            if finished_reason:
                 await play_next_track_internal(udn)
                 await asyncio.sleep(4)  # Give the new track a moment to start
 

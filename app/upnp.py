@@ -54,6 +54,17 @@ class UPnPManager:
         self.discovery = UPnPDiscovery(self)
         self.control = UPnPDeviceControl(self)
 
+    @property
+    def renderer_base_url(self) -> str:
+        """Base URL renderers fetch media/art from: the header-recasing proxy,
+        falling back to the API port if the proxy failed to bind."""
+        from app.services.renderer.stream_proxy import get_stream_proxy
+
+        proxy = get_stream_proxy()
+        if proxy.is_running:
+            return f"http://{self.local_ip}:{proxy.port}"
+        return self.base_url
+
     def _get_local_ip(self) -> str:
         """Get local IP address for media streaming URLs."""
         import socket
