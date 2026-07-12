@@ -90,8 +90,20 @@ import json
 from httpx import ASGITransport, AsyncClient
 from app.main import app
 
+def iter_paths(routes, prefix=""):
+    # starlette >= 1.3 wraps included routers in _IncludedRouter (no .path);
+    # walk into original_router with the include prefix applied.
+    for route in routes:
+        path = getattr(route, "path", None)
+        if path is not None:
+            yield prefix + path
+        inner = getattr(route, "original_router", None)
+        if inner is not None:
+            ctx = getattr(route, "include_context", None)
+            yield from iter_paths(inner.routes, prefix + (ctx.prefix if ctx else ""))
+
 async def main():
-    paths = sorted({route.path for route in app.routes})
+    paths = sorted(set(iter_paths(app.routes)))
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://REDACTED_IP:8111",
