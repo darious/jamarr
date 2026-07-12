@@ -27,6 +27,7 @@ Non-secret application config that ships in the repo. Typical contents:
 - MusicBrainz API root URL and rate limits
 - Logging level / format
 - Scanner concurrency
+- UPnP renderer stream-proxy port (`renderer.stream_proxy_port`, default 8112)
 
 Edit it directly and restart the stack (or rely on hot-reload in
 [Dev Mode](dev-mode.md)).

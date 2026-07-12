@@ -89,6 +89,32 @@ The orchestrator does not care whether a `RendererStatus` came from polling
   track-end (`ended=True`, or Cast `IDLE` after `PLAYING`), and advances the
   queue exactly once. A short grace period after `play_track()` suppresses the
   transient `IDLE` during Cast load so it doesn't false-advance.
+- The UPnP poll loop handles two quirky end-of-track signatures seen on real
+  renderers: a quick `PLAYING → PAUSED_PLAYBACK → STOPPED` sequence counts as
+  track-finished (the `PAUSED` poll alone must not swallow the advance), and a
+  watchdog force-advances renderers stuck reporting `PLAYING` at position 0 for
+  longer than the track duration plus a margin.
+
+## Renderer stream proxy
+
+UPnP renderers fetch stream and artwork URLs through a small in-process HTTP
+proxy (`app/services/renderer/stream_proxy.py`, default port **8112**, config
+`renderer.stream_proxy_port` / env `RENDERER_PROXY_PORT`) instead of hitting
+uvicorn directly.
+
+**Why:** uvicorn lowercases every response header name below the ASGI layer,
+and some renderers parse header names case-sensitively — e.g. the Platinum-SDK
+"Windows Media Player" DMR found in TCL Google TVs needs `Content-Length` /
+`Content-Range` in canonical casing to determine stream size. Without it the
+device plays audio but reports no position/duration and emits erratic
+end-of-track states, breaking auto-advance.
+
+The proxy forwards `GET`/`HEAD` for `/api/stream/` and `/art/` to the API on
+loopback and relays the response with header names re-cased to canonical form.
+All auth (stream tokens), range handling, and quality logic stay in the normal
+endpoints. Browsers and other clients keep using the API port. If the proxy
+port fails to bind, renderer URLs fall back to the API port (pre-proxy
+behaviour).
 
 ## Stream-token policy
 
@@ -120,7 +146,8 @@ scrobbling behave like Android device-UPnP. See
 
 ## Deployment notes
 
-- Docker needs `network_mode: "host"` for both UPnP SSDP and Cast mDNS.
+- Docker needs `network_mode: "host"` for both UPnP SSDP and Cast mDNS. Host
+  networking also exposes the renderer stream proxy (default 8112) on the host.
 - Cast playback does **not** transcode in v1; unsupported codecs/containers fail
   on the receiver. The Default Media Receiver covers common formats.
 - Device-direct Cast requires Google Play Services — de-Googled Android can still
