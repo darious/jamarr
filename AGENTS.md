@@ -75,6 +75,9 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 - `DB_PASS` has no compose default — must be set in `.env`. Production startup
   fails fast if `JWT_SECRET_KEY` is unset or a placeholder.
 - UPnP needs host networking — discovery won't work in bridged containers.
+- UPnP renderers fetch streams/art via a header-recasing proxy on port 8112
+  (`app/services/renderer/stream_proxy.py`), not uvicorn directly — uvicorn
+  lowercases response headers and some renderers parse them case-sensitively.
 - `HOST_IP` auto-derived in `dev.sh`/`deploy.sh` via route lookup; override by exporting it.
 - Frontend dev caches (`web/.svelte-kit`, `web/.vite`) are cleared on `dev.sh` start.
 - New top-level route under `web/src/routes/` must also be added to

@@ -6,6 +6,19 @@ from app.auth_tokens import create_stream_token
 
 logger = logging.getLogger(__name__)
 
+
+def format_didl_duration(seconds: float | None) -> Optional[str]:
+    """Format a duration for DIDL-Lite res@duration (H:MM:SS.mmm)."""
+    if not seconds or seconds <= 0:
+        return None
+    total_ms = round(seconds * 1000)
+    ms = total_ms % 1000
+    total_s = total_ms // 1000
+    h, rem = divmod(total_s, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}.{ms:03d}"
+
+
 class UPnPDeviceControl:
     def __init__(self, manager):
         self.manager = manager
@@ -74,10 +87,11 @@ class UPnPDeviceControl:
         if not dmr:
             raise ValueError(f"DMR device not found for {self.manager.active_renderer}")
 
-        # Build media URL with a short-lived stream token
+        # Build media URL with a short-lived stream token. Renderers fetch via
+        # the header-recasing proxy, not uvicorn directly (see stream_proxy.py).
         stream_token = create_stream_token(track_id, user_id=metadata.get("user_id"))
         media_url = (
-            f"{self.manager.base_url}/api/stream/{track_id}"
+            f"{self.manager.renderer_base_url}/api/stream/{track_id}"
             f"?token={stream_token}"
         )
 
@@ -111,7 +125,10 @@ class UPnPDeviceControl:
         # Build art URL if available
         art_url = None
         if metadata.get("art_sha1"):
-            art_url = f"{self.manager.base_url}/art/file/{metadata['art_sha1']}?max_size=600"
+            art_url = (
+                f"{self.manager.renderer_base_url}/art/file/{metadata['art_sha1']}"
+                f"?max_size=600"
+            )
 
         # Extract metadata fields
         title = metadata.get("title", "Unknown Track")
@@ -144,6 +161,14 @@ class UPnPDeviceControl:
         if art_url:
             art_element = f"<upnp:albumArtURI>{html.escape(art_url)}</upnp:albumArtURI>"
 
+        # Duration lets renderers show a progress bar without probing the file
+        res_attrs = ""
+        duration_str = format_didl_duration(metadata.get("duration_seconds"))
+        if duration_str:
+            res_attrs += f' duration="{duration_str}"'
+        if metadata.get("size_bytes"):
+            res_attrs += f' size="{metadata["size_bytes"]}"'
+
         didl_lite = f"""
         <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">
             <item id="1" parentID="0" restricted="1">
@@ -153,7 +178,7 @@ class UPnPDeviceControl:
                 <upnp:album>{album_esc}</upnp:album>
                 <upnp:class>object.item.audioItem.musicTrack</upnp:class>
                 {art_element}
-                <res protocolInfo="http-get:*:{mime_type}:*">{media_url}</res>
+                <res protocolInfo="http-get:*:{mime_type}:*"{res_attrs}>{media_url}</res>
             </item>
         </DIDL-Lite>
         """

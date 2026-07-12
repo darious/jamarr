@@ -16,4 +16,10 @@ logging:
 # Scanner concurrency
 max_workers: 16
 
+# UPnP renderers fetch streams/art via a header-recasing proxy on this port
+# (uvicorn lowercases response headers; some renderers need canonical casing).
+# Env override: RENDERER_PROXY_PORT.
+renderer:
+  stream_proxy_port: 8112
+
 pearlarr: {}

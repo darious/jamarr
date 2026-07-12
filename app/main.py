@@ -22,11 +22,15 @@ async def lifespan(app: FastAPI):
 
     renderer_registry = get_renderer_registry()
     await renderer_registry.start_all()
+    from app.services.renderer.stream_proxy import get_stream_proxy
+
+    await get_stream_proxy().start()
     # ScanManager is lazy initialized but good to have it ready
     ScanManager.get_instance()
     await Scheduler.get_instance().start()
     yield
     await Scheduler.get_instance().stop()
+    await get_stream_proxy().stop()
     await renderer_registry.stop_all()
     await ScanManager.get_instance().shutdown()
     await close_db()
