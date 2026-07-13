@@ -78,7 +78,7 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.media3:media3-common:1.10.1")
     implementation("androidx.media3:media3-exoplayer:1.10.1")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.media3:media3-session:1.10.1")
     implementation("androidx.mediarouter:mediarouter:1.8.1")
     implementation("io.coil-kt.coil3:coil-compose:3.5.0")
