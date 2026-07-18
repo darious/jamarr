@@ -123,14 +123,31 @@ async def monitor_upnp_playback(udn: str):
                     )
                     if recently_playing:
                         # Ignore STOPPED if it arrives immediately after a Play/Skip (renderer churn).
-                        time_since_start = time.time() - last_track_start_time.get(
-                            udn, 0
-                        )
+                        started_at = last_track_start_time.get(udn, 0)
+                        time_since_start = time.time() - started_at
+                        # Whether the device has reached PLAYING for *this* track.
+                        # Slow renderers can sit in STOPPED for many seconds while
+                        # buffering a new URI; until they have actually played,
+                        # STOPPED means "still starting", not "finished" — but
+                        # was_playing is already true (set optimistically at Play)
+                        # and last_playing_seen may be fresh from the previous
+                        # track, so both would pass the checks below.
+                        played_since_start = last_playing_seen.get(udn, 0) >= started_at
                         if time_since_start < 5.0:
                             logger.info(
                                 f"[Player] Ignoring STOPPED state during transition (started {time_since_start:.1f}s ago)"
                             )
+                        elif not played_since_start and time_since_start < 30.0:
+                            logger.info(
+                                f"[Player] Ignoring STOPPED: renderer has not started the track yet "
+                                f"({time_since_start:.1f}s since Play)"
+                            )
                         else:
+                            if not played_since_start:
+                                logger.warning(
+                                    f"[Player] Renderer never started the track after "
+                                    f"{time_since_start:.0f}s; skipping to next"
+                                )
                             logger.info(
                                 f"[Player] Track finished detection: State={transport_state}, Expected=Playing"
                             )
