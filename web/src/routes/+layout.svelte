@@ -23,7 +23,7 @@
     isAuthChecked,
     setUser,
   } from "$stores/user";
-  import { initializeAuth } from "$lib/stores/auth";
+  import { initializeAuth, sessionExpired } from "$lib/stores/auth";
   import { page } from "$app/stores";
   import { themeAccent, themeMode } from "$stores/theme";
   import {
@@ -42,6 +42,7 @@
   let unsub: (() => void) | undefined;
   let unsubUser: (() => void) | undefined;
   let unsubAuthChecked: (() => void) | undefined;
+  let unsubSessionExpired: (() => void) | undefined;
   let showSettings = false;
   let settingsContainer: HTMLElement;
   let showRenderers = false;
@@ -141,9 +142,28 @@
     appInitializing = false;
   }
 
+  // Stop all background activity once the session is dead: leaving pollers
+  // running would hammer the API with unauthenticated requests (and refresh
+  // replays) every few seconds until the tab is closed.
+  function teardownAppShell() {
+    if (rendererPollInterval) {
+      clearInterval(rendererPollInterval);
+      rendererPollInterval = undefined;
+    }
+    appInitialized = false;
+    appInitializing = false;
+  }
+
   onMount(() => {
     unsubUser = currentUser.subscribe((value) => (user = value));
     unsubAuthChecked = isAuthChecked.subscribe((value) => (authChecked = value));
+    unsubSessionExpired = sessionExpired.subscribe((expired) => {
+      if (expired && appInitialized) {
+        teardownAppShell();
+        clearUser();
+        goto("/login");
+      }
+    });
 
     if (isAuthPage) {
       authLoading = false;
@@ -160,6 +180,7 @@
     if (unsub) unsub();
     if (unsubUser) unsubUser();
     if (unsubAuthChecked) unsubAuthChecked();
+    if (unsubSessionExpired) unsubSessionExpired();
     if (rendererPollInterval) clearInterval(rendererPollInterval);
   });
 

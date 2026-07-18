@@ -39,6 +39,11 @@ class JamarrClient:
         self._client_id = f"jamarr-tui-{uuid.uuid4().hex[:8]}"
         self._refresh_task: asyncio.Task[bool] | None = None
         self._refresh_loop_task: asyncio.Task[None] | None = None
+        # Latched when the server rejects our refresh cookie (401). Refresh
+        # tokens rotate on use, so replaying a dead one trips the server's
+        # reuse detection and revokes every session for the user; background
+        # pollers must not keep retrying. Cleared by a successful login.
+        self._session_dead = False
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=timeout,
@@ -98,6 +103,7 @@ class JamarrClient:
     async def _refresh_access_token(self) -> bool:
         resp = await self._http.post("/api/auth/refresh")
         if resp.status_code == 401:
+            self._session_dead = True
             self._clear_access_token()
             return False
         if resp.status_code >= 400:
@@ -112,6 +118,8 @@ class JamarrClient:
 
     async def refresh_access_token(self) -> bool:
         """Refresh the access token via the server-managed refresh cookie."""
+        if self._session_dead:
+            return False
         task = self._refresh_task
         if task is None or task.done():
             task = asyncio.create_task(self._refresh_access_token())
@@ -173,6 +181,7 @@ class JamarrClient:
             raise ApiError(resp.status_code, resp.text)
         data = resp.json()
         self._access_token = data["access_token"]
+        self._session_dead = False
         self._start_token_refresh()
         return data
 
