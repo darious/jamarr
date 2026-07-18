@@ -9,6 +9,10 @@ from app.services.player import monitor as monitor_module
 from app.services.player.globals import last_playing_seen, last_track_start_time
 from app.services.player.state import update_renderer_state_db
 
+# Captured before fast_sleep patches asyncio.sleep, so the harness can wait
+# real wall-clock time while monitor sleeps stay scaled down.
+_REAL_SLEEP = asyncio.sleep
+
 
 class ScriptedUpnp:
     """UPnP manager stub replaying a scripted (position, transport_state) sequence.
@@ -74,9 +78,11 @@ async def _run_monitor(monkeypatch, udn, upnp, timeout=5.0):
     task = asyncio.create_task(monitor_module.monitor_upnp_playback(udn))
     try:
         await asyncio.wait_for(upnp.drained.wait(), timeout=timeout)
-        # Let the loop process the tail of the script
-        for _ in range(50):
-            await asyncio.sleep(0)
+        # Let the loop process the tail of the script. The advance hook fires
+        # after a real DB await (connection release), so bare event-loop yields
+        # can elapse before it runs on a loaded runner — this flaked in CI.
+        # Give it wall-clock time instead.
+        await _REAL_SLEEP(0.3)
     finally:
         task.cancel()
         try:
