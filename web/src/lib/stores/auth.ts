@@ -7,11 +7,21 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null;
 // Writable store to track auth state
 export const isAuthenticated = writable(false);
 
+// Set once the server definitively rejects our refresh token (401/403).
+// Refresh tokens rotate on every use, so replaying a dead one is interpreted
+// server-side as theft and revokes every session for the user. Without this
+// latch, background pollers re-trigger that replay forever (each fetchWithAuth
+// call retries the refresh), logging the user out on all their devices.
+export const sessionExpired = writable(false);
+let sessionDead = false;
+
 /**
  * Set the access token in memory
  */
 export function setAccessToken(token: string) {
     accessToken = token;
+    sessionDead = false;
+    sessionExpired.set(false);
     isAuthenticated.set(true);
 }
 
@@ -43,6 +53,12 @@ let refreshPromise: Promise<boolean> | null = null;
  * Uses a lock to prevent multiple simultaneous refresh attempts
  */
 export async function refreshAccessToken(fetchImpl: typeof fetch = fetch): Promise<boolean> {
+    // The server has rejected our refresh token; retrying can never succeed
+    // and only re-triggers reuse detection. Only a fresh login resets this.
+    if (sessionDead) {
+        return false;
+    }
+
     // If a refresh is already in progress, wait for it
     if (refreshPromise) {
         return refreshPromise;
@@ -57,6 +73,10 @@ export async function refreshAccessToken(fetchImpl: typeof fetch = fetch): Promi
             });
 
             if (!res.ok) {
+                if (res.status === 401 || res.status === 403) {
+                    sessionDead = true;
+                    sessionExpired.set(true);
+                }
                 clearAccessToken();
                 return false;
             }

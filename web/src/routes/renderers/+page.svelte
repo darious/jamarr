@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount } from "svelte";
+    import { onDestroy, onMount } from "svelte";
     import { fetchWithAuth, triggerScan } from "$lib/api";
     import TabButton from "$lib/components/TabButton.svelte";
     import {
@@ -34,6 +34,10 @@
     onMount(() => {
         fetchRenderers(false);
         checkScanStatus();
+    });
+
+    onDestroy(() => {
+        if (pollInterval) clearInterval(pollInterval);
     });
 
     function rendererKindClass(renderer: any): string {

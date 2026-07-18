@@ -61,6 +61,40 @@ async def test_request_raises_auth_error_when_refresh_fails() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dead_session_stops_refresh_attempts() -> None:
+    refresh_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal refresh_count
+        if request.url.path == "/api/auth/refresh":
+            refresh_count += 1
+            return httpx.Response(401, json={"detail": "expired"})
+        if request.url.path == "/api/auth/login":
+            return httpx.Response(200, json={"access_token": "fresh-token"})
+        return httpx.Response(401, json={"detail": "expired"})
+
+    client = _client_with_transport(httpx.MockTransport(handler))
+    client._access_token = "old-token"  # noqa: SLF001
+
+    try:
+        # First 401 attempts one refresh; the server rejects it, latching the
+        # session as dead. Replaying a rotated refresh token trips server-side
+        # reuse detection, so later requests must not retry the refresh.
+        for _ in range(3):
+            with pytest.raises(AuthError):
+                await client._request("GET", "/api/example")  # noqa: SLF001
+        assert refresh_count == 1
+
+        # A successful login clears the latch.
+        await client.login("user", "pass")
+        with pytest.raises(AuthError):
+            await client._request("GET", "/api/example")  # noqa: SLF001
+        assert refresh_count == 2
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_concurrent_401s_share_one_refresh_call() -> None:
     refresh_count = 0
 
