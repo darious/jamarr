@@ -149,6 +149,42 @@ async def test_stopped_during_transition_does_not_advance(
     assert advances == []
 
 
+async def test_slow_start_stopped_does_not_advance(db, monkeypatch, fast_sleep, advances):
+    """A renderer buffering a new URI can report STOPPED well past the 5s
+    transition guard without ever having reached PLAYING for this track.
+
+    was_playing is already true (set optimistically at Play) and
+    last_playing_seen may be fresh from the previous track, so before the
+    played-since-start check this was misread as end-of-track ~5s in and the
+    track got skipped (Server room TV, 2026-07-18).
+    """
+    udn = "uuid:monitor-slow-start"
+    last_track_start_time[udn] = time.time() - 10  # past the transition guard
+    last_playing_seen[udn] = time.time() - 12  # previous track, before this start
+    await update_renderer_state_db(db, udn, _state())
+
+    upnp = ScriptedUpnp([(0, "STOPPED"), (0, "STOPPED"), (0, "STOPPED")])
+    await _run_monitor(monkeypatch, udn, upnp)
+
+    assert advances == []
+
+
+async def test_never_started_track_advances_after_timeout(
+    db, monkeypatch, fast_sleep, advances
+):
+    """If the renderer still hasn't reached PLAYING 30s after Play, the track
+    is presumed unplayable and the queue moves on instead of wedging."""
+    udn = "uuid:monitor-never-started"
+    last_track_start_time[udn] = time.time() - 45
+    last_playing_seen[udn] = time.time() - 50  # never played since this start
+    await update_renderer_state_db(db, udn, _state())
+
+    upnp = ScriptedUpnp([(0, "STOPPED"), (0, "STOPPED"), (0, "STOPPED")])
+    await _run_monitor(monkeypatch, udn, upnp)
+
+    assert advances == [udn]
+
+
 async def test_idle_stopped_does_not_advance(db, monkeypatch, fast_sleep, advances):
     udn = "uuid:monitor-idle"
     last_playing_seen.pop(udn, None)
