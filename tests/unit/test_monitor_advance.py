@@ -1,4 +1,5 @@
-"""Playback monitor auto-advance: PAUSED->STOPPED transitions, transition guard, watchdog."""
+"""Playback monitor auto-advance: position-based end/fail/stop classification,
+transition guard, start retries, watchdog, prewarm."""
 
 import asyncio
 import time
@@ -6,12 +7,24 @@ import time
 import pytest
 
 from app.services.player import monitor as monitor_module
-from app.services.player.globals import last_playing_seen, last_track_start_time
+from app.services.player.globals import (
+    last_playing_position,
+    last_playing_seen,
+    last_track_start_time,
+    start_retries,
+)
 from app.services.player.state import update_renderer_state_db
 
 # Captured before fast_sleep patches asyncio.sleep, so the harness can wait
 # real wall-clock time while monitor sleeps stay scaled down.
 _REAL_SLEEP = asyncio.sleep
+
+
+def _reset_globals(udn):
+    last_playing_seen.pop(udn, None)
+    last_playing_position.pop(udn, None)
+    start_retries.pop(udn, None)
+    monitor_module._prewarmed_index.pop(udn, None)
 
 
 class ScriptedUpnp:
@@ -25,6 +38,7 @@ class ScriptedUpnp:
         self.index = 0
         self.renderers = {}
         self.drained = asyncio.Event()
+        self.play_calls = []
 
     def _current(self):
         if self.index >= len(self.script):
@@ -42,6 +56,9 @@ class ScriptedUpnp:
         if self.index >= len(self.script):
             self.drained.set()
         return state
+
+    async def play_track(self, track_id, track_path, metadata):
+        self.play_calls.append(track_id)
 
 
 @pytest.fixture
@@ -112,13 +129,13 @@ def _state(queue_len=2, duration=180, is_playing=True):
     }
 
 
-async def test_clean_stop_advances(db, monkeypatch, fast_sleep, advances):
+async def test_stop_near_end_advances(db, monkeypatch, fast_sleep, advances):
     udn = "uuid:monitor-clean-stop"
-    last_playing_seen.pop(udn, None)
+    _reset_globals(udn)
     last_track_start_time[udn] = time.time() - 60
     await update_renderer_state_db(db, udn, _state())
 
-    upnp = ScriptedUpnp([(10, "PLAYING"), (11, "PLAYING"), (0, "STOPPED")])
+    upnp = ScriptedUpnp([(172, "PLAYING"), (174, "PLAYING"), (0, "STOPPED")])
     await _run_monitor(monkeypatch, udn, upnp)
 
     assert advances == [udn]
@@ -131,7 +148,7 @@ async def test_paused_then_stopped_advances(db, monkeypatch, fast_sleep, advance
     DB flag alone (this was the bug that stopped playback between tracks).
     """
     udn = "uuid:monitor-paused-stop"
-    last_playing_seen.pop(udn, None)
+    _reset_globals(udn)
     last_track_start_time[udn] = time.time() - 60
     await update_renderer_state_db(db, udn, _state())
 
@@ -145,7 +162,7 @@ async def test_stopped_during_transition_does_not_advance(
     db, monkeypatch, fast_sleep, advances
 ):
     udn = "uuid:monitor-transition"
-    last_playing_seen.pop(udn, None)
+    _reset_globals(udn)
     last_track_start_time[udn] = time.time()  # just started
     await update_renderer_state_db(db, udn, _state())
 
@@ -155,17 +172,28 @@ async def test_stopped_during_transition_does_not_advance(
     assert advances == []
 
 
-async def test_slow_start_stopped_does_not_advance(db, monkeypatch, fast_sleep, advances):
-    """A renderer buffering a new URI can report STOPPED well past the 5s
-    transition guard without ever having reached PLAYING for this track.
+async def test_stop_mid_track_halts_queue(db, monkeypatch, fast_sleep, advances):
+    """STOPPED at 90s of a 180s track is an external stop (TV remote, another
+    controller) — the queue must halt, not fight the user by advancing."""
+    udn = "uuid:monitor-mid-stop"
+    _reset_globals(udn)
+    last_track_start_time[udn] = time.time() - 60
+    await update_renderer_state_db(db, udn, _state())
 
-    was_playing is already true (set optimistically at Play) and
-    last_playing_seen may be fresh from the previous track, so before the
-    played-since-start check this was misread as end-of-track ~5s in and the
-    track got skipped (Server room TV, 2026-07-18).
-    """
-    udn = "uuid:monitor-slow-start"
-    last_track_start_time[udn] = time.time() - 10  # past the transition guard
+    upnp = ScriptedUpnp([(90, "PLAYING"), (91, "PLAYING"), (0, "STOPPED")])
+    await _run_monitor(monkeypatch, udn, upnp)
+
+    assert advances == []
+    assert upnp.play_calls == []
+
+
+async def test_never_started_track_gets_play_retry(db, monkeypatch, fast_sleep, advances):
+    """A renderer sitting in STOPPED without ever reaching PLAYING gets the
+    Play re-issued instead of the track being skipped (Server room TV
+    intermittently accepts the URI, fetches the stream, and never starts)."""
+    udn = "uuid:monitor-retry-never-started"
+    _reset_globals(udn)
+    last_track_start_time[udn] = time.time() - 10  # past START_RETRY_AFTER_S
     last_playing_seen[udn] = time.time() - 12  # previous track, before this start
     await update_renderer_state_db(db, udn, _state())
 
@@ -173,27 +201,46 @@ async def test_slow_start_stopped_does_not_advance(db, monkeypatch, fast_sleep, 
     await _run_monitor(monkeypatch, udn, upnp)
 
     assert advances == []
+    assert upnp.play_calls == [900]  # current track re-played, not skipped
 
 
-async def test_never_started_track_advances_after_timeout(
+async def test_early_death_gets_play_retry(db, monkeypatch, fast_sleep, advances):
+    """Playing a few seconds and then dropping to STOPPED is a failed start
+    too — the audible variant of the same renderer flakiness."""
+    udn = "uuid:monitor-retry-early-death"
+    _reset_globals(udn)
+    last_track_start_time[udn] = time.time() - 6  # past the transition guard
+    await update_renderer_state_db(db, udn, _state())
+
+    upnp = ScriptedUpnp([(3, "PLAYING"), (0, "STOPPED"), (0, "STOPPED")])
+    await _run_monitor(monkeypatch, udn, upnp)
+
+    assert advances == []
+    assert upnp.play_calls == [900]
+
+
+async def test_failed_start_skips_after_retry_budget(
     db, monkeypatch, fast_sleep, advances
 ):
-    """If the renderer still hasn't reached PLAYING 30s after Play, the track
-    is presumed unplayable and the queue moves on instead of wedging."""
-    udn = "uuid:monitor-never-started"
-    last_track_start_time[udn] = time.time() - 45
-    last_playing_seen[udn] = time.time() - 50  # never played since this start
+    """Once the Play retries are exhausted the track is presumed unplayable
+    and the queue moves on instead of wedging."""
+    udn = "uuid:monitor-retries-exhausted"
+    _reset_globals(udn)
+    start_retries[udn] = monitor_module.MAX_START_RETRIES
+    last_track_start_time[udn] = time.time() - 10
+    last_playing_seen[udn] = time.time() - 12
     await update_renderer_state_db(db, udn, _state())
 
     upnp = ScriptedUpnp([(0, "STOPPED"), (0, "STOPPED"), (0, "STOPPED")])
     await _run_monitor(monkeypatch, udn, upnp)
 
     assert advances == [udn]
+    assert upnp.play_calls == []
 
 
 async def test_idle_stopped_does_not_advance(db, monkeypatch, fast_sleep, advances):
     udn = "uuid:monitor-idle"
-    last_playing_seen.pop(udn, None)
+    _reset_globals(udn)
     last_track_start_time[udn] = time.time() - 600
     await update_renderer_state_db(db, udn, _state(is_playing=False))
 
@@ -209,7 +256,7 @@ async def test_watchdog_advances_when_stuck_playing_at_zero(
     """Renderers that never report position and never emit STOPPED get unstuck
     once wall-clock time exceeds the track duration plus margin."""
     udn = "uuid:monitor-watchdog"
-    last_playing_seen.pop(udn, None)
+    _reset_globals(udn)
     last_track_start_time[udn] = time.time() - 300  # 300s > 180s track + 60s margin
     await update_renderer_state_db(db, udn, _state(duration=180))
 
@@ -223,11 +270,34 @@ async def test_watchdog_ignores_renderers_reporting_position(
     db, monkeypatch, fast_sleep, advances
 ):
     udn = "uuid:monitor-watchdog-pos"
-    last_playing_seen.pop(udn, None)
+    _reset_globals(udn)
     last_track_start_time[udn] = time.time() - 300
     await update_renderer_state_db(db, udn, _state(duration=180))
 
     upnp = ScriptedUpnp([(90, "PLAYING"), (91, "PLAYING"), (92, "PLAYING")])
     await _run_monitor(monkeypatch, udn, upnp)
 
+    assert advances == []
+
+
+async def test_prewarm_triggers_near_track_end(db, monkeypatch, fast_sleep, advances):
+    """Approaching the end of the current track warms the next track's file,
+    once, so the renderer's first fetch is served from the page cache."""
+    udn = "uuid:monitor-prewarm"
+    _reset_globals(udn)
+    last_track_start_time[udn] = time.time() - 60
+    await update_renderer_state_db(db, udn, _state())
+
+    warmed = []
+
+    async def fake_prewarm(path):
+        warmed.append(path)
+
+    monkeypatch.setattr(monitor_module, "_prewarm_next_track", fake_prewarm)
+
+    # 160s of 180s is inside the 30s prewarm lead.
+    upnp = ScriptedUpnp([(159, "PLAYING"), (160, "PLAYING"), (161, "PLAYING")])
+    await _run_monitor(monkeypatch, udn, upnp)
+
+    assert warmed == ["/music/1.flac"]  # next track, warmed exactly once
     assert advances == []

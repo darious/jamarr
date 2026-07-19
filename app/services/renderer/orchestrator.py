@@ -10,7 +10,13 @@ import asyncpg
 from fastapi import HTTPException, Request
 
 from app.db import get_pool
-from app.services.player.globals import last_track_start_time, monitor_start_times, playback_monitors
+from app.services.player.globals import (
+    last_playing_position,
+    last_track_start_time,
+    monitor_start_times,
+    playback_monitors,
+    start_retries,
+)
 from app.services.player.history import (
     log_history,
     reset_history_tracker,
@@ -281,6 +287,9 @@ class RendererOrchestrator:
             else:
                 start_monitor_task(state_key)
                 last_track_start_time[state_key] = time.time()
+                # Position/retry bookkeeping is per-track; reset for the new one.
+                last_playing_position.pop(state_key, None)
+                start_retries.pop(state_key, None)
         finally:
             _clear_monitor_starting(state_key)
 

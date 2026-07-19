@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 import logging
 import json
@@ -10,6 +11,8 @@ from app.services.player.globals import (
     monitor_starting,
     last_track_start_time,
     last_playing_seen,
+    last_playing_position,
+    start_retries,
 )
 from app.services.player.state import (
     get_renderer_state_db,
@@ -19,6 +22,52 @@ from app.services.player.queue import play_next_track_internal
 from app.services.player.history import log_history
 
 logger = logging.getLogger(__name__)
+
+# Ignore STOPPED churn this soon after issuing Play (renderers flap during URI load).
+TRANSITION_GRACE_S = 5.0
+# STOPPED with the last seen position within this of the duration = track finished.
+FINISH_MARGIN_S = 10.0
+# STOPPED with the last seen position at or below this = the track never really
+# got going (failed start), as opposed to an external stop mid-track.
+FAILED_START_MAX_POS_S = 10.0
+# How long to keep treating STOPPED as "still buffering" for a track that has
+# not been seen PLAYING at all, before re-issuing Play.
+START_RETRY_AFTER_S = 8.0
+# Play re-issues per track before giving up and skipping.
+MAX_START_RETRIES = 2
+# Warm the next track's file this close to the end of the current one.
+PREWARM_LEAD_S = 30.0
+PREWARM_BYTES = 8 * 1024 * 1024
+
+# Queue index already prewarmed per renderer, and the task doing it.
+_prewarmed_index: dict[str, int] = {}
+_prewarm_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _prewarm_next_track(path: str) -> None:
+    """Read the head of the file to pull it into the OS page cache.
+
+    Cold NFS reads are slow enough that some renderers (Server room TV) give
+    up starting a track; serving the first fetch from RAM removes that stall.
+    """
+    try:
+        import aiofiles
+
+        from app.config import get_music_path
+
+        if not os.path.isabs(path):
+            path = os.path.join(get_music_path(), path)
+        async with aiofiles.open(path, "rb") as fh:
+            remaining = PREWARM_BYTES
+            while remaining > 0:
+                chunk = await fh.read(min(512 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        logger.info(f"[Player] Prewarmed next track: {os.path.basename(path)}")
+    except Exception:
+        logger.debug("Prewarm failed for %s", path, exc_info=True)
+
 
 def _mark_monitor_starting(udn: str):
     monitor_starting[udn] = time.time()
@@ -87,6 +136,7 @@ async def monitor_upnp_playback(udn: str):
 
             # 2. Update DB
             finished_reason = None
+            replay_track = None
             async for db in get_db():
                 # What the DB currently thinks (may differ from the device)
                 state = await get_renderer_state_db(db, udn)
@@ -97,6 +147,12 @@ async def monitor_upnp_playback(udn: str):
 
                 if transport_state == "PLAYING":
                     last_playing_seen[udn] = time.time()
+                    if device_position:
+                        last_playing_position[udn] = float(device_position)
+                        if device_position > FAILED_START_MAX_POS_S:
+                            # The track is definitely going; the start-retry
+                            # budget belongs to the next troubled start.
+                            start_retries.pop(udn, None)
 
                 # Update live stats from the device
                 if transport_state == "PLAYING" and (rel_time is None or rel_time == 0):
@@ -111,48 +167,103 @@ async def monitor_upnp_playback(udn: str):
                 ]
 
                 # Auto-advance logic:
-                # Treat STOPPED as track-finished if the DB thought we were playing OR the
-                # device reported PLAYING within the last few seconds. The latter covers
-                # renderers that signal end-of-track as PLAYING -> PAUSED_PLAYBACK -> STOPPED:
-                # the PAUSED poll clears is_playing in the DB, so was_playing alone misses it.
-                # Keep this separate from the normal play/pause flow so we do not overwrite
-                # queue/volume fields while a user action is in flight.
+                # Treat STOPPED as end-of-track only when the evidence says so.
+                # The device's last seen position vs the track duration tells us
+                # *where* playback stopped, which distinguishes "finished" from
+                # "failed to start" (retry) from "externally stopped" (halt).
+                # recently_playing covers renderers that signal end-of-track as
+                # PLAYING -> PAUSED_PLAYBACK -> STOPPED: the PAUSED poll clears
+                # is_playing in the DB, so was_playing alone would miss it.
                 if transport_state in ["STOPPED", "NO_MEDIA_PRESENT"]:
                     recently_playing = was_playing or (
                         time.time() - last_playing_seen.get(udn, 0) <= 5.0
                     )
                     if recently_playing:
-                        # Ignore STOPPED if it arrives immediately after a Play/Skip (renderer churn).
                         started_at = last_track_start_time.get(udn, 0)
                         time_since_start = time.time() - started_at
-                        # Whether the device has reached PLAYING for *this* track.
-                        # Slow renderers can sit in STOPPED for many seconds while
-                        # buffering a new URI; until they have actually played,
-                        # STOPPED means "still starting", not "finished" — but
-                        # was_playing is already true (set optimistically at Play)
-                        # and last_playing_seen may be fresh from the previous
-                        # track, so both would pass the checks below.
+                        # Whether the device has reached PLAYING for *this* track;
+                        # was_playing is set optimistically at Play time and
+                        # last_playing_seen/-position may be from the previous
+                        # track, so everything is gated on started_at.
                         played_since_start = last_playing_seen.get(udn, 0) >= started_at
-                        if time_since_start < 5.0:
+                        last_pos = (
+                            last_playing_position.get(udn, 0.0) if played_since_start else 0.0
+                        )
+                        duration = 0
+                        queue = state.get("queue") or []
+                        idx = state.get("current_index")
+                        if idx is not None and 0 <= idx < len(queue):
+                            duration = queue[idx].get("duration_seconds") or 0
+                        retries = start_retries.get(udn, 0)
+                        # min-clamp so very short tracks aren't "finished" at 0s
+                        finish_threshold = max(duration - FINISH_MARGIN_S, duration * 0.5)
+
+                        if time_since_start < TRANSITION_GRACE_S:
                             logger.info(
                                 f"[Player] Ignoring STOPPED state during transition (started {time_since_start:.1f}s ago)"
                             )
-                        elif not played_since_start and time_since_start < 30.0:
+                        elif duration > 0 and played_since_start and last_pos >= finish_threshold:
                             logger.info(
-                                f"[Player] Ignoring STOPPED: renderer has not started the track yet "
-                                f"({time_since_start:.1f}s since Play)"
-                            )
-                        else:
-                            if not played_since_start:
-                                logger.warning(
-                                    f"[Player] Renderer never started the track after "
-                                    f"{time_since_start:.0f}s; skipping to next"
-                                )
-                            logger.info(
-                                f"[Player] Track finished detection: State={transport_state}, Expected=Playing"
+                                f"[Player] Track finished detection: stopped at "
+                                f"{last_pos:.0f}s of {duration:.0f}s"
                             )
                             # Trigger next track outside DB loop; helper opens its own connection.
                             finished_reason = "stopped"
+                        elif duration > 0 and (
+                            not played_since_start or last_pos <= FAILED_START_MAX_POS_S
+                        ):
+                            # Failed start: never reached PLAYING, or died within
+                            # the first seconds (Server room TV does both).
+                            if not played_since_start and time_since_start < START_RETRY_AFTER_S:
+                                logger.info(
+                                    f"[Player] Ignoring STOPPED: renderer has not started the track "
+                                    f"yet ({time_since_start:.1f}s since Play)"
+                                )
+                            elif retries < MAX_START_RETRIES:
+                                start_retries[udn] = retries + 1
+                                # Re-issue Play outside the DB loop.
+                                replay_track = queue[idx]
+                            else:
+                                logger.warning(
+                                    f"[Player] Track failed to start after {MAX_START_RETRIES} "
+                                    f"Play retries; skipping to next"
+                                )
+                                finished_reason = "stopped"
+                        elif duration > 0:
+                            # Stopped mid-track: an external stop (TV remote,
+                            # another controller). Halt instead of fighting it.
+                            logger.info(
+                                f"[Player] Playback stopped mid-track at {last_pos:.0f}s of "
+                                f"{duration:.0f}s; stopping queue"
+                            )
+                            await db.execute(
+                                """
+                                UPDATE renderer_state
+                                SET position_seconds = $1, transport_state = $2, is_playing = $3, updated_at = NOW()
+                                WHERE renderer_udn = $4
+                                """,
+                                state["position_seconds"],
+                                state["transport_state"],
+                                bool(state["is_playing"]),
+                                udn,
+                            )
+                        else:
+                            # No duration metadata; fall back to time-based logic.
+                            if not played_since_start and time_since_start < 30.0:
+                                logger.info(
+                                    f"[Player] Ignoring STOPPED: renderer has not started the track "
+                                    f"yet ({time_since_start:.1f}s since Play)"
+                                )
+                            else:
+                                if not played_since_start:
+                                    logger.warning(
+                                        f"[Player] Renderer never started the track after "
+                                        f"{time_since_start:.0f}s; skipping to next"
+                                    )
+                                logger.info(
+                                    f"[Player] Track finished detection: State={transport_state}, Expected=Playing"
+                                )
+                                finished_reason = "stopped"
                     else:
                         # Genuinely idle; just persist snapshot of state.
                         await db.execute(
@@ -208,6 +319,24 @@ async def monitor_upnp_playback(udn: str):
                             )
                             finished_reason = "watchdog"
 
+                        # Prewarm: pull the next track's file head into the page
+                        # cache shortly before the transition, so the renderer's
+                        # first fetch is served from RAM instead of cold NFS.
+                        next_idx = (idx if idx is not None else -1) + 1
+                        if (
+                            duration > 0
+                            and device_position
+                            and device_position >= duration - PREWARM_LEAD_S
+                            and 0 <= next_idx < len(queue)
+                            and _prewarmed_index.get(udn) != next_idx
+                        ):
+                            next_path = queue[next_idx].get("path")
+                            if next_path:
+                                _prewarmed_index[udn] = next_idx
+                                _prewarm_tasks[udn] = asyncio.create_task(
+                                    _prewarm_next_track(next_path)
+                                )
+
                 # History logging for remote playback (based on renderer state queue)
                 if (
                     state["is_playing"]
@@ -249,7 +378,19 @@ async def monitor_upnp_playback(udn: str):
                                 )
 
             # Execute side effects outside DB context (avoids holding a transaction open)
-            if finished_reason:
+            if replay_track is not None:
+                logger.warning(
+                    f"[Player] Track failed to start ('{replay_track.get('title')}'); "
+                    f"re-issuing Play (attempt {start_retries.get(udn, 0)}/{MAX_START_RETRIES})"
+                )
+                try:
+                    await upnp.play_track(replay_track["id"], replay_track["path"], replay_track)
+                    last_track_start_time[udn] = time.time()
+                    last_playing_position.pop(udn, None)
+                except Exception:
+                    logger.exception(f"[Player] Play retry failed for {udn}")
+                await asyncio.sleep(4)  # Give the retried track a moment to start
+            elif finished_reason:
                 await play_next_track_internal(udn)
                 await asyncio.sleep(4)  # Give the new track a moment to start
 

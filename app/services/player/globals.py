@@ -10,6 +10,12 @@ last_track_start_time: Dict[str, float] = {}
 # treat a quick PLAYING -> PAUSED_PLAYBACK -> STOPPED sequence (how some renderers
 # signal end-of-track) as track-finished even after the PAUSED poll cleared is_playing.
 last_playing_seen: Dict[str, float] = {}
+# Last real position (seconds) reported while PLAYING. Together with the track
+# duration this tells the monitor *where* playback stopped, which distinguishes
+# "finished" from "failed to start" from "externally stopped".
+last_playing_position: Dict[str, float] = {}
+# Play re-issues attempted for the current track after a failed start.
+start_retries: Dict[str, int] = {}
 monitor_starting: Dict[str, float] = {}
 # Track rapid restart attempts: udn -> [(start_time, count_window_start)]
 _monitor_restart_history: Dict[str, list] = {}
