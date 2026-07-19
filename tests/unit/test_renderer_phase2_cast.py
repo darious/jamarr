@@ -9,12 +9,39 @@ from app.services.renderer.cast_backend import CastRendererBackend
 from app.services.renderer.contracts import PlaybackContext
 
 
-class FakeBrowser:
+class FakeHostBrowser:
     def __init__(self) -> None:
+        self.added: list[str] = []
+
+    def add_hosts(self, hosts) -> None:
+        self.added.extend(hosts)
+
+
+class FakeBrowser:
+    """Stands in for pychromecast's CastBrowser: exposes a devices dict of
+    CastInfo-shaped entries and start/stop hooks."""
+
+    def __init__(self, devices=None) -> None:
+        self.devices = dict(devices or {})
+        self.started = False
         self.stopped = False
+        self.host_browser = FakeHostBrowser()
+
+    def start_discovery(self) -> None:
+        self.started = True
 
     def stop_discovery(self) -> None:
         self.stopped = True
+
+
+def make_backend(cast: "FakeCast") -> tuple[CastRendererBackend, FakeBrowser]:
+    browser = FakeBrowser({cast.cast_info.uuid: cast.cast_info})
+    backend = CastRendererBackend(
+        browser_factory=lambda _backend: browser,
+        cast_factory=lambda _cast_info: cast,
+        discovery_timeout=0,
+    )
+    return backend, browser
 
 
 class FakeMediaController:
@@ -97,14 +124,11 @@ class FakeCast:
 @pytest.mark.asyncio
 async def test_phase2_cast_discovery_creates_normalized_devices():
     cast = FakeCast()
-
-    def getter(**kwargs):
-        return [cast], FakeBrowser()
-
-    backend = CastRendererBackend(chromecast_getter=getter)
+    backend, browser = make_backend(cast)
 
     devices = await backend.discover(refresh=True)
 
+    assert browser.started is True
     assert len(devices) == 1
     device = devices[0]
     assert device.renderer_id == "cast:11111111-1111-1111-1111-111111111111"
@@ -117,26 +141,44 @@ async def test_phase2_cast_discovery_creates_normalized_devices():
 
 
 @pytest.mark.asyncio
-async def test_phase2_cast_manual_known_host_passed_to_discovery():
+async def test_phase2_cast_manual_add_registers_known_host():
     cast = FakeCast()
-    calls = []
-
-    def getter(**kwargs):
-        calls.append(kwargs)
-        return [cast], FakeBrowser()
-
-    backend = CastRendererBackend(chromecast_getter=getter)
+    backend, browser = make_backend(cast)
 
     device = await backend.add_manual("192.0.2.55")
 
     assert device is not None
-    assert calls[0]["known_hosts"] == ["192.0.2.55"]
+    assert device.ip == "192.0.2.55"
+    assert "192.0.2.55" in backend.known_hosts
+    assert browser.host_browser.added == ["192.0.2.55"]
+
+
+@pytest.mark.asyncio
+async def test_phase2_cast_browser_callbacks_maintain_registry():
+    """Devices appear and disappear via CastBrowser callbacks, without any
+    explicit rescans — the whole point of persistent discovery."""
+    cast = FakeCast()
+    backend, browser = make_backend(cast)
+    browser.devices.clear()  # nothing known at startup
+    await backend.start()
+    assert await backend.list_devices() == []
+
+    # TV announces itself later; the add callback registers it.
+    browser.devices[cast.cast_info.uuid] = cast.cast_info
+    backend._on_cast_added(cast.cast_info.uuid, "svc")
+    devices = await backend.list_devices()
+    assert len(devices) == 1
+    assert devices[0].name == "Kitchen Cast"
+
+    # mDNS removal drops it from the registry.
+    backend._on_cast_removed(cast.cast_info.uuid, "svc", cast.cast_info)
+    assert await backend.list_devices() == []
 
 
 @pytest.mark.asyncio
 async def test_phase2_cast_play_and_controls_call_pychromecast_shape():
     cast = FakeCast()
-    backend = CastRendererBackend(chromecast_getter=lambda **_: ([cast], FakeBrowser()))
+    backend, _browser = make_backend(cast)
     await backend.discover(refresh=True)
     renderer_id = "cast:11111111-1111-1111-1111-111111111111"
 
@@ -251,7 +293,7 @@ def test_phase2_cast_early_idle_does_not_stop_playback():
 @pytest.mark.asyncio
 async def test_phase2_cast_status_listener_dispatches_to_async_callback():
     cast = FakeCast()
-    backend = CastRendererBackend(chromecast_getter=lambda **_: ([cast], FakeBrowser()))
+    backend, _browser = make_backend(cast)
     await backend.start()
     renderer_id = "cast:11111111-1111-1111-1111-111111111111"
     received = []

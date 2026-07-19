@@ -56,13 +56,16 @@ class CastRendererBackend(RendererBackend):
         known_hosts: list[str] | None = None,
         discovery_timeout: float = 5,
         launch_timeout: float = 10,
-        chromecast_getter: Callable[..., Any] | None = None,
+        browser_factory: Callable[["CastRendererBackend"], Any] | None = None,
+        cast_factory: Callable[[Any], Any] | None = None,
     ) -> None:
         self.known_hosts = known_hosts if known_hosts is not None else self._known_hosts_from_env()
         self.discovery_timeout = discovery_timeout
         self.launch_timeout = launch_timeout
-        self.chromecast_getter = chromecast_getter
+        self.browser_factory = browser_factory
+        self.cast_factory = cast_factory
         self.browser: Any | None = None
+        self._zconf: Any | None = None
         self.casts: dict[str, Any] = {}
         self.devices: dict[str, RendererDevice] = {}
         self._listeners: dict[str, list[_CastStatusListener]] = {}
@@ -72,15 +75,29 @@ class CastRendererBackend(RendererBackend):
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
         try:
-            await self.discover(refresh=True)
+            async with self._discovery_lock:
+                await self._ensure_browser()
+                self._sweep_browser_devices()
         except Exception as exc:
             logger.warning("Cast startup discovery failed: %s", exc)
 
     async def stop(self) -> None:
         browser = self.browser
         self.browser = None
+        zconf = self._zconf
+        self._zconf = None
         if browser and hasattr(browser, "stop_discovery"):
-            await asyncio.to_thread(browser.stop_discovery)
+            try:
+                # Also closes the zeroconf instance when the mDNS browser ran.
+                await asyncio.to_thread(browser.stop_discovery)
+            except Exception:
+                logger.debug("Cast browser stop failed", exc_info=True)
+        if zconf is not None and hasattr(zconf, "close"):
+            try:
+                # Idempotent; covers the case where mDNS never started.
+                await asyncio.to_thread(zconf.close)
+            except Exception:
+                logger.debug("Zeroconf close failed", exc_info=True)
         for cast in list(self.casts.values()):
             if hasattr(cast, "disconnect"):
                 try:
@@ -89,30 +106,33 @@ class CastRendererBackend(RendererBackend):
                     logger.debug("Error disconnecting Cast device", exc_info=True)
 
     async def discover(self, refresh: bool = False) -> list[RendererDevice]:
-        if refresh or not self.devices:
-            async with self._discovery_lock:
-                casts, browser = await asyncio.to_thread(self._get_chromecasts_blocking)
-                if browser:
-                    old_browser = self.browser
-                    self.browser = browser
-                    if old_browser and old_browser is not browser and hasattr(old_browser, "stop_discovery"):
-                        await asyncio.to_thread(old_browser.stop_discovery)
-                for cast in casts:
-                    self._register_cast(cast)
+        async with self._discovery_lock:
+            started = await self._ensure_browser()
+            if started and not self.devices and self.discovery_timeout > 0:
+                # The browser has only just begun listening; give the initial
+                # mDNS burst a moment so the first listing isn't empty.
+                await asyncio.sleep(min(self.discovery_timeout, 5))
+            self._sweep_browser_devices()
         return await self.list_devices()
 
     async def add_manual(self, address: str) -> RendererDevice | None:
-        casts, browser = await asyncio.to_thread(
-            self._get_chromecasts_blocking,
-            [address],
-            self.discovery_timeout,
-        )
-        if browser and hasattr(browser, "stop_discovery"):
-            await asyncio.to_thread(browser.stop_discovery)
-        for cast in casts:
-            device = self._register_cast(cast)
-            if device.ip == address:
-                return device
+        if address not in self.known_hosts:
+            self.known_hosts.append(address)
+        async with self._discovery_lock:
+            await self._ensure_browser()
+            host_browser = getattr(self.browser, "host_browser", None)
+            if host_browser is not None and hasattr(host_browser, "add_hosts"):
+                # Persist the host in the running browser (polled every cycle).
+                host_browser.add_hosts([address])
+            self._sweep_browser_devices()
+        device = self._device_matching_address(address)
+        if device:
+            return device
+        # The host browser only polls every ~30s; probe directly so the manual
+        # add gives immediate feedback.
+        cast_info = await asyncio.to_thread(self._probe_host, address)
+        if cast_info is not None:
+            self._register_cast_info(cast_info.uuid, cast_info)
         return self._device_matching_address(address)
 
     async def list_devices(self) -> list[RendererDevice]:
@@ -304,54 +324,161 @@ class CastRendererBackend(RendererBackend):
             return "IDLE"
         return "UNKNOWN"
 
-    def _get_chromecasts_blocking(
-        self,
-        known_hosts: list[str] | None = None,
-        discovery_timeout: float | None = None,
-    ) -> tuple[list[Any], Any | None]:
-        getter = self.chromecast_getter
-        if getter is None:
+    async def _ensure_browser(self) -> bool:
+        """Start the persistent CastBrowser once; returns True if started now.
+
+        The browser listens for mDNS announcements continuously, so devices
+        register themselves whenever they come online — unlike the previous
+        one-shot get_chromecasts() scan, which missed devices (Google TVs in
+        standby) that take longer than the scan window to answer.
+        """
+        if self.browser is not None:
+            return False
+        if self.browser_factory is not None:
+            browser = self.browser_factory(self)
+        else:
             import pychromecast
+            import zeroconf
 
-            getter = pychromecast.get_chromecasts
-        result = getter(
-            tries=1,
-            timeout=5,
-            retry_wait=1,
-            blocking=True,
-            known_hosts=known_hosts if known_hosts is not None else self.known_hosts,
-        )
-        if isinstance(result, tuple):
-            return result
-        return [], result
+            self._zconf = zeroconf.Zeroconf()
+            listener = pychromecast.discovery.SimpleCastListener(
+                add_callback=self._on_cast_added,
+                remove_callback=self._on_cast_removed,
+                update_callback=self._on_cast_updated,
+            )
+            browser = pychromecast.discovery.CastBrowser(
+                listener, self._zconf, self.known_hosts or None
+            )
+        await asyncio.to_thread(browser.start_discovery)
+        self.browser = browser
+        return True
 
-    def _register_cast(self, cast: Any) -> RendererDevice:
-        uuid = str(getattr(cast, "uuid", None) or getattr(getattr(cast, "cast_info", None), "uuid"))
-        device = RendererDevice(
-            renderer_id=make_renderer_id(self.kind, uuid),
+    # Listener callbacks run on zeroconf worker threads.
+    def _on_cast_added(self, uuid: Any, _service: str | None = None) -> None:
+        self._register_from_browser(uuid)
+
+    def _on_cast_updated(self, uuid: Any, _service: str | None = None) -> None:
+        self._register_from_browser(uuid)
+
+    def _on_cast_removed(self, uuid: Any, _service: str | None = None, _cast_info: Any = None) -> None:
+        key = str(uuid)
+        device = self.devices.pop(key, None)
+        cast = self.casts.pop(key, None)
+        if device:
+            logger.info("Cast device removed: %s", device.name)
+        if cast and hasattr(cast, "disconnect"):
+            loop = self._loop
+            if loop and loop.is_running():
+                loop.call_soon_threadsafe(
+                    lambda: loop.run_in_executor(None, self._safe_disconnect, cast)
+                )
+            else:
+                self._safe_disconnect(cast)
+
+    @staticmethod
+    def _safe_disconnect(cast: Any) -> None:
+        try:
+            cast.disconnect(1)
+        except Exception:
+            logger.debug("Error disconnecting Cast device", exc_info=True)
+
+    def _register_from_browser(self, uuid: Any) -> None:
+        browser = self.browser
+        if browser is None:
+            return
+        cast_info = (getattr(browser, "devices", None) or {}).get(uuid)
+        if cast_info is None:
+            return
+        self._register_cast_info(uuid, cast_info)
+
+    def _sweep_browser_devices(self) -> None:
+        """Register anything the browser knows that we have not seen yet."""
+        browser = self.browser
+        if browser is None:
+            return
+        for uuid, cast_info in dict(getattr(browser, "devices", None) or {}).items():
+            if str(uuid) not in self.devices:
+                self._register_cast_info(uuid, cast_info)
+
+    def _register_cast_info(self, uuid: Any, cast_info: Any) -> RendererDevice | None:
+        key = str(uuid)
+        if key not in self.casts:
+            try:
+                self.casts[key] = self._create_cast(cast_info)
+            except Exception:
+                logger.warning(
+                    "Failed to create Cast client for %s",
+                    getattr(cast_info, "friendly_name", key),
+                    exc_info=True,
+                )
+                return None
+            logger.info(
+                "Cast device discovered: %s (%s)",
+                getattr(cast_info, "friendly_name", key),
+                getattr(cast_info, "host", "?"),
+            )
+        device = self._device_from_info(key, cast_info, self.casts.get(key))
+        self.devices[key] = device
+        return device
+
+    def _create_cast(self, cast_info: Any) -> Any:
+        if self.cast_factory is not None:
+            return self.cast_factory(cast_info)
+        import pychromecast
+
+        # Cheap until .wait() connects it (done lazily in _get_ready_cast).
+        return pychromecast.get_chromecast_from_cast_info(cast_info, self._zconf)
+
+    def _probe_host(self, address: str) -> Any | None:
+        if self.browser_factory is not None:
+            # Injected browsers (tests) surface everything via .devices.
+            return None
+        try:
+            from pychromecast import dial
+            from pychromecast.models import CastInfo, HostServiceInfo
+
+            status = dial.get_device_info(address, timeout=self.discovery_timeout or 5)
+            if status is None or status.uuid is None:
+                return None
+            return CastInfo(
+                services={HostServiceInfo(address, 8009)},
+                uuid=status.uuid,
+                model_name=status.model_name,
+                friendly_name=status.friendly_name,
+                host=address,
+                port=8009,
+                cast_type=status.cast_type,
+                manufacturer=status.manufacturer,
+            )
+        except Exception:
+            logger.warning("Cast manual probe failed for %s", address, exc_info=True)
+            return None
+
+    def _device_from_info(
+        self, uuid_str: str, cast_info: Any, cast: Any | None = None
+    ) -> RendererDevice:
+        def info_attr(name: str) -> Any | None:
+            return getattr(cast_info, name, None) if cast_info is not None else None
+
+        cast_type = info_attr("cast_type") or getattr(cast, "cast_type", None)
+        return RendererDevice(
+            renderer_id=make_renderer_id(self.kind, uuid_str),
             kind=self.kind,
-            native_id=uuid,
-            udn=make_renderer_id(self.kind, uuid),
-            name=getattr(cast, "name", None)
-            or getattr(getattr(cast, "cast_info", None), "friendly_name", None)
-            or "Cast Renderer",
-            ip=self._cast_ip(cast),
-            manufacturer=getattr(getattr(cast, "cast_info", None), "manufacturer", None),
-            model_name=getattr(cast, "model_name", None)
-            or getattr(getattr(cast, "cast_info", None), "model_name", None),
-            cast_type=getattr(cast, "cast_type", None)
-            or getattr(getattr(cast, "cast_info", None), "cast_type", None),
+            native_id=uuid_str,
+            udn=make_renderer_id(self.kind, uuid_str),
+            name=info_attr("friendly_name") or getattr(cast, "name", None) or "Cast Renderer",
+            ip=info_attr("host") or (self._cast_ip(cast) if cast is not None else None),
+            manufacturer=info_attr("manufacturer"),
+            model_name=info_attr("model_name") or getattr(cast, "model_name", None),
+            cast_type=cast_type,
             discovered_by="server",
             capabilities=RendererCapabilities(
                 can_mute=True,
                 supports_events=True,
                 supported_mime_types={"audio/flac", "audio/mpeg", "audio/mp4", "audio/wav", "audio/ogg"},
             ),
-            is_group=(getattr(cast, "cast_type", None) == "group"),
+            is_group=(cast_type == "group"),
         )
-        self.casts[uuid] = cast
-        self.devices[uuid] = device
-        return device
 
     async def _get_ready_cast(self, renderer_id: str) -> Any:
         _, uuid = split_renderer_id(renderer_id)

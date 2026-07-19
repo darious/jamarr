@@ -4,8 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from httpx import AsyncClient
 
-from app.services.renderer.cast_backend import CastRendererBackend
-from tests.unit.test_renderer_phase2_cast import FakeBrowser, FakeCast
+from tests.unit.test_renderer_phase2_cast import FakeCast, make_backend
 
 
 @pytest.fixture
@@ -36,7 +35,7 @@ async def selected_cast_renderer(db):
 @pytest.fixture
 async def fake_cast_backend(monkeypatch):
     cast = FakeCast()
-    backend = CastRendererBackend(chromecast_getter=lambda **_: ([cast], FakeBrowser()))
+    backend, _browser = make_backend(cast)
     await backend.discover(refresh=True)
     monitor_starts = []
 
