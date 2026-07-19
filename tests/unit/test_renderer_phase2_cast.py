@@ -176,6 +176,57 @@ async def test_phase2_cast_browser_callbacks_maintain_registry():
 
 
 @pytest.mark.asyncio
+async def test_phase2_cast_client_creation_deferred_off_callback_thread(monkeypatch):
+    """Without an injected cast factory, the browser callback must register the
+    device immediately (pure data) but defer Chromecast client creation to the
+    event loop's worker threads — pychromecast's constructor can do a blocking
+    zeroconf lookup, which raises if run inside zeroconf's own callback loop."""
+    cast = FakeCast()
+    browser = FakeBrowser()
+    backend = CastRendererBackend(
+        browser_factory=lambda _backend: browser,
+        discovery_timeout=0,
+    )
+    monkeypatch.setattr(backend, "_create_cast", lambda _info: cast)
+    await backend.start()
+
+    browser.devices[cast.cast_info.uuid] = cast.cast_info
+    backend._on_cast_added(cast.cast_info.uuid, "svc")
+
+    # Device is listed synchronously; the client does not exist yet.
+    devices = await backend.list_devices()
+    assert len(devices) == 1
+    assert backend.casts == {}
+
+    # The scheduled task creates the client shortly after (via a worker
+    # thread, so give it real time rather than bare loop yields).
+    for _ in range(200):
+        if backend.casts:
+            break
+        await asyncio.sleep(0.01)
+    assert "11111111-1111-1111-1111-111111111111" in backend.casts
+
+
+@pytest.mark.asyncio
+async def test_phase2_cast_client_created_lazily_at_play(monkeypatch):
+    """If the deferred creation never ran (no loop at callback time), playback
+    still works: _get_ready_cast creates the client on demand."""
+    cast = FakeCast()
+    browser = FakeBrowser({cast.cast_info.uuid: cast.cast_info})
+    backend = CastRendererBackend(
+        browser_factory=lambda _backend: browser,
+        discovery_timeout=0,
+    )
+    monkeypatch.setattr(backend, "_create_cast", lambda _info: cast)
+    backend.browser = browser  # browser known, but no clients created
+
+    ready = await backend._get_ready_cast("cast:11111111-1111-1111-1111-111111111111")
+
+    assert ready is cast
+    assert ("wait", 10) in cast.calls
+
+
+@pytest.mark.asyncio
 async def test_phase2_cast_play_and_controls_call_pychromecast_shape():
     cast = FakeCast()
     backend, _browser = make_backend(cast)

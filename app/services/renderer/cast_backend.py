@@ -234,7 +234,9 @@ class CastRendererBackend(RendererBackend):
         callback: Callable[[RendererStatus], Awaitable[None]],
     ) -> Callable[[], None]:
         _, uuid = split_renderer_id(renderer_id)
-        cast = self.casts[uuid]
+        cast = self.casts.get(uuid)
+        if cast is None:
+            raise ValueError(f"Cast renderer {renderer_id} has no connected client yet")
         listener = _CastStatusListener(self, renderer_id, callback)
         cast.media_controller.register_status_listener(listener)
         self._listeners.setdefault(renderer_id, []).append(listener)
@@ -401,32 +403,61 @@ class CastRendererBackend(RendererBackend):
                 self._register_cast_info(uuid, cast_info)
 
     def _register_cast_info(self, uuid: Any, cast_info: Any) -> RendererDevice | None:
+        """Record the device (pure data, safe from any thread) and arrange for
+        its Cast client to exist.
+
+        Client creation must NOT happen inline here: zeroconf runs its own
+        asyncio loop and fires our listener callbacks inside it, while
+        pychromecast's Chromecast constructor can do a blocking service lookup
+        (when the announcement's cast type is not resolved yet), which raises
+        "Use AsyncServiceInfo.async_request from the event loop". Defer it to
+        a worker thread via our loop instead.
+        """
         key = str(uuid)
-        if key not in self.casts:
-            try:
-                self.casts[key] = self._create_cast(cast_info)
-            except Exception:
-                logger.warning(
-                    "Failed to create Cast client for %s",
-                    getattr(cast_info, "friendly_name", key),
-                    exc_info=True,
-                )
-                return None
-            logger.info(
-                "Cast device discovered: %s (%s)",
-                getattr(cast_info, "friendly_name", key),
-                getattr(cast_info, "host", "?"),
-            )
+        first_seen = key not in self.devices
         device = self._device_from_info(key, cast_info, self.casts.get(key))
         self.devices[key] = device
+        if first_seen:
+            logger.info(
+                "Cast device discovered: %s (%s)",
+                device.name,
+                device.ip or "?",
+            )
+        if key not in self.casts:
+            if self.cast_factory is not None:
+                # Injected factories (tests) are cheap and non-blocking.
+                self.casts[key] = self.cast_factory(cast_info)
+            else:
+                loop = self._loop
+                if loop and loop.is_running():
+                    loop.call_soon_threadsafe(
+                        lambda: loop.create_task(self._connect_cast_client(key, cast_info))
+                    )
+                # No loop yet: _get_ready_cast creates the client lazily.
         return device
+
+    async def _connect_cast_client(self, key: str, cast_info: Any) -> None:
+        if key in self.casts:
+            return
+        try:
+            cast = await asyncio.to_thread(self._create_cast, cast_info)
+        except Exception:
+            logger.warning(
+                "Failed to create Cast client for %s",
+                getattr(cast_info, "friendly_name", key),
+                exc_info=True,
+            )
+            return
+        self.casts.setdefault(key, cast)
 
     def _create_cast(self, cast_info: Any) -> Any:
         if self.cast_factory is not None:
             return self.cast_factory(cast_info)
         import pychromecast
 
-        # Cheap until .wait() connects it (done lazily in _get_ready_cast).
+        # Cheap until .wait() connects it (done lazily in _get_ready_cast),
+        # except when the cast type needs a blocking lookup — hence worker
+        # threads only, never the event loop or zeroconf callbacks.
         return pychromecast.get_chromecast_from_cast_info(cast_info, self._zconf)
 
     def _probe_host(self, address: str) -> Any | None:
@@ -486,6 +517,19 @@ class CastRendererBackend(RendererBackend):
         if not cast:
             await self.discover(refresh=True)
             cast = self.casts.get(uuid)
+        if not cast:
+            # Device known but client creation still pending (or was deferred
+            # before the loop existed): create it now, off the event loop.
+            cast_info = None
+            browser = self.browser
+            if browser is not None:
+                for info_uuid, info in dict(getattr(browser, "devices", None) or {}).items():
+                    if str(info_uuid) == uuid:
+                        cast_info = info
+                        break
+            if cast_info is not None:
+                await self._connect_cast_client(uuid, cast_info)
+                cast = self.casts.get(uuid)
         if not cast:
             raise ValueError(f"Cast renderer {renderer_id} not found")
         await asyncio.to_thread(cast.wait, 10)
