@@ -38,6 +38,38 @@ MAX_START_RETRIES = 2
 # Warm the next track's file this close to the end of the current one.
 PREWARM_LEAD_S = 30.0
 PREWARM_BYTES = 8 * 1024 * 1024
+# Refresh the device volume every this many polls (~seconds), so volume
+# changes made on the device itself (TV remote) reach the app slider.
+VOLUME_REFRESH_POLLS = 15
+
+
+async def _sync_device_volume(upnp, udn: str) -> None:
+    """Seed renderer_state.volume from the device.
+
+    UPnP renderers never push their volume to us, so without this the app
+    only knows a volume the user has already set through Jamarr — and the
+    slider starts on a guess (which is how a first touch used to blast TVs).
+    """
+    getter = getattr(upnp, "get_volume", None)
+    if getter is None:
+        return
+    try:
+        device_volume = await getter(udn)
+    except Exception:
+        logger.debug(f"Volume sync failed for {udn}", exc_info=True)
+        return
+    if device_volume is None:
+        return
+    async for db in get_db():
+        await db.execute(
+            """
+            UPDATE renderer_state
+            SET volume = $1, updated_at = NOW()
+            WHERE renderer_udn = $2 AND volume IS DISTINCT FROM $1
+            """,
+            int(device_volume),
+            udn,
+        )
 
 # Queue index already prewarmed per renderer, and the task doing it.
 _prewarmed_index: dict[str, int] = {}
@@ -100,11 +132,18 @@ async def monitor_upnp_playback(udn: str):
     logger.info(f"[Player] Monitor {udn}: Task started, waiting 3s grace period...")
     await asyncio.sleep(3)
 
+    # Let the UI slider reflect the device's real volume from the start.
+    await _sync_device_volume(upnp, udn)
+
     was_playing = False  # Initialize to prevent UnboundLocalError
     consecutive_errors = 0
     error_started_at = 0.0  # when the first error in the current streak occurred
+    poll_count = 0
     try:
         while True:
+            poll_count += 1
+            if poll_count % VOLUME_REFRESH_POLLS == 0:
+                await _sync_device_volume(upnp, udn)
             # 1. Fetch position & transport from UPnP
             try:
                 logger.info(f"[Player] Monitor {udn}: Polling...")

@@ -259,6 +259,38 @@ class UPnPDeviceControl:
         await action.async_call(InstanceID=0, Channel="Master", DesiredVolume=volume)
         self.manager.log(f"Volume set to {volume} via RenderingControl")
 
+    async def get_volume(self, udn: Optional[str] = None) -> Optional[int]:
+        """Read the renderer's current volume as 0-100 percent, or None.
+
+        Scaled by the device's declared Volume range so devices with a
+        non-100 maximum still map to percent correctly.
+        """
+        target_udn = udn or self.manager.active_renderer
+        if not target_udn:
+            return None
+        dmr = self.manager.dmr_devices.get(target_udn)
+        if not dmr:
+            return None
+        try:
+            action = dmr._action("RenderingControl", "GetVolume")
+            if not action:
+                return None
+            result = await action.async_call(InstanceID=0, Channel="Master")
+            current = result.get("CurrentVolume")
+            if current is None:
+                return None
+            max_volume = 100
+            try:
+                state_var = dmr._state_variable("RenderingControl", "Volume")
+                if state_var is not None and state_var.max_value:
+                    max_volume = int(state_var.max_value) or 100
+            except Exception:
+                pass
+            return max(0, min(100, round(int(current) * 100 / max_volume)))
+        except Exception as exc:
+            logger.debug(f"get_volume failed for {target_udn}: {exc}")
+            return None
+
     async def get_position(self, udn: Optional[str] = None):
         """Get current playback position in seconds."""
         target_udn = udn or self.manager.active_renderer
