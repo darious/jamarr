@@ -5,7 +5,11 @@ import time
 from app.db import get_db
 from app.upnp import UPnPManager
 from app.services.player.state import get_renderer_state_db, update_renderer_state_db
-from app.services.player.globals import last_track_start_time
+from app.services.player.globals import (
+    last_playing_position,
+    last_track_start_time,
+    start_retries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,9 @@ async def play_next_track_internal(udn: str):
             await upnp.play_track(track["id"], track["path"], track)
             # Record track start time to prevent false "track finished" detection
             last_track_start_time[udn] = time.time()
+            # Position/retry bookkeeping is per-track; reset for the new one.
+            last_playing_position.pop(udn, None)
+            start_retries.pop(udn, None)
 
             # Update DB
             state["current_index"] = next_index
