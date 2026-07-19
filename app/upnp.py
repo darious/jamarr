@@ -287,6 +287,9 @@ class UPnPManager:
     async def set_volume(self, volume: int) -> None:
         return await self.control.set_volume(volume)
 
+    async def get_volume(self, udn: str | None = None):
+        return await self.control.get_volume(udn)
+
     async def get_position(self, udn: Optional[str] = None):
         return await self.control.get_position(udn)
 

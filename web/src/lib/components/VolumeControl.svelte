@@ -7,18 +7,21 @@
     export let sliderStyle = "";
     export let containerClass = "flex items-center gap-2 group";
 
-    let volume = ($playerState.volume != null) ? $playerState.volume / 100 : 0.5;
+    // When the device volume is unknown, 1% — a first slider touch must never
+    // be able to blast a renderer (50% of a TV's master scale is deafening).
+    const UNKNOWN_VOLUME = 0.01;
 
-    // Sync from store (0-100 → 0-1). When store is null (e.g. remote
-    // renderer selected, device volume not yet known), default to 50%
-    // to avoid blasting full volume on first slider touch.
+    let volume = ($playerState.volume != null) ? $playerState.volume / 100 : UNKNOWN_VOLUME;
+
+    // Sync from store (0-100 → 0-1). The backend seeds the store with the
+    // real device volume; null means it is genuinely unknown.
     $: if ($playerState.volume !== null && $playerState.volume !== undefined) {
         const newVol = $playerState.volume / 100;
         if (Math.abs(volume - newVol) > 0.01) {
             volume = newVol;
         }
     } else {
-        volume = 0.5;
+        volume = UNKNOWN_VOLUME;
     }
 
     function handleInput(e: Event) {

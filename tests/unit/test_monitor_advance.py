@@ -33,12 +33,13 @@ class ScriptedUpnp:
     The final entry repeats forever; `drained` fires once the script is consumed.
     """
 
-    def __init__(self, script):
+    def __init__(self, script, volume=None):
         self.script = list(script)
         self.index = 0
         self.renderers = {}
         self.drained = asyncio.Event()
         self.play_calls = []
+        self.volume = volume
 
     def _current(self):
         if self.index >= len(self.script):
@@ -59,6 +60,9 @@ class ScriptedUpnp:
 
     async def play_track(self, track_id, track_path, metadata):
         self.play_calls.append(track_id)
+
+    async def get_volume(self, udn):
+        return self.volume
 
 
 @pytest.fixture
@@ -278,6 +282,23 @@ async def test_watchdog_ignores_renderers_reporting_position(
     await _run_monitor(monkeypatch, udn, upnp)
 
     assert advances == []
+
+
+async def test_monitor_seeds_device_volume(db, monkeypatch, fast_sleep, advances):
+    """The monitor reads the device's real volume so the app slider never has
+    to guess (a guessed slider position is how first touch used to blast TVs)."""
+    udn = "uuid:monitor-volume-seed"
+    _reset_globals(udn)
+    last_track_start_time[udn] = time.time() - 60
+    await update_renderer_state_db(db, udn, _state())  # stores volume=20
+
+    upnp = ScriptedUpnp([(90, "PLAYING"), (91, "PLAYING"), (92, "PLAYING")], volume=37)
+    await _run_monitor(monkeypatch, udn, upnp)
+
+    from app.services.player.state import get_renderer_state_db
+
+    state = await get_renderer_state_db(db, udn)
+    assert state["volume"] == 37
 
 
 async def test_prewarm_triggers_near_track_end(db, monkeypatch, fast_sleep, advances):
