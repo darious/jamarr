@@ -22,6 +22,15 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "UTC"
+    ignore:
+      # TS 7 is the native-compiler rewrite; the Svelte/Vite toolchain does
+      # not support it yet. Remove when svelte-check/vite build against TS 7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # @types/node must track the runtime major (node:22-slim in Dockerfile),
+      # not lead it. Bump together with the base image.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-deps:
         patterns:
