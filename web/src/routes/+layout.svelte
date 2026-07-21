@@ -59,6 +59,12 @@
   let renderersLoading = false;
   let appInitialized = false;
   let appInitializing = false;
+  // Terminal latch: once we decide the session is dead and start redirecting to
+  // /login, stop initializeAppShell from being re-entered. Without this the
+  // reactive block below re-fires it (appInitializing toggles back to false) in
+  // a tight loop, flickering the spinner and starving the navigation — the
+  // "page unresponsive" hang. Reset once we actually reach /login.
+  let redirectingToLogin = false;
   let rendererPollInterval: ReturnType<typeof setInterval> | undefined;
 
   const navItems = [
@@ -85,12 +91,17 @@
   $: if (isAuthPage) {
     showMobileMenu = false;
     showMobileSearch = false;
+    // We've arrived on /login: clear the redirect latch and the loading spinner
+    // so a subsequent successful login can re-initialize the shell normally.
+    redirectingToLogin = false;
+    authLoading = false;
   }
 
   // Don't seed auth state here - wait for client-side initialization
 
   async function initializeAppShell() {
-    if (appInitialized || appInitializing || isAuthPage) return;
+    if (appInitialized || appInitializing || isAuthPage || redirectingToLogin)
+      return;
     appInitializing = true;
     authLoading = true;
 
@@ -105,7 +116,11 @@
     });
 
     if (!hydratedUser && !isAuthPage) {
-      authLoading = false;
+      // Dead session: redirect to /login exactly once. Keep the spinner up
+      // (authLoading stays true) until the navigation lands so the app chrome
+      // doesn't flash, and latch redirectingToLogin so the reactive block
+      // below cannot re-enter this function mid-navigation.
+      redirectingToLogin = true;
       appInitializing = false;
       goto("/login");
       return;
@@ -161,6 +176,7 @@
       if (expired && appInitialized) {
         teardownAppShell();
         clearUser();
+        redirectingToLogin = true;
         goto("/login");
       }
     });
@@ -172,7 +188,7 @@
     }
   });
 
-  $: if (!isAuthPage && !appInitialized && !appInitializing) {
+  $: if (!isAuthPage && !appInitialized && !appInitializing && !redirectingToLogin) {
     initializeAppShell();
   }
 
