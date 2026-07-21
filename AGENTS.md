@@ -65,6 +65,10 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   Migrations auto-apply on startup (lifespan → `apply_migrations`; `AUTO_MIGRATE=false`
   to disable). Fresh init_db schemas are *baselined* (recorded, not replayed), so a
   new migration must be compatible with the current schema, not just the old one.
+  **init_db runs BEFORE migrations**, and `CREATE TABLE IF NOT EXISTS` is a no-op on
+  an existing table — so when init_db indexes a column added by a later migration,
+  it must first `ALTER TABLE … ADD COLUMN IF NOT EXISTS` (else startup crashes on the
+  index for existing installs, before auto-migrate can add the column).
   Schema docs are generated (`docs/reference/schema/`) — don't hand-edit.
 - Config: secrets in `.env` (see `.env.example`); non-secret app config in `config.yaml`.
 - Commits: Conventional Commits (`feat(scope):`, `fix(charts):`, `chore(ci):`). **No AI co-author/attribution trailers.**

@@ -91,11 +91,20 @@ async def setup_db():
     app.main.close_db = AsyncMock()
 
     yield
-    
+
     # Restore
     app.db.init_db = orig_init
     app.db.close_db = orig_close
     await close_db()
+
+
+@pytest.fixture
+def real_init_db():
+    """The un-mocked init_db. conftest imported it at module load, before
+    setup_db rebinds app.db.init_db to a mock, so this reference stays real —
+    for tests that must exercise the actual schema setup."""
+    return init_db
+
 
 @pytest.fixture
 async def db() -> AsyncGenerator[asyncpg.Connection, None]:
