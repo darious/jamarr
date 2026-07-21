@@ -1,6 +1,29 @@
 from pathlib import Path
 
-from migrations.apply_migrations import _split_statements
+from migrations.apply_migrations import _split_statements, _has_executable_sql
+
+
+def test_split_statements_ignores_semicolons_in_comments():
+    sql = "-- a; b\nALTER TABLE t ADD COLUMN c INT;\n-- trailing; note\n"
+    stmts = _split_statements(sql)
+    assert len(stmts) == 1
+    assert "ALTER TABLE t ADD COLUMN c INT" in stmts[0]
+
+
+def test_split_statements_keeps_dollar_blocks_intact():
+    sql = "DO $$ BEGIN IF TRUE THEN NULL; END IF; END $$;\nSELECT 1;"
+    stmts = _split_statements(sql)
+    assert len(stmts) == 2
+    assert stmts[0].startswith("DO $$")
+    assert "SELECT 1" in stmts[1]
+
+
+def test_no_migration_yields_a_comment_only_statement():
+    """Guard against the asyncpg empty-query crash: after splitting, every
+    statement of every migration must contain executable SQL."""
+    for path in sorted(Path("migrations").glob("*.sql")):
+        for stmt in _split_statements(path.read_text()):
+            assert _has_executable_sql(stmt), f"{path.name}: comment-only -> {stmt!r}"
 
 
 def test_migration_031_splits_cleanly():
