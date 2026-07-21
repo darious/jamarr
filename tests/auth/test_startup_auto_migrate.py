@@ -37,3 +37,38 @@ async def test_auto_migrate_is_idempotent(db):
         """
     )
     assert len(col) == 1
+
+
+async def test_init_db_safe_on_pre_031_existing_database(db, real_init_db):
+    """Regression: init_db runs BEFORE migrations, and on an existing pre-031
+    database CREATE TABLE IF NOT EXISTS is a no-op — so init_db must add
+    family_id before indexing it, or startup crashes with
+    'column "family_id" does not exist' (which is exactly what happened in prod)."""
+    import app.db as appdb
+
+    # Simulate a pre-031 install: table present, family_id (and its index) gone.
+    await db.execute("DROP INDEX IF EXISTS idx_auth_refresh_session_family")
+    await db.execute(
+        "ALTER TABLE auth_refresh_session DROP COLUMN IF EXISTS family_id"
+    )
+    missing = await db.fetch(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'auth_refresh_session' AND column_name = 'family_id'"
+    )
+    assert not missing
+
+    # The real init_db must not raise, and must re-add the column.
+    saved_pool = appdb._pool
+    try:
+        await real_init_db()
+    finally:
+        new_pool = appdb._pool
+        appdb._pool = saved_pool
+        if new_pool is not saved_pool:
+            await new_pool.close()
+
+    col = await db.fetch(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'auth_refresh_session' AND column_name = 'family_id'"
+    )
+    assert col

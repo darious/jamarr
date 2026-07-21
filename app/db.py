@@ -744,6 +744,15 @@ async def init_db():
                 FOREIGN KEY(user_id) REFERENCES "user"(id) ON DELETE CASCADE
             );
 
+            -- 031: evolve existing installs. The CREATE TABLE above is a no-op
+            -- when the table already exists, so on a pre-031 database the column
+            -- is still missing here. init_db runs BEFORE migrations, so add the
+            -- column now — otherwise the family index below references a column
+            -- that doesn't exist yet and startup dies before auto-migrate runs.
+            -- The 031 migration backfills family_id for existing rows.
+            ALTER TABLE auth_refresh_session
+                ADD COLUMN IF NOT EXISTS family_id UUID;
+
             CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_token_hash
                 ON auth_refresh_session(token_hash);
 
