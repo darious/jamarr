@@ -738,20 +738,27 @@ async def init_db():
                 last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 user_agent TEXT,
                 ip TEXT,
+                -- 031: rotation-chain family. Each login starts a new family;
+                -- rotation keeps it. Reuse detection is scoped to the family.
+                family_id UUID,
                 FOREIGN KEY(user_id) REFERENCES "user"(id) ON DELETE CASCADE
             );
-            
-            CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_token_hash 
+
+            CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_token_hash
                 ON auth_refresh_session(token_hash);
-            
-            CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_user_id 
+
+            CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_user_id
                 ON auth_refresh_session(user_id);
-            
-            CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_expires_at 
+
+            CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_expires_at
                 ON auth_refresh_session(expires_at);
-            
-            CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_active 
-                ON auth_refresh_session(user_id, revoked_at) 
+
+            CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_active
+                ON auth_refresh_session(user_id, revoked_at)
+                WHERE revoked_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS idx_auth_refresh_session_family
+                ON auth_refresh_session(family_id, revoked_at)
                 WHERE revoked_at IS NULL;
         """)
 

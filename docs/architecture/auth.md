@@ -96,7 +96,11 @@ Recommended endpoints:
   - Non-browser: re-login on expiry (no JSON refresh)
   - Output: new access token
   - Side-effect: rotate refresh token (old one revoked)
-  - Reuse of a revoked refresh token must 401 (optionally log at warn level)
+  - Each login starts a rotation **family** (`family_id`); rotation keeps it
+  - Replaying a rotated token whose family still has a live tip, within a short
+    grace window, is a benign lost-response/race and is **re-issued** (200)
+  - Replaying a stale rotated token past that window is treated as reuse/theft
+    and revokes **only that family** (that device), returning 401
 
 - `POST /api/auth/logout`
   - Revokes the active refresh token and clears cookie
@@ -173,12 +177,15 @@ Create a table like:
   - `token_hash` should be **UNIQUE**
   - Multiple active sessions per user are allowed
 
-Rotation:
-- On refresh: mark old session row revoked, insert a new row with a new token hash.
+Rotation (with lineage):
+- Each row carries a `family_id`; a login starts a new family, rotation preserves it.
+- On refresh: mark old session row revoked, insert a new row (same `family_id`) with a new token hash.
 - If a revoked refresh token is presented again:
-  - return 401
-  - optionally log at warn level
-  - optionally revoke all refresh sessions for that user (paranoid mode)
+  - the family still has a live tip and the rotation was recent (within
+    `REFRESH_REUSE_GRACE_SECONDS`, default 120): re-issue from the live tip (200) —
+    this absorbs lost responses and concurrent refreshes without logging anyone out
+  - otherwise: reuse/theft — revoke the whole **family** (that device's chain
+    only, not the user's other devices) and return 401 (logged at warn level)
 
 ### 5.4 Protecting endpoints
 
