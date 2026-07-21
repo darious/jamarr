@@ -12,6 +12,17 @@ from app.security import configure_security_middleware, fastapi_docs_config, is_
 async def lifespan(app: FastAPI):
     validate_jwt_secret_at_startup()
     await init_db()
+    # Apply any pending DB migrations on startup so a plain image pull + restart
+    # is enough to deploy schema changes — operators shouldn't have to know which
+    # migration to run. apply_migrations() is idempotent (checksum-tracked) and
+    # advisory-locked; it's a no-op when the schema is current. Set
+    # AUTO_MIGRATE=false to fall back to running migrations as a separate step.
+    if os.getenv("AUTO_MIGRATE", "true").lower() not in ("false", "0", "no"):
+        from migrations.apply_migrations import apply_migrations
+        from app.db import get_pool
+
+        async with get_pool().acquire() as migration_conn:
+            await apply_migrations(migration_conn)
     from app.services.renderer import get_renderer_registry
     from app.scanner.scan_manager import ScanManager
     from app.scanner.dns_resolver import warm_dns_cache

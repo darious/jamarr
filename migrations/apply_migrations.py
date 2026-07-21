@@ -22,32 +22,65 @@ def _required_env(name: str) -> str:
     return value
 
 
-DB_HOST = _required_env("DB_HOST")
-DB_PORT = int(_required_env("DB_PORT"))
-DB_USER = _required_env("DB_USER")
-DB_PASS = _required_env("DB_PASS")
-DB_NAME = _required_env("DB_NAME")
+def _connect_kwargs() -> Dict[str, object]:
+    """Read DB connection settings from the environment (only needed when
+    apply_migrations opens its own connection, e.g. the CLI / deploy.sh path)."""
+    return dict(
+        host=_required_env("DB_HOST"),
+        port=int(_required_env("DB_PORT")),
+        user=_required_env("DB_USER"),
+        password=_required_env("DB_PASS"),
+        database=_required_env("DB_NAME"),
+    )
+
+
+def _has_executable_sql(stmt: str) -> bool:
+    """True if a statement has any non-comment, non-blank line. A statement made
+    up entirely of `--` comments / whitespace is an empty query to Postgres and
+    makes asyncpg raise; those must be dropped before execution."""
+    return any(
+        line.strip() and not line.strip().startswith("--")
+        for line in stmt.splitlines()
+    )
 
 
 def _split_statements(sql: str) -> List[str]:
     """
-    Minimal statement splitter that respects dollar-quoted blocks (e.g., DO $$ ... $$;).
-    Splits on semicolons only when not inside a $$ block.
+    Statement splitter that respects dollar-quoted blocks (e.g., DO $$ ... $$;)
+    and `--` line comments. Splits on semicolons only when not inside a $$ block
+    or a line comment — a stray `;` inside a comment must NOT split the file —
+    and drops comment/whitespace-only statements.
     """
     statements: List[str] = []
     current: List[str] = []
     in_dollar = False
+    in_line_comment = False
     i = 0
     length = len(sql)
 
     while i < length:
-        if sql.startswith("$$", i):
+        if not in_line_comment and sql.startswith("$$", i):
             in_dollar = not in_dollar
             current.append("$$")
             i += 2
             continue
 
         ch = sql[i]
+
+        if in_line_comment:
+            current.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        # Start of a line comment (outside dollar blocks): consume `;` as text.
+        if not in_dollar and ch == "-" and i + 1 < length and sql[i + 1] == "-":
+            in_line_comment = True
+            current.append("--")
+            i += 2
+            continue
+
         if ch == ";" and not in_dollar:
             stmt = "".join(current).strip()
             if stmt:
@@ -62,7 +95,7 @@ def _split_statements(sql: str) -> List[str]:
     if tail:
         statements.append(tail)
 
-    return statements
+    return [s for s in statements if _has_executable_sql(s)]
 
 
 async def _ensure_table(conn: asyncpg.Connection) -> None:
@@ -100,13 +133,19 @@ def _checksum(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-async def apply_migrations() -> None:
+async def apply_migrations(conn: asyncpg.Connection = None) -> None:
+    """Apply any pending migrations. Idempotent and advisory-locked.
+
+    Pass an existing connection (e.g. from the app pool on startup) to reuse it;
+    otherwise a dedicated connection is opened from the environment and closed
+    afterwards (the CLI / deploy.sh path).
+    """
     if not MIGRATIONS_DIR.exists():
         raise SystemExit(f"Migration directory not found: {MIGRATIONS_DIR}")
 
-    conn = await asyncpg.connect(
-        host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASS, database=DB_NAME
-    )
+    own_conn = conn is None
+    if own_conn:
+        conn = await asyncpg.connect(**_connect_kwargs())
     try:
         await conn.execute("SELECT pg_advisory_lock($1)", LOCK_ID)
         await _ensure_table(conn)
@@ -117,6 +156,29 @@ async def apply_migrations() -> None:
         if not migrations:
             print("No migrations found.")
             return
+
+        # Baseline-on-adopt: if nothing is recorded yet but the schema is already
+        # current (init_db just built it — the "user" table exists), record every
+        # migration as a baseline instead of re-running historical migrations
+        # against a schema they were never written for (an old migration may e.g.
+        # regex a column that is no longer TEXT). Only a genuinely empty database
+        # (no core tables) runs the full history from scratch.
+        if not applied:
+            initialized = await conn.fetchval('SELECT to_regclass(\'public."user"\')')
+            if initialized is not None:
+                for path in migrations:
+                    version = path.name.split("_", 1)[0]
+                    await conn.execute(
+                        f"INSERT INTO {MIGRATION_TABLE} (version, checksum) "
+                        "VALUES ($1, $2) ON CONFLICT (version) DO NOTHING",
+                        version,
+                        _checksum(path),
+                    )
+                print(
+                    f"Baselined {len(migrations)} migrations "
+                    "(existing current schema, nothing to replay)."
+                )
+                return
 
         for path in migrations:
             version = path.name.split("_", 1)[0]
@@ -150,7 +212,8 @@ async def apply_migrations() -> None:
         print("✅ Migrations applied")
     finally:
         await conn.execute("SELECT pg_advisory_unlock($1)", LOCK_ID)
-        await conn.close()
+        if own_conn:
+            await conn.close()
 
 
 if __name__ == "__main__":

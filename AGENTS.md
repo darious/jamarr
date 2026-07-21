@@ -34,7 +34,7 @@ app/                 backend (Python)
 web/src/             SvelteKit: routes/ (album,artist,charts,discovery,history,
                      login,playlists,queue,renderers,settings) + lib/
 tui/jamarr_tui/      api, art, playback, screens, widgets
-migrations/          NNN_*.sql  (raw SQL, applied by deploy.sh in order)
+migrations/          NNN_*.sql  (raw SQL; auto-applied on app startup + by deploy.sh)
 tests/               pytest: api/ auth/ integration/ scanner/ unit/ + top-level
 docs/                outline.md, DATABASE_SCHEMA.md, api.md, auth.md, scanner.md,
                      DEV_MODE.md, tui.md, android.md
@@ -62,6 +62,9 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 - Python: ruff (config in `pyproject.toml` / `lint.sh`). Async-first (asyncpg, httpx, aiofiles).
 - DB changes = new `migrations/NNN_*.sql` (existing installs) **and** the matching
   DDL in `app/db.py` `init_db` (fresh installs + tests). Never edit old migrations.
+  Migrations auto-apply on startup (lifespan → `apply_migrations`; `AUTO_MIGRATE=false`
+  to disable). Fresh init_db schemas are *baselined* (recorded, not replayed), so a
+  new migration must be compatible with the current schema, not just the old one.
   Schema docs are generated (`docs/reference/schema/`) — don't hand-edit.
 - Config: secrets in `.env` (see `.env.example`); non-secret app config in `config.yaml`.
 - Commits: Conventional Commits (`feat(scope):`, `fix(charts):`, `chore(ci):`). **No AI co-author/attribution trailers.**
