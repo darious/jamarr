@@ -15,7 +15,9 @@ from app.auth import (
     get_user_by_username_or_email,
     create_refresh_session,
     get_refresh_session_state,
+    get_live_session_for_family,
     revoke_refresh_session,
+    revoke_family,
     revoke_all_user_sessions,
 )
 from app.auth_tokens import (
@@ -42,9 +44,13 @@ if "REFRESH_COOKIE_SECURE" in os.environ:
 else:
     REFRESH_COOKIE_SECURE = ENV == "production"
 
-# Replays of a rotated refresh token within this window are treated as a benign
-# concurrent-refresh race; older replays trigger revocation of all sessions.
-REFRESH_REUSE_GRACE = timedelta(seconds=30)
+# Replaying a rotated refresh token whose family still has a live tip within this
+# window is treated as a benign lost-response / concurrent-refresh race and is
+# re-issued from the live tip. Older replays are treated as reuse/theft and
+# revoke that token's family (that device), not the user's other devices.
+REFRESH_REUSE_GRACE = timedelta(
+    seconds=int(os.getenv("REFRESH_REUSE_GRACE_SECONDS", "120"))
+)
 
 
 class CreateUserBody(BaseModel):
@@ -297,36 +303,8 @@ async def refresh(
         )
 
     user_id = session["user_id"]
+    family_id = session["family_id"]
     now = datetime.now(timezone.utc)
-
-    if session["revoked_at"] is not None:
-        # A rotated token was replayed. Within a short grace window this is a
-        # benign race (two tabs refreshing concurrently); beyond it, assume the
-        # token was stolen and revoke every session for the user.
-        if now - session["revoked_at"] > REFRESH_REUSE_GRACE:
-            await revoke_all_user_sessions(db, user_id)
-            log_security_event(
-                "refresh_reuse_detected",
-                request,
-                level=logging.WARNING,
-                user_id=user_id,
-                username=session["username"],
-            )
-        else:
-            log_security_event(
-                "refresh_race", request, level=logging.INFO, user_id=user_id
-            )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
-
-    if session["expires_at"] <= now:
-        log_security_event("refresh_expired", request, level=logging.INFO)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
 
     if not session.get("is_active", True):
         log_security_event(
@@ -340,14 +318,66 @@ async def refresh(
             detail="Invalid or expired refresh token",
         )
 
-    # Rotate refresh token (revoke old, create new)
-    await revoke_refresh_session(db, token_hash)
-    
-    # Generate new refresh token
+    if session["expires_at"] <= now:
+        log_security_event("refresh_expired", request, level=logging.INFO)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    # Decide which token to rotate. Normally the presented token is the live tip
+    # of its family and we rotate it directly. If it was already rotated away, a
+    # replay landed here — recover the benign cases and punish only real reuse.
+    rotate_from = session
+
+    if session["revoked_at"] is not None:
+        # The presented token was already rotated. If the family still has a live
+        # tip and the rotation was recent, this is a benign lost-response /
+        # concurrent-refresh: the client simply never saw the new cookie. Re-issue
+        # from the live tip instead of logging them out.
+        tip = await get_live_session_for_family(db, family_id)
+        if tip is not None and (now - session["revoked_at"]) <= REFRESH_REUSE_GRACE:
+            log_security_event(
+                "refresh_recovered",
+                request,
+                level=logging.INFO,
+                user_id=user_id,
+            )
+            rotate_from = tip
+        elif tip is not None:
+            # A stale token replayed while the family is still active: treat as
+            # reuse/theft and revoke ONLY this family (this device), leaving the
+            # user's other devices signed in.
+            await revoke_family(db, family_id)
+            log_security_event(
+                "refresh_reuse_detected",
+                request,
+                level=logging.WARNING,
+                user_id=user_id,
+                username=session["username"],
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token",
+            )
+        else:
+            # Family already fully revoked/expired (e.g. prior logout or theft
+            # response). Nothing to recover — just reject.
+            log_security_event(
+                "refresh_stale", request, level=logging.INFO, user_id=user_id
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token",
+            )
+
+    # Rotate within the family: revoke the current live token, issue a successor.
+    await revoke_refresh_session(db, rotate_from["token_hash"])
+
     new_refresh_token = generate_refresh_token()
     new_token_hash = hash_refresh_token(new_refresh_token)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_TTL_DAYS)
-    
+    expires_at = now + timedelta(days=REFRESH_TOKEN_TTL_DAYS)
+
     await create_refresh_session(
         db=db,
         user_id=user_id,
@@ -355,14 +385,15 @@ async def refresh(
         expires_at=expires_at,
         user_agent=request.headers.get("user-agent"),
         ip=get_client_ip(request),
+        family_id=family_id,
     )
-    
+
     # Set new refresh cookie
     _set_refresh_cookie(response, new_refresh_token)
-    
+
     # Create new access token
     access_token = create_access_token(user_id=user_id)
-    
+
     return {
         "access_token": access_token,
         "token_type": "bearer",

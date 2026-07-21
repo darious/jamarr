@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -52,9 +53,10 @@ async def create_refresh_session(
     expires_at: datetime,
     user_agent: Optional[str],
     ip: Optional[str],
+    family_id: Optional[uuid.UUID] = None,
 ) -> int:
     """Create a new refresh session and return the session ID.
-    
+
     Args:
         db: Database connection
         user_id: User ID
@@ -62,15 +64,20 @@ async def create_refresh_session(
         expires_at: Expiration timestamp
         user_agent: Optional user agent string
         ip: Optional IP address
-        
+        family_id: Rotation-chain family. Omit to start a NEW family (a fresh
+            login / standalone session); rotation passes the parent's family so
+            the whole chain shares one id and reuse detection can be scoped to it.
+
     Returns:
         Session ID
     """
+    if family_id is None:
+        family_id = uuid.uuid4()
     session_id = await db.fetchval(
         """
-        INSERT INTO auth_refresh_session 
-        (user_id, token_hash, created_at, expires_at, last_used_at, user_agent, ip)
-        VALUES ($1, $2, NOW(), $3, NOW(), $4, $5)
+        INSERT INTO auth_refresh_session
+        (user_id, token_hash, created_at, expires_at, last_used_at, user_agent, ip, family_id)
+        VALUES ($1, $2, NOW(), $3, NOW(), $4, $5, $6)
         RETURNING id
         """,
         user_id,
@@ -78,8 +85,52 @@ async def create_refresh_session(
         expires_at,
         user_agent,
         ip,
+        family_id,
     )
     return session_id
+
+
+async def get_live_session_for_family(
+    db: asyncpg.Connection, family_id: uuid.UUID
+) -> Optional[asyncpg.Record]:
+    """Return the current live (un-revoked, unexpired) token of a rotation family.
+
+    A family has at most one live token — the tip of the rotation chain. Returns
+    None once the whole family has been revoked or has expired.
+    """
+    if family_id is None:
+        return None
+    return await db.fetchrow(
+        """
+        SELECT s.*, u.username, u.is_active
+        FROM auth_refresh_session s
+        JOIN "user" u ON u.id = s.user_id
+        WHERE s.family_id = $1
+          AND s.revoked_at IS NULL
+          AND s.expires_at > NOW()
+        ORDER BY s.created_at DESC
+        LIMIT 1
+        """,
+        family_id,
+    )
+
+
+async def revoke_family(db: asyncpg.Connection, family_id: uuid.UUID) -> None:
+    """Revoke every live session in a rotation family (one device/session line).
+
+    Used for reuse/theft detection: kills just the affected chain, leaving the
+    user's other devices (other families) signed in.
+    """
+    if family_id is None:
+        return
+    await db.execute(
+        """
+        UPDATE auth_refresh_session
+        SET revoked_at = NOW()
+        WHERE family_id = $1 AND revoked_at IS NULL
+        """,
+        family_id,
+    )
 
 
 async def get_refresh_session(
