@@ -12,13 +12,16 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-# Derive HOST_IP via internal route to DNS server (REDACTED_IP) unless provided
+# Fall back to the primary outbound source address if .env didn't set HOST_IP.
+# `ip route get` is a routing-table lookup only — nothing is sent to 1.1.1.1 —
+# and using a public address keeps internal topology out of the repo.
 if [[ -z "${HOST_IP:-}" ]]; then
-  HOST_IP="$(ip route get REDACTED_IP 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
+  HOST_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
 fi
 
 if [[ -z "${HOST_IP:-}" ]]; then
-  echo "Unable to determine HOST_IP (tried route to REDACTED_IP). Set HOST_IP manually and retry." >&2
+  echo "Unable to determine HOST_IP." >&2
+  echo "Set it in .env (see .env.example), or export HOST_IP=<this host's LAN IP>." >&2
   exit 1
 fi
 
