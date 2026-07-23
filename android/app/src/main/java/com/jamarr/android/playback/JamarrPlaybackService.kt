@@ -3,6 +3,7 @@ package com.jamarr.android.playback
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -26,6 +27,7 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,7 +42,14 @@ import kotlinx.coroutines.withTimeout
 class JamarrPlaybackService : MediaLibraryService() {
     private var librarySession: MediaLibrarySession? = null
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Report/telemetry work runs here. Without a handler an uncaught throw in a
+    // root coroutine reaches the thread's default handler and kills the process,
+    // so any API failure during playback would crash the app.
+    private val serviceExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.w(TAG, "Playback service coroutine failed", throwable)
+    }
+    private val serviceScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO + serviceExceptionHandler)
     private val serverUrl = AtomicReference("")
 
     // Resolved /api/stream/<id>?token=<jwt> URLs. The stream token expires
@@ -134,17 +143,30 @@ class JamarrPlaybackService : MediaLibraryService() {
             var lastProgressReport = 0L
             var lastReportedQueueKey: String? = null
             var lastReportedMediaId: String? = null
+            var lastPrewarmedQueueKey: String? = null
+            var nextReportAttemptMs = 0L
             while (true) {
                 val url = serverUrl.get()
                 val token = tokenHolder.get()
                 if (url.isNotBlank() && clientId.isNotBlank() && token.isNotBlank() && !authFailed.get()) {
                     val qKey = queueKey(player)
-                    if (qKey != null && qKey != lastReportedQueueKey) {
-                        lastReportedQueueKey = qKey
+                    val canReport = System.currentTimeMillis() >= nextReportAttemptMs
+                    if (qKey != null && qKey != lastReportedQueueKey && canReport) {
                         val tracks = queueSearchTracks(player)
-                        if (tracks.isNotEmpty()) {
+                        // Reporting is best-effort telemetry: swallow failures so a
+                        // dead server or expired session can't take the app down,
+                        // and only advance the marker on success so it retries.
+                        val ok = tracks.isEmpty() || runCatching {
                             apiClient.reportQueue(url, clientId, tracks, player.currentMediaItemIndex)
+                        }.onFailure { Log.w(TAG, "reportQueue failed", it) }.isSuccess
+                        if (ok) {
+                            lastReportedQueueKey = qKey
+                        } else {
+                            nextReportAttemptMs = System.currentTimeMillis() + REPORT_RETRY_BACKOFF_MS
                         }
+                    }
+                    if (qKey != null && qKey != lastPrewarmedQueueKey) {
+                        lastPrewarmedQueueKey = qKey
                         for (i in 0 until player.mediaItemCount) {
                             val tid = extractTrackId(player.getMediaItemAt(i).mediaId)
                             if (tid > 0L && !isStreamUrlFresh(tid, activeQuality.get())) {
@@ -167,9 +189,15 @@ class JamarrPlaybackService : MediaLibraryService() {
                         }
                     }
                     val mediaId = player.currentMediaItem?.mediaId
-                    if (mediaId != null && mediaId != lastReportedMediaId) {
-                        lastReportedMediaId = mediaId
-                        apiClient.reportIndex(url, clientId, player.currentMediaItemIndex)
+                    if (mediaId != null && mediaId != lastReportedMediaId && canReport) {
+                        val ok = runCatching {
+                            apiClient.reportIndex(url, clientId, player.currentMediaItemIndex)
+                        }.onFailure { Log.w(TAG, "reportIndex failed", it) }.isSuccess
+                        if (ok) {
+                            lastReportedMediaId = mediaId
+                        } else {
+                            nextReportAttemptMs = System.currentTimeMillis() + REPORT_RETRY_BACKOFF_MS
+                        }
                     }
                     val now = System.currentTimeMillis()
                     if (player.isPlaying && now - lastProgressReport >= 5000) {
@@ -222,10 +250,18 @@ class JamarrPlaybackService : MediaLibraryService() {
             streamUrlCache.remove(cacheKey(trackId, quality))
         }
 
-        val response = runBlocking {
-            withTimeout(5000) {
-                apiClient.streamUrlInfo(server, tokenHolder.get(), trackId, quality = quality)
+        // ResolvingDataSource.Resolver may only throw IOException; anything else
+        // (timeout, API error) escapes the loader as an unexpected error.
+        val response = try {
+            runBlocking {
+                withTimeout(5000) {
+                    apiClient.streamUrlInfo(server, tokenHolder.get(), trackId, quality = quality)
+                }
             }
+        } catch (e: IOException) {
+            throw e
+        } catch (e: Exception) {
+            throw IOException("Failed to resolve stream URL for track $trackId", e)
         }
         val cached = CachedStreamUrl(
             url = response.url,
@@ -331,7 +367,12 @@ class JamarrPlaybackService : MediaLibraryService() {
     }
 
     companion object {
+        private const val TAG = "JamarrPlaybackService"
         const val JAMARR_SCHEME = "jamarr"
+
+        // Back off after a failed queue/index report so an unreachable server
+        // isn't retried on every 500ms tick.
+        const val REPORT_RETRY_BACKOFF_MS = 5_000L
 
         // Server default STREAM_TOKEN_TTL_SECONDS=300. Cache for 240s so a
         // pre-warmed URL still has ~60s of validity when ExoPlayer opens it.

@@ -408,7 +408,8 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         if (clientId.isNotBlank()) {
-            apiClient.reportQueue(serverUrl, clientId, queue, startIndex)
+            // Best-effort: a failed queue report must not block local playback.
+            runCatching { apiClient.reportQueue(serverUrl, clientId, queue, startIndex) }
         }
 
         if (isRemoteMode) {

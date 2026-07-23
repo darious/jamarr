@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import time
+from collections.abc import Callable
 from typing import Any
 
 import asyncpg
@@ -42,6 +44,30 @@ from app.services.renderer.token_policy import stream_token_ttl_seconds
 logger = logging.getLogger(__name__)
 
 
+def _heals_stale_renderer(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Clear a vanished renderer before the failure reaches the client.
+
+    The call still fails (the client is told to re-select a device), but the
+    session no longer stays pinned to a device that will never answer again.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(
+        self: RendererOrchestrator,
+        db: asyncpg.Connection,
+        client_id: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        try:
+            return await func(self, db, client_id, *args, **kwargs)
+        except ValueError as exc:
+            await self._heal_if_renderer_gone(db, client_id, exc)
+            raise
+
+    return wrapper
+
+
 class RendererOrchestrator:
     def __init__(self, registry: RendererRegistry | None = None) -> None:
         self.registry = registry or get_renderer_registry()
@@ -50,6 +76,69 @@ class RendererOrchestrator:
 
     async def get_active(self, db: asyncpg.Connection, client_id: str) -> tuple[str, str]:
         return await self.registry.get_active(db, client_id)
+
+    async def _renderer_available(self, renderer_id: str) -> bool:
+        """True if the device behind renderer_id is still discoverable."""
+        try:
+            backend = self.registry.get_backend(renderer_id)
+        except ValueError:
+            return False
+        try:
+            devices = await backend.list_devices()
+        except Exception:
+            # Backend is present but unhappy — assume transient, don't clear.
+            logger.debug("Availability check failed for %s", renderer_id, exc_info=True)
+            return True
+        return any(device.renderer_id == renderer_id for device in devices)
+
+    async def clear_stale_renderer(
+        self,
+        db: asyncpg.Connection,
+        renderer_id: str,
+        exc: Exception | None = None,
+    ) -> int:
+        """Reset every session still pointing at a vanished renderer to local.
+
+        A Cast/UPnP device that disappears (powered off, renamed, new DHCP
+        lease) otherwise stays selected forever: every later control call fails
+        with 409, including index reports from clients that are actually playing
+        locally. Nothing else clears it, so the session stays wedged until the
+        user happens to re-pick a device.
+        """
+        if is_local_renderer(renderer_id):
+            return 0
+        result = await db.execute(
+            """
+            UPDATE client_session
+            SET active_renderer_id = 'local:' || client_id,
+                active_renderer_udn = 'local:' || client_id,
+                last_seen_at = NOW()
+            WHERE active_renderer_id = $1
+            """,
+            renderer_id,
+        )
+        cleared = int(result.rsplit(" ", 1)[-1]) if result else 0
+        if cleared:
+            logger.warning(
+                "Renderer %s is gone (%s) — reset %d session(s) to local playback",
+                renderer_id,
+                exc or "not discoverable",
+                cleared,
+            )
+        return cleared
+
+    async def _heal_if_renderer_gone(
+        self,
+        db: asyncpg.Connection,
+        client_id: str,
+        exc: Exception,
+    ) -> None:
+        """Clear the active renderer if this failure means the device is gone."""
+        renderer_id, state_key = await self.get_active(db, client_id)
+        if is_local_renderer(renderer_id) or await self._renderer_available(renderer_id):
+            return
+        await self.clear_stale_renderer(db, renderer_id, exc)
+        await self._cancel_monitor(state_key, remove=True)
 
     async def set_active(
         self,
@@ -79,6 +168,7 @@ class RendererOrchestrator:
             return False
         return await backend.add_manual(address) is not None
 
+    @_heals_stale_renderer
     async def set_queue(
         self,
         db: asyncpg.Connection,
@@ -112,6 +202,7 @@ class RendererOrchestrator:
                 self._play_remote_background(renderer_id, state_key, track, user_id, request)
             )
 
+    @_heals_stale_renderer
     async def play_track(
         self,
         db: asyncpg.Connection,
@@ -157,6 +248,7 @@ class RendererOrchestrator:
         await self._play_remote(renderer_id, state_key, track, user_id, request)
         return {"status": "streaming_started", "renderer": state_key}
 
+    @_heals_stale_renderer
     async def pause(self, db: asyncpg.Connection, client_id: str) -> None:
         renderer_id, state_key = await self.get_active(db, client_id)
         state = await get_renderer_state_db(db, state_key)
@@ -168,6 +260,7 @@ class RendererOrchestrator:
                 playback_monitors[state_key].cancel()
                 del playback_monitors[state_key]
 
+    @_heals_stale_renderer
     async def resume(self, db: asyncpg.Connection, client_id: str) -> None:
         renderer_id, state_key = await self.get_active(db, client_id)
         state = await get_renderer_state_db(db, state_key)
@@ -182,6 +275,7 @@ class RendererOrchestrator:
                 start_monitor_task(state_key)
                 monitor_start_times[state_key] = time.time()
 
+    @_heals_stale_renderer
     async def stop_or_clear(self, db: asyncpg.Connection, client_id: str) -> tuple[dict[str, Any], str]:
         renderer_id, state_key = await self.get_active(db, client_id)
         state = await get_renderer_state_db(db, state_key)
@@ -200,6 +294,7 @@ class RendererOrchestrator:
             await self._cancel_monitor(state_key, remove=True)
         return state, state_key
 
+    @_heals_stale_renderer
     async def seek(self, db: asyncpg.Connection, client_id: str, seconds: float) -> str:
         renderer_id, state_key = await self.get_active(db, client_id)
         state = await get_renderer_state_db(db, state_key)
@@ -210,6 +305,7 @@ class RendererOrchestrator:
             return "remote"
         return "local"
 
+    @_heals_stale_renderer
     async def set_volume(self, db: asyncpg.Connection, client_id: str, percent: int) -> None:
         renderer_id, state_key = await self.get_active(db, client_id)
         state = await get_renderer_state_db(db, state_key)
@@ -218,6 +314,7 @@ class RendererOrchestrator:
         if not is_local_renderer(renderer_id):
             await self.registry.get_backend(renderer_id).set_volume(renderer_id, percent)
 
+    @_heals_stale_renderer
     async def skip_to_index(
         self,
         db: asyncpg.Connection,
@@ -259,6 +356,13 @@ class RendererOrchestrator:
         try:
             await self._cancel_monitor(state_key)
             await self._play_remote(renderer_id, state_key, track, user_id, request)
+        except ValueError as exc:
+            # Nobody is awaiting this task, so a vanished device would otherwise
+            # leave the session pinned to it with only an unobserved traceback.
+            if not await self._renderer_available(renderer_id):
+                async with get_pool().acquire() as conn:
+                    await self.clear_stale_renderer(conn, renderer_id, exc)
+            raise
         finally:
             _clear_monitor_starting(state_key)
 
