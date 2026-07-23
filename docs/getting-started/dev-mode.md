@@ -8,10 +8,12 @@
 
 This starts all services with hot-reload enabled. No rebuilds needed for code changes!
 
-`dev.sh` auto-detects `HOST_IP` from your routing table. If that fails, set it manually:
+`dev.sh` reads `HOST_IP` from `.env` (see `.env.example`). If it isn't set there,
+the script falls back to auto-detecting your primary outbound address from the
+routing table. To override for a single run:
 
 ```bash
-HOST_IP=REDACTED_IP ./dev.sh
+HOST_IP=192.168.1.50 ./dev.sh
 ```
 
 Under the hood it runs `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`.
