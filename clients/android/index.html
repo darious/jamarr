@@ -1,0 +1,3455 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Self-hosted web-based music controller">
+      
+      
+      
+      
+        <link rel="prev" href="../tui/">
+      
+      
+        <link rel="next" href="../../guides/scanning/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Android - Jamarr</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/brand.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#native-android-and-android-auto-approach" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Jamarr" class="md-header__button md-logo" aria-label="Jamarr" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Jamarr
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Android
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="deep-purple" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/darious/jamarr" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jamarr
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/install/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../architecture/overview/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../web/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Clients
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/scanning/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../roadmap/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Roadmap
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Jamarr" class="md-nav__button md-logo" aria-label="Jamarr" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    Jamarr
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/darious/jamarr" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jamarr
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/dev-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dev Mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authentication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/renderers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Renderers & Playback
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/scanner-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/artwork/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artwork
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../architecture/decisions/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Decisions (ADRs)
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Decisions (ADRs)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0001-jwt-auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0001: JWT access + rotating refresh tokens
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0002-renderer-orchestration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0002: Unified renderer orchestration with pluggable backends
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0003-cast-stream-token-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0003: Duration-aware stream-token TTL for Cast
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0004-cast-dual-control-path/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0004: Two Cast control paths (server-driven + device-direct)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0005-scanner-two-phase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0005: Two-phase library scan (scan, then enrich)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/template/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Template
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/schema/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/scanner-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanner CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/env-vars/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment Variables
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clients
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Clients
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../web/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-Goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sequence-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sequence Plan
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sequence Plan">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stage-0-api-survey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 0: API Survey
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-1-phone-playback-prototype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 1: Phone Playback Prototype
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-2-mediasession-foundation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 2: MediaSession Foundation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-3-android-auto-browse-prototype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 3: Android Auto Browse Prototype
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-4-minimal-android-adapter-only-if-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 4: Minimal Android Adapter, Only If Needed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-5-phone-ui-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 5: Phone UI Expansion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-6-optional-hardening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 6: Optional Hardening
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#first-milestone-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First Milestone Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#android-app-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android App Shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#android-auto-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android Auto Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#backend-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backend Strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#minimal-optional-android-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal Optional Android Adapter
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Minimal Optional Android Adapter">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiandroidbrowseroot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/android/browse/root
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiandroidbrowsenode_idchildren" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/android/browse/{node_id}/children
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiandroidresolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/android/resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-this-adapter-is-small" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why This Adapter Is Small
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-to-defer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What To Defer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#risk-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Risk Controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#main-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stage-3-plan-android-auto-v1-2026-04-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 3 Plan: Android Auto v1 - 2026-04-25
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stage 3 Plan: Android Auto v1 - 2026-04-25">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#auth-in-the-car" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auth in the car
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#service-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#browse-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Browse tree
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stream-url-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream URL lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#artwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#history-reporting-and-lastfm-scrobbling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        History reporting and Last.fm scrobbling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manifest-and-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manifest and discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deferred-to-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deferred to v2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation order
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-implementation-status-2026-04-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Implementation Status - 2026-04-21
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Current Implementation Status - 2026-04-21">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#verified-on-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verified On Device
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implemented-app-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implemented App Shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#api-routes-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API Routes Used
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-1-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 1 Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-2-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 2 Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-work-completed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Work Completed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#development-environment-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development Environment Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/scanning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scanning a Library
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/lastfm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Last.fm
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/playlists/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Playlists
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-Goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sequence-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sequence Plan
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sequence Plan">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stage-0-api-survey" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 0: API Survey
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-1-phone-playback-prototype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 1: Phone Playback Prototype
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-2-mediasession-foundation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 2: MediaSession Foundation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-3-android-auto-browse-prototype" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 3: Android Auto Browse Prototype
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-4-minimal-android-adapter-only-if-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 4: Minimal Android Adapter, Only If Needed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-5-phone-ui-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 5: Phone UI Expansion
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-6-optional-hardening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 6: Optional Hardening
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#first-milestone-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First Milestone Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#android-app-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android App Shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#android-auto-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android Auto Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#backend-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backend Strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#minimal-optional-android-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal Optional Android Adapter
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Minimal Optional Android Adapter">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-apiandroidbrowseroot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/android/browse/root
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-apiandroidbrowsenode_idchildren" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GET /api/android/browse/{node_id}/children
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-apiandroidresolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        POST /api/android/resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-this-adapter-is-small" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why This Adapter Is Small
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-to-defer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What To Defer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#risk-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Risk Controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#main-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stage-3-plan-android-auto-v1-2026-04-25" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 3 Plan: Android Auto v1 - 2026-04-25
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stage 3 Plan: Android Auto v1 - 2026-04-25">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#auth-in-the-car" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auth in the car
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#service-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service architecture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#browse-tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Browse tree
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stream-url-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream URL lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#artwork" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#history-reporting-and-lastfm-scrobbling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        History reporting and Last.fm scrobbling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manifest-and-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manifest and discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deferred-to-v2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deferred to v2
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation order
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-implementation-status-2026-04-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Implementation Status - 2026-04-21
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Current Implementation Status - 2026-04-21">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#verified-on-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verified On Device
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implemented-app-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implemented App Shape
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#api-routes-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API Routes Used
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-1-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 1 Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-2-result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 2 Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-work-completed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Work Completed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#development-environment-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development Environment Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/darious/jamarr/edit/main/docs/clients/android.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="native-android-and-android-auto-approach">Native Android and Android Auto Approach<a class="headerlink" href="#native-android-and-android-auto-approach" title="Permanent link">&para;</a></h1>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
+<p>Add a native Android client for Jamarr without turning the backend into a new
+platform project.</p>
+<p>The Android app should be another Jamarr client. It should reuse the existing
+FastAPI API, auth model, stream URL flow, artwork endpoints, and library data as
+much as possible. Android Auto support should play through Android's
+<code>MediaSession</code> in the car; it should not use Jamarr's UPnP renderer support.</p>
+<p>This document intentionally separates the first safe milestone from optional
+later improvements. The first milestone should be small enough to validate the
+approach before committing to larger API work.</p>
+<h2 id="non-goals">Non-Goals<a class="headerlink" href="#non-goals" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No rewrite of the current web API.</li>
+<li>No changes to the Svelte UI contract unless independently needed.</li>
+<li>No Android Auto support for UPnP renderers.</li>
+<li>No new backend queue system for Android in the first milestone.</li>
+<li>No new auth model in the first milestone.</li>
+<li>No database schema changes in the first milestone.</li>
+<li>No broad <code>/api/mobile</code> platform redesign before a working Android prototype
+  proves what is actually needed.</li>
+</ul>
+<h2 id="sequence-plan">Sequence Plan<a class="headerlink" href="#sequence-plan" title="Permanent link">&para;</a></h2>
+<p>The work should be staged so each step proves one thing and keeps backend risk
+low. Stages 0-2 are the real initial scope. Later stages are optional and should
+only happen after the earlier stages expose a concrete need.</p>
+<h3 id="stage-0-api-survey">Stage 0: API Survey<a class="headerlink" href="#stage-0-api-survey" title="Permanent link">&para;</a></h3>
+<p>Goal: confirm which existing Jamarr endpoints the Android app can already use.</p>
+<p>Work:</p>
+<ol>
+<li>List the current auth, search, library, artwork, and stream URL endpoints.</li>
+<li>Identify the smallest path from "logged in" to "play one track".</li>
+<li>Note missing fields only if they block Android playback.</li>
+</ol>
+<p>Backend changes allowed: none.</p>
+<p>Exit criteria:</p>
+<ul>
+<li>A short endpoint map exists for the Android prototype.</li>
+<li>There is a known existing endpoint path to find or select a track.</li>
+<li>There is a known existing endpoint path to generate a playable stream URL.</li>
+</ul>
+<p>Stage 0 output: <a href="../../reference/api/">API Reference</a>.</p>
+<h3 id="stage-1-phone-playback-prototype">Stage 1: Phone Playback Prototype<a class="headerlink" href="#stage-1-phone-playback-prototype" title="Permanent link">&para;</a></h3>
+<p>Goal: prove native Android can play Jamarr audio without backend redesign.</p>
+<p>Work:</p>
+<ol>
+<li>Create the native Android project.</li>
+<li>Store a Jamarr server URL.</li>
+<li>Log in using the existing auth endpoints.</li>
+<li>Fetch enough library or search data to select one track.</li>
+<li>Request an existing Jamarr stream URL for that track.</li>
+<li>Play the stream with Android Media3/ExoPlayer.</li>
+</ol>
+<p>Backend changes allowed: none unless a tiny compatibility fix is required to
+play one track.</p>
+<p>Exit criteria:</p>
+<ul>
+<li>The app can log in.</li>
+<li>The app can select one Jamarr track.</li>
+<li>The app can play that track through ExoPlayer.</li>
+<li>The web UI still works without changes.</li>
+</ul>
+<h3 id="stage-2-mediasession-foundation">Stage 2: MediaSession Foundation<a class="headerlink" href="#stage-2-mediasession-foundation" title="Permanent link">&para;</a></h3>
+<p>Goal: make Android own playback in the standard Android way.</p>
+<p>Work:</p>
+<ol>
+<li>Add a Media3 <code>MediaSession</code>.</li>
+<li>Connect ExoPlayer to the session.</li>
+<li>Show Android media notification controls.</li>
+<li>Support play, pause, seek, previous, and next inside the phone app.</li>
+</ol>
+<p>Backend changes allowed: none.</p>
+<p>Exit criteria:</p>
+<ul>
+<li>Lock screen and notification controls work.</li>
+<li>Headset/media button controls work.</li>
+<li>Playback state is reported by Android's <code>MediaSession</code>, not Jamarr's UPnP
+  renderer state.</li>
+</ul>
+<h3 id="stage-3-android-auto-browse-prototype">Stage 3: Android Auto Browse Prototype<a class="headerlink" href="#stage-3-android-auto-browse-prototype" title="Permanent link">&para;</a></h3>
+<p>Goal: prove Android Auto can browse and play Jamarr tracks through the phone's
+media session.</p>
+<p>Work:</p>
+<ol>
+<li>Add a Media3 <code>MediaLibraryService</code>.</li>
+<li>Expose a small Android Auto browse tree.</li>
+<li>Map browse selections to Jamarr track IDs.</li>
+<li>Resolve selected tracks to existing Jamarr stream URLs.</li>
+<li>Test with Android Auto Desktop Head Unit or a real car.</li>
+</ol>
+<p>Backend changes allowed: none at first. If current web-shaped endpoints make
+the media tree awkward, stop and add the small adapter described in the next
+stage.</p>
+<p>Exit criteria:</p>
+<ul>
+<li>Android Auto can display at least one browse path.</li>
+<li>Android Auto can start playback.</li>
+<li>Playback happens through ExoPlayer and <code>MediaSession</code>.</li>
+<li>No UPnP or Jamarr renderer state is involved.</li>
+</ul>
+<h3 id="stage-4-minimal-android-adapter-only-if-needed">Stage 4: Minimal Android Adapter, Only If Needed<a class="headerlink" href="#stage-4-minimal-android-adapter-only-if-needed" title="Permanent link">&para;</a></h3>
+<p>Goal: reduce Android Auto client complexity if the existing API is awkward for
+tree-shaped browsing.</p>
+<p>Work:</p>
+<ol>
+<li>Add one narrow FastAPI router at <code>app/api/android.py</code>.</li>
+<li>Add only these routes:</li>
+<li><code>GET /api/android/browse/root</code></li>
+<li><code>GET /api/android/browse/{node_id}/children</code></li>
+<li><code>POST /api/android/resolve</code></li>
+<li>Reuse existing auth and existing database/library/stream logic.</li>
+<li>Add focused tests for the new routes.</li>
+</ol>
+<p>Backend changes allowed: one additive router only. No migrations, no web route
+changes, no auth rewrite, no player rewrite.</p>
+<p>Exit criteria:</p>
+<ul>
+<li>Android Auto browse code is simpler than it was against the web API.</li>
+<li>Existing web UI behavior is unchanged.</li>
+<li>New tests cover the adapter routes.</li>
+</ul>
+<h3 id="stage-5-phone-ui-expansion">Stage 5: Phone UI Expansion<a class="headerlink" href="#stage-5-phone-ui-expansion" title="Permanent link">&para;</a></h3>
+<p>Goal: turn the prototype into a useful phone app.</p>
+<p>Work:</p>
+<ol>
+<li>Add basic library screens.</li>
+<li>Add search.</li>
+<li>Add artist, album, and playlist detail screens.</li>
+<li>Add now-playing and queue UI managed locally by Android Media3.</li>
+</ol>
+<p>Backend changes allowed: small additive fields or endpoint fixes only when the
+Android UI proves a specific gap.</p>
+<p>Exit criteria:</p>
+<ul>
+<li>The phone app can browse enough of the library to be useful.</li>
+<li>Local Android playback remains independent of Jamarr UPnP playback.</li>
+</ul>
+<h3 id="stage-6-optional-hardening">Stage 6: Optional Hardening<a class="headerlink" href="#stage-6-optional-hardening" title="Permanent link">&para;</a></h3>
+<p>Goal: improve reliability and polish after the core app works.</p>
+<p>Possible work:</p>
+<ul>
+<li>Android playback history reporting.</li>
+<li>Better artwork sizing or caching.</li>
+<li>Batch stream URL resolution.</li>
+<li>Offline downloads.</li>
+<li>Android device/session management.</li>
+<li>Mobile-specific queue persistence.</li>
+</ul>
+<p>Backend changes allowed: only individually justified additions. Avoid grouping
+these into one large platform rewrite.</p>
+<p>Exit criteria:</p>
+<ul>
+<li>Each hardening item has a concrete problem it solves.</li>
+<li>Each item can be tested independently.</li>
+</ul>
+<h2 id="first-milestone-summary">First Milestone Summary<a class="headerlink" href="#first-milestone-summary" title="Permanent link">&para;</a></h2>
+<p>The first real milestone is the end of Stage 2: Android can log in, play one
+Jamarr track with ExoPlayer, and expose that playback through Media3
+<code>MediaSession</code>.</p>
+<p>Android Auto begins in Stage 3. The optional <code>/api/android</code> backend adapter is
+Stage 4, not a prerequisite.</p>
+<h2 id="android-app-shape">Android App Shape<a class="headerlink" href="#android-app-shape" title="Permanent link">&para;</a></h2>
+<p>Use a normal native Android app:</p>
+<ul>
+<li>Kotlin</li>
+<li>Jetpack Compose for phone UI</li>
+<li>Media3 ExoPlayer for playback</li>
+<li>Media3 Session for <code>MediaSession</code> / Android Auto integration</li>
+<li>Retrofit or Ktor for HTTP</li>
+<li>DataStore for server URL and local app preferences</li>
+<li>Secure local storage for refresh/session material</li>
+</ul>
+<p>Suggested package layout:</p>
+<div class="highlight"><pre><span></span><code>android/
+  app/
+    ui/          # Compose screens
+    data/        # Jamarr API client and DTOs
+    auth/        # Login, refresh, token storage
+    playback/    # ExoPlayer and MediaSession
+    car/         # MediaLibraryService for Android Auto
+</code></pre></div>
+<p>The first app does not need a full Jamarr UI. A small login screen, search or
+library picker, and now-playing screen are enough to validate the playback path.</p>
+<h2 id="android-auto-model">Android Auto Model<a class="headerlink" href="#android-auto-model" title="Permanent link">&para;</a></h2>
+<p>Android Auto media apps are not custom projected phone screens. The car host
+connects to the app's media service, asks for a browsable media tree, and sends
+playback commands through the app's media session.</p>
+<p>For Jamarr, Android Auto should be:</p>
+<div class="highlight"><pre><span></span><code>Jamarr FastAPI -&gt; Android app -&gt; ExoPlayer -&gt; MediaSession -&gt; Android Auto
+</code></pre></div>
+<p>It should not be:</p>
+<div class="highlight"><pre><span></span><code>Android Auto -&gt; Jamarr backend player state -&gt; UPnP renderer
+</code></pre></div>
+<p>The app owns playback in the car. Jamarr provides metadata, artwork, and stream
+URLs.</p>
+<h2 id="backend-strategy">Backend Strategy<a class="headerlink" href="#backend-strategy" title="Permanent link">&para;</a></h2>
+<p>Start with no backend changes. If Android Auto needs a cleaner browse tree than
+the current web API naturally provides, add one narrow adapter router.</p>
+<p>The adapter should:</p>
+<ul>
+<li>live under new Android-specific paths;</li>
+<li>reuse existing auth dependencies;</li>
+<li>use existing database/library query logic where practical;</li>
+<li>avoid schema changes;</li>
+<li>avoid changing existing web endpoints;</li>
+<li>return a small Android-friendly media item shape.</li>
+</ul>
+<p>Suggested file if needed:</p>
+<div class="highlight"><pre><span></span><code>app/api/android.py
+</code></pre></div>
+<p>Suggested route prefix if needed:</p>
+<div class="highlight"><pre><span></span><code>/api/android
+</code></pre></div>
+<h2 id="minimal-optional-android-adapter">Minimal Optional Android Adapter<a class="headerlink" href="#minimal-optional-android-adapter" title="Permanent link">&para;</a></h2>
+<p>Only add this after the first Android playback prototype works and the Android
+Auto <code>MediaLibraryService</code> proves that current endpoints are awkward.</p>
+<h3 id="get-apiandroidbrowseroot"><code>GET /api/android/browse/root</code><a class="headerlink" href="#get-apiandroidbrowseroot" title="Permanent link">&para;</a></h3>
+<p>Returns a small fixed set of top-level folders for Android Auto.</p>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;items&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;recent&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Recently Played&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;browsable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;playable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;playlists&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Playlists&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;browsable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;playable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;artists&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Artists&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;browsable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;playable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;albums&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Albums&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;browsable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;playable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="get-apiandroidbrowsenode_idchildren"><code>GET /api/android/browse/{node_id}/children</code><a class="headerlink" href="#get-apiandroidbrowsenode_idchildren" title="Permanent link">&para;</a></h3>
+<p>Maps simple node IDs to existing Jamarr data.</p>
+<p>Possible mappings:</p>
+<div class="highlight"><pre><span></span><code>recent           -&gt; recent tracks or playback history
+playlists        -&gt; playlist list
+playlist:{id}    -&gt; playlist tracks
+artists          -&gt; artist list
+artist:{mbid}    -&gt; artist albums or tracks
+albums           -&gt; album list
+album:{id}       -&gt; album tracks
+</code></pre></div>
+<p>Response shape:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;items&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;track:123&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Dreams&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;subtitle&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Fleetwood Mac&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;image_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/api/art/...&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;browsable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;playable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The Android app should treat <code>id</code> as opaque. The backend can parse IDs however
+it wants internally.</p>
+<h3 id="post-apiandroidresolve"><code>POST /api/android/resolve</code><a class="headerlink" href="#post-apiandroidresolve" title="Permanent link">&para;</a></h3>
+<p>Converts an Android media item ID into a playable stream.</p>
+<p>Request:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;track:123&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Response:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;track:123&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;track_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">123</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;stream_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/api/stream/123?token=...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Dreams&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;artist&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Fleetwood Mac&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;album&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Rumours&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;duration_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">257000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;image_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/api/art/...&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>This should wrap the existing Jamarr stream URL behavior. It should not create a
+new streaming system.</p>
+<h2 id="why-this-adapter-is-small">Why This Adapter Is Small<a class="headerlink" href="#why-this-adapter-is-small" title="Permanent link">&para;</a></h2>
+<p>The adapter is not a new API platform. It is a translation layer between:</p>
+<ul>
+<li>Android Auto's tree-shaped media browsing model; and</li>
+<li>Jamarr's existing library, playlist, history, artwork, and stream data.</li>
+</ul>
+<p>It should be read-only except for stream URL generation, which Jamarr already
+does. It should not own playback state.</p>
+<h2 id="what-to-defer">What To Defer<a class="headerlink" href="#what-to-defer" title="Permanent link">&para;</a></h2>
+<p>These may be useful later, but they should not block the first app:</p>
+<ul>
+<li>Android-specific playback history reporting.</li>
+<li>Offline downloads.</li>
+<li>Batch stream URL resolution.</li>
+<li>Artwork resizing/caching endpoints.</li>
+<li>Android session/device management.</li>
+<li>Mobile-specific queue persistence.</li>
+<li>A generalized <code>/api/mobile/v1</code> API.</li>
+<li>Car App Library templated media screens.</li>
+</ul>
+<p>Add these only after the first Android app shows a concrete need.</p>
+<h2 id="risk-controls">Risk Controls<a class="headerlink" href="#risk-controls" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Keep all new backend routes under <code>/api/android</code>.</li>
+<li>Do not modify existing web routes for Android.</li>
+<li>Add focused tests only for any new Android adapter endpoints.</li>
+<li>Avoid migrations for the first Android work.</li>
+<li>Keep Android Auto playback local to Android Media3.</li>
+<li>Use the existing Jamarr stream URL endpoint for actual file access.</li>
+</ul>
+<h2 id="main-decision">Main Decision<a class="headerlink" href="#main-decision" title="Permanent link">&para;</a></h2>
+<p>The important decision is to prove playback before designing a larger API. If
+the proof of concept can play Jamarr tracks through Media3, Android Auto support
+becomes a focused media-service task rather than a backend rewrite.</p>
+<p>The order is:</p>
+<ol>
+<li>API survey.</li>
+<li>Phone playback prototype.</li>
+<li>MediaSession foundation.</li>
+<li>Android Auto browse prototype.</li>
+<li>Minimal Android adapter only if needed.</li>
+<li>Phone UI expansion.</li>
+<li>Optional hardening.</li>
+</ol>
+<h2 id="stage-3-plan-android-auto-v1-2026-04-25">Stage 3 Plan: Android Auto v1 - 2026-04-25<a class="headerlink" href="#stage-3-plan-android-auto-v1-2026-04-25" title="Permanent link">&para;</a></h2>
+<p>Stages 0-2 are complete. Stage 5 (Phone UI) is well past its original scope:
+home, search, artist detail, album detail, playlists, charts, history,
+favourites, queue/now playing, and history+scrobble reporting all ship in the
+phone app. The next milestone is in-car playback through Android Auto.</p>
+<p>This section captures the concrete decisions made before any car-related code.
+Stage 4's <code>/api/android</code> adapter is <strong>not</strong> part of v1 - existing endpoints map
+to the planned browse tree without change.</p>
+<h3 id="auth-in-the-car">Auth in the car<a class="headerlink" href="#auth-in-the-car" title="Permanent link">&para;</a></h3>
+<p>The car has no UI for typing a password. The <code>MediaLibraryService</code> runs on the
+phone and reuses the access token already in DataStore.</p>
+<ul>
+<li>If the token is missing or expired beyond refresh, the root browse tree
+  returns a single non-playable item titled "Sign in on phone to use Jamarr".</li>
+<li>The existing <code>JamarrApiClient</code> auth interceptor handles refresh transparently
+  while the car session is live.</li>
+<li>No in-car login flow.</li>
+</ul>
+<h3 id="service-architecture">Service architecture<a class="headerlink" href="#service-architecture" title="Permanent link">&para;</a></h3>
+<p>Upgrade the existing <code>JamarrPlaybackService extends MediaSessionService</code> to
+extend <code>MediaLibraryService</code> instead. <code>MediaLibraryService</code> is a subclass of
+<code>MediaSessionService</code>, so the phone behaviour is preserved and the same service
+serves both phone and car. No second service.</p>
+<h3 id="browse-tree">Browse tree<a class="headerlink" href="#browse-tree" title="Permanent link">&para;</a></h3>
+<p>Drive-safe and shallow. The artist and album catalogues are too large to be
+useful as flat lists in the car, so they are intentionally <strong>not</strong> root nodes -
+voice/text search is the entry point for "play <something specific>".</p>
+<div class="highlight"><pre><span></span><code>Root
+├── Favourites
+│   ├── Artists  → artist   → albums   → tracks
+│   └── Releases → album    → tracks
+└── Playlists    → playlist → tracks
+├── Recently PLayed
+│   ├── Albums   → album    → tracks
+├── Charts
+│   ├── Albums   → album    → tracks
+├── History
+│   ├── Albums   → album    → tracks
+│   └── Artists  → artist   → albums   → tracks
+├── Recently Added
+│   ├── Albums   → album    → tracks
+</code></pre></div>
+<p>Tap behaviour:</p>
+<ul>
+<li>Track: play it; queue siblings (album/playlist) for prev/next.</li>
+<li>Album / playlist: play from track 1.</li>
+<li>Artist: show albums (no auto-play; "Shuffle artist" deferred).</li>
+</ul>
+<p>Search is wired through <code>MediaLibrarySession.Callback.onSearch</code> later (see
+deferred section). For v1, AA's text search field will be empty.</p>
+<h3 id="stream-url-lifecycle">Stream URL lifecycle<a class="headerlink" href="#stream-url-lifecycle" title="Permanent link">&para;</a></h3>
+<p>Stream URLs are short-lived, signed tokens. The current phone code resolves the
+whole queue's URLs up front, which would fail mid-drive on long playlists.</p>
+<p>For Android Auto - and the phone, since they share the service - switch to lazy
+resolution: implement a Media3 <code>ResolvingDataSource.Factory</code> that calls
+<code>GET /api/stream-url/{id}</code> immediately before each track plays. The <code>MediaItem</code>
+holds the track id; the data source resolves it to a fresh URL on demand.</p>
+<p>No backend change. This also fixes any "queue dies after N tracks" issue from
+expired tokens.</p>
+<h3 id="artwork">Artwork<a class="headerlink" href="#artwork" title="Permanent link">&para;</a></h3>
+<p><code>MediaMetadata.artworkUri</code> is fetched by the AA system process, not by our app,
+so it can't carry our bearer token. v1 embeds bytes:</p>
+<ul>
+<li>Fetch artwork via OkHttp/Coil using the existing
+  <code>/api/art/file/{sha1}?max_size=400</code> endpoint (auth header attached as normal).</li>
+<li>Set the bytes on <code>MediaMetadata.artworkData</code>.</li>
+<li>~30-100 KB per track in the session bundle - acceptable for now.</li>
+</ul>
+<p>If memory/IPC cost becomes a problem, revisit with a signed art URL endpoint.</p>
+<h3 id="history-reporting-and-lastfm-scrobbling">History reporting and Last.fm scrobbling<a class="headerlink" href="#history-reporting-and-lastfm-scrobbling" title="Permanent link">&para;</a></h3>
+<p>These ship in v1 (not deferred). The phone already calls
+<code>POST /api/player/queue</code>, <code>POST /api/player/index</code>, and
+<code>POST /api/player/progress</code> from the polling loop in <code>JamarrApp.kt</code>. The same
+loop must keep running while AA is connected; nothing about car playback should
+disable it.</p>
+<p>The polling loop is driven by <code>MediaController</code> state, not by the foreground
+UI, so it should continue working when the phone screen is off and AA is in
+control. Verify this explicitly during DHU testing - history rows for
+in-car playback must appear at the same 30s/20% threshold the web UI uses.</p>
+<h3 id="manifest-and-discovery">Manifest and discovery<a class="headerlink" href="#manifest-and-discovery" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Add <code>res/xml/automotive_app_desc.xml</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nt">&lt;automotiveApp&gt;</span>
+<span class="w">    </span><span class="nt">&lt;uses</span><span class="w"> </span><span class="na">name=</span><span class="s">&quot;media&quot;</span><span class="nt">/&gt;</span>
+<span class="nt">&lt;/automotiveApp&gt;</span>
+</code></pre></div>
+<ul>
+<li>Application-level meta-data:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nt">&lt;meta-data</span>
+<span class="w">    </span><span class="na">android:name=</span><span class="s">&quot;com.google.android.gms.car.application&quot;</span>
+<span class="w">    </span><span class="na">android:resource=</span><span class="s">&quot;@xml/automotive_app_desc&quot;</span><span class="nt">/&gt;</span>
+</code></pre></div>
+<ul>
+<li>The service intent filter keeps <code>MediaSessionService</code> and adds
+  <code>MediaLibraryService</code> (Media3 dispatches to both).</li>
+</ul>
+<h3 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h3>
+<p>Use Android Studio's Desktop Head Unit (DHU) to iterate without driving:</p>
+<ul>
+<li>Install DHU via the SDK Manager (Extras &gt; Android Auto Desktop Head Unit).</li>
+<li>Phone needs USB debugging + AA developer mode enabled.</li>
+<li>A small helper script under <code>android/scripts/dhu.sh</code> should:</li>
+<li>check <code>adb</code> is available,</li>
+<li>start the phone-side AA in head-unit-server mode,</li>
+<li>launch the DHU binary,</li>
+<li>tear everything down on Ctrl-C.</li>
+</ul>
+<p>The <code>android/README.md</code> (or root README) needs a "Testing in the car" section
+linking to the script and noting prerequisites. Real-car validation is the
+final step.</p>
+<h3 id="deferred-to-v2">Deferred to v2<a class="headerlink" href="#deferred-to-v2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Voice/text search (<code>onSearch</code>) - intentional v1 omission.</li>
+<li>Custom session commands (favourite from car, etc.).</li>
+<li>Offline downloads.</li>
+<li>Pagination/alphabet scaffolding for full Artists/Albums browse - rejected
+  for v1; search covers the use case.</li>
+<li>The <code>/api/android</code> adapter - revisit only if a v1 awkwardness justifies it.</li>
+</ul>
+<h3 id="implementation-order">Implementation order<a class="headerlink" href="#implementation-order" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Lazy stream resolution via <code>ResolvingDataSource.Factory</code> (fixes phone bug
+   too).</li>
+<li>Service upgrade to <code>MediaLibraryService</code> + manifest changes.</li>
+<li>Root browse tree + Recently Played + Favourites + Playlists nodes.</li>
+<li>Drilldown nodes (album→tracks, artist→albums, playlist→tracks).</li>
+<li>Embedded artwork on <code>MediaMetadata</code>.</li>
+<li>DHU helper script + README.</li>
+<li>Verify history/scrobble reporting still works under AA.</li>
+</ol>
+<h2 id="current-implementation-status-2026-04-21">Current Implementation Status - 2026-04-21<a class="headerlink" href="#current-implementation-status-2026-04-21" title="Permanent link">&para;</a></h2>
+<p>The native Android proof of concept now exists under <code>android/</code>.</p>
+<p>Backend and web were intentionally left unchanged. The app uses existing Jamarr
+API routes only.</p>
+<h3 id="verified-on-device">Verified On Device<a class="headerlink" href="#verified-on-device" title="Permanent link">&para;</a></h3>
+<p>Test device:</p>
+<ul>
+<li>Pixel XL</li>
+<li>Android 10</li>
+<li>ADB serial seen locally as <code>HT69K0206009</code></li>
+</ul>
+<p>Verified behavior:</p>
+<ul>
+<li>Login works against a LAN Jamarr server URL.</li>
+<li>Track search works.</li>
+<li>The app calls <code>GET /api/stream-url/{track_id}</code> and plays the returned stream
+  URL with Media3 ExoPlayer.</li>
+<li>Playback works on device.</li>
+<li>Media notification shade controls work.</li>
+<li>In-app controls work:</li>
+<li>play</li>
+<li>pause</li>
+<li>previous</li>
+<li>next</li>
+<li>seek back 10 seconds</li>
+<li>seek forward 30 seconds</li>
+<li>Notification shade controls also work.</li>
+<li>Artwork appears in the Android media notification.</li>
+<li>Scrolling works on the phone UI.</li>
+</ul>
+<h3 id="implemented-app-shape">Implemented App Shape<a class="headerlink" href="#implemented-app-shape" title="Permanent link">&para;</a></h3>
+<p>The current app is a native Kotlin Android project:</p>
+<div class="highlight"><pre><span></span><code>android/
+  settings.gradle.kts
+  build.gradle.kts
+  gradle/wrapper/
+  app/
+    build.gradle.kts
+    src/main/AndroidManifest.xml
+    src/main/java/com/jamarr/android/
+      MainActivity.kt
+      auth/SettingsStore.kt
+      data/JamarrApiClient.kt
+      data/JamarrDtos.kt
+      playback/JamarrPlaybackController.kt
+      playback/JamarrPlaybackService.kt
+      ui/JamarrApp.kt
+      ui/Theme.kt
+    src/main/res/drawable/jamarr_logo.png
+</code></pre></div>
+<p>Main dependencies:</p>
+<ul>
+<li>Kotlin</li>
+<li>Jetpack Compose</li>
+<li>AndroidX DataStore preferences</li>
+<li>Media3 ExoPlayer</li>
+<li>Media3 Session</li>
+<li>OkHttp</li>
+<li>kotlinx.serialization</li>
+<li>Coil 3 for artwork loading</li>
+</ul>
+<p>Build stack:</p>
+<ul>
+<li>Android Gradle Plugin 9.0.1</li>
+<li>Gradle wrapper 9.1.0</li>
+<li>AGP 9 built-in Kotlin support</li>
+<li>Compose compiler plugin 2.3.10</li>
+<li>kotlinx.serialization compiler plugin 2.3.10</li>
+<li>JDK 17</li>
+</ul>
+<h3 id="api-routes-used">API Routes Used<a class="headerlink" href="#api-routes-used" title="Permanent link">&para;</a></h3>
+<p>Authentication:</p>
+<div class="highlight"><pre><span></span><code>POST /api/auth/login
+</code></pre></div>
+<p>Search and playback:</p>
+<div class="highlight"><pre><span></span><code>GET /api/search?q=&lt;query&gt;
+GET /api/stream-url/{track_id}
+GET /api/stream/{track_id}?token=&lt;stream_jwt&gt;
+</code></pre></div>
+<p>Home page sections:</p>
+<div class="highlight"><pre><span></span><code>GET /api/home/new-releases
+GET /api/home/recently-added-albums
+GET /api/history/albums
+GET /api/home/discover-artists
+GET /api/history/artists
+</code></pre></div>
+<p>Album playback:</p>
+<div class="highlight"><pre><span></span><code>GET /api/tracks?album=&lt;album&gt;&amp;artist=&lt;artist&gt;
+</code></pre></div>
+<p>Artwork:</p>
+<div class="highlight"><pre><span></span><code>GET /api/art/file/{sha1}?max_size=400
+</code></pre></div>
+<h3 id="stage-1-result">Stage 1 Result<a class="headerlink" href="#stage-1-result" title="Permanent link">&para;</a></h3>
+<p>Stage 1 is complete for the POC.</p>
+<p>Implementation details:</p>
+<ul>
+<li>Server URL and access token are saved with DataStore.</li>
+<li>Login sends the existing JSON body:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;username&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your_username&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;password&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>The password field had to be changed to <code>KeyboardType.Password</code>. Before this,
+  Android treated it as normal autocorrect text, which could leave unexpected
+  whitespace in the field and cause <code>Invalid credentials</code>.</li>
+<li>Cleartext HTTP is currently enabled in the manifest for LAN development URLs
+  such as <code>http://REDACTED_IP:8111</code>.</li>
+<li>Do not use <code>localhost</code> from a physical phone unless Jamarr is running on the
+  phone itself. Use the machine's LAN IP.</li>
+</ul>
+<h3 id="stage-2-result">Stage 2 Result<a class="headerlink" href="#stage-2-result" title="Permanent link">&para;</a></h3>
+<p>Stage 2 is complete for the POC.</p>
+<p>Implementation details:</p>
+<ul>
+<li><code>JamarrPlaybackService</code> extends Media3 <code>MediaSessionService</code>.</li>
+<li>The service owns the ExoPlayer instance.</li>
+<li><code>JamarrPlaybackController</code> uses a Media3 <code>MediaController</code>.</li>
+<li>The phone UI no longer owns ExoPlayer directly.</li>
+<li>The manifest declares the media playback foreground service:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="nt">&lt;service</span>
+<span class="w">    </span><span class="na">android:name=</span><span class="s">&quot;.playback.JamarrPlaybackService&quot;</span>
+<span class="w">    </span><span class="na">android:exported=</span><span class="s">&quot;true&quot;</span>
+<span class="w">    </span><span class="na">android:foregroundServiceType=</span><span class="s">&quot;mediaPlayback&quot;</span><span class="nt">&gt;</span>
+<span class="w">    </span><span class="nt">&lt;intent-filter&gt;</span>
+<span class="w">        </span><span class="nt">&lt;action</span><span class="w"> </span><span class="na">android:name=</span><span class="s">&quot;androidx.media3.session.MediaSessionService&quot;</span><span class="w"> </span><span class="nt">/&gt;</span>
+<span class="w">    </span><span class="nt">&lt;/intent-filter&gt;</span>
+<span class="nt">&lt;/service&gt;</span>
+</code></pre></div>
+<ul>
+<li>The app requests notification permission on Android 13+.</li>
+<li>Search results are turned into a Media3 playlist, so previous/next works from
+  both the app and notification shade.</li>
+</ul>
+<h3 id="ui-work-completed">UI Work Completed<a class="headerlink" href="#ui-work-completed" title="Permanent link">&para;</a></h3>
+<p>The UI is no longer just the original bare POC.</p>
+<p>Completed UI changes:</p>
+<ul>
+<li>Dark grey and pink theme.</li>
+<li>Site logo copied from <code>web/static/assets/logo.png</code> into Android resources.</li>
+<li>Home screen with horizontal artwork rows matching the web home page:</li>
+<li>New Releases</li>
+<li>Recently Added</li>
+<li>Recently Played Albums</li>
+<li>Newly Added Artists</li>
+<li>Recently Played Artists</li>
+<li>Album cards load artwork and can start playback.</li>
+<li>Artist cards currently search for the artist name.</li>
+<li>Search still works and track cards can start playback.</li>
+<li>Now-playing controls remain visible in the screen.</li>
+</ul>
+<h3 id="development-environment-notes">Development Environment Notes<a class="headerlink" href="#development-environment-notes" title="Permanent link">&para;</a></h3>
+<p>Host environment used:</p>
+<ul>
+<li>CachyOS / Arch</li>
+<li>Android Studio installed</li>
+<li>Android SDK under <code>/home/darious/Android/Sdk</code></li>
+<li>Android SDK platform <code>android-36</code> present</li>
+<li>ADB available at <code>/usr/bin/adb</code></li>
+<li>System Java default was Java 26:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>java-26-openjdk (default)
+</code></pre></div>
+<ul>
+<li>Java 17 was already installed:</li>
+</ul>
+<div class="highlight"><pre><span></span><code>java-17-openjdk
+</code></pre></div>
+<p>Important build detail:</p>
+<ul>
+<li>Use Java 17 for Android Gradle Plugin builds.</li>
+<li>The project has a Gradle wrapper pinned to Gradle 9.1.0.</li>
+<li>The system <code>gradle</code> package was 9.4.1 and used Java 26 by default, so the
+  wrapper is preferred.</li>
+<li>AGP 9 built-in Kotlin is enabled. Do not re-add the
+  <code>org.jetbrains.kotlin.android</code> plugin; AGP 9 provides Kotlin support for the
+  Android app module.</li>
+</ul>
+<p>Recommended build command:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>android
+<span class="nv">JAVA_HOME</span><span class="o">=</span>/usr/lib/jvm/java-17-openjdk<span class="w"> </span>./gradlew<span class="w"> </span>:app:assembleDebug
+</code></pre></div>
+<p>Recommended install command:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>android
+<span class="nv">JAVA_HOME</span><span class="o">=</span>/usr/lib/jvm/java-17-openjdk<span class="w"> </span>./gradlew<span class="w"> </span>:app:installDebug
+</code></pre></div>
+<p>The Codex sandbox could not use <code>/home/darious/.gradle</code> because it was outside
+the writable workspace. During this session, builds used a workspace-local
+Gradle user home:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">GRADLE_USER_HOME</span><span class="o">=</span>/home/darious/code/jamarr/android/.gradle-user
+</code></pre></div>
+<p>That directory is ignored by <code>android/.gitignore</code> and should not be committed.</p>
+<p>ADB needed to run outside the sandbox to access USB and the local ADB daemon.</p>
+<p>Useful device checks:</p>
+<div class="highlight"><pre><span></span><code>adb<span class="w"> </span>devices
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>packages<span class="w"> </span>com.jamarr.android
+adb<span class="w"> </span>shell<span class="w"> </span>monkey<span class="w"> </span>-p<span class="w"> </span>com.jamarr.android<span class="w"> </span><span class="m">1</span>
+</code></pre></div>
+<h3 id="build-status">Build Status<a class="headerlink" href="#build-status" title="Permanent link">&para;</a></h3>
+<p>The final checked app state built and installed successfully on 2026-04-21:</p>
+<div class="highlight"><pre><span></span><code>BUILD SUCCESSFUL
+Installed on 1 device.
+</code></pre></div>
+<h3 id="known-limitations">Known Limitations<a class="headerlink" href="#known-limitations" title="Permanent link">&para;</a></h3>
+<p>These are acceptable for the current POC but should be addressed later:</p>
+<ul>
+<li>Access tokens are stored in DataStore. Refresh-cookie/session handling is not
+  fully implemented yet.</li>
+<li>Refresh/session material is not stored in encrypted storage yet.</li>
+<li>Stream URLs are resolved eagerly for a whole queue. Later, resolve URLs lazily
+  when a track is about to play so short-lived stream tokens do not expire in a
+  long queue.</li>
+<li>Album playback currently fetches album tracks from the existing web-shaped
+  <code>/api/tracks</code> route.</li>
+<li>Artist cards do not open artist detail screens yet; they trigger a search.</li>
+<li>No playlist, album detail, artist detail, or full library screens yet.</li>
+<li>No playback history reporting from Android yet.</li>
+<li>No Android Auto <code>MediaLibraryService</code> browse tree yet. That remains Stage 3.</li>
+<li>No <code>/api/android</code> adapter exists. Stage 4 should only be added if Android Auto
+  browsing proves the current API is too awkward.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.top", "navigation.indexes", "content.code.copy", "content.action.edit", "search.suggest", "search.highlight", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

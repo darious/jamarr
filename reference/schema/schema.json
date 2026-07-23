@@ -1,0 +1,5139 @@
+{
+  "name": "jamarr_test",
+  "tables": [
+    {
+      "name": "public.track",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('track_id_seq'::regclass)"
+        },
+        {
+          "name": "path",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "artist",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "album",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "album_artist",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "track_no",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "disc_no",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "release_date",
+          "type": "date",
+          "nullable": true
+        },
+        {
+          "name": "release_type",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_type_raw",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_date_raw",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_date_tag",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "duration_seconds",
+          "type": "double precision",
+          "nullable": true
+        },
+        {
+          "name": "codec",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "sample_rate_hz",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "bit_depth",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "bitrate",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "channels",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "label",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "artist_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "album_artist_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "track_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_track_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_group_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "artwork_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "size_bytes",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "quick_hash",
+          "type": "bytea",
+          "nullable": true
+        },
+        {
+          "name": "mtime",
+          "type": "double precision",
+          "nullable": true
+        },
+        {
+          "name": "fts_vector",
+          "type": "tsvector",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "track_pkey",
+          "def": "CREATE UNIQUE INDEX track_pkey ON public.track USING btree (id)",
+          "table": "public.track",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "track_path_key",
+          "def": "CREATE UNIQUE INDEX track_path_key ON public.track USING btree (path)",
+          "table": "public.track",
+          "columns": [
+            "path"
+          ]
+        },
+        {
+          "name": "idx_track_fts",
+          "def": "CREATE INDEX idx_track_fts ON public.track USING gin (fts_vector)",
+          "table": "public.track",
+          "columns": [
+            "fts_vector"
+          ]
+        },
+        {
+          "name": "idx_track_artwork",
+          "def": "CREATE INDEX idx_track_artwork ON public.track USING btree (artwork_id)",
+          "table": "public.track",
+          "columns": [
+            "artwork_id"
+          ]
+        },
+        {
+          "name": "idx_track_artist_mbid",
+          "def": "CREATE INDEX idx_track_artist_mbid ON public.track USING btree (artist_mbid)",
+          "table": "public.track",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "idx_track_release_mbid",
+          "def": "CREATE INDEX idx_track_release_mbid ON public.track USING btree (release_mbid)",
+          "table": "public.track",
+          "columns": [
+            "release_mbid"
+          ]
+        },
+        {
+          "name": "idx_track_release_group_mbid",
+          "def": "CREATE INDEX idx_track_release_group_mbid ON public.track USING btree (release_group_mbid)",
+          "table": "public.track",
+          "columns": [
+            "release_group_mbid"
+          ]
+        },
+        {
+          "name": "idx_track_nav",
+          "def": "CREATE INDEX idx_track_nav ON public.track USING btree (artist, album, disc_no, track_no)",
+          "table": "public.track",
+          "columns": [
+            "artist",
+            "album",
+            "disc_no",
+            "track_no"
+          ]
+        },
+        {
+          "name": "idx_track_album",
+          "def": "CREATE INDEX idx_track_album ON public.track USING btree (album, disc_no, track_no)",
+          "table": "public.track",
+          "columns": [
+            "album",
+            "disc_no",
+            "track_no"
+          ]
+        },
+        {
+          "name": "idx_track_updated",
+          "def": "CREATE INDEX idx_track_updated ON public.track USING btree (updated_at)",
+          "table": "public.track",
+          "columns": [
+            "updated_at"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "track_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.track",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "track_path_not_null",
+          "type": "n",
+          "def": "NOT NULL path",
+          "table": "public.track",
+          "referenced_table": "",
+          "columns": [
+            "path"
+          ]
+        },
+        {
+          "name": "track_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.track",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "track_path_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (path)",
+          "table": "public.track",
+          "referenced_table": "",
+          "columns": [
+            "path"
+          ]
+        }
+      ],
+      "triggers": [
+        {
+          "name": "track_fts_update",
+          "def": "CREATE TRIGGER track_fts_update BEFORE INSERT OR UPDATE ON public.track FOR EACH ROW EXECUTE FUNCTION track_fts_trigger()"
+        }
+      ]
+    },
+    {
+      "name": "public.artist",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "citext",
+          "nullable": true
+        },
+        {
+          "name": "sort_name",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "bio",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "image_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "image_source",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "artwork_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "letter",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "artist_pkey",
+          "def": "CREATE UNIQUE INDEX artist_pkey ON public.artist USING btree (mbid)",
+          "table": "public.artist",
+          "columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "idx_artist_name",
+          "def": "CREATE INDEX idx_artist_name ON public.artist USING btree (name)",
+          "table": "public.artist",
+          "columns": [
+            "name"
+          ]
+        },
+        {
+          "name": "idx_artist_letter",
+          "def": "CREATE INDEX idx_artist_letter ON public.artist USING btree (letter)",
+          "table": "public.artist",
+          "columns": [
+            "letter"
+          ]
+        },
+        {
+          "name": "idx_artist_name_trgm",
+          "def": "CREATE INDEX idx_artist_name_trgm ON public.artist USING gin (name gin_trgm_ops)",
+          "table": "public.artist",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "artist_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL mbid",
+          "table": "public.artist",
+          "referenced_table": "",
+          "columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "artist_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (mbid)",
+          "table": "public.artist",
+          "referenced_table": "",
+          "columns": [
+            "mbid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.album",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "release_group_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_date",
+          "type": "date",
+          "nullable": true
+        },
+        {
+          "name": "release_type",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_type_raw",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "artwork_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "peak_chart_position",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "album_pkey",
+          "def": "CREATE UNIQUE INDEX album_pkey ON public.album USING btree (mbid)",
+          "table": "public.album",
+          "columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "idx_album_release_group_mbid",
+          "def": "CREATE INDEX idx_album_release_group_mbid ON public.album USING btree (release_group_mbid)",
+          "table": "public.album",
+          "columns": [
+            "release_group_mbid"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "album_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL mbid",
+          "table": "public.album",
+          "referenced_table": "",
+          "columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "album_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (mbid)",
+          "table": "public.album",
+          "referenced_table": "",
+          "columns": [
+            "mbid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.artist_album",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "artist_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "album_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "type",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "artist_album_pkey",
+          "def": "CREATE UNIQUE INDEX artist_album_pkey ON public.artist_album USING btree (artist_mbid, album_mbid)",
+          "table": "public.artist_album",
+          "columns": [
+            "artist_mbid",
+            "album_mbid"
+          ]
+        },
+        {
+          "name": "idx_artist_album_map_album",
+          "def": "CREATE INDEX idx_artist_album_map_album ON public.artist_album USING btree (album_mbid)",
+          "table": "public.artist_album",
+          "columns": [
+            "album_mbid"
+          ]
+        },
+        {
+          "name": "idx_artist_album_map_artist_type",
+          "def": "CREATE INDEX idx_artist_album_map_artist_type ON public.artist_album USING btree (artist_mbid, type)",
+          "table": "public.artist_album",
+          "columns": [
+            "artist_mbid",
+            "type"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "artist_album_album_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL album_mbid",
+          "table": "public.artist_album",
+          "referenced_table": "",
+          "columns": [
+            "album_mbid"
+          ]
+        },
+        {
+          "name": "artist_album_artist_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_mbid",
+          "table": "public.artist_album",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "artist_album_artist_mbid_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE",
+          "table": "public.artist_album",
+          "referenced_table": "public.artist",
+          "columns": [
+            "artist_mbid"
+          ],
+          "referenced_columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "artist_album_album_mbid_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (album_mbid) REFERENCES album(mbid) ON DELETE CASCADE",
+          "table": "public.artist_album",
+          "referenced_table": "public.album",
+          "columns": [
+            "album_mbid"
+          ],
+          "referenced_columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "artist_album_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (artist_mbid, album_mbid)",
+          "table": "public.artist_album",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid",
+            "album_mbid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.external_link",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('external_link_id_seq'::regclass)"
+        },
+        {
+          "name": "entity_type",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "entity_id",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "type",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "url",
+          "type": "text",
+          "nullable": false
+        }
+      ],
+      "indexes": [
+        {
+          "name": "external_link_pkey",
+          "def": "CREATE UNIQUE INDEX external_link_pkey ON public.external_link USING btree (id)",
+          "table": "public.external_link",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "external_link_entity_type_entity_id_type_key",
+          "def": "CREATE UNIQUE INDEX external_link_entity_type_entity_id_type_key ON public.external_link USING btree (entity_type, entity_id, type)",
+          "table": "public.external_link",
+          "columns": [
+            "entity_type",
+            "entity_id",
+            "type"
+          ]
+        },
+        {
+          "name": "idx_link_entity",
+          "def": "CREATE INDEX idx_link_entity ON public.external_link USING btree (entity_type, entity_id)",
+          "table": "public.external_link",
+          "columns": [
+            "entity_type",
+            "entity_id"
+          ]
+        },
+        {
+          "name": "idx_link_entity_type",
+          "def": "CREATE INDEX idx_link_entity_type ON public.external_link USING btree (entity_type, entity_id, type)",
+          "table": "public.external_link",
+          "columns": [
+            "entity_type",
+            "entity_id",
+            "type"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "external_link_entity_id_not_null",
+          "type": "n",
+          "def": "NOT NULL entity_id",
+          "table": "public.external_link",
+          "referenced_table": "",
+          "columns": [
+            "entity_id"
+          ]
+        },
+        {
+          "name": "external_link_entity_type_not_null",
+          "type": "n",
+          "def": "NOT NULL entity_type",
+          "table": "public.external_link",
+          "referenced_table": "",
+          "columns": [
+            "entity_type"
+          ]
+        },
+        {
+          "name": "external_link_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.external_link",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "external_link_type_not_null",
+          "type": "n",
+          "def": "NOT NULL type",
+          "table": "public.external_link",
+          "referenced_table": "",
+          "columns": [
+            "type"
+          ]
+        },
+        {
+          "name": "external_link_url_not_null",
+          "type": "n",
+          "def": "NOT NULL url",
+          "table": "public.external_link",
+          "referenced_table": "",
+          "columns": [
+            "url"
+          ]
+        },
+        {
+          "name": "external_link_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.external_link",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "external_link_entity_type_entity_id_type_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (entity_type, entity_id, type)",
+          "table": "public.external_link",
+          "referenced_table": "",
+          "columns": [
+            "entity_type",
+            "entity_id",
+            "type"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.track_artist",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "track_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "artist_mbid",
+          "type": "text",
+          "nullable": false
+        }
+      ],
+      "indexes": [
+        {
+          "name": "track_artist_pkey",
+          "def": "CREATE UNIQUE INDEX track_artist_pkey ON public.track_artist USING btree (track_id, artist_mbid)",
+          "table": "public.track_artist",
+          "columns": [
+            "track_id",
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "idx_track_artist_map_mbid",
+          "def": "CREATE INDEX idx_track_artist_map_mbid ON public.track_artist USING btree (artist_mbid)",
+          "table": "public.track_artist",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "idx_track_artist_map_track",
+          "def": "CREATE INDEX idx_track_artist_map_track ON public.track_artist USING btree (track_id)",
+          "table": "public.track_artist",
+          "columns": [
+            "track_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "track_artist_artist_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_mbid",
+          "table": "public.track_artist",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "track_artist_track_id_not_null",
+          "type": "n",
+          "def": "NOT NULL track_id",
+          "table": "public.track_artist",
+          "referenced_table": "",
+          "columns": [
+            "track_id"
+          ]
+        },
+        {
+          "name": "track_artist_track_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE",
+          "table": "public.track_artist",
+          "referenced_table": "public.track",
+          "columns": [
+            "track_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "track_artist_artist_mbid_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE",
+          "table": "public.track_artist",
+          "referenced_table": "public.artist",
+          "columns": [
+            "artist_mbid"
+          ],
+          "referenced_columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "track_artist_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (track_id, artist_mbid)",
+          "table": "public.track_artist",
+          "referenced_table": "",
+          "columns": [
+            "track_id",
+            "artist_mbid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.artwork",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('artwork_id_seq'::regclass)"
+        },
+        {
+          "name": "sha1",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "type",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "mime",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "width",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "height",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "path_on_disk",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "filesize_bytes",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "image_format",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "source_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "check_errors",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "artwork_pkey",
+          "def": "CREATE UNIQUE INDEX artwork_pkey ON public.artwork USING btree (id)",
+          "table": "public.artwork",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "artwork_sha1_key",
+          "def": "CREATE UNIQUE INDEX artwork_sha1_key ON public.artwork USING btree (sha1)",
+          "table": "public.artwork",
+          "columns": [
+            "sha1"
+          ]
+        },
+        {
+          "name": "idx_artwork_source",
+          "def": "CREATE INDEX idx_artwork_source ON public.artwork USING btree (source)",
+          "table": "public.artwork",
+          "columns": [
+            "source"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "artwork_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.artwork",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "artwork_sha1_not_null",
+          "type": "n",
+          "def": "NOT NULL sha1",
+          "table": "public.artwork",
+          "referenced_table": "",
+          "columns": [
+            "sha1"
+          ]
+        },
+        {
+          "name": "artwork_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.artwork",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "artwork_sha1_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (sha1)",
+          "table": "public.artwork",
+          "referenced_table": "",
+          "columns": [
+            "sha1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.image_map",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "artwork_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "entity_type",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "entity_id",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "image_type",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "score",
+          "type": "double precision",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "image_map_pkey",
+          "def": "CREATE UNIQUE INDEX image_map_pkey ON public.image_map USING btree (entity_type, entity_id, image_type)",
+          "table": "public.image_map",
+          "columns": [
+            "entity_type",
+            "entity_id",
+            "image_type"
+          ]
+        },
+        {
+          "name": "idx_image_map_artwork",
+          "def": "CREATE INDEX idx_image_map_artwork ON public.image_map USING btree (artwork_id)",
+          "table": "public.image_map",
+          "columns": [
+            "artwork_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "image_map_artwork_id_not_null",
+          "type": "n",
+          "def": "NOT NULL artwork_id",
+          "table": "public.image_map",
+          "referenced_table": "",
+          "columns": [
+            "artwork_id"
+          ]
+        },
+        {
+          "name": "image_map_entity_id_not_null",
+          "type": "n",
+          "def": "NOT NULL entity_id",
+          "table": "public.image_map",
+          "referenced_table": "",
+          "columns": [
+            "entity_id"
+          ]
+        },
+        {
+          "name": "image_map_entity_type_not_null",
+          "type": "n",
+          "def": "NOT NULL entity_type",
+          "table": "public.image_map",
+          "referenced_table": "",
+          "columns": [
+            "entity_type"
+          ]
+        },
+        {
+          "name": "image_map_image_type_not_null",
+          "type": "n",
+          "def": "NOT NULL image_type",
+          "table": "public.image_map",
+          "referenced_table": "",
+          "columns": [
+            "image_type"
+          ]
+        },
+        {
+          "name": "image_map_artwork_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (artwork_id) REFERENCES artwork(id) ON DELETE CASCADE",
+          "table": "public.image_map",
+          "referenced_table": "public.artwork",
+          "columns": [
+            "artwork_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "image_map_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (entity_type, entity_id, image_type)",
+          "table": "public.image_map",
+          "referenced_table": "",
+          "columns": [
+            "entity_type",
+            "entity_id",
+            "image_type"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.renderer",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('renderer_id_seq'::regclass)"
+        },
+        {
+          "name": "friendly_name",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "udn",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "nullable": true,
+          "default": "'upnp'::text"
+        },
+        {
+          "name": "native_id",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "renderer_id",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "location_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "ip",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "control_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "rendering_control_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "device_type",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "manufacturer",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "model_name",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "model_number",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "serial_number",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "firmware_version",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "event_subscription_sid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "supports_events",
+          "type": "boolean",
+          "nullable": true,
+          "default": "false"
+        },
+        {
+          "name": "supports_gapless",
+          "type": "boolean",
+          "nullable": true,
+          "default": "false"
+        },
+        {
+          "name": "supported_mime_types",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "icon_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "icon_mime",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "icon_width",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "icon_height",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "cast_uuid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "cast_type",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "last_discovered_by",
+          "type": "text",
+          "nullable": true,
+          "default": "'server'::text"
+        },
+        {
+          "name": "available",
+          "type": "boolean",
+          "nullable": true,
+          "default": "true"
+        },
+        {
+          "name": "enabled_by_default",
+          "type": "boolean",
+          "nullable": true,
+          "default": "true"
+        },
+        {
+          "name": "renderer_metadata",
+          "type": "jsonb",
+          "nullable": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "renderer_pkey",
+          "def": "CREATE UNIQUE INDEX renderer_pkey ON public.renderer USING btree (id)",
+          "table": "public.renderer",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "renderer_udn_key",
+          "def": "CREATE UNIQUE INDEX renderer_udn_key ON public.renderer USING btree (udn)",
+          "table": "public.renderer",
+          "columns": [
+            "udn"
+          ]
+        },
+        {
+          "name": "renderer_renderer_id_key",
+          "def": "CREATE UNIQUE INDEX renderer_renderer_id_key ON public.renderer USING btree (renderer_id)",
+          "table": "public.renderer",
+          "columns": [
+            "renderer_id"
+          ]
+        },
+        {
+          "name": "renderer_cast_uuid_key",
+          "def": "CREATE UNIQUE INDEX renderer_cast_uuid_key ON public.renderer USING btree (cast_uuid)",
+          "table": "public.renderer",
+          "columns": [
+            "cast_uuid"
+          ]
+        },
+        {
+          "name": "idx_renderer_renderer_id",
+          "def": "CREATE UNIQUE INDEX idx_renderer_renderer_id ON public.renderer USING btree (renderer_id) WHERE (renderer_id IS NOT NULL)",
+          "table": "public.renderer",
+          "columns": [
+            "renderer_id"
+          ]
+        },
+        {
+          "name": "idx_renderer_cast_uuid",
+          "def": "CREATE UNIQUE INDEX idx_renderer_cast_uuid ON public.renderer USING btree (cast_uuid) WHERE (cast_uuid IS NOT NULL)",
+          "table": "public.renderer",
+          "columns": [
+            "cast_uuid"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "renderer_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.renderer",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "renderer_udn_not_null",
+          "type": "n",
+          "def": "NOT NULL udn",
+          "table": "public.renderer",
+          "referenced_table": "",
+          "columns": [
+            "udn"
+          ]
+        },
+        {
+          "name": "renderer_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.renderer",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "renderer_udn_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (udn)",
+          "table": "public.renderer",
+          "referenced_table": "",
+          "columns": [
+            "udn"
+          ]
+        },
+        {
+          "name": "renderer_renderer_id_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (renderer_id)",
+          "table": "public.renderer",
+          "referenced_table": "",
+          "columns": [
+            "renderer_id"
+          ]
+        },
+        {
+          "name": "renderer_cast_uuid_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (cast_uuid)",
+          "table": "public.renderer",
+          "referenced_table": "",
+          "columns": [
+            "cast_uuid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.client_session",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "client_id",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "active_renderer_udn",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "active_renderer_id",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "client_session_pkey",
+          "def": "CREATE UNIQUE INDEX client_session_pkey ON public.client_session USING btree (client_id)",
+          "table": "public.client_session",
+          "columns": [
+            "client_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "client_session_client_id_not_null",
+          "type": "n",
+          "def": "NOT NULL client_id",
+          "table": "public.client_session",
+          "referenced_table": "",
+          "columns": [
+            "client_id"
+          ]
+        },
+        {
+          "name": "client_session_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (client_id)",
+          "table": "public.client_session",
+          "referenced_table": "",
+          "columns": [
+            "client_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.renderer_state",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "renderer_udn",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "queue",
+          "type": "text",
+          "nullable": true,
+          "default": "'[]'::text"
+        },
+        {
+          "name": "current_index",
+          "type": "integer",
+          "nullable": true,
+          "default": "'-1'::integer"
+        },
+        {
+          "name": "position_seconds",
+          "type": "double precision",
+          "nullable": true,
+          "default": "0"
+        },
+        {
+          "name": "is_playing",
+          "type": "boolean",
+          "nullable": true,
+          "default": "false"
+        },
+        {
+          "name": "transport_state",
+          "type": "text",
+          "nullable": true,
+          "default": "'STOPPED'::text"
+        },
+        {
+          "name": "volume",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "renderer_state_pkey",
+          "def": "CREATE UNIQUE INDEX renderer_state_pkey ON public.renderer_state USING btree (renderer_udn)",
+          "table": "public.renderer_state",
+          "columns": [
+            "renderer_udn"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "renderer_state_renderer_udn_not_null",
+          "type": "n",
+          "def": "NOT NULL renderer_udn",
+          "table": "public.renderer_state",
+          "referenced_table": "",
+          "columns": [
+            "renderer_udn"
+          ]
+        },
+        {
+          "name": "renderer_state_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (renderer_udn)",
+          "table": "public.renderer_state",
+          "referenced_table": "",
+          "columns": [
+            "renderer_udn"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.playback_history",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('playback_history_id_seq'::regclass)"
+        },
+        {
+          "name": "track_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "timestamp",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "client_ip",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "hostname",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "client_id",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "playback_history_pkey",
+          "def": "CREATE UNIQUE INDEX playback_history_pkey ON public.playback_history USING btree (id)",
+          "table": "public.playback_history",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "idx_playback_history_ts",
+          "def": "CREATE INDEX idx_playback_history_ts ON public.playback_history USING btree (\"timestamp\")",
+          "table": "public.playback_history",
+          "columns": [
+            "timestamp"
+          ]
+        },
+        {
+          "name": "idx_playback_history_user_ts",
+          "def": "CREATE INDEX idx_playback_history_user_ts ON public.playback_history USING btree (user_id, \"timestamp\")",
+          "table": "public.playback_history",
+          "columns": [
+            "user_id",
+            "timestamp"
+          ]
+        },
+        {
+          "name": "idx_playback_history_track_ts",
+          "def": "CREATE INDEX idx_playback_history_track_ts ON public.playback_history USING btree (track_id, \"timestamp\")",
+          "table": "public.playback_history",
+          "columns": [
+            "track_id",
+            "timestamp"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "playback_history_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.playback_history",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "playback_history_track_id_not_null",
+          "type": "n",
+          "def": "NOT NULL track_id",
+          "table": "public.playback_history",
+          "referenced_table": "",
+          "columns": [
+            "track_id"
+          ]
+        },
+        {
+          "name": "playback_history_track_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE",
+          "table": "public.playback_history",
+          "referenced_table": "public.track",
+          "columns": [
+            "track_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "playback_history_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.playback_history",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.user",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('user_id_seq'::regclass)"
+        },
+        {
+          "name": "username",
+          "type": "citext",
+          "nullable": false
+        },
+        {
+          "name": "email",
+          "type": "citext",
+          "nullable": false
+        },
+        {
+          "name": "password_hash",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "display_name",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "last_login_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "is_active",
+          "type": "boolean",
+          "nullable": true,
+          "default": "true"
+        },
+        {
+          "name": "is_admin",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "accent_color",
+          "type": "text",
+          "nullable": true,
+          "default": "'#ff006e'::text"
+        },
+        {
+          "name": "theme_mode",
+          "type": "text",
+          "nullable": true,
+          "default": "'dark'::text"
+        },
+        {
+          "name": "lastfm_username",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "lastfm_session_key",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "lastfm_enabled",
+          "type": "boolean",
+          "nullable": true,
+          "default": "true"
+        },
+        {
+          "name": "lastfm_connected_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "user_pkey",
+          "def": "CREATE UNIQUE INDEX user_pkey ON public.\"user\" USING btree (id)",
+          "table": "public.user",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "user_username_key",
+          "def": "CREATE UNIQUE INDEX user_username_key ON public.\"user\" USING btree (username)",
+          "table": "public.user",
+          "columns": [
+            "username"
+          ]
+        },
+        {
+          "name": "user_email_key",
+          "def": "CREATE UNIQUE INDEX user_email_key ON public.\"user\" USING btree (email)",
+          "table": "public.user",
+          "columns": [
+            "email"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "user_email_not_null",
+          "type": "n",
+          "def": "NOT NULL email",
+          "table": "public.user",
+          "referenced_table": "",
+          "columns": [
+            "email"
+          ]
+        },
+        {
+          "name": "user_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.user",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "user_is_admin_not_null",
+          "type": "n",
+          "def": "NOT NULL is_admin",
+          "table": "public.user",
+          "referenced_table": "",
+          "columns": [
+            "is_admin"
+          ]
+        },
+        {
+          "name": "user_password_hash_not_null",
+          "type": "n",
+          "def": "NOT NULL password_hash",
+          "table": "public.user",
+          "referenced_table": "",
+          "columns": [
+            "password_hash"
+          ]
+        },
+        {
+          "name": "user_username_not_null",
+          "type": "n",
+          "def": "NOT NULL username",
+          "table": "public.user",
+          "referenced_table": "",
+          "columns": [
+            "username"
+          ]
+        },
+        {
+          "name": "user_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.user",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "user_username_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (username)",
+          "table": "public.user",
+          "referenced_table": "",
+          "columns": [
+            "username"
+          ]
+        },
+        {
+          "name": "user_email_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (email)",
+          "table": "public.user",
+          "referenced_table": "",
+          "columns": [
+            "email"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.favorite_artist",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "artist_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "favorite_artist_pkey",
+          "def": "CREATE UNIQUE INDEX favorite_artist_pkey ON public.favorite_artist USING btree (user_id, artist_mbid)",
+          "table": "public.favorite_artist",
+          "columns": [
+            "user_id",
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "idx_favorite_artist_user_created",
+          "def": "CREATE INDEX idx_favorite_artist_user_created ON public.favorite_artist USING btree (user_id, created_at DESC)",
+          "table": "public.favorite_artist",
+          "columns": [
+            "user_id",
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_favorite_artist_artist",
+          "def": "CREATE INDEX idx_favorite_artist_artist ON public.favorite_artist USING btree (artist_mbid)",
+          "table": "public.favorite_artist",
+          "columns": [
+            "artist_mbid"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "favorite_artist_artist_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_mbid",
+          "table": "public.favorite_artist",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "favorite_artist_user_id_not_null",
+          "type": "n",
+          "def": "NOT NULL user_id",
+          "table": "public.favorite_artist",
+          "referenced_table": "",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "favorite_artist_artist_mbid_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE",
+          "table": "public.favorite_artist",
+          "referenced_table": "public.artist",
+          "columns": [
+            "artist_mbid"
+          ],
+          "referenced_columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "favorite_artist_user_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE",
+          "table": "public.favorite_artist",
+          "referenced_table": "public.user",
+          "columns": [
+            "user_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "favorite_artist_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (user_id, artist_mbid)",
+          "table": "public.favorite_artist",
+          "referenced_table": "",
+          "columns": [
+            "user_id",
+            "artist_mbid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.favorite_release",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "album_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "favorite_release_pkey",
+          "def": "CREATE UNIQUE INDEX favorite_release_pkey ON public.favorite_release USING btree (user_id, album_mbid)",
+          "table": "public.favorite_release",
+          "columns": [
+            "user_id",
+            "album_mbid"
+          ]
+        },
+        {
+          "name": "idx_favorite_release_user_created",
+          "def": "CREATE INDEX idx_favorite_release_user_created ON public.favorite_release USING btree (user_id, created_at DESC)",
+          "table": "public.favorite_release",
+          "columns": [
+            "user_id",
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_favorite_release_album",
+          "def": "CREATE INDEX idx_favorite_release_album ON public.favorite_release USING btree (album_mbid)",
+          "table": "public.favorite_release",
+          "columns": [
+            "album_mbid"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "favorite_release_album_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL album_mbid",
+          "table": "public.favorite_release",
+          "referenced_table": "",
+          "columns": [
+            "album_mbid"
+          ]
+        },
+        {
+          "name": "favorite_release_user_id_not_null",
+          "type": "n",
+          "def": "NOT NULL user_id",
+          "table": "public.favorite_release",
+          "referenced_table": "",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "favorite_release_album_mbid_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (album_mbid) REFERENCES album(mbid) ON DELETE CASCADE",
+          "table": "public.favorite_release",
+          "referenced_table": "public.album",
+          "columns": [
+            "album_mbid"
+          ],
+          "referenced_columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "favorite_release_user_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE",
+          "table": "public.favorite_release",
+          "referenced_table": "public.user",
+          "columns": [
+            "user_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "favorite_release_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (user_id, album_mbid)",
+          "table": "public.favorite_release",
+          "referenced_table": "",
+          "columns": [
+            "user_id",
+            "album_mbid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.session",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('session_id_seq'::regclass)"
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "token",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "nullable": false
+        },
+        {
+          "name": "user_agent",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "ip",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "session_pkey",
+          "def": "CREATE UNIQUE INDEX session_pkey ON public.session USING btree (id)",
+          "table": "public.session",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "session_token_key",
+          "def": "CREATE UNIQUE INDEX session_token_key ON public.session USING btree (token)",
+          "table": "public.session",
+          "columns": [
+            "token"
+          ]
+        },
+        {
+          "name": "idx_session_token",
+          "def": "CREATE INDEX idx_session_token ON public.session USING btree (token)",
+          "table": "public.session",
+          "columns": [
+            "token"
+          ]
+        },
+        {
+          "name": "idx_session_user",
+          "def": "CREATE INDEX idx_session_user ON public.session USING btree (user_id)",
+          "table": "public.session",
+          "columns": [
+            "user_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "session_expires_at_not_null",
+          "type": "n",
+          "def": "NOT NULL expires_at",
+          "table": "public.session",
+          "referenced_table": "",
+          "columns": [
+            "expires_at"
+          ]
+        },
+        {
+          "name": "session_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.session",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "session_token_not_null",
+          "type": "n",
+          "def": "NOT NULL token",
+          "table": "public.session",
+          "referenced_table": "",
+          "columns": [
+            "token"
+          ]
+        },
+        {
+          "name": "session_user_id_not_null",
+          "type": "n",
+          "def": "NOT NULL user_id",
+          "table": "public.session",
+          "referenced_table": "",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "session_user_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE",
+          "table": "public.session",
+          "referenced_table": "public.user",
+          "columns": [
+            "user_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "session_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.session",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "session_token_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (token)",
+          "table": "public.session",
+          "referenced_table": "",
+          "columns": [
+            "token"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.top_track",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('top_track_id_seq'::regclass)"
+        },
+        {
+          "name": "artist_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "type",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "track_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "external_name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "external_album",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "external_date",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "external_duration_ms",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "external_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "popularity",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "rank",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "top_track_pkey",
+          "def": "CREATE UNIQUE INDEX top_track_pkey ON public.top_track USING btree (id)",
+          "table": "public.top_track",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "top_track_artist_mbid_type_external_name_external_album_key",
+          "def": "CREATE UNIQUE INDEX top_track_artist_mbid_type_external_name_external_album_key ON public.top_track USING btree (artist_mbid, type, external_name, external_album)",
+          "table": "public.top_track",
+          "columns": [
+            "artist_mbid",
+            "type",
+            "external_name",
+            "external_album"
+          ]
+        },
+        {
+          "name": "top_track_artist_mbid_type_rank_key",
+          "def": "CREATE UNIQUE INDEX top_track_artist_mbid_type_rank_key ON public.top_track USING btree (artist_mbid, type, rank)",
+          "table": "public.top_track",
+          "columns": [
+            "artist_mbid",
+            "type",
+            "rank"
+          ]
+        },
+        {
+          "name": "top_track_artist_mbid_type_external_mbid_key",
+          "def": "CREATE UNIQUE INDEX top_track_artist_mbid_type_external_mbid_key ON public.top_track USING btree (artist_mbid, type, external_mbid)",
+          "table": "public.top_track",
+          "columns": [
+            "artist_mbid",
+            "type",
+            "external_mbid"
+          ]
+        },
+        {
+          "name": "idx_top_track_artist",
+          "def": "CREATE INDEX idx_top_track_artist ON public.top_track USING btree (artist_mbid, type)",
+          "table": "public.top_track",
+          "columns": [
+            "artist_mbid",
+            "type"
+          ]
+        },
+        {
+          "name": "idx_top_track_track",
+          "def": "CREATE INDEX idx_top_track_track ON public.top_track USING btree (track_id)",
+          "table": "public.top_track",
+          "columns": [
+            "track_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "top_track_artist_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_mbid",
+          "table": "public.top_track",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "top_track_external_name_not_null",
+          "type": "n",
+          "def": "NOT NULL external_name",
+          "table": "public.top_track",
+          "referenced_table": "",
+          "columns": [
+            "external_name"
+          ]
+        },
+        {
+          "name": "top_track_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.top_track",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "top_track_type_check",
+          "type": "CHECK",
+          "def": "CHECK ((type = ANY (ARRAY['top'::text, 'single'::text])))",
+          "table": "public.top_track",
+          "referenced_table": "",
+          "columns": [
+            "type"
+          ]
+        },
+        {
+          "name": "top_track_type_not_null",
+          "type": "n",
+          "def": "NOT NULL type",
+          "table": "public.top_track",
+          "referenced_table": "",
+          "columns": [
+            "type"
+          ]
+        },
+        {
+          "name": "top_track_track_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE SET NULL",
+          "table": "public.top_track",
+          "referenced_table": "public.track",
+          "columns": [
+            "track_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "top_track_artist_mbid_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE",
+          "table": "public.top_track",
+          "referenced_table": "public.artist",
+          "columns": [
+            "artist_mbid"
+          ],
+          "referenced_columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "top_track_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.top_track",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "top_track_artist_mbid_type_external_name_external_album_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (artist_mbid, type, external_name, external_album)",
+          "table": "public.top_track",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid",
+            "type",
+            "external_name",
+            "external_album"
+          ]
+        },
+        {
+          "name": "top_track_artist_mbid_type_rank_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (artist_mbid, type, rank)",
+          "table": "public.top_track",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid",
+            "type",
+            "rank"
+          ]
+        },
+        {
+          "name": "top_track_artist_mbid_type_external_mbid_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (artist_mbid, type, external_mbid)",
+          "table": "public.top_track",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid",
+            "type",
+            "external_mbid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.similar_artist",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "artist_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "similar_artist_name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "similar_artist_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "rank",
+          "type": "integer",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "similar_artist_pkey",
+          "def": "CREATE UNIQUE INDEX similar_artist_pkey ON public.similar_artist USING btree (artist_mbid, similar_artist_name)",
+          "table": "public.similar_artist",
+          "columns": [
+            "artist_mbid",
+            "similar_artist_name"
+          ]
+        },
+        {
+          "name": "idx_similar_artist_main",
+          "def": "CREATE INDEX idx_similar_artist_main ON public.similar_artist USING btree (artist_mbid)",
+          "table": "public.similar_artist",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "idx_similar_artist_related",
+          "def": "CREATE INDEX idx_similar_artist_related ON public.similar_artist USING btree (similar_artist_mbid)",
+          "table": "public.similar_artist",
+          "columns": [
+            "similar_artist_mbid"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "similar_artist_artist_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_mbid",
+          "table": "public.similar_artist",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "similar_artist_similar_artist_name_not_null",
+          "type": "n",
+          "def": "NOT NULL similar_artist_name",
+          "table": "public.similar_artist",
+          "referenced_table": "",
+          "columns": [
+            "similar_artist_name"
+          ]
+        },
+        {
+          "name": "similar_artist_artist_mbid_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE",
+          "table": "public.similar_artist",
+          "referenced_table": "public.artist",
+          "columns": [
+            "artist_mbid"
+          ],
+          "referenced_columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "similar_artist_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (artist_mbid, similar_artist_name)",
+          "table": "public.similar_artist",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid",
+            "similar_artist_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.artist_genre",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "artist_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "genre",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "nullable": true,
+          "default": "0"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "artist_genre_pkey",
+          "def": "CREATE UNIQUE INDEX artist_genre_pkey ON public.artist_genre USING btree (artist_mbid, genre)",
+          "table": "public.artist_genre",
+          "columns": [
+            "artist_mbid",
+            "genre"
+          ]
+        },
+        {
+          "name": "idx_artist_genre_artist",
+          "def": "CREATE INDEX idx_artist_genre_artist ON public.artist_genre USING btree (artist_mbid)",
+          "table": "public.artist_genre",
+          "columns": [
+            "artist_mbid"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "artist_genre_artist_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_mbid",
+          "table": "public.artist_genre",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "artist_genre_genre_not_null",
+          "type": "n",
+          "def": "NOT NULL genre",
+          "table": "public.artist_genre",
+          "referenced_table": "",
+          "columns": [
+            "genre"
+          ]
+        },
+        {
+          "name": "artist_genre_artist_mbid_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE",
+          "table": "public.artist_genre",
+          "referenced_table": "public.artist",
+          "columns": [
+            "artist_mbid"
+          ],
+          "referenced_columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "artist_genre_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (artist_mbid, genre)",
+          "table": "public.artist_genre",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid",
+            "genre"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.missing_album",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('missing_album_id_seq'::regclass)"
+        },
+        {
+          "name": "artist_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "release_group_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "release_date",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "primary_type",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "musicbrainz_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "missing_album_pkey",
+          "def": "CREATE UNIQUE INDEX missing_album_pkey ON public.missing_album USING btree (id)",
+          "table": "public.missing_album",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "missing_album_artist_mbid_release_group_mbid_key",
+          "def": "CREATE UNIQUE INDEX missing_album_artist_mbid_release_group_mbid_key ON public.missing_album USING btree (artist_mbid, release_group_mbid)",
+          "table": "public.missing_album",
+          "columns": [
+            "artist_mbid",
+            "release_group_mbid"
+          ]
+        },
+        {
+          "name": "idx_missing_album_artist",
+          "def": "CREATE INDEX idx_missing_album_artist ON public.missing_album USING btree (artist_mbid)",
+          "table": "public.missing_album",
+          "columns": [
+            "artist_mbid"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "missing_album_artist_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_mbid",
+          "table": "public.missing_album",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid"
+          ]
+        },
+        {
+          "name": "missing_album_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.missing_album",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "missing_album_release_group_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL release_group_mbid",
+          "table": "public.missing_album",
+          "referenced_table": "",
+          "columns": [
+            "release_group_mbid"
+          ]
+        },
+        {
+          "name": "missing_album_title_not_null",
+          "type": "n",
+          "def": "NOT NULL title",
+          "table": "public.missing_album",
+          "referenced_table": "",
+          "columns": [
+            "title"
+          ]
+        },
+        {
+          "name": "missing_album_artist_mbid_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE",
+          "table": "public.missing_album",
+          "referenced_table": "public.artist",
+          "columns": [
+            "artist_mbid"
+          ],
+          "referenced_columns": [
+            "mbid"
+          ]
+        },
+        {
+          "name": "missing_album_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.missing_album",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "missing_album_artist_mbid_release_group_mbid_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (artist_mbid, release_group_mbid)",
+          "table": "public.missing_album",
+          "referenced_table": "",
+          "columns": [
+            "artist_mbid",
+            "release_group_mbid"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.playlist",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('playlist_id_seq'::regclass)"
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "is_public",
+          "type": "boolean",
+          "nullable": false,
+          "default": "false"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "playlist_pkey",
+          "def": "CREATE UNIQUE INDEX playlist_pkey ON public.playlist USING btree (id)",
+          "table": "public.playlist",
+          "columns": [
+            "id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "playlist_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.playlist",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "playlist_is_public_not_null",
+          "type": "n",
+          "def": "NOT NULL is_public",
+          "table": "public.playlist",
+          "referenced_table": "",
+          "columns": [
+            "is_public"
+          ]
+        },
+        {
+          "name": "playlist_name_not_null",
+          "type": "n",
+          "def": "NOT NULL name",
+          "table": "public.playlist",
+          "referenced_table": "",
+          "columns": [
+            "name"
+          ]
+        },
+        {
+          "name": "playlist_updated_at_not_null",
+          "type": "n",
+          "def": "NOT NULL updated_at",
+          "table": "public.playlist",
+          "referenced_table": "",
+          "columns": [
+            "updated_at"
+          ]
+        },
+        {
+          "name": "playlist_user_id_not_null",
+          "type": "n",
+          "def": "NOT NULL user_id",
+          "table": "public.playlist",
+          "referenced_table": "",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "playlist_user_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE",
+          "table": "public.playlist",
+          "referenced_table": "public.user",
+          "columns": [
+            "user_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "playlist_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.playlist",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.playlist_track",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('playlist_track_id_seq'::regclass)"
+        },
+        {
+          "name": "playlist_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "track_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "position",
+          "type": "integer",
+          "nullable": false
+        }
+      ],
+      "indexes": [
+        {
+          "name": "playlist_track_pkey",
+          "def": "CREATE UNIQUE INDEX playlist_track_pkey ON public.playlist_track USING btree (id)",
+          "table": "public.playlist_track",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "idx_playlist_track_playlist_pos",
+          "def": "CREATE INDEX idx_playlist_track_playlist_pos ON public.playlist_track USING btree (playlist_id, \"position\")",
+          "table": "public.playlist_track",
+          "columns": [
+            "playlist_id",
+            "position"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "playlist_track_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.playlist_track",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "playlist_track_playlist_id_not_null",
+          "type": "n",
+          "def": "NOT NULL playlist_id",
+          "table": "public.playlist_track",
+          "referenced_table": "",
+          "columns": [
+            "playlist_id"
+          ]
+        },
+        {
+          "name": "playlist_track_position_not_null",
+          "type": "n",
+          "def": "NOT NULL \"position\"",
+          "table": "public.playlist_track",
+          "referenced_table": "",
+          "columns": [
+            "position"
+          ]
+        },
+        {
+          "name": "playlist_track_track_id_not_null",
+          "type": "n",
+          "def": "NOT NULL track_id",
+          "table": "public.playlist_track",
+          "referenced_table": "",
+          "columns": [
+            "track_id"
+          ]
+        },
+        {
+          "name": "playlist_track_track_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE",
+          "table": "public.playlist_track",
+          "referenced_table": "public.track",
+          "columns": [
+            "track_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "playlist_track_playlist_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (playlist_id) REFERENCES playlist(id) ON DELETE CASCADE",
+          "table": "public.playlist_track",
+          "referenced_table": "public.playlist",
+          "columns": [
+            "playlist_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "playlist_track_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.playlist_track",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.chart_album",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "position",
+          "type": "integer",
+          "nullable": false
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "artist",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "last_week",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "peak",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "weeks",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_group_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "chart_album_pkey",
+          "def": "CREATE UNIQUE INDEX chart_album_pkey ON public.chart_album USING btree (\"position\")",
+          "table": "public.chart_album",
+          "columns": [
+            "position"
+          ]
+        },
+        {
+          "name": "idx_chart_album_rg_mbid",
+          "def": "CREATE INDEX idx_chart_album_rg_mbid ON public.chart_album USING btree (release_group_mbid)",
+          "table": "public.chart_album",
+          "columns": [
+            "release_group_mbid"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "chart_album_artist_not_null",
+          "type": "n",
+          "def": "NOT NULL artist",
+          "table": "public.chart_album",
+          "referenced_table": "",
+          "columns": [
+            "artist"
+          ]
+        },
+        {
+          "name": "chart_album_position_not_null",
+          "type": "n",
+          "def": "NOT NULL \"position\"",
+          "table": "public.chart_album",
+          "referenced_table": "",
+          "columns": [
+            "position"
+          ]
+        },
+        {
+          "name": "chart_album_title_not_null",
+          "type": "n",
+          "def": "NOT NULL title",
+          "table": "public.chart_album",
+          "referenced_table": "",
+          "columns": [
+            "title"
+          ]
+        },
+        {
+          "name": "chart_album_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (\"position\")",
+          "table": "public.chart_album",
+          "referenced_table": "",
+          "columns": [
+            "position"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.chart_match_override",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "artist",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "release_group_mbid",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_chart_match_override_key",
+          "def": "CREATE UNIQUE INDEX idx_chart_match_override_key ON public.chart_match_override USING btree (lower(artist), lower(title))",
+          "table": "public.chart_match_override",
+          "columns": [
+            "lower",
+            "lower1"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "chart_match_override_artist_not_null",
+          "type": "n",
+          "def": "NOT NULL artist",
+          "table": "public.chart_match_override",
+          "referenced_table": "",
+          "columns": [
+            "artist"
+          ]
+        },
+        {
+          "name": "chart_match_override_release_group_mbid_not_null",
+          "type": "n",
+          "def": "NOT NULL release_group_mbid",
+          "table": "public.chart_match_override",
+          "referenced_table": "",
+          "columns": [
+            "release_group_mbid"
+          ]
+        },
+        {
+          "name": "chart_match_override_title_not_null",
+          "type": "n",
+          "def": "NOT NULL title",
+          "table": "public.chart_match_override",
+          "referenced_table": "",
+          "columns": [
+            "title"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.lastfm_scrobble",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('lastfm_scrobble_id_seq'::regclass)"
+        },
+        {
+          "name": "lastfm_username",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "played_at",
+          "type": "timestamp with time zone",
+          "nullable": false
+        },
+        {
+          "name": "played_at_uts",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "track_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "track_name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "track_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "artist_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "artist_name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "artist_url",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "album_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "album_name",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "lastfm_scrobble_pkey",
+          "def": "CREATE UNIQUE INDEX lastfm_scrobble_pkey ON public.lastfm_scrobble USING btree (id)",
+          "table": "public.lastfm_scrobble",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_lastfm_username_played_at_track_name_artist_key",
+          "def": "CREATE UNIQUE INDEX lastfm_scrobble_lastfm_username_played_at_track_name_artist_key ON public.lastfm_scrobble USING btree (lastfm_username, played_at, track_name, artist_name)",
+          "table": "public.lastfm_scrobble",
+          "columns": [
+            "lastfm_username",
+            "played_at",
+            "track_name",
+            "artist_name"
+          ]
+        },
+        {
+          "name": "idx_lastfm_scrobble_user_played",
+          "def": "CREATE INDEX idx_lastfm_scrobble_user_played ON public.lastfm_scrobble USING btree (lastfm_username, played_at DESC)",
+          "table": "public.lastfm_scrobble",
+          "columns": [
+            "lastfm_username",
+            "played_at"
+          ]
+        },
+        {
+          "name": "idx_lastfm_scrobble_played_at",
+          "def": "CREATE INDEX idx_lastfm_scrobble_played_at ON public.lastfm_scrobble USING btree (played_at DESC)",
+          "table": "public.lastfm_scrobble",
+          "columns": [
+            "played_at"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "lastfm_scrobble_artist_name_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_name",
+          "table": "public.lastfm_scrobble",
+          "referenced_table": "",
+          "columns": [
+            "artist_name"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.lastfm_scrobble",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_lastfm_username_not_null",
+          "type": "n",
+          "def": "NOT NULL lastfm_username",
+          "table": "public.lastfm_scrobble",
+          "referenced_table": "",
+          "columns": [
+            "lastfm_username"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_played_at_not_null",
+          "type": "n",
+          "def": "NOT NULL played_at",
+          "table": "public.lastfm_scrobble",
+          "referenced_table": "",
+          "columns": [
+            "played_at"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_track_name_not_null",
+          "type": "n",
+          "def": "NOT NULL track_name",
+          "table": "public.lastfm_scrobble",
+          "referenced_table": "",
+          "columns": [
+            "track_name"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.lastfm_scrobble",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_lastfm_username_played_at_track_name_artist_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (lastfm_username, played_at, track_name, artist_name)",
+          "table": "public.lastfm_scrobble",
+          "referenced_table": "",
+          "columns": [
+            "lastfm_username",
+            "played_at",
+            "track_name",
+            "artist_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.lastfm_scrobble_match",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('lastfm_scrobble_match_id_seq'::regclass)"
+        },
+        {
+          "name": "scrobble_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "track_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "match_score",
+          "type": "double precision",
+          "nullable": false
+        },
+        {
+          "name": "match_method",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "match_reason",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "cache_key",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "matched_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "lastfm_scrobble_match_pkey",
+          "def": "CREATE UNIQUE INDEX lastfm_scrobble_match_pkey ON public.lastfm_scrobble_match USING btree (id)",
+          "table": "public.lastfm_scrobble_match",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_match_scrobble_id_key",
+          "def": "CREATE UNIQUE INDEX lastfm_scrobble_match_scrobble_id_key ON public.lastfm_scrobble_match USING btree (scrobble_id)",
+          "table": "public.lastfm_scrobble_match",
+          "columns": [
+            "scrobble_id"
+          ]
+        },
+        {
+          "name": "idx_scrobble_match_cache_key",
+          "def": "CREATE INDEX idx_scrobble_match_cache_key ON public.lastfm_scrobble_match USING btree (cache_key) WHERE (cache_key IS NOT NULL)",
+          "table": "public.lastfm_scrobble_match",
+          "columns": [
+            "cache_key"
+          ]
+        },
+        {
+          "name": "idx_scrobble_match_track_id",
+          "def": "CREATE INDEX idx_scrobble_match_track_id ON public.lastfm_scrobble_match USING btree (track_id)",
+          "table": "public.lastfm_scrobble_match",
+          "columns": [
+            "track_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "lastfm_scrobble_match_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.lastfm_scrobble_match",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_match_match_method_not_null",
+          "type": "n",
+          "def": "NOT NULL match_method",
+          "table": "public.lastfm_scrobble_match",
+          "referenced_table": "",
+          "columns": [
+            "match_method"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_match_match_score_not_null",
+          "type": "n",
+          "def": "NOT NULL match_score",
+          "table": "public.lastfm_scrobble_match",
+          "referenced_table": "",
+          "columns": [
+            "match_score"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_match_scrobble_id_not_null",
+          "type": "n",
+          "def": "NOT NULL scrobble_id",
+          "table": "public.lastfm_scrobble_match",
+          "referenced_table": "",
+          "columns": [
+            "scrobble_id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_match_track_id_not_null",
+          "type": "n",
+          "def": "NOT NULL track_id",
+          "table": "public.lastfm_scrobble_match",
+          "referenced_table": "",
+          "columns": [
+            "track_id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_match_track_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE",
+          "table": "public.lastfm_scrobble_match",
+          "referenced_table": "public.track",
+          "columns": [
+            "track_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_match_scrobble_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE",
+          "table": "public.lastfm_scrobble_match",
+          "referenced_table": "public.lastfm_scrobble",
+          "columns": [
+            "scrobble_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_match_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.lastfm_scrobble_match",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "lastfm_scrobble_match_scrobble_id_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (scrobble_id)",
+          "table": "public.lastfm_scrobble_match",
+          "referenced_table": "",
+          "columns": [
+            "scrobble_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.lastfm_skip_artist",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "artist_name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "reason",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "added_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "lastfm_skip_artist_pkey",
+          "def": "CREATE UNIQUE INDEX lastfm_skip_artist_pkey ON public.lastfm_skip_artist USING btree (artist_name)",
+          "table": "public.lastfm_skip_artist",
+          "columns": [
+            "artist_name"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "lastfm_skip_artist_artist_name_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_name",
+          "table": "public.lastfm_skip_artist",
+          "referenced_table": "",
+          "columns": [
+            "artist_name"
+          ]
+        },
+        {
+          "name": "lastfm_skip_artist_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (artist_name)",
+          "table": "public.lastfm_skip_artist",
+          "referenced_table": "",
+          "columns": [
+            "artist_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.scheduled_task",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('scheduled_task_id_seq'::regclass)"
+        },
+        {
+          "name": "job_key",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "cron",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "timezone",
+          "type": "text",
+          "nullable": false,
+          "default": "'UTC'::text"
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "nullable": true,
+          "default": "true"
+        },
+        {
+          "name": "last_run_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "next_run_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "last_status",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "last_error",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "scheduled_task_pkey",
+          "def": "CREATE UNIQUE INDEX scheduled_task_pkey ON public.scheduled_task USING btree (id)",
+          "table": "public.scheduled_task",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "idx_scheduled_task_enabled_next_run",
+          "def": "CREATE INDEX idx_scheduled_task_enabled_next_run ON public.scheduled_task USING btree (enabled, next_run_at)",
+          "table": "public.scheduled_task",
+          "columns": [
+            "enabled",
+            "next_run_at"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "scheduled_task_cron_not_null",
+          "type": "n",
+          "def": "NOT NULL cron",
+          "table": "public.scheduled_task",
+          "referenced_table": "",
+          "columns": [
+            "cron"
+          ]
+        },
+        {
+          "name": "scheduled_task_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.scheduled_task",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "scheduled_task_job_key_not_null",
+          "type": "n",
+          "def": "NOT NULL job_key",
+          "table": "public.scheduled_task",
+          "referenced_table": "",
+          "columns": [
+            "job_key"
+          ]
+        },
+        {
+          "name": "scheduled_task_timezone_not_null",
+          "type": "n",
+          "def": "NOT NULL timezone",
+          "table": "public.scheduled_task",
+          "referenced_table": "",
+          "columns": [
+            "timezone"
+          ]
+        },
+        {
+          "name": "scheduled_task_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.scheduled_task",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.scheduled_task_run",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('scheduled_task_run_id_seq'::regclass)"
+        },
+        {
+          "name": "task_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "nullable": false
+        },
+        {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "error",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "duration_ms",
+          "type": "integer",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "scheduled_task_run_pkey",
+          "def": "CREATE UNIQUE INDEX scheduled_task_run_pkey ON public.scheduled_task_run USING btree (id)",
+          "table": "public.scheduled_task_run",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "idx_scheduled_task_run_task_started",
+          "def": "CREATE INDEX idx_scheduled_task_run_task_started ON public.scheduled_task_run USING btree (task_id, started_at DESC)",
+          "table": "public.scheduled_task_run",
+          "columns": [
+            "task_id",
+            "started_at"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "scheduled_task_run_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.scheduled_task_run",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "scheduled_task_run_started_at_not_null",
+          "type": "n",
+          "def": "NOT NULL started_at",
+          "table": "public.scheduled_task_run",
+          "referenced_table": "",
+          "columns": [
+            "started_at"
+          ]
+        },
+        {
+          "name": "scheduled_task_run_status_not_null",
+          "type": "n",
+          "def": "NOT NULL status",
+          "table": "public.scheduled_task_run",
+          "referenced_table": "",
+          "columns": [
+            "status"
+          ]
+        },
+        {
+          "name": "scheduled_task_run_task_id_not_null",
+          "type": "n",
+          "def": "NOT NULL task_id",
+          "table": "public.scheduled_task_run",
+          "referenced_table": "",
+          "columns": [
+            "task_id"
+          ]
+        },
+        {
+          "name": "scheduled_task_run_task_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (task_id) REFERENCES scheduled_task(id) ON DELETE CASCADE",
+          "table": "public.scheduled_task_run",
+          "referenced_table": "public.scheduled_task",
+          "columns": [
+            "task_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "scheduled_task_run_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.scheduled_task_run",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.combined_playback_history",
+      "type": "VIEW",
+      "columns": [
+        {
+          "name": "source",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "source_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "track_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "played_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "lastfm_username",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "client_id",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "hostname",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "client_ip",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "match_score",
+          "type": "double precision",
+          "nullable": true
+        },
+        {
+          "name": "match_method",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "def": "CREATE VIEW combined_playback_history AS (\n WITH lastfm_rows AS (\n         SELECT 'lastfm'::text AS source,\n            lsm.id AS source_id,\n            lsm.track_id,\n            ls.played_at,\n            u.id AS user_id,\n            ls.lastfm_username,\n            NULL::text AS client_id,\n            NULL::text AS hostname,\n            NULL::text AS client_ip,\n            lsm.match_score,\n            lsm.match_method\n           FROM ((lastfm_scrobble_match lsm\n             JOIN lastfm_scrobble ls ON ((ls.id = lsm.scrobble_id)))\n             JOIN \"user\" u ON ((ls.lastfm_username = u.lastfm_username)))\n        ), local_rows AS (\n         SELECT 'local'::text AS source,\n            ph.id AS source_id,\n            ph.track_id,\n            ph.\"timestamp\" AS played_at,\n            ph.user_id,\n            NULL::text AS lastfm_username,\n            ph.client_id,\n            ph.hostname,\n            ph.client_ip,\n            NULL::double precision AS match_score,\n            NULL::text AS match_method\n           FROM playback_history ph\n        ), lastfm_filtered AS (\n         SELECT lf.source,\n            lf.source_id,\n            lf.track_id,\n            lf.played_at,\n            lf.user_id,\n            lf.lastfm_username,\n            lf.client_id,\n            lf.hostname,\n            lf.client_ip,\n            lf.match_score,\n            lf.match_method\n           FROM lastfm_rows lf\n          WHERE (NOT (EXISTS ( SELECT 1\n                   FROM playback_history lo\n                  WHERE ((lo.track_id = lf.track_id) AND ((lo.\"timestamp\" \u003e= (lf.played_at - '00:00:05'::interval)) AND (lo.\"timestamp\" \u003c= (lf.played_at + '00:00:05'::interval)))))))\n        )\n SELECT local_rows.source,\n    local_rows.source_id,\n    local_rows.track_id,\n    local_rows.played_at,\n    local_rows.user_id,\n    local_rows.lastfm_username,\n    local_rows.client_id,\n    local_rows.hostname,\n    local_rows.client_ip,\n    local_rows.match_score,\n    local_rows.match_method\n   FROM local_rows\nUNION ALL\n SELECT lastfm_filtered.source,\n    lastfm_filtered.source_id,\n    lastfm_filtered.track_id,\n    lastfm_filtered.played_at,\n    lastfm_filtered.user_id,\n    lastfm_filtered.lastfm_username,\n    lastfm_filtered.client_id,\n    lastfm_filtered.hostname,\n    lastfm_filtered.client_ip,\n    lastfm_filtered.match_score,\n    lastfm_filtered.match_method\n   FROM lastfm_filtered\n)",
+      "referenced_tables": [
+        "public.lastfm_scrobble_match",
+        "public.lastfm_scrobble",
+        "\"user\"",
+        "public.playback_history",
+        "local_rows",
+        "lastfm_filtered"
+      ]
+    },
+    {
+      "name": "public.combined_playback_history_mat",
+      "type": "MATERIALIZED VIEW",
+      "columns": [
+        {
+          "name": "source",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "source_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "track_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "played_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": true
+        },
+        {
+          "name": "lastfm_username",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "client_id",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "hostname",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "client_ip",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "match_score",
+          "type": "double precision",
+          "nullable": true
+        },
+        {
+          "name": "match_method",
+          "type": "text",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "combined_playback_history_mat_pk",
+          "def": "CREATE UNIQUE INDEX combined_playback_history_mat_pk ON public.combined_playback_history_mat USING btree (source, source_id)",
+          "table": "public.combined_playback_history_mat",
+          "columns": [
+            "source",
+            "source_id"
+          ]
+        },
+        {
+          "name": "combined_playback_history_mat_played_at",
+          "def": "CREATE INDEX combined_playback_history_mat_played_at ON public.combined_playback_history_mat USING btree (played_at DESC)",
+          "table": "public.combined_playback_history_mat",
+          "columns": [
+            "played_at"
+          ]
+        },
+        {
+          "name": "combined_playback_history_mat_track_played",
+          "def": "CREATE INDEX combined_playback_history_mat_track_played ON public.combined_playback_history_mat USING btree (track_id, played_at DESC)",
+          "table": "public.combined_playback_history_mat",
+          "columns": [
+            "track_id",
+            "played_at"
+          ]
+        }
+      ],
+      "def": "CREATE MATERIALIZED VIEW combined_playback_history_mat AS (\n SELECT source,\n    source_id,\n    track_id,\n    played_at,\n    user_id,\n    lastfm_username,\n    client_id,\n    hostname,\n    client_ip,\n    match_score,\n    match_method\n   FROM combined_playback_history\n)",
+      "referenced_tables": [
+        "public.combined_playback_history"
+      ]
+    },
+    {
+      "name": "public.auth_refresh_session",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('auth_refresh_session_id_seq'::regclass)"
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "token_hash",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "nullable": false
+        },
+        {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "last_used_at",
+          "type": "timestamp with time zone",
+          "nullable": false,
+          "default": "now()"
+        },
+        {
+          "name": "user_agent",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "ip",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "family_id",
+          "type": "uuid",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "auth_refresh_session_pkey",
+          "def": "CREATE UNIQUE INDEX auth_refresh_session_pkey ON public.auth_refresh_session USING btree (id)",
+          "table": "public.auth_refresh_session",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "auth_refresh_session_token_hash_key",
+          "def": "CREATE UNIQUE INDEX auth_refresh_session_token_hash_key ON public.auth_refresh_session USING btree (token_hash)",
+          "table": "public.auth_refresh_session",
+          "columns": [
+            "token_hash"
+          ]
+        },
+        {
+          "name": "idx_auth_refresh_session_token_hash",
+          "def": "CREATE INDEX idx_auth_refresh_session_token_hash ON public.auth_refresh_session USING btree (token_hash)",
+          "table": "public.auth_refresh_session",
+          "columns": [
+            "token_hash"
+          ]
+        },
+        {
+          "name": "idx_auth_refresh_session_user_id",
+          "def": "CREATE INDEX idx_auth_refresh_session_user_id ON public.auth_refresh_session USING btree (user_id)",
+          "table": "public.auth_refresh_session",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "idx_auth_refresh_session_expires_at",
+          "def": "CREATE INDEX idx_auth_refresh_session_expires_at ON public.auth_refresh_session USING btree (expires_at)",
+          "table": "public.auth_refresh_session",
+          "columns": [
+            "expires_at"
+          ]
+        },
+        {
+          "name": "idx_auth_refresh_session_active",
+          "def": "CREATE INDEX idx_auth_refresh_session_active ON public.auth_refresh_session USING btree (user_id, revoked_at) WHERE (revoked_at IS NULL)",
+          "table": "public.auth_refresh_session",
+          "columns": [
+            "user_id",
+            "revoked_at"
+          ]
+        },
+        {
+          "name": "idx_auth_refresh_session_family",
+          "def": "CREATE INDEX idx_auth_refresh_session_family ON public.auth_refresh_session USING btree (family_id, revoked_at) WHERE (revoked_at IS NULL)",
+          "table": "public.auth_refresh_session",
+          "columns": [
+            "family_id",
+            "revoked_at"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "auth_refresh_session_created_at_not_null",
+          "type": "n",
+          "def": "NOT NULL created_at",
+          "table": "public.auth_refresh_session",
+          "referenced_table": "",
+          "columns": [
+            "created_at"
+          ]
+        },
+        {
+          "name": "auth_refresh_session_expires_at_not_null",
+          "type": "n",
+          "def": "NOT NULL expires_at",
+          "table": "public.auth_refresh_session",
+          "referenced_table": "",
+          "columns": [
+            "expires_at"
+          ]
+        },
+        {
+          "name": "auth_refresh_session_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.auth_refresh_session",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "auth_refresh_session_last_used_at_not_null",
+          "type": "n",
+          "def": "NOT NULL last_used_at",
+          "table": "public.auth_refresh_session",
+          "referenced_table": "",
+          "columns": [
+            "last_used_at"
+          ]
+        },
+        {
+          "name": "auth_refresh_session_token_hash_not_null",
+          "type": "n",
+          "def": "NOT NULL token_hash",
+          "table": "public.auth_refresh_session",
+          "referenced_table": "",
+          "columns": [
+            "token_hash"
+          ]
+        },
+        {
+          "name": "auth_refresh_session_user_id_not_null",
+          "type": "n",
+          "def": "NOT NULL user_id",
+          "table": "public.auth_refresh_session",
+          "referenced_table": "",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "auth_refresh_session_user_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE",
+          "table": "public.auth_refresh_session",
+          "referenced_table": "public.user",
+          "columns": [
+            "user_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "auth_refresh_session_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.auth_refresh_session",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "auth_refresh_session_token_hash_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (token_hash)",
+          "table": "public.auth_refresh_session",
+          "referenced_table": "",
+          "columns": [
+            "token_hash"
+          ]
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "table": "public.artist_album",
+      "columns": [
+        "artist_mbid"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.artist",
+      "parent_columns": [
+        "mbid"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.artist_album",
+      "columns": [
+        "album_mbid"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.album",
+      "parent_columns": [
+        "mbid"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (album_mbid) REFERENCES album(mbid) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.track_artist",
+      "columns": [
+        "track_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.track",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.track_artist",
+      "columns": [
+        "artist_mbid"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.artist",
+      "parent_columns": [
+        "mbid"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.image_map",
+      "columns": [
+        "artwork_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.artwork",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (artwork_id) REFERENCES artwork(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.playback_history",
+      "columns": [
+        "track_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.track",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.favorite_artist",
+      "columns": [
+        "artist_mbid"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.artist",
+      "parent_columns": [
+        "mbid"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.favorite_artist",
+      "columns": [
+        "user_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.user",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.favorite_release",
+      "columns": [
+        "album_mbid"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.album",
+      "parent_columns": [
+        "mbid"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (album_mbid) REFERENCES album(mbid) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.favorite_release",
+      "columns": [
+        "user_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.user",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.session",
+      "columns": [
+        "user_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.user",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.top_track",
+      "columns": [
+        "track_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.track",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "zero_or_one",
+      "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE SET NULL"
+    },
+    {
+      "table": "public.top_track",
+      "columns": [
+        "artist_mbid"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.artist",
+      "parent_columns": [
+        "mbid"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.similar_artist",
+      "columns": [
+        "artist_mbid"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.artist",
+      "parent_columns": [
+        "mbid"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.artist_genre",
+      "columns": [
+        "artist_mbid"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.artist",
+      "parent_columns": [
+        "mbid"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.missing_album",
+      "columns": [
+        "artist_mbid"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.artist",
+      "parent_columns": [
+        "mbid"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (artist_mbid) REFERENCES artist(mbid) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.playlist",
+      "columns": [
+        "user_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.user",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.playlist_track",
+      "columns": [
+        "track_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.track",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.playlist_track",
+      "columns": [
+        "playlist_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.playlist",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (playlist_id) REFERENCES playlist(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.lastfm_scrobble_match",
+      "columns": [
+        "track_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.track",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.lastfm_scrobble_match",
+      "columns": [
+        "scrobble_id"
+      ],
+      "cardinality": "zero_or_one",
+      "parent_table": "public.lastfm_scrobble",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.scheduled_task_run",
+      "columns": [
+        "task_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.scheduled_task",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (task_id) REFERENCES scheduled_task(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.auth_refresh_session",
+      "columns": [
+        "user_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.user",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE"
+    }
+  ],
+  "functions": [
+    {
+      "name": "public.citextin",
+      "return_type": "citext",
+      "arguments": "cstring",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citextout",
+      "return_type": "cstring",
+      "arguments": "citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citextrecv",
+      "return_type": "citext",
+      "arguments": "internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citextsend",
+      "return_type": "bytea",
+      "arguments": "citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext",
+      "return_type": "citext",
+      "arguments": "character",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext",
+      "return_type": "citext",
+      "arguments": "boolean",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext",
+      "return_type": "citext",
+      "arguments": "inet",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_eq",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_ne",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_lt",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_le",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_gt",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_ge",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_cmp",
+      "return_type": "int4",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_hash",
+      "return_type": "int4",
+      "arguments": "citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_smaller",
+      "return_type": "citext",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_larger",
+      "return_type": "citext",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.min",
+      "return_type": "citext",
+      "arguments": "citext",
+      "type": "a"
+    },
+    {
+      "name": "public.max",
+      "return_type": "citext",
+      "arguments": "citext",
+      "type": "a"
+    },
+    {
+      "name": "public.texticlike",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.texticnlike",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.texticregexeq",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.texticregexne",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.texticlike",
+      "return_type": "bool",
+      "arguments": "citext, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.texticnlike",
+      "return_type": "bool",
+      "arguments": "citext, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.texticregexeq",
+      "return_type": "bool",
+      "arguments": "citext, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.texticregexne",
+      "return_type": "bool",
+      "arguments": "citext, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_match",
+      "return_type": "_text",
+      "arguments": "string citext, pattern citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_match",
+      "return_type": "_text",
+      "arguments": "string citext, pattern citext, flags text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_matches",
+      "return_type": "_text",
+      "arguments": "string citext, pattern citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_matches",
+      "return_type": "_text",
+      "arguments": "string citext, pattern citext, flags text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_replace",
+      "return_type": "text",
+      "arguments": "string citext, pattern citext, replacement text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_replace",
+      "return_type": "text",
+      "arguments": "string citext, pattern citext, replacement text, flags text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_split_to_array",
+      "return_type": "_text",
+      "arguments": "string citext, pattern citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_split_to_array",
+      "return_type": "_text",
+      "arguments": "string citext, pattern citext, flags text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_split_to_table",
+      "return_type": "text",
+      "arguments": "string citext, pattern citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.regexp_split_to_table",
+      "return_type": "text",
+      "arguments": "string citext, pattern citext, flags text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.strpos",
+      "return_type": "int4",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.replace",
+      "return_type": "text",
+      "arguments": "citext, citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.split_part",
+      "return_type": "text",
+      "arguments": "citext, citext, integer",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.translate",
+      "return_type": "text",
+      "arguments": "citext, citext, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_pattern_lt",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_pattern_le",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_pattern_gt",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_pattern_ge",
+      "return_type": "bool",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_pattern_cmp",
+      "return_type": "int4",
+      "arguments": "citext, citext",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.citext_hash_extended",
+      "return_type": "int8",
+      "arguments": "citext, bigint",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.set_limit",
+      "return_type": "float4",
+      "arguments": "real",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.show_limit",
+      "return_type": "float4",
+      "arguments": "",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.show_trgm",
+      "return_type": "_text",
+      "arguments": "text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.similarity",
+      "return_type": "float4",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.similarity_op",
+      "return_type": "bool",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.word_similarity",
+      "return_type": "float4",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.word_similarity_op",
+      "return_type": "bool",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.word_similarity_commutator_op",
+      "return_type": "bool",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.similarity_dist",
+      "return_type": "float4",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.word_similarity_dist_op",
+      "return_type": "float4",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.word_similarity_dist_commutator_op",
+      "return_type": "float4",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_in",
+      "return_type": "gtrgm",
+      "arguments": "cstring",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_out",
+      "return_type": "cstring",
+      "arguments": "gtrgm",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_consistent",
+      "return_type": "bool",
+      "arguments": "internal, text, smallint, oid, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_distance",
+      "return_type": "float8",
+      "arguments": "internal, text, smallint, oid, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_compress",
+      "return_type": "internal",
+      "arguments": "internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_decompress",
+      "return_type": "internal",
+      "arguments": "internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_penalty",
+      "return_type": "internal",
+      "arguments": "internal, internal, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_picksplit",
+      "return_type": "internal",
+      "arguments": "internal, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_union",
+      "return_type": "gtrgm",
+      "arguments": "internal, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_same",
+      "return_type": "internal",
+      "arguments": "gtrgm, gtrgm, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gin_extract_value_trgm",
+      "return_type": "internal",
+      "arguments": "text, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gin_extract_query_trgm",
+      "return_type": "internal",
+      "arguments": "text, internal, smallint, internal, internal, internal, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gin_trgm_consistent",
+      "return_type": "bool",
+      "arguments": "internal, smallint, text, integer, internal, internal, internal, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gin_trgm_triconsistent",
+      "return_type": "char",
+      "arguments": "internal, smallint, text, integer, internal, internal, internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.strict_word_similarity",
+      "return_type": "float4",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.strict_word_similarity_op",
+      "return_type": "bool",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.strict_word_similarity_commutator_op",
+      "return_type": "bool",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.strict_word_similarity_dist_op",
+      "return_type": "float4",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.strict_word_similarity_dist_commutator_op",
+      "return_type": "float4",
+      "arguments": "text, text",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.gtrgm_options",
+      "return_type": "void",
+      "arguments": "internal",
+      "type": "FUNCTION"
+    },
+    {
+      "name": "public.track_fts_trigger",
+      "return_type": "trigger",
+      "arguments": "",
+      "type": "FUNCTION"
+    }
+  ],
+  "driver": {
+    "name": "postgres",
+    "database_version": "PostgreSQL 18.1 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+    "meta": {
+      "current_schema": "public",
+      "search_paths": [
+        "jamarr_test",
+        "public"
+      ],
+      "dict": {
+        "Functions": "Stored procedures and functions"
+      }
+    }
+  }
+}
