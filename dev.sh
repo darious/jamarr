@@ -4,6 +4,14 @@
 
 set -euo pipefail
 
+# Load local settings (HOST_IP, MUSIC_NFS_*) from .env if present
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 # Derive HOST_IP via internal route to DNS server (REDACTED_IP) unless provided
 if [[ -z "${HOST_IP:-}" ]]; then
   HOST_IP="$(ip route get REDACTED_IP 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
