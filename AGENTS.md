@@ -91,6 +91,17 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   `_SPA_ROUTE_PREFIXES` in `app/main.py`, or the backend 404s it.
 - `android/test.sh` defaults `ANDROID_HOME=/opt/android-sdk` and caps gradle/kotlin
   heaps when <4 GiB memory available; instrumentation tests only run with a device attached.
+- Headless emulator UI check (dev box has no DISPLAY): `JAVA_HOME=~/Android/jdk`,
+  `ANDROID_HOME=~/Android/Sdk`, AVD `jamarr36`. Boot needs `sg kvm -c "…/emulator
+  -avd jamarr36 -no-window -no-audio -gpu swiftshader_indirect"` (shells predate kvm
+  group). Install: `./gradlew :app:installDebug` (`adb uninstall com.jamarr.android`
+  first on signature mismatch). Drive via `adb shell input tap/text` +
+  `adb exec-out uiautomator dump /dev/tty`; screenshot `adb exec-out screencap -p`.
+  Emulator reaches LAN server at `http://192.168.1.107:8111` (not the app's
+  `10.0.2.2` default); prod is `https://jamarr.darious.co.uk`. Test login lives in
+  `~/prod_login.txt` on the dev box (pointer only — not in-repo). Force 3-button nav
+  to test system-bar insets:
+  `adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton`.
 
 ## Deeper docs (read only when relevant)
 
