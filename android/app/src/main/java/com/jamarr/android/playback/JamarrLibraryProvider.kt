@@ -26,6 +26,7 @@ import com.jamarr.android.data.ArtistTrackEntry
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.PlaylistTrack
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.data.sortedSinglesAsc
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
@@ -339,7 +340,6 @@ class JamarrLibraryProvider(
             .sortedSinglesAsc()
             .mapNotNull { it.toSearchTrack(detail!!.name) }
         val topTracks = detail?.topTracks.orEmpty()
-            .sortedScrobbledDesc()
             .mapNotNull { it.toSearchTrack(detail!!.name) }
 
         val sections = mutableListOf<List<MediaItem>>()
@@ -503,20 +503,9 @@ class JamarrLibraryProvider(
         val detail = runCatching {
             apiClient.artistDetail(serverUrlProvider(), tokenProvider(), mbid = mbid)
         }.getOrNull() ?: return emptyList()
-        return detail.topTracks.sortedScrobbledDesc().mapNotNull { it.toSearchTrack(detail.name) }
+        // Server order is top_track.rank; matches the web UI and the artist screen.
+        return detail.topTracks.mapNotNull { it.toSearchTrack(detail.name) }
     }
-
-    private fun List<ArtistTrackEntry>.sortedSinglesAsc(): List<ArtistTrackEntry> =
-        sortedWith(
-            compareBy<ArtistTrackEntry> { it.date.isNullOrBlank() }
-                .thenBy { it.date ?: "" },
-        )
-
-    private fun List<ArtistTrackEntry>.sortedScrobbledDesc(): List<ArtistTrackEntry> =
-        sortedWith(
-            compareBy<ArtistTrackEntry> { it.popularity == null }
-                .thenByDescending { it.popularity ?: 0 },
-        )
 
     private suspend fun albumTracks(mbid: String): List<MediaItem> {
         if (mbid.isBlank()) return emptyList()

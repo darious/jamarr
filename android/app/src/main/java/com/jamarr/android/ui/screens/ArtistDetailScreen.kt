@@ -1,8 +1,10 @@
 package com.jamarr.android.ui.screens
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -46,6 +49,7 @@ import com.jamarr.android.data.ArtistDetail
 import com.jamarr.android.data.ArtistTrackEntry
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.data.SimilarArtist
+import com.jamarr.android.data.sortedSinglesAsc
 import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.ArtistArt
 import com.jamarr.android.ui.components.HeartIcon
@@ -59,6 +63,9 @@ import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
 import com.jamarr.android.ui.theme.JamarrShapes
 import com.jamarr.android.ui.theme.JamarrType
+
+/** Roughly six rows; the rest of the list scrolls within the section. */
+private val TopTracksMaxHeight = 340.dp
 
 private enum class TopTracksTab(val label: String) {
     MostScrobbled("Most Scrobbled"),
@@ -198,11 +205,13 @@ fun ArtistDetailScreen(
                 }
             }
 
+            // Order mirrors the web UI: scrobbled/listened keep the server order
+            // (top_track.rank, plays DESC); singles are re-sorted oldest-first.
             val topList = when (tab.value) {
                 TopTracksTab.MostScrobbled -> detail.value?.topTracks.orEmpty()
                 TopTracksTab.MostListened -> detail.value?.mostListened.orEmpty()
-                TopTracksTab.Singles -> detail.value?.singles.orEmpty()
-            }.take(6)
+                TopTracksTab.Singles -> detail.value?.singles.orEmpty().sortedSinglesAsc()
+            }
             val resolvedQueue = topList.mapNotNull { it.toSearchTrack(artistName) }
             item {
                 Row(
@@ -217,6 +226,14 @@ fun ArtistDetailScreen(
                         color = JamarrColors.Text,
                         modifier = Modifier.weight(1f),
                     )
+                    if (topList.isNotEmpty()) {
+                        Text(
+                            text = "${topList.size} tracks",
+                            style = JamarrType.CaptionSmall,
+                            color = JamarrColors.Muted,
+                            modifier = Modifier.padding(end = 10.dp),
+                        )
+                    }
                     if (resolvedQueue.isNotEmpty()) {
                         Row(
                             modifier = Modifier
@@ -245,20 +262,34 @@ fun ArtistDetailScreen(
                     modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding),
                 )
             }
-            items(topList.withIndex().toList(), key = { (i, _) -> "top-${tab.value}-$i" }) { (i, entry) ->
-                val track = entry.toSearchTrack(artistName)
-                TrackRow(
-                    number = i + 1,
-                    title = entry.displayTitle,
-                    subtitle = entry.album ?: "—",
-                    duration = entry.plays?.let { "$it plays" } ?: formatDuration(entry.durationSeconds),
-                    active = track != null && ctx.playbackController.currentMediaId?.toLongOrNull() == track.id,
-                    onClick = {
-                        if (track != null) {
-                            onPlayTrack(track, resolvedQueue)
-                        }
-                    },
-                )
+            // The full list lives in its own bounded scroller so a long top-tracks
+            // list can't bury Discography / Similar Artists further down the page.
+            item {
+                val scrollState = remember(tab.value) { ScrollState(0) }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = TopTracksMaxHeight)
+                        .verticalScroll(scrollState),
+                ) {
+                    topList.forEachIndexed { i, entry ->
+                        val track = entry.toSearchTrack(artistName)
+                        TrackRow(
+                            number = i + 1,
+                            title = entry.displayTitle,
+                            subtitle = entry.album ?: "—",
+                            duration = entry.plays?.let { "$it plays" }
+                                ?: formatDuration(entry.durationSeconds),
+                            active = track != null &&
+                                ctx.playbackController.currentMediaId?.toLongOrNull() == track.id,
+                            onClick = {
+                                if (track != null) {
+                                    onPlayTrack(track, resolvedQueue)
+                                }
+                            },
+                        )
+                    }
+                }
             }
 
             val availableTabs = DiscographyTab.entries.filter { tab ->
