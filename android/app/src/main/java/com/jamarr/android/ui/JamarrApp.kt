@@ -15,10 +15,15 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -129,9 +134,15 @@ private fun JamarrRoot() {
         Box(modifier = Modifier.fillMaxSize().background(JamarrColors.Bg)) {
             val atRoot = isRootRoute(currentRoute)
             val activeTab = routeToTab(currentRoute) ?: JamarrTab.Home
+            // The bottom stack (mini player + nav bar + system-nav inset) is measured
+            // rather than assumed: the mini player's real height depends on its seek
+            // bar and control sizes, and the token estimate left content stranded
+            // underneath it. Seeded with the token estimate for the first frame.
+            val density = LocalDensity.current
             val navBarHeight = if (atRoot) JamarrDims.BottomNavHeight else 0.dp
             val miniHeight = if (vm.nowPlayingTrack != null) JamarrDims.MiniPlayerHeight else 0.dp
-            val contentPadding = PaddingValues(bottom = navBarHeight + miniHeight)
+            var bottomStackHeight by remember { mutableStateOf(navBarHeight + miniHeight) }
+            val contentPadding = PaddingValues(bottom = bottomStackHeight)
 
             NavHost(
                 navController = navController,
@@ -336,6 +347,12 @@ private fun JamarrRoot() {
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    // Measured before navigationBarsPadding so the reported height
+                    // includes the system-nav inset the stack sits above.
+                    .onSizeChanged { size ->
+                        val measured = with(density) { size.height.toDp() }
+                        if (measured != bottomStackHeight) bottomStackHeight = measured
+                    }
                     .navigationBarsPadding(),
             ) {
                 val track = vm.nowPlayingTrack
