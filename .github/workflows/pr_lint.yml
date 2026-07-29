@@ -26,10 +26,13 @@ jobs:
       - uses: actions/checkout@v7.0.1
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v8.3.2
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          # v9 flipped the default to false; keep pruning so the cache entry
+          # stays the size it was on v8.
+          prune-cache: true
 
       - name: Create dummy .env
         run: |
