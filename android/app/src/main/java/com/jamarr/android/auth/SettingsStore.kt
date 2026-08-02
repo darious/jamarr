@@ -30,6 +30,11 @@ class SettingsStore(private val context: Context) {
     private val clientIdKey = stringPreferencesKey("client_id")
     private val useDeviceUpnpKey = booleanPreferencesKey("use_device_upnp")
 
+    // Gates background network use (read-ahead now, downloads later) to
+    // unmetered networks. Off by default: read-ahead only pulls the track that
+    // is about to play anyway, so it costs no more data than playing on.
+    private val wifiOnlyKey = booleanPreferencesKey("wifi_only_transfers")
+
     suspend fun load(): StoredSession {
         val prefs = context.jamarrDataStore.data.first()
         return StoredSession(
@@ -42,6 +47,14 @@ class SettingsStore(private val context: Context) {
 
     suspend fun saveUseDeviceUpnp(enabled: Boolean) {
         context.jamarrDataStore.edit { prefs -> prefs[useDeviceUpnpKey] = enabled }
+    }
+
+    fun observeWifiOnlyTransfers(): Flow<Boolean> = context.jamarrDataStore.data
+        .map { prefs -> prefs[wifiOnlyKey] ?: false }
+        .distinctUntilChanged()
+
+    suspend fun saveWifiOnlyTransfers(enabled: Boolean) {
+        context.jamarrDataStore.edit { prefs -> prefs[wifiOnlyKey] = enabled }
     }
 
     fun observeSession(): Flow<StoredSession> = context.jamarrDataStore.data
