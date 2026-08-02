@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Tag main, wait for the Android release workflow to publish the APK, then
 # rename the GitHub release. Usage: ./release.sh v1.2.3 "Release title"
+#
+# Names come from docs/reference/release-names.md -- take the next one off the
+# queue, and check the pre-tag list there (notably the Android versionCode).
 set -euo pipefail
 
 DRY_RUN=0
@@ -12,6 +15,7 @@ fi
 if [[ $# -ne 2 ]]; then
     echo "Usage: $0 [--dry-run] <version> <name>" >&2
     echo "Example: $0 v1.2.3 \"Cosmic Cassette\"" >&2
+    echo "Next name: see docs/reference/release-names.md" >&2
     echo "  --dry-run: validate, create local tag, poll for an EXISTING release," >&2
     echo "             skip pushing the tag and editing the release title." >&2
     exit 64

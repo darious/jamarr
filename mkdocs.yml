@@ -93,6 +93,7 @@ nav:
       - Database Schema: reference/schema/README.md
       - Scanner CLI: reference/scanner-cli.md
       - Environment Variables: reference/env-vars.md
+      - Release Names: reference/release-names.md
   - Clients:
       - Web: clients/web.md
       - TUI: clients/tui.md
