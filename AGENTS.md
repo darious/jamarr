@@ -87,18 +87,34 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   lowercases response headers and some renderers parse them case-sensitively.
 - `HOST_IP` auto-derived in `dev.sh`/`deploy.sh` via route lookup; override by exporting it.
 - Frontend dev caches (`web/.svelte-kit`, `web/.vite`) are cleared on `dev.sh` start.
+- `test-web.sh`/`lint.sh` run in containers as root and leave root-owned artifacts in
+  the bind mount (`web/.svelte-kit`, `web/build`, `__pycache__/`). `dev.sh` then dies
+  on "Permission denied" clearing those caches. Fix without sudo:
+  `docker run --rm -v "$PWD":/repo alpine:3 chown -R 1000:1000 /repo/<paths>`.
+  The dev web container also runs `npm install`, which can add optional-peer entries
+  to `web/package-lock.json` — revert that noise before committing.
 - New top-level route under `web/src/routes/` must also be added to
   `_SPA_ROUTE_PREFIXES` in `app/main.py`, or the backend 404s it.
-- `android/test.sh` defaults `ANDROID_HOME=/opt/android-sdk` and caps gradle/kotlin
-  heaps when <4 GiB memory available; instrumentation tests only run with a device attached.
-- Headless emulator UI check (dev box has no DISPLAY): `JAVA_HOME=~/Android/jdk`,
-  `ANDROID_HOME=~/Android/Sdk`, AVD `jamarr36`. Boot needs `sg kvm -c "…/emulator
-  -avd jamarr36 -no-window -no-audio -gpu swiftshader_indirect"` (shells predate kvm
-  group). Install: `./gradlew :app:installDebug` (`adb uninstall com.jamarr.android`
-  first on signature mismatch). Drive via `adb shell input tap/text` +
+- `android/test.sh` probes for the SDK (`~/Android/Sdk`, then `/opt/android-sdk`) and
+  for a JDK (`~/Android/jdk`, then the usual `/usr/lib/jvm` LTS paths) when
+  `ANDROID_HOME`/`JAVA_HOME` are unset, so it runs bare; it caps gradle/kotlin heaps
+  when <4 GiB memory available. Instrumentation tests run only when a device is
+  attached — detected via `$ANDROID_HOME/platform-tools/adb`, since the SDK's `adb`
+  is normally not on PATH.
+- Android toolchain (user-local, no root): JDK 21 (Temurin) at `~/Android/jdk`, SDK at
+  `~/Android/Sdk`, installed via `cmdline-tools`. AGP 9 / Gradle 9 need JDK 17+.
+  `compileSdk = 37` resolves to the `platforms;android-37.0` package, not
+  `platforms;android-37`.
+- Headless emulator UI check (dev box has no DISPLAY): AVD `jamarr36`
+  (API 36 `google_apis;x86_64`, pixel_6). Boot with `~/Android/Sdk/emulator/emulator
+  -avd jamarr36 -no-window -no-audio -gpu swiftshader_indirect`. Install:
+  `./gradlew :app:installDebug` (`adb uninstall com.jamarr.android` first on
+  signature mismatch). Drive via `adb shell input tap/text` +
   `adb exec-out uiautomator dump /dev/tty`; screenshot `adb exec-out screencap -p`.
-  Emulator reaches LAN server at `http://192.168.1.107:8111` (not the app's
-  `10.0.2.2` default); prod is `https://jamarr.darious.co.uk`. Test login lives in
+  Emulator reaches the prod LAN server at `http://192.168.1.107:8111` (not the app's
+  `10.0.2.2` default), or a locally-run `dev.sh` at `http://192.168.0.22:8111` — the
+  dev box is `192.168.0.22/23`, so both live on one subnet. Prod over the internet is
+  `https://jamarr.darious.co.uk`. Test login lives in
   `~/prod_login.txt` on the dev box (pointer only — not in-repo). Force 3-button nav
   to test system-bar insets:
   `adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton`.
