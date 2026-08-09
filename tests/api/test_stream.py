@@ -3,6 +3,7 @@ import json
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 import os
+import subprocess
 import wave
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
@@ -400,3 +401,81 @@ async def test_stream_cache_cleanup_removes_old_and_oversized_files(tmp_path, mo
 
     assert not keep_file.exists()
     assert large_file.exists()
+
+
+@pytest.fixture
+async def normalizable_track(db, tmp_path):
+    """A real (short) FLAC plus a completed analysis row.
+
+    The normalized path shells out to ffmpeg, so unlike the other fixtures
+    here it needs decodable audio rather than a dummy byte blob.
+    """
+    path = tmp_path / "tone.flac"
+    subprocess.run(
+        [
+            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-c:a", "flac", str(path),
+        ],
+        check=True,
+    )
+    await db.execute(
+        """
+        INSERT INTO track (id, title, artist, album, path, duration_seconds,
+                           codec, sample_rate_hz, bit_depth)
+        VALUES (1201, 'Tone', 'Artist', 'Album', $1, 1, 'FLAC', 44100, 16)
+        """,
+        str(path),
+    )
+    await db.execute(
+        """
+        INSERT INTO track_audio_analysis (track_id, status, loudness_lufs, true_peak_db)
+        VALUES (1201, 'complete', -24.0, -6.0)
+        """
+    )
+    yield str(path)
+
+
+@pytest.mark.asyncio
+async def test_normalized_stream_applies_gain_and_advertises_it(
+    auth_client: AsyncClient, db, normalizable_track
+):
+    response = await auth_client.get("/api/stream/1201")
+
+    assert response.status_code == 200
+    assert response.headers["x-jamarr-loudness-normalized"] == "1"
+    assert response.headers["x-jamarr-loudness-gain-mode"] == "track"
+    # -24 LUFS against a -16 target wants +8 dB, which the +6 dB max boost caps
+    # and the -1 dBTP ceiling then clamps to +5 against the track's -6 dBTP peak.
+    assert float(response.headers["x-jamarr-loudness-gain-db"]) == pytest.approx(5.0)
+    assert response.headers["x-jamarr-stream-quality"] == "original"
+    assert response.headers["content-type"] == "audio/flac"
+    body = await response.aread()
+    assert body.startswith(b"fLaC")
+
+
+@pytest.mark.asyncio
+async def test_normalized_stream_honours_requested_quality_profile(
+    auth_client: AsyncClient, db, normalizable_track
+):
+    """Gain and transcode compose: the body must be the requested codec, not
+    FLAC, or a normalized mobile stream would silently ship lossless bytes."""
+    response = await auth_client.get("/api/stream/1201?quality=mp3_320")
+
+    assert response.status_code == 200
+    assert response.headers["x-jamarr-loudness-normalized"] == "1"
+    assert response.headers["x-jamarr-stream-quality"] == "mp3_320"
+    assert response.headers["content-type"] == "audio/mpeg"
+    body = await response.aread()
+    assert len(body) > 0
+    assert not body.startswith(b"fLaC")
+
+
+@pytest.mark.asyncio
+async def test_normalization_can_be_disabled_per_request(
+    auth_client: AsyncClient, db, normalizable_track
+):
+    response = await auth_client.get("/api/stream/1201?normalize=0")
+
+    assert response.status_code == 200
+    assert "x-jamarr-loudness-normalized" not in response.headers
