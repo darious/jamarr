@@ -26,6 +26,7 @@ import com.jamarr.android.data.ArtistTrackEntry
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.PlaylistTrack
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.data.sortedReleasesDesc
 import com.jamarr.android.data.sortedSinglesAsc
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CoroutineScope
@@ -347,8 +348,7 @@ class JamarrLibraryProvider(
             // Hold "Appears On" until after the synthetic singles/top-tracks rows.
             if (group == GROUP_APPEARS_ON) continue
             val list = grouped[group] ?: continue
-            val sorted = list.sortedByDescending { it.releaseDate ?: it.year ?: "" }
-            sections.add(buildAlbumGroup(sorted, group))
+            sections.add(buildAlbumGroup(list.sortedReleasesDesc(), group))
         }
 
         if (singlesTracks.isNotEmpty()) {
@@ -381,8 +381,7 @@ class JamarrLibraryProvider(
         }
 
         grouped[GROUP_APPEARS_ON]?.let { list ->
-            val sorted = list.sortedByDescending { it.releaseDate ?: it.year ?: "" }
-            sections.add(buildAlbumGroup(sorted, GROUP_APPEARS_ON))
+            sections.add(buildAlbumGroup(list.sortedReleasesDesc(), GROUP_APPEARS_ON))
         }
 
         return sections.flatten()
