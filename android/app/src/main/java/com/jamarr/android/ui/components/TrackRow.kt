@@ -15,8 +15,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
@@ -31,9 +36,16 @@ fun TrackRow(
     active: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    missing: Boolean = false,
 ) {
     val background = if (active) JamarrColors.PrimaryTint else JamarrColors.Bg
-    val titleColor = if (active) JamarrColors.Primary else JamarrColors.Text
+    // Missing tracks are struck through and dimmed, matching the web UI's
+    // TrackCard treatment; otherwise the only tell is an absent duration.
+    val titleColor = when {
+        active -> JamarrColors.Primary
+        missing -> JamarrColors.Neutral
+        else -> JamarrColors.Text
+    }
 
     Row(
         modifier = modifier
@@ -58,7 +70,10 @@ fun TrackRow(
         Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
+                // Carried as a span rather than the textDecoration parameter: the
+                // parameter is applied at draw time and so is invisible to both
+                // semantics and the text layout result, leaving it untestable.
+                text = if (missing) struckThrough(title) else AnnotatedString(title),
                 style = JamarrType.CardTitle,
                 color = titleColor,
                 maxLines = 1,
@@ -83,6 +98,10 @@ fun TrackRow(
             )
         }
     }
+}
+
+private fun struckThrough(text: String): AnnotatedString = buildAnnotatedString {
+    withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { append(text) }
 }
 
 fun formatDuration(seconds: Double?): String? {
