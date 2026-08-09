@@ -100,14 +100,35 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   `ANDROID_HOME`/`JAVA_HOME` are unset, so it runs bare; it caps gradle/kotlin heaps
   when <4 GiB memory available. Instrumentation tests run only when a device is
   attached — detected via `$ANDROID_HOME/platform-tools/adb`, since the SDK's `adb`
-  is normally not on PATH.
+  is normally not on PATH. The check runs once at script start, so an emulator booted
+  in parallel is missed and `connectedDebugAndroidTest` is silently skipped; wait for
+  `sys.boot_completed=1` first, or pass `RUN_ANDROID_INSTRUMENTATION=1` to require it.
 - Android toolchain (user-local, no root): JDK 21 (Temurin) at `~/Android/jdk`, SDK at
   `~/Android/Sdk`, installed via `cmdline-tools`. AGP 9 / Gradle 9 need JDK 17+.
   `compileSdk = 37` resolves to the `platforms;android-37.0` package, not
-  `platforms;android-37`.
+  `platforms;android-37`. **Neither is in the repo or provisioned by any script** —
+  on a fresh box both are absent and `test.sh` exits with "No Android SDK found".
+  To reinstall: unpack a Temurin JDK 21 tarball to `~/Android/jdk`, unzip the linux
+  `commandlinetools` bundle to `~/Android/Sdk/cmdline-tools/latest`, then
+  `yes | sdkmanager --licenses` and `sdkmanager "platform-tools"
+  "platforms;android-37.0" "build-tools;37.0.0" "emulator"
+  "system-images;android-36;google_apis;x86_64"` (~2 GiB). Last known-good set:
+  JDK 21.0.12+8, cmdline-tools 22.0, platform-tools 37.0.1, build-tools 37.0.0,
+  emulator 37.1.11. `sdkmanager` and `avdmanager` live in
+  `~/Android/Sdk/cmdline-tools/latest/bin` and are not on PATH; `sdkmanager` warns
+  that it is deprecated in favour of the `android` CLI, but still works.
 - Headless emulator UI check (dev box has no DISPLAY): AVD `jamarr36`
-  (API 36 `google_apis;x86_64`, pixel_6). Boot with `~/Android/Sdk/emulator/emulator
-  -avd jamarr36 -no-window -no-audio -gpu swiftshader_indirect`. Install:
+  (API 36 `google_apis;x86_64`, pixel_6). Recreate with `avdmanager create avd -n
+  jamarr36 -k "system-images;android-36;google_apis;x86_64" -d pixel_6`; it prints a
+  harmless `Could not load devices from .../devices.xml` error but still applies the
+  profile. Then fix the generated `~/.android/avd/jamarr36.avd/config.ini`, which
+  ships `avd.id`/`avd.name` as the literal `<build>` and GPU off — set those to
+  `jamarr36`, `hw.gpu.enabled=yes`, `hw.gpu.mode=swiftshader_indirect`, and
+  `hw.keyboard=yes` (needed for `adb shell input text`). Boot with
+  `~/Android/Sdk/emulator/emulator -avd jamarr36 -no-window -no-audio
+  -gpu swiftshader_indirect`; ~40s to `sys.boot_completed=1`, because the dev box
+  grants `/dev/kvm` through a POSIX ACL rather than `kvm` group membership, so
+  acceleration works without sudo — check with `getfacl /dev/kvm`, not `id`. Install:
   `./gradlew :app:installDebug` (`adb uninstall com.jamarr.android` first on
   signature mismatch). Drive via `adb shell input tap/text` +
   `adb exec-out uiautomator dump /dev/tty`; screenshot `adb exec-out screencap -p`.
@@ -115,7 +136,7 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   `10.0.2.2` default), or a locally-run `dev.sh` at `http://192.168.0.22:8111` — the
   dev box is `192.168.0.22/23`, so both live on one subnet. Prod over the internet is
   `https://jamarr.darious.co.uk`. Test login lives in
-  `~/prod_login.txt` on the dev box (pointer only — not in-repo). Force 3-button nav
+  `~/jamarr_prod.txt` on the dev box (pointer only — not in-repo). Force 3-button nav
   to test system-bar insets:
   `adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton`.
 
