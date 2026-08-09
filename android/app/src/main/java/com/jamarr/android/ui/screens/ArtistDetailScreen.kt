@@ -287,6 +287,9 @@ fun ArtistDetailScreen(
                                     onPlayTrack(track, resolvedQueue)
                                 }
                             },
+                            // No local track id means the artist has the track but the
+                            // library does not — applies to all three top-tracks tabs.
+                            missing = track == null,
                         )
                     }
                 }
