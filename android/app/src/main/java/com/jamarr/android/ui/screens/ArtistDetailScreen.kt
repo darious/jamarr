@@ -49,6 +49,7 @@ import com.jamarr.android.data.ArtistDetail
 import com.jamarr.android.data.ArtistTrackEntry
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.data.SimilarArtist
+import com.jamarr.android.data.sortedReleasesDesc
 import com.jamarr.android.data.sortedSinglesAsc
 import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.ArtistArt
@@ -321,7 +322,9 @@ fun ArtistDetailScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                val filteredAlbums = albums.value.filter { it.matchesDiscoTab(discoTab.value) }
+                val filteredAlbums = albums.value
+                    .filter { it.matchesDiscoTab(discoTab.value) }
+                    .sortedReleasesDesc()
                 items(filteredAlbums, key = { "disco-${discoTab.value}-${it.albumMbid ?: it.album}" }) { album ->
                     DiscographyRow(album = album, onClick = { onAlbumClick(album) })
                 }
