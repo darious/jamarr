@@ -198,11 +198,6 @@ private fun PodiumColumn(
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "#${album.position}",
-            style = JamarrType.StatValue,
-            color = if (highlighted) JamarrColors.Primary else JamarrColors.Text,
-        )
-        Text(
             text = album.localTitle ?: album.title,
             style = JamarrType.CardTitle,
             color = JamarrColors.Text,
@@ -219,13 +214,25 @@ private fun PodiumColumn(
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(8.dp))
+        // The plinth carries the rank, which is what makes it read as a podium
+        // step rather than a stray block of colour. Filling it with Primary
+        // instead left an unexplained slab under the winner.
+        val plinthShape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(barHeight)
-                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-                .background(if (highlighted) JamarrColors.Primary else JamarrColors.Card),
-        )
+                .clip(plinthShape)
+                .background(if (highlighted) JamarrColors.Card else JamarrColors.Surface)
+                .border(width = 1.dp, color = JamarrColors.Border, shape = plinthShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "#${album.position}",
+                style = if (highlighted) JamarrType.StatValue else JamarrType.CardTitle,
+                color = if (highlighted) JamarrColors.Primary else JamarrColors.Muted,
+            )
+        }
     }
 }
 
