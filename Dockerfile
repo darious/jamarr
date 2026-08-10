@@ -13,8 +13,10 @@ FROM python:3.14.2-slim
 WORKDIR /app
 
 # Install system dependencies
-# ffmpeg is useful for audio manipulation if jamarr does any transcoding or analysis
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# ffmpeg is useful for audio manipulation if jamarr does any transcoding or analysis.
+# metaflac (flac) adds a SEEKTABLE to transcoded FLAC: ffmpeg's flac muxer cannot
+# write one, and without it browsers seek by estimation and stall on the jump.
+RUN apt-get update && apt-get install -y ffmpeg flac && rm -rf /var/lib/apt/lists/*
 
 # Install uv for dependency management
 RUN pip install --no-cache-dir uv
