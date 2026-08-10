@@ -76,6 +76,12 @@ data class StreamUrlResponse(
     val streamMimeType: String? = null,
     @SerialName("original_quality_label")
     val originalQualityLabel: String = "Original",
+    // Source characteristics, so the client can skip ladder rungs that would
+    // not shrink this track. Absent on older servers, hence nullable.
+    @SerialName("source_sample_rate_hz")
+    val sourceSampleRateHz: Int? = null,
+    @SerialName("source_bit_depth")
+    val sourceBitDepth: Int? = null,
 )
 
 data class HomeContent(

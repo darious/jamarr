@@ -64,6 +64,7 @@ class JamarrPlaybackService : MediaLibraryService() {
         val qualityLabel: String,
         val originalQualityLabel: String,
         val expiresAtMs: Long,
+        val source: StreamSource? = null,
     )
     private val streamUrlCache = ConcurrentHashMap<String, CachedStreamUrl>()
 
@@ -264,6 +265,10 @@ class JamarrPlaybackService : MediaLibraryService() {
                                             qualityLabel = response.streamQualityLabel,
                                             originalQualityLabel = response.originalQualityLabel,
                                             expiresAtMs = System.currentTimeMillis() + STREAM_URL_TTL_MS,
+                                            source = StreamSource(
+                                                response.sourceSampleRateHz,
+                                                response.sourceBitDepth,
+                                            ),
                                         )
                                         streamUrlCache[cacheKey(tid, response.streamQuality)] = entry
                                         rememberStreamLabels(tid, entry)
@@ -353,6 +358,7 @@ class JamarrPlaybackService : MediaLibraryService() {
             qualityLabel = response.streamQualityLabel,
             originalQualityLabel = response.originalQualityLabel,
             expiresAtMs = System.currentTimeMillis() + STREAM_URL_TTL_MS,
+            source = StreamSource(response.sourceSampleRateHz, response.sourceBitDepth),
         )
         streamUrlCache[cacheKey(trackId, response.streamQuality)] = cached
         rememberStreamLabels(trackId, cached)
@@ -412,7 +418,8 @@ class JamarrPlaybackService : MediaLibraryService() {
         if (trackId > 0L && mediaCache.isFullyCached(trackId, activeQuality.get())) return
 
         val now = System.currentTimeMillis()
-        val next = adaptiveQualityPolicy.recordBufferingEvent(activeQuality.get(), now)
+        val source = streamUrlCache[cacheKey(trackId, activeQuality.get())]?.source
+        val next = adaptiveQualityPolicy.recordBufferingEvent(activeQuality.get(), now, source)
         if (next != null) {
             downgradeForBuffering(player, next)
         }
