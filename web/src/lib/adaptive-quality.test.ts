@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
     canDowngradeQuality,
     nextLowerQuality,
+    profileReducesSource,
     normalizeQuality,
     recordPlaybackHealthEvent,
 } from "./adaptive-quality";
@@ -44,5 +45,34 @@ describe("adaptive quality policy", () => {
 
         expect(canDowngradeQuality("opus_128")).toBe(false);
         expect(decision.downgradeTo).toBeNull();
+    });
+});
+
+describe("source-aware ladder", () => {
+    const cdQuality = { sampleRateHz: 44_100, bitDepth: 16 };
+    const hiRes = { sampleRateHz: 96_000, bitDepth: 24 };
+
+    it("skips lossless rungs that would not shrink a CD-quality source", () => {
+        // FLAC 24/48 upsamples 16/44.1 and lands larger than the source.
+        expect(nextLowerQuality("original", cdQuality)).toBe("mp3_320");
+        expect(profileReducesSource("flac_24_48", cdQuality)).toBe(false);
+        expect(profileReducesSource("flac_16_48", cdQuality)).toBe(false);
+        expect(profileReducesSource("mp3_320", cdQuality)).toBe(true);
+    });
+
+    it("keeps lossless rungs for a hi-res source", () => {
+        expect(nextLowerQuality("original", hiRes)).toBe("flac_24_48");
+        expect(nextLowerQuality("flac_24_48", hiRes)).toBe("flac_16_48");
+    });
+
+    it("walks the ladder verbatim when the source is unknown", () => {
+        expect(nextLowerQuality("original")).toBe("flac_24_48");
+        expect(nextLowerQuality("original", { sampleRateHz: null, bitDepth: null })).toBe(
+            "flac_24_48",
+        );
+    });
+
+    it("still reports no downgrade at the floor", () => {
+        expect(canDowngradeQuality("opus_128", cdQuality)).toBe(false);
     });
 });
