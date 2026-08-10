@@ -1,6 +1,7 @@
 import pytest
 
 from app.services.renderer.contracts import (
+    PlaybackContext,
     RendererCapabilities,
     RendererDevice,
     make_renderer_id,
@@ -110,3 +111,30 @@ def test_phase1_upnp_transport_mapping():
     assert UpnpRendererBackend.normalize_transport_state("PAUSED_PLAYBACK") == "PAUSED"
     assert UpnpRendererBackend.normalize_transport_state("STOPPED") == "IDLE"
     assert UpnpRendererBackend.normalize_transport_state("VENDOR_DEFINED") == "UNKNOWN"
+
+
+@pytest.mark.asyncio
+async def test_phase1_upnp_backend_prefers_context_stream_url_and_mime_type():
+    fake = FakeUpnpManager()
+    backend = UpnpRendererBackend(fake)
+
+    await backend.play_track(
+        "upnp:uuid:test",
+        {
+            "id": 904,
+            "path": "/music/song.mp3",
+            "title": "Song",
+            "mime": "audio/mpeg",
+        },
+        PlaybackContext(
+            base_url="http://127.0.0.1:8111",
+            user_id=42,
+            stream_url="http://127.0.0.1:8111/api/stream/904?token=normalized",
+            stream_mime_type="audio/flac",
+        ),
+    )
+
+    assert [cmd.name for cmd in fake.commands] == ["set_renderer", "play_track"]
+    metadata = fake.commands[1].args[2]
+    assert metadata["stream_url"] == "http://127.0.0.1:8111/api/stream/904?token=normalized"
+    assert metadata["mime"] == "audio/flac"

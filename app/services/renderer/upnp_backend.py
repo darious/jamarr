@@ -58,10 +58,15 @@ class UpnpRendererBackend(RendererBackend):
         _, udn = split_renderer_id(renderer_id)
         await self.manager.set_renderer(udn)
         self.manager.base_url = context.base_url
+        metadata = dict(track)
+        if context.stream_url:
+            metadata["stream_url"] = context.stream_url
+        if context.stream_mime_type:
+            metadata["mime"] = context.stream_mime_type
         await self.manager.play_track(
             int(track["id"]),
             track.get("path"),
-            track,
+            metadata,
             username=context.username,
         )
         return RendererStatus(renderer_id=renderer_id, state="PLAYING")

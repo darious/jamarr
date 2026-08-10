@@ -21,6 +21,12 @@ class Track(BaseModel):
     release_date: Optional[str] = None
     bitrate: Optional[int] = None
     plays: Optional[int] = None
+    loudness_lufs: Optional[float] = None
+    true_peak_db: Optional[float] = None
+    loudness_gain_db: Optional[float] = None
+    loudness_gain_mode: Optional[str] = None
+    loudness_target_lufs: Optional[float] = None
+    loudness_normalized: bool = False
     logged: bool = False
     artists: Optional[List[Dict[str, Optional[str]]]] = None
 
