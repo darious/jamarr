@@ -126,6 +126,12 @@ export interface Track {
     bitrate: number | null;
     sample_rate_hz: number | null;
     bit_depth: number | null;
+    loudness_lufs?: number | null;
+    true_peak_db?: number | null;
+    loudness_gain_db?: number | null;
+    loudness_gain_mode?: string | null;
+    loudness_target_lufs?: number | null;
+    loudness_normalized?: boolean;
     mb_release_id?: string | null;
     mb_release_group_id?: string | null;
     artist_mbid?: string | null;
@@ -299,17 +305,27 @@ export async function fetchTracks(params: { album?: string, artist?: string, alb
     return await res.json();
 }
 
-export async function getStreamUrlInfo(trackId: number, quality: string = "original"): Promise<StreamUrlInfo> {
+// `headers` carries X-Jamarr-Client-Id, which the backend uses to resolve
+// album-vs-track loudness gain for this client's queue.
+export async function getStreamUrlInfo(
+    trackId: number,
+    quality: string = "original",
+    headers?: HeadersInit,
+): Promise<StreamUrlInfo> {
     const q = new URLSearchParams();
     if (quality) q.set("quality", quality);
     const suffix = q.toString() ? `?${q.toString()}` : "";
-    const res = await fetchWithAuth(`/api/stream-url/${trackId}${suffix}`);
+    const res = await fetchWithAuth(`/api/stream-url/${trackId}${suffix}`, { headers });
     if (!res.ok) throw new Error('Failed to fetch stream URL');
     return await res.json();
 }
 
-export async function getStreamUrl(trackId: number, quality: string = "original"): Promise<string> {
-    return (await getStreamUrlInfo(trackId, quality)).url;
+export async function getStreamUrl(
+    trackId: number,
+    quality: string = "original",
+    headers?: HeadersInit,
+): Promise<string> {
+    return (await getStreamUrlInfo(trackId, quality, headers)).url;
 }
 
 export async function triggerScan(forceRescan: boolean = false): Promise<void> {

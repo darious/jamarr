@@ -9,10 +9,19 @@ from rich.progress import (
     SpinnerColumn,
     BarColumn,
     TextColumn,
+    MofNCompleteColumn,
+    TimeElapsedColumn,
     TimeRemainingColumn,
 )
 
 from app.scanner.core import Scanner
+from app.scanner.audio_analysis import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_SILENCE_MIN_DURATION_SECONDS,
+    DEFAULT_SILENCE_THRESHOLD_DB,
+    AudioAnalysisRunner,
+)
 
 # Configure Logging (Standard)
 logging.basicConfig(
@@ -99,6 +108,73 @@ async def main():
         help="Force filesystem rescan and full metadata update (otherwise fills only missing metadata)",
     )
 
+    # Command: AUDIO ANALYSIS
+    audio_parser = subparsers.add_parser(
+        "audio-analysis",
+        help="Analyze local audio files and store derived track metrics",
+        parents=[parent_parser],
+    )
+    audio_parser.add_argument(
+        "--phase",
+        choices=["1", "2", "3", "4", "all"],
+        default="1",
+        help="Analysis phase to run.",
+    )
+    audio_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help=f"Number of DB rows to select per batch (default: {DEFAULT_BATCH_SIZE})",
+    )
+    audio_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=DEFAULT_CONCURRENCY,
+        help=f"Number of ffmpeg analyses to run at once (default: {DEFAULT_CONCURRENCY})",
+    )
+    audio_parser.add_argument(
+        "--limit",
+        type=int,
+        help="Maximum number of tracks to process in this run",
+    )
+    audio_parser.add_argument(
+        "--track-id",
+        type=int,
+        help="Analyze one track ID",
+    )
+    audio_parser.add_argument(
+        "--path",
+        help="Analyze one relative file path or all tracks under a relative directory",
+    )
+    audio_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Analyze selected tracks even when cached analysis is current",
+    )
+    audio_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show which tracks would be selected without running ffmpeg or writing results",
+    )
+    audio_parser.add_argument(
+        "--silence-threshold-db",
+        type=float,
+        default=DEFAULT_SILENCE_THRESHOLD_DB,
+        help=f"Silence threshold in dBFS (default: {DEFAULT_SILENCE_THRESHOLD_DB:g})",
+    )
+    audio_parser.add_argument(
+        "--silence-min-duration",
+        type=float,
+        default=DEFAULT_SILENCE_MIN_DURATION_SECONDS,
+        help=f"Minimum silence duration in seconds (default: {DEFAULT_SILENCE_MIN_DURATION_SECONDS:g})",
+    )
+    audio_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=600,
+        help="Per-track ffmpeg timeout in seconds (default: 600)",
+    )
+
     args = parser.parse_args()
 
     # Apply Verbose Logging
@@ -180,18 +256,74 @@ async def main():
             await scanner.prune_library()
             console.print("[green]Full Library Update Complete![/green]")
 
+    elif args.command == "audio-analysis":
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            task_id = None
+
+            def progress_cb(current, total, message):
+                nonlocal task_id
+                display_total = total if total is not None else max(current, 1)
+                if task_id is None:
+                    task_id = progress.add_task(message, total=display_total)
+                progress.update(
+                    task_id,
+                    completed=current,
+                    total=display_total,
+                    description=message,
+                )
+
+            runner = AudioAnalysisRunner(
+                batch_size=args.batch_size,
+                concurrency=args.concurrency,
+                limit=args.limit,
+                force=args.force,
+                dry_run=args.dry_run,
+                track_id=args.track_id,
+                path=args.path,
+                silence_threshold_db=args.silence_threshold_db,
+                silence_min_duration_seconds=args.silence_min_duration,
+                timeout_seconds=args.timeout,
+                progress_cb=progress_cb,
+            )
+            phase_methods = {
+                "1": runner.run_phase1,
+                "2": runner.run_phase2,
+                "3": runner.run_phase3,
+                "4": runner.run_phase4,
+            }
+            if args.phase == "all":
+                all_stats = {}
+                for phase in ["1", "2", "3", "4"]:
+                    all_stats[f"phase{phase}"] = await phase_methods[phase]()
+                console.print(f"[green]Audio analysis complete:[/green] {all_stats}")
+            else:
+                stats = await phase_methods[args.phase]()
+                console.print(f"[green]Audio analysis complete:[/green] {stats}")
+
     else:
         parser.print_help()
 
 
 if __name__ == "__main__":
+    import sys
+
     from app.db import init_db
     from app.scanner.core import warm_dns_cache
 
     async def run():
         await init_db()
-        # Warm DNS cache before scanning to eliminate DNS lookups
-        await warm_dns_cache()
+        # Warm DNS cache before network-backed scanner commands.
+        if "audio-analysis" not in sys.argv[1:]:
+            await warm_dns_cache()
         await main()
 
     asyncio.run(run())
