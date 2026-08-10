@@ -21,6 +21,7 @@
   import {
     canDowngradeQuality,
     nextLowerQuality,
+    type StreamSource,
     recordPlaybackHealthEvent,
   } from "$lib/adaptive-quality";
   import NowPlayingOverlay from "$components/NowPlayingOverlay.svelte";
@@ -70,8 +71,16 @@
   const DEFAULT_RENDERER_ICON = "/assets/icon-renderer.svg";
   const LOCAL_RENDERER_ICON = "/assets/icon-browser.svg";
 
+  // Source characteristics of the playing track, so the ladder can skip rungs
+  // that would not shrink it (FLAC 24/48 off a 16/44.1 source is an upsample).
+  let activeSource: StreamSource | null = null;
+
   function applyStreamInfo(trackId: number, info: any) {
     if (!currentTrack || currentTrack.id !== trackId) return;
+    activeSource = {
+      sampleRateHz: info.source_sample_rate_hz ?? null,
+      bitDepth: info.source_bit_depth ?? null,
+    };
     playerState.update((s) => ({
       ...s,
       stream_quality: info.stream_quality,
@@ -79,6 +88,9 @@
       original_quality_label: info.original_quality_label,
     }));
   }
+
+  const SEEK_STALL_GRACE_MS = 5_000;
+  let lastSeekAt = 0;
 
   function clearAdaptiveWatchdog() {
     if (adaptiveWatchdog) {
@@ -94,7 +106,7 @@
       if (!$playerState.renderer.startsWith("local")) return;
       if (!currentTrack || currentTrack.id !== trackId) return;
       if (activeQuality !== quality) return;
-      if (!canDowngradeQuality(activeQuality)) return;
+      if (!canDowngradeQuality(activeQuality, activeSource)) return;
 
       const hasAdvanced =
         audio &&
@@ -108,9 +120,9 @@
 
   async function downgradeCurrentStream(reason: string, targetQuality?: string) {
     if (!$playerState.renderer.startsWith("local")) return;
-    if (!audio || !currentTrack || downgradeInFlight || !canDowngradeQuality(activeQuality)) return;
+    if (!audio || !currentTrack || downgradeInFlight || !canDowngradeQuality(activeQuality, activeSource)) return;
     downgradeInFlight = true;
-    const nextQuality = targetQuality || nextLowerQuality(activeQuality);
+    const nextQuality = targetQuality || nextLowerQuality(activeQuality, activeSource);
     const resumeAt = Number.isFinite(audio.currentTime) ? audio.currentTime : progress || 0;
     const shouldPlay = !audio.paused;
     try {
@@ -152,7 +164,18 @@
 
   function handlePlaybackHealthEvent(reason: string) {
     if (!$playerState.renderer.startsWith("local") || !isPlaying) return;
-    const decision = recordPlaybackHealthEvent(stallEvents, activeQuality);
+    // Initial buffering is not a rebuffer. A normalized stream is transcoded on
+    // first request, so opening a cold track fires several `waiting` events
+    // before a single sample exists -- enough to trip the stall threshold and
+    // downgrade a track that was never actually struggling. Only count stalls
+    // once playback has produced audio; a track that never starts at all is
+    // caught by the watchdog armed at load instead.
+    if (!audio || !Number.isFinite(audio.currentTime) || audio.currentTime <= 0) return;
+    // Nor is a seek. Jumping into a byte range the browser has not fetched
+    // stalls by definition; counting those downgraded tracks purely because
+    // the user scrubbed.
+    if (Date.now() - lastSeekAt < SEEK_STALL_GRACE_MS) return;
+    const decision = recordPlaybackHealthEvent(stallEvents, activeQuality, Date.now(), activeSource);
     stallEvents = decision.events;
     if (decision.downgradeTo) {
       void downgradeCurrentStream(reason, decision.downgradeTo);
@@ -728,6 +751,12 @@
 
       audio.src = newSrc;
 
+      // Stalls are ignored until playback produces audio, so cover the case
+      // where it never does: if nothing has started shortly after load, step
+      // the quality down as the mid-playback path would have.
+      stallEvents = [];
+      armAdaptiveWatchdog(track.id, activeQuality, 0);
+
       // Force Playback immediately - User action (click) initiated this chain
       audio
         .play()
@@ -783,6 +812,7 @@
       audioA.addEventListener("ended", handleActiveEnded);
       audioA.addEventListener("waiting", () => handlePlaybackHealthEvent("waiting"));
       audioA.addEventListener("stalled", () => handlePlaybackHealthEvent("stalled"));
+      audioA.addEventListener("seeking", () => (lastSeekAt = Date.now()));
     } else {
       console.error("[PlayerBar] audioA element not found in onMount!");
     }
@@ -791,6 +821,7 @@
       audioB.addEventListener("ended", handleActiveEnded);
       audioB.addEventListener("waiting", () => handlePlaybackHealthEvent("waiting"));
       audioB.addEventListener("stalled", () => handlePlaybackHealthEvent("stalled"));
+      audioB.addEventListener("seeking", () => (lastSeekAt = Date.now()));
     }
 
     // Polling for remote playback
