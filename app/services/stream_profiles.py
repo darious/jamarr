@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,12 @@ class StreamProfile:
     mime_type: str
     ffmpeg_args: tuple[str, ...] = ()
     cached: bool = False
+    # Output characteristics, used to tell whether this rung actually reduces
+    # the data rate of a given source. Lossy rungs always do, so they leave
+    # sample_rate_hz/bit_depth unset.
+    sample_rate_hz: int | None = None
+    bit_depth: int | None = None
+    lossless: bool = False
 
 
 PROFILES: dict[str, StreamProfile] = {
@@ -48,6 +55,9 @@ PROFILES: dict[str, StreamProfile] = {
             "5",
         ),
         cached=True,
+        sample_rate_hz=48000,
+        bit_depth=24,
+        lossless=True,
     ),
     "flac_16_48": StreamProfile(
         key="flac_16_48",
@@ -68,6 +78,9 @@ PROFILES: dict[str, StreamProfile] = {
             "5",
         ),
         cached=True,
+        sample_rate_hz=48000,
+        bit_depth=16,
+        lossless=True,
     ),
     "mp3_320": StreamProfile(
         key="mp3_320",
@@ -117,6 +130,8 @@ PROFILE_ALIASES = {
     "mobile": "opus_128",
 }
 
+logger = logging.getLogger(__name__)
+
 _cleanup_last_run = 0.0
 _transcode_locks: dict[str, asyncio.Lock] = {}
 
@@ -129,13 +144,43 @@ def normalize_quality(value: str | None) -> str:
     return key
 
 
-def next_lower_quality(current: str | None) -> str:
+def profile_reduces_source(profile: StreamProfile, track: dict[str, Any] | None) -> bool:
+    """Whether transcoding to `profile` would actually shrink this source.
+
+    Lossy rungs always do. A lossless rung only does if it lowers the raw data
+    rate: FLAC 24/48 off a 16/44.1 source is an *upsample*, ~69% larger, so
+    stepping onto it to relieve a stall makes the stall worse.
+    """
+
+    if not profile.lossless:
+        return True
+    if not track:
+        return True
+    source_rate = track.get("sample_rate_hz")
+    source_depth = track.get("bit_depth")
+    if not source_rate or not source_depth:
+        return True
+    if not profile.sample_rate_hz or not profile.bit_depth:
+        return True
+    return (profile.sample_rate_hz * profile.bit_depth) < (int(source_rate) * int(source_depth))
+
+
+def next_lower_quality(current: str | None, track: dict[str, Any] | None = None) -> str:
+    """Next rung down, skipping any that would not shrink this source.
+
+    Called without `track` it walks the ladder verbatim, which is the right
+    behaviour when the source characteristics are unknown.
+    """
+
     key = normalize_quality(current)
     try:
         idx = QUALITY_LADDER.index(key)
     except ValueError:
         return "original"
-    return QUALITY_LADDER[min(idx + 1, len(QUALITY_LADDER) - 1)]
+    for candidate in QUALITY_LADDER[idx + 1:]:
+        if profile_reduces_source(PROFILES[candidate], track):
+            return candidate
+    return key
 
 
 def original_quality_label(track: dict[str, Any]) -> str:
@@ -161,7 +206,42 @@ def stream_claims_for_quality(quality: str, track: dict[str, Any]) -> dict[str, 
         "stream_quality_label": profile.label,
         "stream_mime_type": profile.mime_type or None,
         "original_quality_label": original_quality_label(track),
+        # The client walks the same ladder when it downgrades, so it needs the
+        # source characteristics to skip rungs that would not shrink it.
+        "source_sample_rate_hz": track.get("sample_rate_hz"),
+        "source_bit_depth": track.get("bit_depth"),
     }
+
+
+@dataclass(frozen=True)
+class ProfileVariant:
+    """A cache-distinct rendering of a profile, e.g. loudness-normalized.
+
+    Variants get their own cache entry rather than being generated per
+    request, so the response can still be a plain file: that is what keeps
+    Range requests, seeking and Content-Length working.
+    """
+
+    key: str
+    filters: tuple[str, ...] = ()
+    encode_args: tuple[str, ...] | None = None
+    extension: str | None = None
+    mime_type: str | None = None
+
+
+def _apply_variant(profile: StreamProfile, variant: ProfileVariant | None) -> StreamProfile:
+    if variant is None:
+        return profile
+    base_args = profile.ffmpeg_args if variant.encode_args is None else variant.encode_args
+    return replace(
+        profile,
+        ffmpeg_args=tuple(base_args) + variant.filters,
+        extension=variant.extension or profile.extension,
+        mime_type=variant.mime_type or profile.mime_type,
+        # A variant always needs generating, even off the "original" profile
+        # which is otherwise served straight from disk.
+        cached=True,
+    )
 
 
 async def cached_profile_path(
@@ -169,16 +249,18 @@ async def cached_profile_path(
     source_path: str,
     track: dict[str, Any],
     quality: str,
+    variant: ProfileVariant | None = None,
 ) -> tuple[Path, StreamProfile]:
     key = normalize_quality(quality)
-    profile = PROFILES[key]
+    profile = _apply_variant(PROFILES[key], variant)
     if not profile.cached:
         return Path(source_path), profile
 
     cache_dir = _cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     fingerprint = _cache_fingerprint(track, source_path)
-    out_path = cache_dir / f"track-{track['id']}-{fingerprint}-{key}.{profile.extension}"
+    suffix = f"-{variant.key}" if variant else ""
+    out_path = cache_dir / f"track-{track['id']}-{fingerprint}-{key}{suffix}.{profile.extension}"
 
     if out_path.exists() and out_path.stat().st_size > 0:
         _touch(out_path)
@@ -266,8 +348,35 @@ async def _transcode(source_path: str, out_path: Path, profile: StreamProfile) -
     if not temp_path.exists() or temp_path.stat().st_size <= 0:
         _unlink_quietly(temp_path)
         raise RuntimeError("ffmpeg produced an empty stream cache file")
+    if profile.extension == "flac":
+        await _add_flac_seektable(temp_path)
     shutil.move(str(temp_path), str(out_path))
     _touch(out_path)
+
+
+async def _add_flac_seektable(path: Path) -> None:
+    """Give a transcoded FLAC a SEEKTABLE.
+
+    ffmpeg's flac muxer cannot write one, and source files generally have one.
+    Without it a browser seeks by estimating the byte offset and then has to
+    resync, which shows up as a stall after every jump. Best effort: a cache
+    file without a seektable still plays.
+    """
+
+    proc = await asyncio.create_subprocess_exec(
+        "metaflac",
+        "--add-seekpoint=10s",
+        str(path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        logger.warning(
+            "metaflac could not add a seektable to %s: %s",
+            path.name,
+            stderr.decode("utf-8", errors="replace")[-500:],
+        )
 
 
 def _cache_dir() -> Path:

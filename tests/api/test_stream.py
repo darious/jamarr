@@ -479,3 +479,74 @@ async def test_normalization_can_be_disabled_per_request(
 
     assert response.status_code == 200
     assert "x-jamarr-loudness-normalized" not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_normalized_stream_is_seekable(
+    auth_client: AsyncClient, db, normalizable_track, tmp_path, monkeypatch
+):
+    """Normalized responses must be range-serveable.
+
+    Generating them per request made the response a bodiless stream: the
+    browser could not seek, and every re-request re-encoded the whole track.
+    """
+    monkeypatch.setenv("JAMARR_STREAM_CACHE_DIR", str(tmp_path / "cache"))
+
+    full = await auth_client.get("/api/stream/1201")
+    assert full.status_code == 200
+    assert full.headers["accept-ranges"] == "bytes"
+    assert int(full.headers["content-length"]) > 0
+
+    partial = await auth_client.get("/api/stream/1201", headers={"Range": "bytes=0-99"})
+    assert partial.status_code == 206
+    assert partial.headers["content-length"] == "100"
+    assert partial.headers["x-jamarr-loudness-normalized"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_normalized_stream_reuses_its_cache_entry(
+    auth_client: AsyncClient, db, normalizable_track, tmp_path, monkeypatch
+):
+    """Same track, quality and gain mode must resolve to one cache file."""
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setenv("JAMARR_STREAM_CACHE_DIR", str(cache_dir))
+
+    first = await auth_client.get("/api/stream/1201")
+    assert first.status_code == 200
+    entries = sorted(p.name for p in cache_dir.glob("track-1201-*"))
+    assert len(entries) == 1
+
+    second = await auth_client.get("/api/stream/1201")
+    assert second.status_code == 200
+    assert sorted(p.name for p in cache_dir.glob("track-1201-*")) == entries
+
+
+def test_quality_ladder_skips_rungs_that_would_not_shrink_the_source():
+    """A CD-quality source must not "downgrade" onto FLAC 24/48.
+
+    That rung resamples 44.1k up to 48k and pads 16-bit to 24, landing ~69%
+    larger than the source -- the opposite of what a stall response needs.
+    """
+    cd_quality = {"sample_rate_hz": 44100, "bit_depth": 16}
+
+    assert next_lower_quality("original", cd_quality) == "mp3_320"
+    assert next_lower_quality("mp3_320", cd_quality) == "opus_128"
+
+
+def test_quality_ladder_keeps_lossless_rungs_for_hi_res_sources():
+    hi_res = {"sample_rate_hz": 96000, "bit_depth": 24}
+
+    assert next_lower_quality("original", hi_res) == "flac_24_48"
+    assert next_lower_quality("flac_24_48", hi_res) == "flac_16_48"
+
+
+def test_quality_ladder_skips_equal_rate_lossless_rung():
+    """24/48 source: FLAC 24/48 is a pointless re-encode, 16/48 is a real cut."""
+    same_as_rung = {"sample_rate_hz": 48000, "bit_depth": 24}
+
+    assert next_lower_quality("original", same_as_rung) == "flac_16_48"
+
+
+def test_quality_ladder_is_unchanged_without_source_details():
+    assert next_lower_quality("original") == "flac_24_48"
+    assert next_lower_quality("original", {"sample_rate_hz": None, "bit_depth": None}) == "flac_24_48"
