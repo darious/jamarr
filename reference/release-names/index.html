@@ -1308,6 +1308,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#two-streams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two streams
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#convention" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1750,6 +1761,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#two-streams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two streams
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#convention" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1821,10 +1843,41 @@
 <h1 id="release-names">Release names<a class="headerlink" href="#release-names" title="Permanent link">&para;</a></h1>
 <p>Every Jamarr release gets a musician or band as a codename, passed to
 <code>release.sh</code> alongside the version:</p>
-<div class="highlight"><pre><span></span><code>./release.sh<span class="w"> </span>v1.5.0<span class="w"> </span><span class="s2">&quot;Arcade Fire&quot;</span>
+<div class="highlight"><pre><span></span><code>./release.sh<span class="w"> </span>v1.5.0<span class="w"> </span><span class="s2">&quot;Arcade Fire&quot;</span><span class="w">           </span><span class="c1"># server: Docker image</span>
+./release.sh<span class="w"> </span>android-v1.8.0<span class="w"> </span><span class="s2">&quot;Tori Amos&quot;</span><span class="w">     </span><span class="c1"># app: signed APK</span>
 </code></pre></div>
-<p>That produces the tag <code>v1.5.0</code> and a GitHub release titled
-<code>v1.5.0 - Arcade Fire</code>. Use <code>--dry-run</code> first to validate without pushing.</p>
+<p>That produces the tag and a GitHub release titled <code>&lt;tag&gt; - &lt;Name&gt;</code>. Use
+<code>--dry-run</code> first to validate without pushing.</p>
+<h2 id="two-streams">Two streams<a class="headerlink" href="#two-streams" title="Permanent link">&para;</a></h2>
+<p>The server and the Android app are released independently, because they are
+installed independently — a phone can be several server releases behind.</p>
+<table>
+<thead>
+<tr>
+<th>Stream</th>
+<th>Tag</th>
+<th>Builds</th>
+<th>Triggered workflow</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Server (backend + web)</td>
+<td><code>v1.7.1</code></td>
+<td>Docker image, <code>latest</code> moves</td>
+<td><code>publish_docker.yml</code></td>
+</tr>
+<tr>
+<td>App</td>
+<td><code>android-v1.8.0</code></td>
+<td>signed APK on the release</td>
+<td><code>android_release.yml</code></td>
+</tr>
+</tbody>
+</table>
+<p>A server tag no longer rebuilds the APK, and an app tag does not rebuild the
+image. Before this split, <code>android_release.yml</code> fired on every <code>v*</code> tag, so a
+backend-only release republished an unchanged APK.</p>
 <h2 id="convention">Convention<a class="headerlink" href="#convention" title="Permanent link">&para;</a></h2>
 <ul>
 <li>One artist per release, <strong>used once and never reused</strong>.</li>
@@ -2035,17 +2088,28 @@ browses. Regenerate against prod with:</p>
 <span class="k">LIMIT</span><span class="w"> </span><span class="mi">45</span><span class="p">;</span>
 </code></pre></div>
 <h2 id="before-tagging">Before tagging<a class="headerlink" href="#before-tagging" title="Permanent link">&para;</a></h2>
-<p><code>release.sh</code> checks the tag does not already exist and that the tree is
-clean, but it does not check any of the following:</p>
+<p><strong>There is nothing to bump.</strong> The tag is the version:</p>
 <ul>
-<li><strong>Bump <code>versionCode</code> and <code>versionName</code></strong> in <code>android/app/build.gradle.kts</code>.
-  <code>versionCode</code> must increase for every published APK, or a device cannot tell
-  one build from the next and will not treat it as an update.</li>
+<li><code>android_release.yml</code> parses <code>android-vX.Y.Z</code> and builds the APK with that
+  <code>versionName</code>, plus a <code>versionCode</code> derived from it (<code>major*10000 +
+  minor*100 + patch</code>, so 1.8.0 is 10800). It then re-reads the built APK and
+  fails the release if either disagrees with the tag.</li>
+<li><code>publish_docker.yml</code> bakes the tag into the image as <code>JAMARR_VERSION</code>, which
+  is what <code>/api/version</code> and the generated API reference report.</li>
+</ul>
+<p>Nothing in the working tree carries a version, so there is no bump to forget,
+no version to collide with another PR, and no way for a published artifact to
+disagree with its tag. Builds outside a release report <code>0.0.0-dev</code> (app) or
+<code>dev</code> (server).</p>
+<p><code>release.sh</code> checks the tag does not already exist and that the tree is clean.
+It does not check:</p>
+<ul>
 <li>Land everything through a PR to <code>main</code> first — tagging is what publishes the
-  signed APK (<code>android_release.yml</code>) and the Docker image
-  (<code>publish_docker.yml</code>), and both are public and awkward to retract.</li>
+  signed APK and the Docker image, and both are public and awkward to retract.</li>
 <li>Pick MAJOR/MINOR/PATCH from what actually changed: a new user-facing feature
   is a MINOR bump, a fix-only release is a PATCH.</li>
+<li>The two streams number independently. The app starts at <code>android-v1.8.0</code>,
+  continuing the numbering users have already seen on the releases page.</li>
 </ul>
 
 

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FastAPI",
-    "version": "0.1.0"
+    "version": "v1.7.0"
   },
   "paths": {
     "/art/test": {
@@ -23,9 +23,9 @@
       }
     },
     "/art/file/{sha1}": {
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
         "parameters": [
           {
             "name": "sha1",
@@ -68,9 +68,9 @@
           }
         }
       },
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
         "parameters": [
           {
             "name": "sha1",
@@ -179,9 +179,9 @@
       }
     },
     "/api/art/file/{sha1}": {
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
         "parameters": [
           {
             "name": "sha1",
@@ -224,9 +224,9 @@
           }
         }
       },
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
         "parameters": [
           {
             "name": "sha1",
@@ -1102,9 +1102,9 @@
       }
     },
     "/api/stream/{track_id}": {
-      "head": {
+      "get": {
         "summary": "Stream Track",
-        "operationId": "stream_track_api_stream__track_id__head",
+        "operationId": "stream_track_api_stream__track_id__get",
         "parameters": [
           {
             "name": "track_id",
@@ -1185,9 +1185,9 @@
           }
         }
       },
-      "get": {
+      "head": {
         "summary": "Stream Track",
-        "operationId": "stream_track_api_stream__track_id__head",
+        "operationId": "stream_track_api_stream__track_id__get",
         "parameters": [
           {
             "name": "track_id",
@@ -5858,6 +5858,60 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/version": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Running application version",
+        "description": "Version of this build, or ``dev`` when not built from a release tag.",
+        "operationId": "app_version_api_version_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response App Version Api Version Get"
+                }
               }
             }
           },

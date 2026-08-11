@@ -1955,6 +1955,78 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#android-auto-hardening-2026-08-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android Auto Hardening - 2026-08-11
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Android Auto Hardening - 2026-08-11">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#browse-tree_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Browse tree
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#playback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Playback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#artwork_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2699,6 +2771,78 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#android-auto-hardening-2026-08-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android Auto Hardening - 2026-08-11
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Android Auto Hardening - 2026-08-11">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#browse-tree_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Browse tree
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#playback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Playback
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#artwork_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3420,6 +3564,106 @@ Installed on 1 device.
 <li>No <code>/api/android</code> adapter exists. Stage 4 should only be added if Android Auto
   browsing proves the current API is too awkward.</li>
 </ul>
+<h2 id="android-auto-hardening-2026-08-11">Android Auto Hardening - 2026-08-11<a class="headerlink" href="#android-auto-hardening-2026-08-11" title="Permanent link">&para;</a></h2>
+<p>Stage 3 shipped a working browse tree; this pass fixed the behaviour that only
+shows up in a car, and added the test stack to keep it fixed.</p>
+<h3 id="browse-tree_1">Browse tree<a class="headerlink" href="#browse-tree_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Paging is honoured.</strong> Media3 forwards <code>EXTRA_PAGE</code>/<code>EXTRA_PAGE_SIZE</code> from
+  legacy browsers and only falls back to <code>(0, MAX_VALUE)</code> when the browser sends
+  no options. Nodes now build a light row list, apply the window, and turn only
+  that page into <code>MediaItem</code>s.</li>
+<li><strong>Failures are errors.</strong> A node that cannot load returns
+  <code>LibraryResult.ofError</code> (<code>ERROR_SESSION_AUTHENTICATION_EXPIRED</code> for 401/403,
+  <code>ERROR_IO</code> otherwise) instead of an empty list that reads as an empty library.</li>
+<li><strong>Sign-in refreshes the tree.</strong> <code>notifyChildrenChanged</code> fires for every static
+  node when the stored session changes, so the car stops showing "Sign in on
+  phone" without a reconnect.</li>
+<li><strong>Every static node resolves via <code>onGetItem</code></strong>, not just root's children, so a
+  restored browse stack does not fail.</li>
+<li><strong>Entries with no MBID are dropped</strong> rather than offered as browsable folders
+  that open empty.</li>
+<li><strong>Album, playlist, Singles and Most Scrobbled folders lead with "Play all".</strong></li>
+<li><strong>Subtitles come with <code>displayTitle</code>.</strong> Media3 only forwards <code>subtitle</code> when
+  <code>displayTitle</code> is set; otherwise it derives the description from
+  <code>MediaMetadataCompat.PREFERRED_DESCRIPTION_ORDER</code> and drops it.</li>
+<li>Track items carry <code>durationMs</code>, artist and album.</li>
+</ul>
+<h3 id="playback">Playback<a class="headerlink" href="#playback" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>onAddMediaItems</code> resolves only. Sibling expansion belongs to
+  <code>onSetMediaItems</code> — "add to queue" of one track must add one track.</li>
+<li>Queue expansion no longer fetches artwork: nothing renders queue items, and
+  every fetch delayed the first note. The artwork <em>URI</em> is still set.</li>
+<li>Voice search is still unimplemented. The manifest must advertise
+  <code>MEDIA_PLAY_FROM_SEARCH</code> (lint <code>MissingIntentFilterForMediaSearch</code> fails the
+  build without it for a media Auto app), so a search request is now rejected
+  with an error rather than handed to the player as an item with no URI.</li>
+<li><strong>Playback resumption</strong> works: the last queue is written to DataStore and
+  restored from <code>onPlaybackResumption</code>, with
+  <code>androidx.media3.session.MediaButtonReceiver</code> declared so the system media
+  button reaches the service.</li>
+</ul>
+<h3 id="artwork_1">Artwork<a class="headerlink" href="#artwork_1" title="Permanent link">&para;</a></h3>
+<p>The Stage 3 note that <code>artworkUri</code> "can't carry our bearer token" does not apply
+to <code>/api/art/file/{sha1}</code>, which needs no auth. <code>ArtworkPolicy</code> now decides:</p>
+<ul>
+<li><strong>HTTPS server -&gt; URI only.</strong> The host fetches it, so browsing costs no HTTP
+  calls and no bitmaps cross the binder.</li>
+<li><strong>Cleartext server -&gt; bytes, as before.</strong> The Auto host is a separate app with
+  its own network security config and does not permit cleartext, so an <code>http://</code>
+  icon URI would silently fail to load there.</li>
+</ul>
+<p>The URI path has not been verified against a real head unit yet — that needs DHU
+or a car. Requested size dropped 400 -&gt; 320 px.</p>
+<h3 id="service">Service<a class="headerlink" href="#service" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Settings load off the main thread; everything that needs them awaits a
+  <code>CompletableDeferred</code>. <code>onCreate</code> used <code>runBlocking</code> on the very path the car
+  uses to start the service.</li>
+<li>The reporting tick backs off from 500 ms to 5 s when nothing is playing.</li>
+<li>Sibling nodes share payloads through a 45 s <code>TtlCache</code> — the three Recently
+  Played folders plus Recently Added were five <code>/api/home</code> sub-requests each.</li>
+<li><code>onConnect</code> filters controllers (<code>ControllerAccess</code>): self, platform-trusted
+  callers, and a verified package allowlist (Auto, Assistant, system UI,
+  Bluetooth, Wear). The service is exported, so it was previously bindable by
+  any installed app.</li>
+</ul>
+<h3 id="testing_1">Testing<a class="headerlink" href="#testing_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Where</th>
+<th>Needs a device</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Media id grammar, paging, cache, resume state, connection filter, artwork policy</td>
+<td><code>app/src/test/.../playback/</code></td>
+<td>no</td>
+</tr>
+<tr>
+<td>Browse tree against a fake Jamarr server</td>
+<td><code>app/src/androidTest/.../JamarrLibraryProviderInstrumentedTest.kt</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Real <code>MediaBrowser</code> -&gt; service plumbing</td>
+<td><code>app/src/androidTest/.../MediaBrowserHarnessTest.kt</code></td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<p><code>android/scripts/emulator.sh start|stop|status</code> boots the headless AVD
+(creating and fixing up its config on first use). <code>RUN_ANDROID_INSTRUMENTATION=1
+./test.sh</code> now boots it automatically when no device is attached and shuts it
+down afterwards.</p>
+<p>The harness earned its keep immediately: the session callback was first written
+with Kotlin interface delegation (<code>by</code>), which does not generate overrides for
+Java default methods — so every browse call fell through to media3's defaults
+and returned <code>ERROR_NOT_SUPPORTED</code>. Only a real <code>MediaBrowser</code> could see that.</p>
 
 
 
