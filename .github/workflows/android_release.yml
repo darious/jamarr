@@ -1,9 +1,11 @@
 name: Android Release
 
+# android-v* only. This used to fire on every v* tag, so a backend-only
+# release rebuilt and republished the APK unchanged.
 on:
   push:
     tags:
-      - "v*"
+      - "android-v*"
 
 permissions:
   contents: write
@@ -47,13 +49,40 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
+      # The tag is the version. versionCode must be a monotonic integer, so it
+      # is derived from the same semver: 1.8.0 -> 10800.
+      - name: Derive version from tag
+        id: version
+        run: |
+          name="${GITHUB_REF_NAME#android-v}"
+          if [[ ! "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag $GITHUB_REF_NAME must look like android-vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          IFS=. read -r major minor patch <<< "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$((major * 10000 + minor * 100 + patch))" >> "$GITHUB_OUTPUT"
+
       - name: Build release APK
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon --stacktrace assembleRelease
+        run: |
+          ./gradlew --no-daemon --stacktrace assembleRelease \
+            -PjamarrVersionName=${{ steps.version.outputs.name }} \
+            -PjamarrVersionCode=${{ steps.version.outputs.code }}
+
+      # Cheap insurance: the whole point is that the APK stops disagreeing with
+      # the tag, so fail the release if it somehow still does.
+      - name: Verify APK version
+        run: |
+          aapt2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | head -1)"
+          badging="$("$aapt2" dump badging app/build/outputs/apk/release/app-release.apk | head -1)"
+          echo "$badging"
+          grep -q "versionName='${{ steps.version.outputs.name }}'" <<<"$badging"
+          grep -q "versionCode='${{ steps.version.outputs.code }}'" <<<"$badging"
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/jamarr.apk

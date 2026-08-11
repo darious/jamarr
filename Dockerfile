@@ -12,6 +12,11 @@ RUN npm run build
 FROM python:3.14.2-slim
 WORKDIR /app
 
+# The version comes from the git tag that triggered the build (publish_docker.yml
+# passes it); an untagged build honestly reports itself as "dev".
+ARG JAMARR_VERSION=dev
+ENV JAMARR_VERSION=$JAMARR_VERSION
+
 # Install system dependencies
 # ffmpeg is useful for audio manipulation if jamarr does any transcoding or analysis.
 # metaflac (flac) adds a SEEKTABLE to transcoded FLAC: ffmpeg's flac muxer cannot

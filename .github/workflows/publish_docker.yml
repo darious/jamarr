@@ -1,18 +1,11 @@
 name: Publish Docker image
 
+# Releases only. A merge to main used to publish too, which meant every
+# release built the same image twice — once on merge, once on the tag — and
+# `latest` tracked whatever landed last rather than what was released.
+# Use workflow_dispatch to publish an untagged main when you need to.
 on:
   push:
-    branches: [main]
-    paths:
-      - ".github/workflows/publish_docker.yml"
-      - "app/**"
-      - "web/**"
-      - "migrations/**"
-      - "config.yaml"
-      - "docker-compose.yml"
-      - "Dockerfile"
-      - "pyproject.toml"
-      - "uv.lock"
     tags:
       - "v*.*.*"
   workflow_dispatch:
@@ -40,7 +33,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
             type=sha,prefix=sha-
             type=semver,pattern={{version}}
 
@@ -54,6 +47,28 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Bakes the version into the image so /api/version and the OpenAPI
+          # schema report the release rather than a placeholder.
+          build-args: |
+            JAMARR_VERSION=${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # android_release.yml used to create the GitHub Release for every v* tag.
+  # It now only handles android-v*, so server releases need their own.
+  release:
+    needs: publish
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3.0.2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
 

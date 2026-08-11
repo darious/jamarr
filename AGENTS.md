@@ -72,6 +72,15 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   Schema docs are generated (`docs/reference/schema/`) — don't hand-edit.
 - Config: secrets in `.env` (see `.env.example`); non-secret app config in `config.yaml`.
 - Commits: Conventional Commits (`feat(scope):`, `fix(charts):`, `chore(ci):`). **No AI co-author/attribution trailers.**
+- Versions live in the git tag, never in a file. Server releases are `v1.7.1`
+  (Docker image, `latest` moves, `JAMARR_VERSION` baked in); app releases are
+  `android-v1.8.0` (signed APK, `versionName` from the tag and `versionCode` =
+  `major*10000 + minor*100 + patch`). Cut both with `release.sh <tag> "<Name>"`
+  — see `docs/reference/release-names.md`. Nothing to bump in a PR.
+- CI builds on PRs and on release tags only; a merge to `main` builds nothing.
+  `deploy.sh` pulls `:latest`, which now moves on server tags rather than on
+  every merge, so deploys land released versions. `workflow_dispatch` on
+  `publish_docker.yml` publishes an untagged `main` when you need it.
 - Ports (dev): API 8111, Vite 5173, Postgres 8110, CloudBeaver 8978.
 
 ## Gotchas

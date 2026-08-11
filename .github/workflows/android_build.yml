@@ -1,14 +1,10 @@
 name: Android Build
 
+# PR only. Pull request events build the merge commit, so the push-to-main run
+# this used to do was rebuilding a tree that had just been built.
 on:
   pull_request:
     branches: [ "main" ]
-    paths:
-      - ".github/workflows/android_build.yml"
-      - "android/**"
-  push:
-    branches:
-      - main
     paths:
       - ".github/workflows/android_build.yml"
       - "android/**"
