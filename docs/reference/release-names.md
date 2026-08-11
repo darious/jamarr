@@ -4,11 +4,26 @@ Every Jamarr release gets a musician or band as a codename, passed to
 `release.sh` alongside the version:
 
 ```bash
-./release.sh v1.5.0 "Arcade Fire"
+./release.sh v1.5.0 "Arcade Fire"           # server: Docker image
+./release.sh android-v1.8.0 "Tori Amos"     # app: signed APK
 ```
 
-That produces the tag `v1.5.0` and a GitHub release titled
-`v1.5.0 - Arcade Fire`. Use `--dry-run` first to validate without pushing.
+That produces the tag and a GitHub release titled `<tag> - <Name>`. Use
+`--dry-run` first to validate without pushing.
+
+## Two streams
+
+The server and the Android app are released independently, because they are
+installed independently — a phone can be several server releases behind.
+
+| Stream | Tag | Builds | Triggered workflow |
+|---|---|---|---|
+| Server (backend + web) | `v1.7.1` | Docker image, `latest` moves | `publish_docker.yml` |
+| App | `android-v1.8.0` | signed APK on the release | `android_release.yml` |
+
+A server tag no longer rebuilds the APK, and an app tag does not rebuild the
+image. Before this split, `android_release.yml` fired on every `v*` tag, so a
+backend-only release republished an unchanged APK.
 
 ## Convention
 
@@ -83,14 +98,26 @@ LIMIT 45;
 
 ## Before tagging
 
-`release.sh` checks the tag does not already exist and that the tree is
-clean, but it does not check any of the following:
+**There is nothing to bump.** The tag is the version:
 
-- **Bump `versionCode` and `versionName`** in `android/app/build.gradle.kts`.
-  `versionCode` must increase for every published APK, or a device cannot tell
-  one build from the next and will not treat it as an update.
+- `android_release.yml` parses `android-vX.Y.Z` and builds the APK with that
+  `versionName`, plus a `versionCode` derived from it (`major*10000 +
+  minor*100 + patch`, so 1.8.0 is 10800). It then re-reads the built APK and
+  fails the release if either disagrees with the tag.
+- `publish_docker.yml` bakes the tag into the image as `JAMARR_VERSION`, which
+  is what `/api/version` and the generated API reference report.
+
+Nothing in the working tree carries a version, so there is no bump to forget,
+no version to collide with another PR, and no way for a published artifact to
+disagree with its tag. Builds outside a release report `0.0.0-dev` (app) or
+`dev` (server).
+
+`release.sh` checks the tag does not already exist and that the tree is clean.
+It does not check:
+
 - Land everything through a PR to `main` first — tagging is what publishes the
-  signed APK (`android_release.yml`) and the Docker image
-  (`publish_docker.yml`), and both are public and awkward to retract.
+  signed APK and the Docker image, and both are public and awkward to retract.
 - Pick MAJOR/MINOR/PATCH from what actually changed: a new user-facing feature
   is a MINOR bump, a fix-only release is a PATCH.
+- The two streams number independently. The app starts at `android-v1.8.0`,
+  continuing the numbering users have already seen on the releases page.

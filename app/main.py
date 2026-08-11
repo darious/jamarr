@@ -2,10 +2,11 @@ from contextlib import asynccontextmanager
 import os
 import re
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from app.auth_tokens import validate_jwt_secret_at_startup
 from app.db import init_db, close_db
 from app.security import configure_security_middleware, fastapi_docs_config, is_production
+from app.version import __version__
 
 
 @asynccontextmanager
@@ -47,7 +48,7 @@ async def lifespan(app: FastAPI):
     await close_db()
 
 
-app = FastAPI(lifespan=lifespan, **fastapi_docs_config())
+app = FastAPI(lifespan=lifespan, version=__version__, **fastapi_docs_config())
 configure_security_middleware(app)
 
 # Configure rate limiting (disabled in test/dev)
@@ -86,6 +87,7 @@ from pathlib import Path  # noqa: E402
 from app.media import art  # noqa: E402
 from app.api import library, stream, player, search, scan, auth, media_quality, charts, lastfm, history, scheduler, recommendation, favorites  # noqa: E402
 from app import monitoring  # noqa: E402
+from app.api.deps import get_current_user_jwt  # noqa: E402
 from app import playlist  # noqa: E402
 
 app.include_router(art.router)
@@ -106,6 +108,12 @@ app.include_router(scheduler.router)
 app.include_router(recommendation.router, prefix="/api")
 app.include_router(monitoring.router)
 app.include_router(favorites.router)
+
+
+@app.get("/api/version", tags=["meta"], summary="Running application version")
+async def app_version(_user=Depends(get_current_user_jwt)) -> dict[str, str]:
+    """Version of this build, or ``dev`` when not built from a release tag."""
+    return {"version": __version__}
 
 
 # Serve built SvelteKit frontend (output lives in web/build)

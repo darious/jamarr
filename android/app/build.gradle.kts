@@ -1,6 +1,20 @@
 import java.io.File
 import java.util.Base64
 
+/**
+ * The app version comes from the release tag, not from this file.
+ *
+ * `android_release.yml` parses `android-vX.Y.Z` and passes both values in, so a
+ * published APK always matches the tag that built it. Every other build (local,
+ * CI, PR) is not a release and gets the dev placeholder. versionCode has to be a
+ * monotonic integer, so it is derived arithmetically from the same semver.
+ */
+val jamarrVersionName: String =
+    (project.findProperty("jamarrVersionName") as String?)?.takeIf { it.isNotBlank() }
+        ?: "0.0.0-dev"
+val jamarrVersionCode: Int =
+    (project.findProperty("jamarrVersionCode") as String?)?.toIntOrNull() ?: 1
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -15,8 +29,8 @@ android {
         applicationId = "com.jamarr.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = jamarrVersionCode
+        versionName = jamarrVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"http://10.0.2.2:8111\"")
     }

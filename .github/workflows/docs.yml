@@ -30,7 +30,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # Full history + tags: the API reference version comes from git describe.
       - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v9.0.0
@@ -64,8 +67,18 @@ jobs:
           LASTFM_SHARED_SECRET=dummy_lastfm_secret
           EOF
 
+      # The published API reference carries a version; without this it would
+      # show the FastAPI default rather than the last server release.
       - name: Generate OpenAPI schema
-        run: uv run --with fastapi --with pydantic python scripts/docs/gen_openapi.py
+        env:
+          JAMARR_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          if [[ -z "$JAMARR_VERSION" ]]; then
+            JAMARR_VERSION="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo dev)"
+            export JAMARR_VERSION
+          fi
+          echo "Documenting version $JAMARR_VERSION"
+          uv run --with fastapi --with pydantic python scripts/docs/gen_openapi.py
 
       - name: Generate database schema docs
         run: |
