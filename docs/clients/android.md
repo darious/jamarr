@@ -858,3 +858,90 @@ These are acceptable for the current POC but should be addressed later:
 - No Android Auto `MediaLibraryService` browse tree yet. That remains Stage 3.
 - No `/api/android` adapter exists. Stage 4 should only be added if Android Auto
   browsing proves the current API is too awkward.
+
+## Android Auto Hardening - 2026-08-11
+
+Stage 3 shipped a working browse tree; this pass fixed the behaviour that only
+shows up in a car, and added the test stack to keep it fixed.
+
+### Browse tree
+
+- **Paging is honoured.** Media3 forwards `EXTRA_PAGE`/`EXTRA_PAGE_SIZE` from
+  legacy browsers and only falls back to `(0, MAX_VALUE)` when the browser sends
+  no options. Nodes now build a light row list, apply the window, and turn only
+  that page into `MediaItem`s.
+- **Failures are errors.** A node that cannot load returns
+  `LibraryResult.ofError` (`ERROR_SESSION_AUTHENTICATION_EXPIRED` for 401/403,
+  `ERROR_IO` otherwise) instead of an empty list that reads as an empty library.
+- **Sign-in refreshes the tree.** `notifyChildrenChanged` fires for every static
+  node when the stored session changes, so the car stops showing "Sign in on
+  phone" without a reconnect.
+- **Every static node resolves via `onGetItem`**, not just root's children, so a
+  restored browse stack does not fail.
+- **Entries with no MBID are dropped** rather than offered as browsable folders
+  that open empty.
+- **Album, playlist, Singles and Most Scrobbled folders lead with "Play all".**
+- **Subtitles come with `displayTitle`.** Media3 only forwards `subtitle` when
+  `displayTitle` is set; otherwise it derives the description from
+  `MediaMetadataCompat.PREFERRED_DESCRIPTION_ORDER` and drops it.
+- Track items carry `durationMs`, artist and album.
+
+### Playback
+
+- `onAddMediaItems` resolves only. Sibling expansion belongs to
+  `onSetMediaItems` — "add to queue" of one track must add one track.
+- Queue expansion no longer fetches artwork: nothing renders queue items, and
+  every fetch delayed the first note. The artwork *URI* is still set.
+- Voice search is still unimplemented. The manifest must advertise
+  `MEDIA_PLAY_FROM_SEARCH` (lint `MissingIntentFilterForMediaSearch` fails the
+  build without it for a media Auto app), so a search request is now rejected
+  with an error rather than handed to the player as an item with no URI.
+- **Playback resumption** works: the last queue is written to DataStore and
+  restored from `onPlaybackResumption`, with
+  `androidx.media3.session.MediaButtonReceiver` declared so the system media
+  button reaches the service.
+
+### Artwork
+
+The Stage 3 note that `artworkUri` "can't carry our bearer token" does not apply
+to `/api/art/file/{sha1}`, which needs no auth. `ArtworkPolicy` now decides:
+
+- **HTTPS server -> URI only.** The host fetches it, so browsing costs no HTTP
+  calls and no bitmaps cross the binder.
+- **Cleartext server -> bytes, as before.** The Auto host is a separate app with
+  its own network security config and does not permit cleartext, so an `http://`
+  icon URI would silently fail to load there.
+
+The URI path has not been verified against a real head unit yet — that needs DHU
+or a car. Requested size dropped 400 -> 320 px.
+
+### Service
+
+- Settings load off the main thread; everything that needs them awaits a
+  `CompletableDeferred`. `onCreate` used `runBlocking` on the very path the car
+  uses to start the service.
+- The reporting tick backs off from 500 ms to 5 s when nothing is playing.
+- Sibling nodes share payloads through a 45 s `TtlCache` — the three Recently
+  Played folders plus Recently Added were five `/api/home` sub-requests each.
+- `onConnect` filters controllers (`ControllerAccess`): self, platform-trusted
+  callers, and a verified package allowlist (Auto, Assistant, system UI,
+  Bluetooth, Wear). The service is exported, so it was previously bindable by
+  any installed app.
+
+### Testing
+
+| Layer | Where | Needs a device |
+|---|---|---|
+| Media id grammar, paging, cache, resume state, connection filter, artwork policy | `app/src/test/.../playback/` | no |
+| Browse tree against a fake Jamarr server | `app/src/androidTest/.../JamarrLibraryProviderInstrumentedTest.kt` | yes |
+| Real `MediaBrowser` -> service plumbing | `app/src/androidTest/.../MediaBrowserHarnessTest.kt` | yes |
+
+`android/scripts/emulator.sh start|stop|status` boots the headless AVD
+(creating and fixing up its config on first use). `RUN_ANDROID_INSTRUMENTATION=1
+./test.sh` now boots it automatically when no device is attached and shuts it
+down afterwards.
+
+The harness earned its keep immediately: the session callback was first written
+with Kotlin interface delegation (`by`), which does not generate overrides for
+Java default methods — so every browse call fell through to media3's defaults
+and returned `ERROR_NOT_SUPPORTED`. Only a real `MediaBrowser` could see that.

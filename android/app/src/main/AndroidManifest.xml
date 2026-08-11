@@ -34,6 +34,16 @@
             </intent-filter>
         </activity>
 
+        <!--
+            Exported because the car host, Assistant and the system media
+            controls all bind from other processes; JamarrPlaybackService
+            filters connections in onConnect.
+
+            MEDIA_PLAY_FROM_SEARCH is required of every Android Auto media app
+            (lint: MissingIntentFilterForMediaSearch), but search is not
+            implemented — JamarrLibraryProvider rejects search requests with an
+            error rather than handing the player an unplayable item.
+        -->
         <service
             android:name=".playback.JamarrPlaybackService"
             android:exported="true"
@@ -45,5 +55,18 @@
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
             </intent-filter>
         </service>
+
+        <!--
+            Playback resumption: the system delivers the media button that
+            starts a resumed session here, which is what makes the car's
+            "continue listening" affordance reach onPlaybackResumption.
+        -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

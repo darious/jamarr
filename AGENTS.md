@@ -98,11 +98,12 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 - `android/test.sh` probes for the SDK (`~/Android/Sdk`, then `/opt/android-sdk`) and
   for a JDK (`~/Android/jdk`, then the usual `/usr/lib/jvm` LTS paths) when
   `ANDROID_HOME`/`JAVA_HOME` are unset, so it runs bare; it caps gradle/kotlin heaps
-  when <4 GiB memory available. Instrumentation tests run only when a device is
-  attached — detected via `$ANDROID_HOME/platform-tools/adb`, since the SDK's `adb`
-  is normally not on PATH. The check runs once at script start, so an emulator booted
-  in parallel is missed and `connectedDebugAndroidTest` is silently skipped; wait for
-  `sys.boot_completed=1` first, or pass `RUN_ANDROID_INSTRUMENTATION=1` to require it.
+  when <4 GiB memory available. Instrumentation tests run when a device is attached —
+  detected via `$ANDROID_HOME/platform-tools/adb`, since the SDK's `adb` is normally
+  not on PATH. The check runs once at script start, so an emulator booted in parallel
+  is missed. `RUN_ANDROID_INSTRUMENTATION=1` makes them mandatory: with no device
+  attached it boots the headless AVD via `android/scripts/emulator.sh` and stops it
+  on exit.
 - Android toolchain (user-local, no root): JDK 21 (Temurin) at `~/Android/jdk`, SDK at
   `~/Android/Sdk`, installed via `cmdline-tools`. AGP 9 / Gradle 9 need JDK 17+.
   `compileSdk = 37` resolves to the `platforms;android-37.0` package, not
@@ -118,10 +119,12 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   `~/Android/Sdk/cmdline-tools/latest/bin` and are not on PATH; `sdkmanager` warns
   that it is deprecated in favour of the `android` CLI, but still works.
 - Headless emulator UI check (dev box has no DISPLAY): AVD `jamarr36`
-  (API 36 `google_apis;x86_64`, pixel_6). Recreate with `avdmanager create avd -n
-  jamarr36 -k "system-images;android-36;google_apis;x86_64" -d pixel_6`; it prints a
-  harmless `Could not load devices from .../devices.xml` error but still applies the
-  profile. Then fix the generated `~/.android/avd/jamarr36.avd/config.ini`, which
+  (API 36 `google_apis;x86_64`, pixel_6). `android/scripts/emulator.sh
+  start|stop|status` does all of the following, creating the AVD if it is missing;
+  the manual equivalent is `avdmanager create avd -n jamarr36 -k
+  "system-images;android-36;google_apis;x86_64" -d pixel_6` (it prints a harmless
+  `Could not load devices from .../devices.xml` error but still applies the
+  profile), then fixing the generated `~/.android/avd/jamarr36.avd/config.ini`, which
   ships `avd.id`/`avd.name` as the literal `<build>` and GPU off — set those to
   `jamarr36`, `hw.gpu.enabled=yes`, `hw.gpu.mode=swiftshader_indirect`, and
   `hw.keyboard=yes` (needed for `adb shell input text`). Boot with

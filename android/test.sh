@@ -65,24 +65,37 @@ if [[ ! -x "$adb_bin" ]]; then
   adb_bin="$(command -v adb || true)"
 fi
 
+device_attached() {
+  [[ -n "$adb_bin" ]] || return 1
+  "$adb_bin" devices |
+    awk 'NR > 1 && $2 == "device" { found = 1 } END { exit !found }'
+}
+
+# RUN_ANDROID_INSTRUMENTATION=1 means "these tests must run": boot the headless
+# emulator if nothing is attached, rather than failing on a missing device.
+# Without it, instrumentation runs only when a device happens to be there.
+started_emulator=false
 should_run_instrumentation=false
-if [[ "${RUN_ANDROID_INSTRUMENTATION:-}" == "1" ]]; then
+if device_attached; then
   should_run_instrumentation=true
-elif [[ -n "$adb_bin" ]]; then
-  device_count="$(
-    "$adb_bin" devices |
-      awk 'NR > 1 && $2 == "device" { count++ } END { print count + 0 }'
-  )"
-  if [[ "$device_count" -gt 0 ]]; then
-    should_run_instrumentation=true
-  fi
+elif [[ "${RUN_ANDROID_INSTRUMENTATION:-}" == "1" ]]; then
+  ./scripts/emulator.sh start
+  started_emulator=true
+  should_run_instrumentation=true
 fi
+
+cleanup() {
+  if [[ "$started_emulator" == "true" ]]; then
+    ./scripts/emulator.sh stop || true
+  fi
+}
+trap cleanup EXIT
 
 if [[ "$should_run_instrumentation" == "true" ]]; then
   tasks+=(":app:connectedDebugAndroidTest")
 else
   echo "No Android device/emulator detected; compiled instrumentation tests but skipped connectedDebugAndroidTest."
-  echo "Set RUN_ANDROID_INSTRUMENTATION=1 when an emulator/device is available to require UI/integration tests."
+  echo "Set RUN_ANDROID_INSTRUMENTATION=1 to boot the headless emulator and require them."
 fi
 
 ./gradlew --no-daemon --stacktrace "${low_mem_args[@]}" "${tasks[@]}" "$@"

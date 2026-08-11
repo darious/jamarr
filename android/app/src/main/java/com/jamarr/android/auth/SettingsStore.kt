@@ -29,6 +29,7 @@ class SettingsStore(private val context: Context) {
     private val cookiesKey = stringSetPreferencesKey("cookies_v1")
     private val clientIdKey = stringPreferencesKey("client_id")
     private val useDeviceUpnpKey = booleanPreferencesKey("use_device_upnp")
+    private val resumeQueueKey = stringPreferencesKey("resume_queue_v1")
 
     // Gates background network use (read-ahead now, downloads later) to
     // unmetered networks. Off by default: read-ahead only pulls the track that
@@ -99,6 +100,22 @@ class SettingsStore(private val context: Context) {
         context.jamarrDataStore.edit { prefs ->
             if (cookies.isEmpty()) prefs.remove(cookiesKey)
             else prefs[cookiesKey] = cookies.toSet()
+        }
+    }
+
+    /**
+     * The last queue, so the car can resume it.
+     *
+     * Playback resumption runs before any controller has set a queue, so the
+     * only thing available at that point is what was written down here.
+     */
+    suspend fun loadResumeQueue(): String? =
+        context.jamarrDataStore.data.first()[resumeQueueKey]
+
+    suspend fun saveResumeQueue(encoded: String?) {
+        context.jamarrDataStore.edit { prefs ->
+            if (encoded.isNullOrBlank()) prefs.remove(resumeQueueKey)
+            else prefs[resumeQueueKey] = encoded
         }
     }
 
