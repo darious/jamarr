@@ -79,7 +79,7 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
+    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
@@ -90,10 +90,10 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
-    implementation("androidx.media3:media3-common:1.10.1")
-    implementation("androidx.media3:media3-exoplayer:1.10.1")
+    implementation("androidx.media3:media3-common:1.11.0")
+    implementation("androidx.media3:media3-exoplayer:1.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
-    implementation("androidx.media3:media3-session:1.10.1")
+    implementation("androidx.media3:media3-session:1.11.0")
     implementation("androidx.mediarouter:mediarouter:1.8.1")
     implementation("io.coil-kt.coil3:coil-compose:3.5.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.5.0")
@@ -104,13 +104,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
 
-    implementation("org.jupnp:org.jupnp:3.0.4") {
+    implementation("org.jupnp:org.jupnp:3.0.5") {
         exclude(group = "org.osgi")
     }
-    implementation("org.jupnp:org.jupnp.support:3.0.4") {
+    implementation("org.jupnp:org.jupnp.support:3.0.5") {
         exclude(group = "org.osgi")
     }
-    implementation("org.jupnp:org.jupnp.android:3.0.4") {
+    implementation("org.jupnp:org.jupnp.android:3.0.5") {
         exclude(group = "org.osgi")
     }
     implementation("org.eclipse.jetty:jetty-server:9.4.53.v20231009")
