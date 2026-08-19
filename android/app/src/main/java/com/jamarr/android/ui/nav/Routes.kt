@@ -8,6 +8,7 @@ object Routes {
     const val PLAYLISTS = "playlists"
     const val CHARTS = "charts"
     const val HISTORY = "history"
+    const val DOWNLOADS = "downloads"
 
     const val ARTIST = "artist?mbid={mbid}&name={name}&artSha1={artSha1}"
     const val ALBUM = "album?mbid={mbid}&album={album}&artist={artist}&artistMbid={artistMbid}&artSha1={artSha1}"

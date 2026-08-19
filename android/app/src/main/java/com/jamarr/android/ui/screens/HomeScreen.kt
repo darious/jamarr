@@ -58,6 +58,7 @@ import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.ArtistArt
 import com.jamarr.android.ui.components.CastIcon
+import com.jamarr.android.ui.components.DownloadIcon
 import com.jamarr.android.ui.components.CloseIcon
 import com.jamarr.android.ui.components.SearchIcon
 import com.jamarr.android.ui.state.LocalJamarrContext
@@ -88,6 +89,7 @@ fun HomeScreen(
     onRefresh: () -> Unit = {},
     rendererName: String = "This Device",
     onRendererClick: () -> Unit = {},
+    onDownloadsClick: () -> Unit = {},
 ) {
     val isSearching = searchQuery.trim().isNotEmpty()
     val showAccountSheet = remember { mutableStateOf(false) }
@@ -138,6 +140,7 @@ fun HomeScreen(
                     rendererName = rendererName,
                     onAvatarClick = { showAccountSheet.value = true },
                     onRendererClick = onRendererClick,
+                    onDownloadsClick = onDownloadsClick,
                 )
                 SearchBar(
                     query = searchQuery,
@@ -231,6 +234,7 @@ private fun HeaderRow(
     rendererName: String,
     onAvatarClick: () -> Unit,
     onRendererClick: () -> Unit,
+    onDownloadsClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -256,6 +260,15 @@ private fun HeaderRow(
             contentAlignment = Alignment.Center,
         ) {
             CastIcon(tint = JamarrColors.Muted, size = 18.dp)
+        }
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onDownloadsClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            DownloadIcon(tint = JamarrColors.Muted, size = 18.dp)
         }
         Image(
             painter = painterResource(id = R.drawable.jamarr_logo),

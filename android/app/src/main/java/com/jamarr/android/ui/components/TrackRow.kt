@@ -23,6 +23,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.jamarr.android.download.DownloadProgress
+import com.jamarr.android.download.db.DownloadRecordState
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
 import com.jamarr.android.ui.theme.JamarrType
@@ -37,6 +39,8 @@ fun TrackRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     missing: Boolean = false,
+    downloadState: DownloadProgress? = null,
+    onDownloadClick: (() -> Unit)? = null,
 ) {
     val background = if (active) JamarrColors.PrimaryTint else JamarrColors.Bg
     // Missing tracks are struck through and dimmed, matching the web UI's
@@ -96,6 +100,46 @@ fun TrackRow(
                 style = JamarrType.Caption,
                 color = JamarrColors.Neutral,
             )
+        }
+        if (onDownloadClick != null) {
+            Spacer(Modifier.width(4.dp))
+            DownloadAffordance(state = downloadState, onClick = onDownloadClick)
+        }
+    }
+}
+
+/**
+ * Trailing download control: tap to queue, tap again once complete to remove.
+ * Mid-download it shows percentage rather than an icon, so a stalled transfer
+ * is visible instead of looking idle.
+ */
+@Composable
+private fun DownloadAffordance(state: DownloadProgress?, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        when (state?.state) {
+            DownloadRecordState.COMPLETED ->
+                DownloadDoneIcon(tint = JamarrColors.Primary, size = 16.dp)
+            DownloadRecordState.DOWNLOADING -> Text(
+                text = state.percent?.let { "${it.toInt()}%" } ?: "…",
+                style = JamarrType.CaptionSmall,
+                color = JamarrColors.Primary,
+            )
+            DownloadRecordState.QUEUED -> Text(
+                text = "…",
+                style = JamarrType.CaptionSmall,
+                color = JamarrColors.Muted,
+            )
+            DownloadRecordState.FAILED -> Text(
+                text = "!",
+                style = JamarrType.CaptionSmall,
+                color = JamarrColors.Neutral,
+            )
+            null -> DownloadIcon(tint = JamarrColors.Muted, size = 16.dp)
         }
     }
 }
