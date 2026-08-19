@@ -15,6 +15,8 @@ import com.jamarr.android.data.PlayerStateResponse
 import com.jamarr.android.data.Renderer
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.download.DownloadProgress
+import com.jamarr.android.download.db.DownloadedTrackEntity
 import com.jamarr.android.playback.JamarrPlaybackController
 import com.jamarr.android.playback.ResolvedTrack
 import com.jamarr.android.cast.CastDeviceController
@@ -78,6 +80,13 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     var showNowPlaying by mutableStateOf(false)
     var clientId by mutableStateOf("")
 
+    // Download state, mirrored from the process-wide engine so every screen
+    // sees the same progress without each one subscribing to Media3 directly.
+    var downloadStates by mutableStateOf<Map<Long, DownloadProgress>>(emptyMap())
+        private set
+    var downloadedTracks by mutableStateOf<List<DownloadedTrackEntity>>(emptyList())
+        private set
+
     // Renderer / remote playback state
     var renderers by mutableStateOf<List<Renderer>>(emptyList())
     var deviceRenderers by mutableStateOf<List<DeviceRendererInfo>>(emptyList())
@@ -124,6 +133,14 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
+        }
+
+        viewModelScope.launch {
+            app.downloads.states.collectLatest { downloadStates = it }
+        }
+
+        viewModelScope.launch {
+            app.downloads.observeTracks().collectLatest { downloadedTracks = it }
         }
 
         viewModelScope.launch {
@@ -453,6 +470,26 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { playTracks(queue, startIndex) }
                 .onFailure { status = it.message ?: "Playback failed." }
             busy = false
+        }
+    }
+
+    /** Queues a download, or removes one that has already finished. */
+    fun toggleDownload(track: SearchTrack) {
+        viewModelScope.launch {
+            runCatching {
+                if (downloadStates[track.id]?.isComplete == true) {
+                    app.downloads.removeTrack(track.id)
+                } else {
+                    app.downloads.downloadTrack(track)
+                }
+            }.onFailure { status = it.message ?: "Download failed." }
+        }
+    }
+
+    fun removeDownload(trackId: Long) {
+        viewModelScope.launch {
+            runCatching { app.downloads.removeTrack(trackId) }
+                .onFailure { status = it.message ?: "Could not remove download." }
         }
     }
 

@@ -12,7 +12,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
@@ -28,8 +27,6 @@ import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.SearchTrack
-import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
@@ -43,7 +40,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 
 @OptIn(markerClass = [UnstableApi::class])
 class JamarrPlaybackService : MediaLibraryService() {
@@ -59,29 +55,6 @@ class JamarrPlaybackService : MediaLibraryService() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO + serviceExceptionHandler)
     private val serverUrl = AtomicReference("")
 
-    // Resolved /api/stream/<id>?token=<jwt> URLs. The stream token expires
-    // (default 300s server-side) so cached URLs must not outlive the token,
-    // otherwise ExoPlayer reopens with a stale token and gets 401.
-    private data class CachedStreamUrl(
-        val url: String,
-        val quality: String,
-        val qualityLabel: String,
-        val originalQualityLabel: String,
-        val expiresAtMs: Long,
-        val source: StreamSource? = null,
-    )
-    private val streamUrlCache = ConcurrentHashMap<String, CachedStreamUrl>()
-
-    // Quality labels shown by the now-playing UI, keyed the same way as the
-    // media cache. Unlike streamUrlCache these never expire: once a track plays
-    // from disk the resolver stops running, so the labels have to survive
-    // independently of the stream token.
-    private data class StreamLabels(
-        val quality: String,
-        val qualityLabel: String,
-        val originalQualityLabel: String,
-    )
-    private val streamLabels = ConcurrentHashMap<String, StreamLabels>()
     private val activeQuality = AtomicReference("original")
     private val adaptiveQualityPolicy = AdaptiveStreamQualityPolicy()
     private val downgradeInFlight = AtomicBoolean(false)
@@ -96,6 +69,7 @@ class JamarrPlaybackService : MediaLibraryService() {
     private lateinit var apiClient: JamarrApiClient
     private lateinit var libraryProvider: JamarrLibraryProvider
     private lateinit var mediaCache: JamarrMediaCache
+    private lateinit var streamResolver: StreamUrlResolver
     private lateinit var prefetcher: StreamPrefetcher
     private lateinit var connectivityManager: ConnectivityManager
     private val wifiOnlyTransfers = AtomicBoolean(false)
@@ -167,9 +141,16 @@ class JamarrPlaybackService : MediaLibraryService() {
             }
         }
 
+        streamResolver = StreamUrlResolver(
+            apiClient = apiClient,
+            serverUrlProvider = { serverUrl.get() },
+            tokenProvider = { tokenHolder.get() },
+            awaitReady = { settingsLoaded.await() },
+        )
+
         val httpFactory = DefaultHttpDataSource.Factory()
         val resolvingFactory = ResolvingDataSource.Factory(httpFactory) { spec ->
-            resolveDataSpec(spec)
+            streamResolver.resolveDataSpec(spec, activeQuality.get())
         }
 
         // Cache layers sit ABOVE the resolver on purpose. They then see the
@@ -303,27 +284,9 @@ class JamarrPlaybackService : MediaLibraryService() {
                         lastPrewarmedQueueKey = qKey
                         for (i in 0 until player.mediaItemCount) {
                             val tid = extractTrackId(player.getMediaItemAt(i).mediaId)
-                            if (tid > 0L && !isStreamUrlFresh(tid, activeQuality.get())) {
+                            if (tid > 0L && !streamResolver.isFresh(tid, activeQuality.get())) {
                                 serviceScope.launch(Dispatchers.IO) {
-                                    runCatching {
-                                        withTimeout(5000) {
-                                            apiClient.streamUrlInfo(url, token, tid, quality = activeQuality.get())
-                                        }
-                                    }.onSuccess { response ->
-                                        val entry = CachedStreamUrl(
-                                            url = response.url,
-                                            quality = response.streamQuality,
-                                            qualityLabel = response.streamQualityLabel,
-                                            originalQualityLabel = response.originalQualityLabel,
-                                            expiresAtMs = System.currentTimeMillis() + STREAM_URL_TTL_MS,
-                                            source = StreamSource(
-                                                response.sourceSampleRateHz,
-                                                response.sourceBitDepth,
-                                            ),
-                                        )
-                                        streamUrlCache[cacheKey(tid, response.streamQuality)] = entry
-                                        rememberStreamLabels(tid, entry)
-                                    }
+                                    runCatching { streamResolver.prewarm(tid, activeQuality.get()) }
                                 }
                             }
                         }
@@ -511,55 +474,6 @@ class JamarrPlaybackService : MediaLibraryService() {
     private fun sessionKey(serverUrl: String, accessToken: String): String =
         "$serverUrl|${accessToken.isNotBlank()}"
 
-    private fun resolveDataSpec(spec: DataSpec): DataSpec {
-        val uri = spec.uri
-        if (uri.scheme != JAMARR_SCHEME) return spec
-        val trackId = uri.lastPathSegment?.toLongOrNull()
-            ?: throw IOException("Missing track id in $uri")
-        // Resumption can start playback before settings finish loading; wait
-        // briefly on the loader thread rather than fail the open outright.
-        runBlocking {
-            runCatching { withTimeout(SETTINGS_WAIT_MS) { settingsLoaded.await() } }
-        }
-        val server = serverUrl.get()
-        if (server.isBlank()) throw IOException("Jamarr server URL not set")
-
-        val now = System.currentTimeMillis()
-        val quality = activeQuality.get()
-        streamUrlCache[cacheKey(trackId, quality)]?.let { cached ->
-            if (cached.expiresAtMs > now) {
-                rememberStreamLabels(trackId, cached)
-                return spec.withUri(Uri.parse(cached.url))
-            }
-            streamUrlCache.remove(cacheKey(trackId, quality))
-        }
-
-        // ResolvingDataSource.Resolver may only throw IOException; anything else
-        // (timeout, API error) escapes the loader as an unexpected error.
-        val response = try {
-            runBlocking {
-                withTimeout(5000) {
-                    apiClient.streamUrlInfo(server, tokenHolder.get(), trackId, quality = quality)
-                }
-            }
-        } catch (e: IOException) {
-            throw e
-        } catch (e: Exception) {
-            throw IOException("Failed to resolve stream URL for track $trackId", e)
-        }
-        val cached = CachedStreamUrl(
-            url = response.url,
-            quality = response.streamQuality,
-            qualityLabel = response.streamQualityLabel,
-            originalQualityLabel = response.originalQualityLabel,
-            expiresAtMs = System.currentTimeMillis() + STREAM_URL_TTL_MS,
-            source = StreamSource(response.sourceSampleRateHz, response.sourceBitDepth),
-        )
-        streamUrlCache[cacheKey(trackId, response.streamQuality)] = cached
-        rememberStreamLabels(trackId, cached)
-        return spec.withUri(Uri.parse(response.url))
-    }
-
     /**
      * Schedules read-ahead for the track after the current one.
      *
@@ -575,21 +489,6 @@ class JamarrPlaybackService : MediaLibraryService() {
         prefetcher.prefetch(if (trackId > 0L) listOf(trackId) else emptyList())
     }
 
-    private fun isStreamUrlFresh(trackId: Long, quality: String): Boolean {
-        val cached = streamUrlCache[cacheKey(trackId, quality)] ?: return false
-        return cached.expiresAtMs > System.currentTimeMillis()
-    }
-
-    private fun cacheKey(trackId: Long, quality: String): String = "$trackId:$quality"
-
-    private fun rememberStreamLabels(trackId: Long, cached: CachedStreamUrl) {
-        streamLabels[cacheKey(trackId, cached.quality)] = StreamLabels(
-            quality = cached.quality,
-            qualityLabel = cached.qualityLabel,
-            originalQualityLabel = cached.originalQualityLabel,
-        )
-    }
-
     /**
      * Publishes the quality labels for the item that just became current.
      *
@@ -600,7 +499,7 @@ class JamarrPlaybackService : MediaLibraryService() {
     private fun applyStreamLabels(mediaItem: MediaItem?) {
         val quality = activeQuality.get()
         val trackId = mediaItem?.mediaId?.let { extractTrackId(it) } ?: 0L
-        val known = if (trackId > 0L) streamLabels[cacheKey(trackId, quality)] else null
+        val known = if (trackId > 0L) streamResolver.labels(trackId, quality) else null
         currentStreamQuality.set(known?.quality ?: quality)
         currentStreamQualityLabel.set(known?.qualityLabel ?: qualityLabel(quality))
         currentOriginalQualityLabel.set(known?.originalQualityLabel ?: qualityLabel(quality))
@@ -613,7 +512,7 @@ class JamarrPlaybackService : MediaLibraryService() {
         if (trackId > 0L && mediaCache.isFullyCached(trackId, activeQuality.get())) return
 
         val now = System.currentTimeMillis()
-        val source = streamUrlCache[cacheKey(trackId, activeQuality.get())]?.source
+        val source = streamResolver.source(trackId, activeQuality.get())
         val next = adaptiveQualityPolicy.recordBufferingEvent(activeQuality.get(), now, source)
         if (next != null) {
             downgradeForBuffering(player, next)
@@ -713,12 +612,8 @@ class JamarrPlaybackService : MediaLibraryService() {
         // How often the queue is written down for playback resumption.
         const val RESUME_SNAPSHOT_INTERVAL_MS = 10_000L
 
-        // Upper bound on blocking a loader thread for the initial settings read.
-        const val SETTINGS_WAIT_MS = 5_000L
-
-        // Server default STREAM_TOKEN_TTL_SECONDS=300. Cache for 240s so a
-        // pre-warmed URL still has ~60s of validity when ExoPlayer opens it.
-        const val STREAM_URL_TTL_MS = 240_000L
+        // Stream-URL caching and the settings wait now live in
+        // StreamUrlResolver, which the download engine shares.
 
         // DefaultLoadControl's audio default (~13 MB) would stop a lossless
         // stream far short of maxBufferMs; 48 MB covers a full FLAC track.
