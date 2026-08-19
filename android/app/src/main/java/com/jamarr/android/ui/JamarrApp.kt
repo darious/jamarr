@@ -45,6 +45,7 @@ import com.jamarr.android.ui.nav.routeToTab
 import com.jamarr.android.ui.screens.AlbumDetailScreen
 import com.jamarr.android.ui.screens.ArtistDetailScreen
 import com.jamarr.android.ui.screens.ChartsScreen
+import com.jamarr.android.ui.screens.DownloadsScreen
 import com.jamarr.android.ui.screens.FavouritesScreen
 import com.jamarr.android.ui.screens.HistoryScreen
 import com.jamarr.android.ui.screens.HomeScreen
@@ -205,6 +206,18 @@ private fun JamarrRoot() {
                         onRefresh = { vm.refreshHome() },
                         rendererName = vm.activeRendererName,
                         onRendererClick = { vm.showRendererPicker = true },
+                        onDownloadsClick = { navController.navigate(Routes.DOWNLOADS) },
+                    )
+                }
+
+                composable(Routes.DOWNLOADS) {
+                    DownloadsScreen(
+                        tracks = vm.downloadedTracks,
+                        downloadStates = vm.downloadStates,
+                        nowPlayingTrackId = vm.nowPlayingTrack?.id,
+                        onTrackClick = { track, queue -> vm.playTrack(track, queue) },
+                        onRemove = { trackId -> vm.removeDownload(trackId) },
+                        contentPadding = contentPadding,
                     )
                 }
 
@@ -325,6 +338,8 @@ private fun JamarrRoot() {
                             vm.playQueueFromUi(queue, startIndex)
                         },
                         contentPadding = contentPadding,
+                        downloadStates = vm.downloadStates,
+                        onToggleDownload = { track -> vm.toggleDownload(track) },
                     )
                 }
 

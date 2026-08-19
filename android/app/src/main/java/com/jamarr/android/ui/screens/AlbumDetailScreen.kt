@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.jamarr.android.data.AlbumDetail
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.download.DownloadProgress
 import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.HeartIcon
 import com.jamarr.android.ui.components.PlayShuffleActions
@@ -66,6 +67,8 @@ fun AlbumDetailScreen(
     onArtistClick: () -> Unit,
     onPlayTracks: (List<SearchTrack>, Int) -> Unit,
     contentPadding: PaddingValues,
+    downloadStates: Map<Long, DownloadProgress> = emptyMap(),
+    onToggleDownload: ((SearchTrack) -> Unit)? = null,
 ) {
     val ctx = LocalJamarrContext.current
     val scope = rememberCoroutineScope()
@@ -186,6 +189,8 @@ fun AlbumDetailScreen(
                                 val start = tracks.value.indexOf(track).coerceAtLeast(0)
                                 onPlayTracks(tracks.value, start)
                             },
+                            downloadState = downloadStates[track.id],
+                            onDownloadClick = onToggleDownload?.let { toggle -> { toggle(track) } },
                         )
                     }
                 }
@@ -239,6 +244,8 @@ fun AlbumDetailScreen(
                             val start = tracks.value.indexOf(track).coerceAtLeast(0)
                             onPlayTracks(tracks.value, start)
                         },
+                        downloadState = downloadStates[track.id],
+                        onDownloadClick = onToggleDownload?.let { toggle -> { toggle(track) } },
                     )
                 }
             }

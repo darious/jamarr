@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Jamarr</string>
+    <string name="download_channel_name">Downloads</string>
+    <string name="download_waiting_for_network">Waiting for network</string>
+    <plurals name="download_in_progress">
+        <item quantity="one">Downloading %d track</item>
+        <item quantity="other">Downloading %d tracks</item>
+    </plurals>
+    <plurals name="download_queued">
+        <item quantity="one">%d track queued</item>
+        <item quantity="other">%d tracks queued</item>
+    </plurals>
 </resources>

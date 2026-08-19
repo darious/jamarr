@@ -396,3 +396,46 @@ fun RepeatOneIcon(tint: Color, size: Dp = 22.dp) {
         drawLine(tint, Offset(s * 0.5f, s * 0.38f), Offset(s * 0.5f, s * 0.62f), strokeWidth = stroke * 1.2f)
     }
 }
+
+@Composable
+fun DownloadIcon(tint: Color, size: Dp = 22.dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.minDimension
+        val stroke = s * 0.09f
+        // Shaft with arrow head, over a tray line.
+        drawLine(
+            tint,
+            Offset(s * 0.5f, s * 0.12f),
+            Offset(s * 0.5f, s * 0.62f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        val head = Path().apply {
+            moveTo(s * 0.28f, s * 0.44f)
+            lineTo(s * 0.5f, s * 0.66f)
+            lineTo(s * 0.72f, s * 0.44f)
+        }
+        drawPath(head, color = tint, style = Stroke(width = stroke, cap = StrokeCap.Round))
+        drawLine(
+            tint,
+            Offset(s * 0.2f, s * 0.85f),
+            Offset(s * 0.8f, s * 0.85f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+fun DownloadDoneIcon(tint: Color, size: Dp = 22.dp) {
+    Canvas(modifier = Modifier.size(size)) {
+        val s = this.size.minDimension
+        val stroke = s * 0.11f
+        val tick = Path().apply {
+            moveTo(s * 0.2f, s * 0.52f)
+            lineTo(s * 0.42f, s * 0.74f)
+            lineTo(s * 0.8f, s * 0.26f)
+        }
+        drawPath(tick, color = tint, style = Stroke(width = stroke, cap = StrokeCap.Round))
+    }
+}

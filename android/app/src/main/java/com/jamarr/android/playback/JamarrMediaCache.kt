@@ -29,7 +29,8 @@ import java.io.File
  */
 @OptIn(markerClass = [UnstableApi::class])
 class JamarrMediaCache(context: Context) {
-    private val databaseProvider = StandaloneDatabaseProvider(context)
+    /** Also backs the download index, which must share this cache's database. */
+    val databaseProvider = StandaloneDatabaseProvider(context)
 
     val downloadCache: Cache = SimpleCache(
         File(context.filesDir, DOWNLOAD_DIR),

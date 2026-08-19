@@ -4,6 +4,7 @@ import android.app.Application
 import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.JamarrCookieJar
+import com.jamarr.android.download.JamarrDownloads
 import com.jamarr.android.playback.JamarrMediaCache
 
 class JamarrApplication : Application() {
@@ -18,6 +19,9 @@ class JamarrApplication : Application() {
      * opened by processes that actually play something.
      */
     val mediaCache: JamarrMediaCache by lazy { JamarrMediaCache(this) }
+
+    /** Download engine and its metadata store; see `JamarrDownloads`. */
+    val downloads: JamarrDownloads by lazy { JamarrDownloads(this) }
 
     override fun onCreate() {
         super.onCreate()

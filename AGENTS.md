@@ -34,6 +34,12 @@ app/                 backend (Python)
 web/src/             SvelteKit: routes/ (album,artist,charts,discovery,history,
                      login,playlists,queue,renderers,settings) + lib/
 tui/jamarr_tui/      api, art, playback, screens, widgets
+android/app/src/main/java/com/jamarr/android/
+                     ui/ data/ auth/ cast/ upnp/ renderer/
+  playback/          ExoPlayer + MediaLibraryService (Android Auto), stream URL
+                     resolver, disk caches, read-ahead prefetch
+  download/          offline downloads: Media3 DownloadManager + Room (db/)
+                     roadmap: android/OFFLINE_PLAYBACK.md
 migrations/          NNN_*.sql  (raw SQL; auto-applied on app startup + by deploy.sh)
 tests/               pytest: api/ auth/ integration/ scanner/ unit/ + top-level
 docs/                outline.md, DATABASE_SCHEMA.md, api.md, auth.md, scanner.md,
@@ -54,6 +60,7 @@ Everything runs through `uv` (backend/tui) or Docker Compose. Do not `pip instal
 | Deploy (pull img, backup db, migrate, restart) | `./deploy.sh` |
 | Scan library | `docker compose run --rm jamarr uv run python -m app.scanner.cli scan` |
 | Enrich metadata | `... app.scanner.cli metadata` |
+| Android lint+tests+APK | `android/test.sh` (add `RUN_ANDROID_INSTRUMENTATION=1` to require device tests) |
 
 Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brings it up/down. Run a single test: `./test.sh tests/test_charts.py` (args forwarded to pytest).
 

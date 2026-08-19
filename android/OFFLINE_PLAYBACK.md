@@ -1,7 +1,7 @@
 # Offline Playback and Stream Buffering Plan
 
-Status: **Phase 1 implemented** (written 2026-08-02, updated 2026-08-02).
-Phases 2-5 not started.
+Status: **Phases 1-2 implemented** (written 2026-08-02, updated 2026-08-19).
+Phases 3-5 not started.
 
 Two features, one shared piece of infrastructure:
 
@@ -111,34 +111,55 @@ tests — the decisions it makes live in `PrefetchPolicy`.
 Not done in this phase: there is no settings UI for wifi-only yet — the flag is
 stored and honoured, but only Phase 5 surfaces it.
 
-## Phase 2 — download engine + local metadata
+## Phase 2 — download engine + local metadata — **done**
 
-5. Dependencies: `androidx.media3:media3-exoplayer-workmanager` (reboot/network
-   requeue), `androidx.room:room-runtime` + `room-ktx` + KSP.
-   - Risk: KSP under AGP 9 built-in Kotlin. If it fights, fall back to a
-     kotlinx-serialization JSON store; the dataset is small (thousands of rows
-     at most). Room is preferred — decide at first build.
-6. `download/JamarrDownloadService : DownloadService` plus a `DownloadManager`
-   using
-   `DefaultDownloaderFactory(CacheDataSource.Factory(downloadCache).setUpstreamDataSourceFactory(resolvingFactory))`.
-   Foreground notification; `requirements = NETWORK`, plus `UNMETERED` when the
-   wifi-only setting is on.
-   - `DownloadRequest.id = "track:{id}:{quality}"`, `uri = jamarr://track/{id}`.
-7. Room schema under `download/db/`:
-   - `downloaded_track` — `trackId` PK, title, artist, album, albumMbid,
-     artistMbid, artSha1, durationSeconds, quality, sizeBytes, state, addedAt.
-   - `download_group` — id, kind (`album` | `artist` | `playlist`), key, title,
-     subtitle, artSha1, requestedAt.
-   - `download_group_track` — join table.
+5. ✅ Dependencies: `media3-exoplayer-workmanager` 1.10.1, Room 2.8.4 with KSP
+   2.3.11. The flagged risk did not materialise — KSP 2.3.11 runs under AGP
+   9.3.1 / Kotlin 2.4.10, so the kotlinx-serialization fallback was not needed.
+6. ✅ `download/JamarrDownloadService` + `download/JamarrDownloads`, the
+   process-wide engine held lazily by `JamarrApplication`. `WorkManagerScheduler`
+   requeues after reboot or network return; requirements follow the wifi-only
+   flag (`NETWORK_UNMETERED` when set).
+   - `DownloadRequest.id` and `customCacheKey` are both
+     `track:{id}:{quality}`, and the downloader is built with the same
+     `JamarrCacheKeyFactory` playback uses.
+7. ✅ Room schema in `download/db/` as planned, plus a `position` column on the
+   join table so a group's tracks come back in the order they were requested.
+8. ✅ `DownloadManager.Listener` feeding
+   `JamarrDownloads.states: StateFlow<Map<Long, DownloadProgress>>`, mirrored
+   onto the view model. Rebuilt from Media3's download index at startup — Room
+   records intent, the index is the truth about bytes.
+9. ✅ Download affordance on `TrackRow`, wired into the album screen, and a
+   `DownloadsScreen` reading Room.
 
-   Groups exist so the Downloads screens can list an album/artist/playlist as a
-   unit, and so removing a group removes its tracks while a track referenced by
-   a second group survives.
-8. `DownloadManager.Listener` feeding a
-   `StateFlow<Map<Long, DownloadState>>` (idle / queued / running% / done /
-   failed) for the UI.
-9. Download action on the `TrackRow` overflow menu. Minimal `DownloadsScreen`
-   listing downloaded tracks.
+Deviations from the plan above:
+
+- **`StreamUrlResolver` was extracted from `JamarrPlaybackService` first.** The
+  downloader has to resolve stream URLs exactly as playback does; a download
+  that resolved differently would write bytes the player could never find. The
+  service now delegates to it, so there is one implementation, not two.
+- **Downloads are fetched at `original`, not at a chosen quality.** Cache keys
+  carry the quality, so a download at some other quality would not be a cache
+  hit under the key the player looks up, and would silently re-stream. A
+  download-quality setting has to arrive together with a player-side lookup that
+  accepts *any* downloaded quality — moved to phase 5.
+- **No `TrackRow` overflow menu.** A trailing icon (arrow / percent / tick)
+  costs one optional parameter and leaves every existing call site untouched.
+- **Standalone tracks get their own `TRACK` group.** Removal is then uniform —
+  a track dies with its last group — instead of needing a separate rule for
+  tracks nothing else owns.
+- **The foreground notification is hand-built.** Media3's
+  `DownloadNotificationHelper` lives in `media3-ui`, whose View-based player UI
+  this Compose app has no other use for.
+- **Downloads are reached from an icon in the home header**, not a sixth bottom
+  tab, per the open decision above.
+
+Tests: `DownloadProgressTest` (Media3 state mapping) as a JVM test, and
+`DownloadDaoInstrumentedTest` — group ownership, orphan detection, ordering and
+cascade — on the emulator, since Room needs a device.
+
+Not done in this phase: album/artist/playlist download buttons, offline artwork,
+offline mode. Those are phase 3, unchanged.
 
 ## Phase 3 — offline library + offline mode
 
@@ -184,7 +205,11 @@ stored and honoured, but only Phase 5 surfaces it.
     MP3 320 / Opus 128), wifi-only downloads, prefetch cache cap, storage used,
     delete-all.
 20. Default download quality: `flac_16_48` rather than `original`, for phone
-    storage.
+    storage. **This cannot ship on its own.** Cache keys carry the quality, so
+    the player must first learn to accept a downloaded track at *any* quality
+    rather than only the active one — otherwise a track downloaded at
+    `flac_16_48` is a cache miss during `original` playback and re-streams over
+    the network. Phase 2 pins downloads to `original` for exactly this reason.
 
 ## Testing
 
