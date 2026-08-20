@@ -94,7 +94,7 @@ Non-secret app config (MusicBrainz URL, logging, concurrency) lives in
 
 | Variable | Default | Description |
 |---|---|---|
-| `REFRESH_COOKIE_SECURE` | `false` | Set `true` in production (requires HTTPS) |
+| `REFRESH_COOKIE_SECURE` | per-request | Unset: `Secure` when the request is HTTPS (or `X-Forwarded-Proto: https`). Set `true`/`false` to pin it — `true` breaks plain-HTTP clients, which can never send the cookie back |
 | `REFRESH_COOKIE_NAME` | `jamarr_refresh` | Refresh cookie name |
 | `ALLOWED_HOSTS` | empty | Comma-separated; empty allows all (dev only) |
 | `ALLOWED_ORIGINS` | empty | CORS origins |

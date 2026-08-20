@@ -36,6 +36,6 @@ Edit it directly and restart the stack (or rely on hot-reload in
 
 For internet-facing deployments behind a reverse proxy:
 
-- `REFRESH_COOKIE_SECURE=true` (requires HTTPS)
+- `REFRESH_COOKIE_SECURE` — leave unset; the cookie is marked `Secure` per request (HTTPS, or `X-Forwarded-Proto: https` from a trusted proxy). Pinning it `true` locks out clients that reach the server over plain HTTP
 - Set `ALLOWED_HOSTS`, `ALLOWED_ORIGINS`, and `TRUSTED_PROXY_IPS`
 - See [Authentication](../architecture/auth.md) for the full cookie/TLS model
