@@ -2809,8 +2809,13 @@ curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Aut
 <li><code>Secure=true</code></li>
 <li><code>SameSite=Lax</code> (start here)</li>
 <li><code>Path=/api</code> (current implementation; scopes the cookie to the API)</li>
-<li>Consider HSTS if you’re always HTTPS.</li>
 </ul>
+<p><code>Secure</code> is decided per request: on when the request is HTTPS, or when a trusted
+proxy forwards <code>X-Forwarded-Proto: https</code>. That matters because a <code>Secure</code>
+cookie handed to a plain-HTTP client is never sent back, so the same server
+reached over LAN HTTP would issue a session that dies at the first refresh.
+<code>REFRESH_COOKIE_SECURE</code> pins the flag on or off if you need to override it.
+- Consider HSTS if you’re always HTTPS.</p>
 <h3 id="62-development-options">6.2 Development options<a class="headerlink" href="#62-development-options" title="Permanent link">&para;</a></h3>
 <p>You <strong>do not need Let’s Encrypt in dev</strong>.</p>
 <p>Pick one:</p>

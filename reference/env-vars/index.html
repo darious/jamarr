@@ -2248,8 +2248,8 @@ too — or point readers at <code>.env.example</code> as the source of truth.</p
 <tbody>
 <tr>
 <td><code>REFRESH_COOKIE_SECURE</code></td>
-<td><code>false</code></td>
-<td>Set <code>true</code> in production (requires HTTPS)</td>
+<td>per-request</td>
+<td>Unset: <code>Secure</code> when the request is HTTPS (or <code>X-Forwarded-Proto: https</code>). Set <code>true</code>/<code>false</code> to pin it — <code>true</code> breaks plain-HTTP clients, which can never send the cookie back</td>
 </tr>
 <tr>
 <td><code>REFRESH_COOKIE_NAME</code></td>

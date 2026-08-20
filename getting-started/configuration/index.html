@@ -1840,7 +1840,7 @@ explicitly only if detection fails or you need to override it:</p>
 <h2 id="production-hardening">Production hardening<a class="headerlink" href="#production-hardening" title="Permanent link">&para;</a></h2>
 <p>For internet-facing deployments behind a reverse proxy:</p>
 <ul>
-<li><code>REFRESH_COOKIE_SECURE=true</code> (requires HTTPS)</li>
+<li><code>REFRESH_COOKIE_SECURE</code> — leave unset; the cookie is marked <code>Secure</code> per request (HTTPS, or <code>X-Forwarded-Proto: https</code> from a trusted proxy). Pinning it <code>true</code> locks out clients that reach the server over plain HTTP</li>
 <li>Set <code>ALLOWED_HOSTS</code>, <code>ALLOWED_ORIGINS</code>, and <code>TRUSTED_PROXY_IPS</code></li>
 <li>See <a href="../../architecture/auth/">Authentication</a> for the full cookie/TLS model</li>
 </ul>
