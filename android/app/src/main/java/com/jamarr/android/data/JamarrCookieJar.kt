@@ -1,6 +1,6 @@
 package com.jamarr.android.data
 
-import com.jamarr.android.auth.SettingsStore
+import com.jamarr.android.auth.CookieStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,7 +13,7 @@ import okhttp3.CookieJar
 import okhttp3.HttpUrl
 
 class JamarrCookieJar(
-    private val settingsStore: SettingsStore,
+    private val settingsStore: CookieStore,
 ) : CookieJar {
 
     @Serializable
@@ -56,8 +56,8 @@ class JamarrCookieJar(
                 if (parsed.httpOnly) builder.httpOnly()
                 store.getOrPut(parsed.domain) { mutableListOf() }.add(builder.build())
             }
+            primed = true
         }
-        primed = true
     }
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {

@@ -152,7 +152,10 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   Emulator reaches the prod LAN server at `http://192.168.1.107:8111` (not the app's
   `10.0.2.2` default), or a locally-run `dev.sh` at `http://192.168.0.22:8111` — the
   dev box is `192.168.0.22/23`, so both live on one subnet. Prod over the internet is
-  `https://jamarr.darious.co.uk`. Test login lives in
+  `https://jamarr.darious.co.uk`. Only **debug** builds can use those http URLs:
+  `res/xml/network_security_config.xml` permits cleartext under `debug-overrides`
+  only, and `src/release/AndroidManifest.xml` pins `usesCleartextTraffic=false`.
+  Test login lives in
   `~/jamarr_prod.txt` on the dev box (pointer only — not in-repo). Force 3-button nav
   to test system-bar insets:
   `adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton`.
