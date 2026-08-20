@@ -22,7 +22,13 @@ data class StoredSession(
     val useDeviceUpnp: Boolean = false,
 )
 
-class SettingsStore(private val context: Context) {
+/** The slice of persistence [com.jamarr.android.data.JamarrCookieJar] needs, so it can be unit-tested without a Context. */
+interface CookieStore {
+    suspend fun loadCookies(): Set<String>
+    suspend fun saveCookies(cookies: Collection<String>)
+}
+
+class SettingsStore(private val context: Context) : CookieStore {
     private val serverUrlKey = stringPreferencesKey("server_url")
     private val accessTokenKey = stringPreferencesKey("access_token")
     private val activeTabKey = intPreferencesKey("active_tab")
@@ -92,11 +98,11 @@ class SettingsStore(private val context: Context) {
         }
     }
 
-    suspend fun loadCookies(): Set<String> {
+    override suspend fun loadCookies(): Set<String> {
         return context.jamarrDataStore.data.first()[cookiesKey].orEmpty()
     }
 
-    suspend fun saveCookies(cookies: Collection<String>) {
+    override suspend fun saveCookies(cookies: Collection<String>) {
         context.jamarrDataStore.edit { prefs ->
             if (cookies.isEmpty()) prefs.remove(cookiesKey)
             else prefs[cookiesKey] = cookies.toSet()
