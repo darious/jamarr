@@ -257,3 +257,34 @@ async def test_get_client_ip_uses_forwarded_headers_for_trusted_proxy(monkeypatc
         )
 
     assert response.json() == {"client_ip": "198.51.100.77"}
+
+
+@pytest.mark.asyncio
+async def test_get_client_ip_ignores_client_supplied_forwarded_prefix(monkeypatch):
+    """A client that sends its own X-Forwarded-For cannot pick what we log.
+
+    Proxies append, so the client's value sits at the head of the chain ahead
+    of every real hop. Resolution walks from the right and stops at the first
+    hop that is not a trusted proxy.
+    """
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "10.0.0.2,10.0.0.3")
+    app = FastAPI()
+
+    @app.get("/whoami")
+    async def whoami(request: Request):
+        return {"client_ip": get_client_ip(request)}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app, client=("10.0.0.2", 12345)),
+        base_url="http://10.0.0.2:8111",
+    ) as client:
+        response = await client.get(
+            "/whoami",
+            headers={
+                # "203.0.113.9" is the forged prefix; "198.51.100.77" is the
+                # real peer the first proxy saw; "10.0.0.3" is a trusted hop.
+                "X-Forwarded-For": "203.0.113.9, 198.51.100.77, 10.0.0.3",
+            },
+        )
+
+    assert response.json() == {"client_ip": "198.51.100.77"}
