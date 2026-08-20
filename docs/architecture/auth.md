@@ -231,6 +231,12 @@ Jamarr already distinguishes dev/prod via compose stacks and scripts.
   - `Secure=true`
   - `SameSite=Lax` (start here)
   - `Path=/api` (current implementation; scopes the cookie to the API)
+
+`Secure` is decided per request: on when the request is HTTPS, or when a trusted
+proxy forwards `X-Forwarded-Proto: https`. That matters because a `Secure`
+cookie handed to a plain-HTTP client is never sent back, so the same server
+reached over LAN HTTP would issue a session that dies at the first refresh.
+`REFRESH_COOKIE_SECURE` pins the flag on or off if you need to override it.
 - Consider HSTS if you’re always HTTPS.
 
 ### 6.2 Development options

@@ -38,11 +38,14 @@ limiter = Limiter(
     enabled=ENV == "production",
 )
 
-# Configuration
+# Configuration. Unset means "decide per request" (see _refresh_cookie_secure);
+# setting it pins the Secure attribute on or off for every response.
 if "REFRESH_COOKIE_SECURE" in os.environ:
-    REFRESH_COOKIE_SECURE = os.getenv("REFRESH_COOKIE_SECURE", "false").lower() == "true"
+    REFRESH_COOKIE_SECURE: Optional[bool] = (
+        os.getenv("REFRESH_COOKIE_SECURE", "false").lower() == "true"
+    )
 else:
-    REFRESH_COOKIE_SECURE = ENV == "production"
+    REFRESH_COOKIE_SECURE = None
 
 # Replaying a rotated refresh token whose family still has a live tip within this
 # window is treated as a benign lost-response / concurrent-refresh race and is
@@ -80,7 +83,29 @@ class ChangePasswordBody(BaseModel):
     new_password: str
 
 
-def _set_refresh_cookie(response: Response, token: str) -> None:
+def _refresh_cookie_secure(request: Request) -> bool:
+    """Whether this response should mark the refresh cookie ``Secure``.
+
+    A ``Secure`` cookie handed out over a plaintext connection is never sent
+    back, so pinning ``secure=True`` breaks every HTTP deployment: login stores
+    a cookie the client can never return, and each ``/api/auth/refresh`` then
+    arrives with no cookie at all. Clients see that as a hard logout the moment
+    the access token expires. Decide per request instead, unless
+    ``REFRESH_COOKIE_SECURE`` pins it.
+    """
+    if REFRESH_COOKIE_SECURE is not None:
+        return REFRESH_COOKIE_SECURE
+    if request.url.scheme == "https":
+        return True
+    # X-Forwarded-Proto is authoritative only with TRUSTED_PROXY_IPS set, in
+    # which case it is already folded into request.url.scheme above. Reading it
+    # untrusted here can only *add* Secure, so a spoofed header cannot downgrade
+    # the cookie — it can only make a client's own cookie unusable.
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    return forwarded.split(",")[0].strip().lower() == "https"
+
+
+def _set_refresh_cookie(request: Request, response: Response, token: str) -> None:
     """Set JWT refresh token cookie."""
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
@@ -88,12 +113,12 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         max_age=REFRESH_TOKEN_TTL_DAYS * 86400,  # Convert days to seconds
         httponly=True,
         samesite="lax",
-        secure=REFRESH_COOKIE_SECURE,
+        secure=_refresh_cookie_secure(request),
         path="/api",
     )
 
 
-def _clear_refresh_cookie(response: Response) -> None:
+def _clear_refresh_cookie(request: Request, response: Response) -> None:
     """Clear JWT refresh token cookie."""
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
@@ -101,7 +126,7 @@ def _clear_refresh_cookie(response: Response) -> None:
         max_age=0,
         httponly=True,
         samesite="lax",
-        secure=REFRESH_COOKIE_SECURE,
+        secure=_refresh_cookie_secure(request),
         path="/api",
     )
 
@@ -241,7 +266,7 @@ async def login(
     )
 
     # Set refresh token cookie
-    _set_refresh_cookie(response, refresh_token)
+    _set_refresh_cookie(request, response, refresh_token)
 
     log_security_event(
         "login_success",
@@ -272,7 +297,7 @@ async def logout(
         await revoke_refresh_session(db, token_hash)
         log_security_event("logout", request, level=logging.INFO)
     
-    _clear_refresh_cookie(response)
+    _clear_refresh_cookie(request, response)
     return {"ok": True}
 
 
@@ -389,7 +414,7 @@ async def refresh(
     )
 
     # Set new refresh cookie
-    _set_refresh_cookie(response, new_refresh_token)
+    _set_refresh_cookie(request, response, new_refresh_token)
 
     # Create new access token
     access_token = create_access_token(user_id=user_id)
@@ -498,7 +523,7 @@ async def change_password(
         "DELETE FROM auth_refresh_session WHERE user_id = $1 AND revoked_at IS NULL",
         user["id"],
     )
-    _clear_refresh_cookie(response)
+    _clear_refresh_cookie(request, response)
     log_security_event(
         "password_changed",
         request,
@@ -626,7 +651,7 @@ async def setup_first_user(
         username=user["username"],
     )
 
-    _set_refresh_cookie(response, refresh_token)
+    _set_refresh_cookie(request, response, refresh_token)
 
     user_data = _public_user_dict(user)
     return {
