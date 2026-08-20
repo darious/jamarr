@@ -72,11 +72,16 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   Schema docs are generated (`docs/reference/schema/`) — don't hand-edit.
 - Config: secrets in `.env` (see `.env.example`); non-secret app config in `config.yaml`.
 - Commits: Conventional Commits (`feat(scope):`, `fix(charts):`, `chore(ci):`). **No AI co-author/attribution trailers.**
-- Versions live in the git tag, never in a file. Server releases are `v1.7.1`
-  (Docker image, `latest` moves, `JAMARR_VERSION` baked in); app releases are
-  `android-v1.8.0` (signed APK, `versionName` from the tag and `versionCode` =
-  `major*10000 + minor*100 + patch`). Cut both with `release.sh <tag> "<Name>"`
-  — see `docs/reference/release-names.md`. Nothing to bump in a PR.
+- Versions live in the git tag, never in a file. Two independent streams, and
+  the codename's letter says which: server `vX.Y.Z` takes a **Z** artist
+  (Docker image incl. the web UI, `latest` moves, `JAMARR_VERSION` baked in);
+  app `android-vX.Y.Z` takes an **A** artist (signed APK, `versionName` from
+  the tag, `versionCode` = `major*10000 + minor*100 + patch`). `release.sh`
+  rejects a name on the wrong stream. The numbers drift on purpose — align
+  them only when a change to one *requires* the other. Nothing else is
+  versioned: the web UI ships inside the image, the TUI runs from a checkout,
+  and the `0.1.0`s in `pyproject.toml`/`web/package.json` are inert. Cut with
+  `release.sh <tag> "<Name>"` — see `docs/reference/release-names.md`.
 - CI builds on PRs and on release tags only; a merge to `main` builds nothing.
   `deploy.sh` pulls `:latest`, which now moves on server tags rather than on
   every merge, so deploys land released versions. `workflow_dispatch` on

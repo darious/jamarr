@@ -8,7 +8,8 @@
 # The tag IS the version -- nothing in the tree needs bumping first. The
 # workflows parse it and bake it into the artifact they build.
 #
-# Names come from docs/reference/release-names.md -- take the next one off the
+# Names come from docs/reference/release-names.md -- Z artists for the server
+# stream, A artists for the app stream. Take the next one off the
 # queue.
 set -euo pipefail
 
@@ -20,8 +21,8 @@ fi
 
 if [[ $# -ne 2 ]]; then
     echo "Usage: $0 [--dry-run] <version> <name>" >&2
-    echo "Example: $0 v1.2.3 \"Cosmic Cassette\"          (server release)" >&2
-    echo "Example: $0 android-v1.2.3 \"Cosmic Cassette\"  (app release)" >&2
+    echo "Example: $0 v1.2.3 \"Hans Zimmer\"             (server release, Z name)" >&2
+    echo "Example: $0 android-v1.2.3 \"All Time Low\"   (app release, A name)" >&2
     echo "Next name: see docs/reference/release-names.md" >&2
     echo "  --dry-run: validate, create local tag, poll for an EXISTING release," >&2
     echo "             skip pushing the tag and editing the release title." >&2
@@ -47,6 +48,32 @@ else
     STREAM="server"
     WORKFLOW="publish_docker.yml"
     WAIT_FOR="release to be created"
+fi
+
+# The codename's first letter identifies the stream, and walks with the major
+# version: the app counts up from A (1.x=A, 2.x=B), the server counts down from
+# Z (1.x=Z, 2.x=Y). Derived rather than hardcoded so a major bump needs no edit
+# here (see docs/reference/release-names.md).
+MAJOR="${VERSION#android-}"
+MAJOR="${MAJOR#v}"
+MAJOR="${MAJOR%%.*}"
+if (( MAJOR < 1 || MAJOR > 13 )); then
+    echo "No letter defined for major version $MAJOR (the two chains meet at 13)" >&2
+    exit 64
+fi
+if [[ "$STREAM" == "server" ]]; then
+    LETTER_ORD=$(( 91 - MAJOR ))   # 1 -> Z
+else
+    LETTER_ORD=$(( 64 + MAJOR ))   # 1 -> A
+fi
+EXPECT_LETTER="$(printf "\\$(printf '%03o' "$LETTER_ORD")")"
+
+# "The Zutons" files under Z, matching how the library sorts.
+NAME_LETTER="$(printf '%s' "${NAME#The }" | cut -c1 | tr '[:lower:]' '[:upper:]')"
+if [[ "$NAME_LETTER" != "$EXPECT_LETTER" ]]; then
+    echo "A $STREAM release ($VERSION) takes a name starting with $EXPECT_LETTER (got: $NAME)" >&2
+    echo "Next name: see docs/reference/release-names.md" >&2
+    exit 64
 fi
 
 if ! command -v gh >/dev/null 2>&1; then
