@@ -121,13 +121,28 @@ def _trusted_proxy_ips() -> set[str]:
 
 
 def get_client_ip(request: Request) -> str:
+    """Resolve the requesting client's address.
+
+    Normally ``request.client`` has already been rewritten by
+    ``ProxyHeadersMiddleware`` (added whenever ``TRUSTED_PROXY_IPS`` is set),
+    so the direct address is the answer. The forwarded-header walk below is
+    the fallback for when the peer is still a trusted proxy.
+
+    That walk goes right to left. Each proxy *appends* to
+    ``X-Forwarded-For``, so the leftmost entry is whatever the original
+    client chose to send — a client that supplies its own header keeps its
+    value at the head of the chain, ahead of every real hop. The rightmost
+    entry that is not a proxy we trust is the last address a trusted proxy
+    actually observed, so it is the only one a client cannot forge.
+    """
     direct_ip = request.client.host if request.client else "unknown"
-    if direct_ip in _trusted_proxy_ips():
+    trusted = _trusted_proxy_ips()
+    if direct_ip in trusted:
         forwarded_for = request.headers.get("x-forwarded-for", "")
-        if forwarded_for:
-            first_hop = forwarded_for.split(",", 1)[0].strip()
-            if first_hop:
-                return first_hop
+        for hop in reversed(forwarded_for.split(",")):
+            hop = hop.strip()
+            if hop and hop not in trusted:
+                return hop
 
         real_ip = request.headers.get("x-real-ip", "").strip()
         if real_ip:
