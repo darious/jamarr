@@ -1308,10 +1308,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#two-streams" class="md-nav__link">
+  <a href="#two-streams-two-letters" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two streams
+        Two streams, two letters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version-numbers-drift-and-that-is-fine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version numbers drift, and that is fine
       
     </span>
   </a>
@@ -1341,10 +1352,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#queue" class="md-nav__link">
+  <a href="#queue-server-z" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Queue
+        Queue — server (Z)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#queue-app-a" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue — app (A)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-a-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating a queue
       
     </span>
   </a>
@@ -1761,10 +1794,21 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#two-streams" class="md-nav__link">
+  <a href="#two-streams-two-letters" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two streams
+        Two streams, two letters
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version-numbers-drift-and-that-is-fine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version numbers drift, and that is fine
       
     </span>
   </a>
@@ -1794,10 +1838,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#queue" class="md-nav__link">
+  <a href="#queue-server-z" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Queue
+        Queue — server (Z)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#queue-app-a" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue — app (A)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerating-a-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating a queue
       
     </span>
   </a>
@@ -1843,12 +1909,12 @@
 <h1 id="release-names">Release names<a class="headerlink" href="#release-names" title="Permanent link">&para;</a></h1>
 <p>Every Jamarr release gets a musician or band as a codename, passed to
 <code>release.sh</code> alongside the version:</p>
-<div class="highlight"><pre><span></span><code>./release.sh<span class="w"> </span>v1.5.0<span class="w"> </span><span class="s2">&quot;Arcade Fire&quot;</span><span class="w">           </span><span class="c1"># server: Docker image</span>
-./release.sh<span class="w"> </span>android-v1.8.0<span class="w"> </span><span class="s2">&quot;Tori Amos&quot;</span><span class="w">     </span><span class="c1"># app: signed APK</span>
+<div class="highlight"><pre><span></span><code>./release.sh<span class="w"> </span>v1.8.1<span class="w"> </span><span class="s2">&quot;Hans Zimmer&quot;</span><span class="w">           </span><span class="c1"># server: Docker image</span>
+./release.sh<span class="w"> </span>android-v1.9.0<span class="w"> </span><span class="s2">&quot;All Time Low&quot;</span><span class="w">  </span><span class="c1"># app: signed APK</span>
 </code></pre></div>
 <p>That produces the tag and a GitHub release titled <code>&lt;tag&gt; - &lt;Name&gt;</code>. Use
 <code>--dry-run</code> first to validate without pushing.</p>
-<h2 id="two-streams">Two streams<a class="headerlink" href="#two-streams" title="Permanent link">&para;</a></h2>
+<h2 id="two-streams-two-letters">Two streams, two letters<a class="headerlink" href="#two-streams-two-letters" title="Permanent link">&para;</a></h2>
 <p>The server and the Android app are released independently, because they are
 installed independently — a phone can be several server releases behind.</p>
 <table>
@@ -1856,48 +1922,124 @@ installed independently — a phone can be several server releases behind.</p>
 <tr>
 <th>Stream</th>
 <th>Tag</th>
+<th>Letter</th>
 <th>Builds</th>
 <th>Triggered workflow</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Server (backend + web)</td>
-<td><code>v1.7.1</code></td>
+<td>Server (backend + web UI)</td>
+<td><code>v1.8.1</code></td>
+<td><strong>Z</strong></td>
 <td>Docker image, <code>latest</code> moves</td>
 <td><code>publish_docker.yml</code></td>
 </tr>
 <tr>
 <td>App</td>
-<td><code>android-v1.8.0</code></td>
+<td><code>android-v1.9.0</code></td>
+<td><strong>A</strong></td>
 <td>signed APK on the release</td>
 <td><code>android_release.yml</code></td>
 </tr>
 </tbody>
 </table>
-<p>A server tag no longer rebuilds the APK, and an app tag does not rebuild the
-image. Before this split, <code>android_release.yml</code> fired on every <code>v*</code> tag, so a
-backend-only release republished an unchanged APK.</p>
-<h2 id="convention">Convention<a class="headerlink" href="#convention" title="Permanent link">&para;</a></h2>
-<ul>
-<li>One artist per release, <strong>used once and never reused</strong>.</li>
-<li>Every <code>v1.x</code> release so far has used an artist beginning with <strong>A</strong>, so the
-  letter appears to track the major version — <code>v1.x</code> = A, <code>v2.x</code> = B.
-  Confirm that before cutting <code>v2.0.0</code>; nothing in <code>release.sh</code> enforces it.</li>
-<li>Ordering within a letter is not alphabetical and never has been. Pick
-  whichever name fits; the queue below is just to avoid repeats and
-  deliberation.</li>
-</ul>
-<h2 id="used">Used<a class="headerlink" href="#used" title="Permanent link">&para;</a></h2>
+<p>The letter is what tells the two chains apart at a glance: a Z name is a server
+release, an A name is an app release. Before <code>v1.8.1</code> both streams drew from
+the same A pool, which is why the server's history below is all A names.</p>
+<p>The letter walks with the major version — the app counts <strong>up</strong> from A, the
+server counts <strong>down</strong> from Z:</p>
 <table>
 <thead>
 <tr>
-<th>Version</th>
+<th>Major</th>
+<th>App</th>
+<th>Server</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.x</td>
+<td>A</td>
+<td>Z</td>
+</tr>
+<tr>
+<td>2.x</td>
+<td>B</td>
+<td>Y</td>
+</tr>
+<tr>
+<td>3.x</td>
+<td>C</td>
+<td>X</td>
+</tr>
+</tbody>
+</table>
+<p><code>release.sh</code> derives this rather than hardcoding it, so a major bump needs no
+change to the script. The two chains would collide at 13.x, which is a problem
+for a future that will not arrive.</p>
+<p>A server tag does not rebuild the APK, and an app tag does not rebuild the
+image. Before the split (<code>ad5403d</code>), <code>android_release.yml</code> fired on every <code>v*</code>
+tag, so a backend-only release republished an unchanged APK.</p>
+<h2 id="version-numbers-drift-and-that-is-fine">Version numbers drift, and that is fine<a class="headerlink" href="#version-numbers-drift-and-that-is-fine" title="Permanent link">&para;</a></h2>
+<p>The two numbers are independent and are <strong>expected</strong> to diverge. The server may
+be several releases ahead while the app sits unchanged; the app's number then
+tells you the release it last actually changed in.</p>
+<p>Align them — cut both at the same number — <strong>only when a change to one requires
+the other</strong>: a new API the app depends on, a contract change, an auth or stream
+format the old client cannot speak. A fix that only touches one artifact ships
+on one stream. Never bump a version to keep the numbers level.</p>
+<p>There is nothing else in the repo carrying a version. The web UI is built into
+the server image and served by it, so it can never be out of step. The TUI is
+not published — it runs from a checkout. The <code>0.1.0</code> strings in
+<code>pyproject.toml</code>, <code>tui/pyproject.toml</code> and <code>web/package.json</code> are inert
+placeholders that nothing reads.</p>
+<h2 id="convention">Convention<a class="headerlink" href="#convention" title="Permanent link">&para;</a></h2>
+<ul>
+<li>One artist per release, <strong>used once and never reused</strong> — across both streams.</li>
+<li>The letter comes from the stream and the major version: <code>v1.x</code> takes Z, <code>v2.x</code>
+  takes Y; <code>android-v1.x</code> takes A, <code>android-v2.x</code> takes B.</li>
+<li>Ordering within a letter is not alphabetical and never has been. Pick
+  whichever name fits; the queues below are just to avoid repeats and
+  deliberation.</li>
+<li>Move a name from the queue into the used table as part of the release.</li>
+</ul>
+<h2 id="used">Used<a class="headerlink" href="#used" title="Permanent link">&para;</a></h2>
+<p>Reconciled against the published releases on 2026-08-20.</p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
 <th>Name</th>
 <th>Released</th>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>v1.8.0</td>
+<td>Alter Bridge</td>
+<td>2026-08-11</td>
+</tr>
+<tr>
+<td>android-v1.8.0</td>
+<td>Alter Bridge</td>
+<td>2026-08-11</td>
+</tr>
+<tr>
+<td>v1.7.0</td>
+<td>Christina Aguilera</td>
+<td>2026-08-10</td>
+</tr>
+<tr>
+<td>v1.6.0</td>
+<td>Bryan Adams</td>
+<td>2026-08-09</td>
+</tr>
+<tr>
+<td>v1.5.0</td>
+<td>Tori Amos</td>
+<td>2026-08-02</td>
+</tr>
 <tr>
 <td>v1.4.2</td>
 <td>Aphex Twin</td>
@@ -1960,10 +2102,9 @@ backend-only release republished an unchanged APK.</p>
 </tr>
 </tbody>
 </table>
-<h2 id="queue">Queue<a class="headerlink" href="#queue" title="Permanent link">&para;</a></h2>
-<p>The artists with the most tracks in the library, already-used names removed.
-Take from the top, delete the line, and move it into the table above as part
-of the release commit.</p>
+<p><code>android-v1.8.0</code> and <code>v1.8.0</code> share a name: they were cut three minutes apart
+when the streams split, and are the only pair that will.</p>
+<h2 id="queue-server-z">Queue — server (Z)<a class="headerlink" href="#queue-server-z" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -1975,118 +2116,171 @@ of the release commit.</p>
 <tbody>
 <tr>
 <td>1</td>
-<td>Tori Amos</td>
-<td>306</td>
+<td>ZZ Top</td>
+<td>180</td>
 </tr>
 <tr>
 <td>2</td>
-<td>Bryan Adams</td>
-<td>299</td>
+<td>Hans Zimmer</td>
+<td>155</td>
 </tr>
 <tr>
 <td>3</td>
-<td>Christina Aguilera</td>
-<td>177</td>
+<td>Rob Zombie</td>
+<td>108</td>
 </tr>
 <tr>
 <td>4</td>
+<td>ZAYN</td>
+<td>64</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Zero 7</td>
+<td>51</td>
+</tr>
+<tr>
+<td>6</td>
+<td>The Zutons</td>
+<td>46</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Zedd</td>
+<td>36</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Zucchero</td>
+<td>28</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Zeitkratzer</td>
+<td>6</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Zendaya</td>
+<td>4</td>
+</tr>
+</tbody>
+</table>
+<p>The Z bench is shallow — 40 artists in the library, and only eight with real
+catalogues. When it runs out, take any Z artist rather than reaching for
+another letter; the letter is what identifies the stream and the major version.
+The bench refills at <code>v2.0.0</code>, which moves the server chain to Y.</p>
+<h2 id="queue-app-a">Queue — app (A)<a class="headerlink" href="#queue-app-a" title="Permanent link">&para;</a></h2>
+<p>Already-used names removed.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Name</th>
+<th>Tracks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
 <td>All Time Low</td>
 <td>150</td>
 </tr>
 <tr>
-<td>5</td>
-<td>Alter Bridge</td>
-<td>147</td>
-</tr>
-<tr>
-<td>6</td>
+<td>2</td>
 <td>Ryan Adams</td>
 <td>147</td>
 </tr>
 <tr>
-<td>7</td>
+<td>3</td>
 <td>Anastacia</td>
 <td>139</td>
 </tr>
 <tr>
-<td>8</td>
+<td>4</td>
 <td>Ash</td>
 <td>137</td>
 </tr>
 <tr>
-<td>9</td>
+<td>5</td>
 <td>Asian Dub Foundation</td>
 <td>130</td>
 </tr>
 <tr>
-<td>10</td>
+<td>6</td>
 <td>James Arthur</td>
 <td>109</td>
 </tr>
 <tr>
-<td>11</td>
+<td>7</td>
 <td>Anthrax</td>
 <td>108</td>
 </tr>
 <tr>
-<td>12</td>
+<td>8</td>
 <td>Avenged Sevenfold</td>
 <td>107</td>
 </tr>
 <tr>
-<td>13</td>
+<td>9</td>
 <td>Ashanti</td>
 <td>105</td>
 </tr>
 <tr>
-<td>14</td>
+<td>10</td>
 <td>Anouk</td>
 <td>101</td>
 </tr>
 <tr>
-<td>15</td>
+<td>11</td>
 <td>ATB</td>
 <td>101</td>
 </tr>
 <tr>
-<td>16</td>
+<td>12</td>
 <td>Autechre</td>
 <td>101</td>
 </tr>
 <tr>
-<td>17</td>
+<td>13</td>
 <td>AWOLNATION</td>
 <td>101</td>
 </tr>
 <tr>
-<td>18</td>
+<td>14</td>
 <td>Amon Amarth</td>
 <td>96</td>
 </tr>
 <tr>
-<td>19</td>
+<td>15</td>
 <td>Anathema</td>
 <td>92</td>
 </tr>
 <tr>
-<td>20</td>
+<td>16</td>
 <td>Air</td>
 <td>91</td>
 </tr>
 </tbody>
 </table>
-<p>Counts are from the production library on 2026-08-02. Grouping uses
-<code>artist.letter</code>, which is derived from the sort name — so artists filed under
-a surname (Tori Amos, Bryan Adams) count as A, matching how the library
-browses. Regenerate against prod with:</p>
+<h2 id="regenerating-a-queue">Regenerating a queue<a class="headerlink" href="#regenerating-a-queue" title="Permanent link">&para;</a></h2>
+<p>Counts are from the production library — A on 2026-08-02, Z on 2026-08-20.
+Grouping uses <code>artist.letter</code>, derived from the sort name, so artists filed
+under a surname (Tori Amos, Hans Zimmer) count as A and Z respectively,
+matching how the library browses.</p>
 <div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="k">DISTINCT</span><span class="w"> </span><span class="n">ta</span><span class="p">.</span><span class="n">track_id</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">tracks</span>
 <span class="k">FROM</span><span class="w"> </span><span class="n">artist</span><span class="w"> </span><span class="n">a</span>
 <span class="k">JOIN</span><span class="w"> </span><span class="n">track_artist</span><span class="w"> </span><span class="n">ta</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">ta</span><span class="p">.</span><span class="n">artist_mbid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">mbid</span>
-<span class="k">WHERE</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">letter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;A&#39;</span>
+<span class="k">WHERE</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">letter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;Z&#39;</span>
 <span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">name</span>
 <span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">tracks</span><span class="w"> </span><span class="k">DESC</span><span class="p">,</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">name</span>
 <span class="k">LIMIT</span><span class="w"> </span><span class="mi">45</span><span class="p">;</span>
 </code></pre></div>
+<p>Without database access, the running server answers the same question:
+<code>GET /api/artists?starts_with=Z</code> for the names, then <code>GET /api/tracks?artist=&lt;name&gt;</code>
+per artist for the counts. The API route credits featured artists slightly
+differently from the SQL, so treat its counts as approximate — fine for
+ordering a queue.</p>
 <h2 id="before-tagging">Before tagging<a class="headerlink" href="#before-tagging" title="Permanent link">&para;</a></h2>
 <p><strong>There is nothing to bump.</strong> The tag is the version:</p>
 <ul>
@@ -2108,8 +2302,7 @@ It does not check:</p>
   signed APK and the Docker image, and both are public and awkward to retract.</li>
 <li>Pick MAJOR/MINOR/PATCH from what actually changed: a new user-facing feature
   is a MINOR bump, a fix-only release is a PATCH.</li>
-<li>The two streams number independently. The app starts at <code>android-v1.8.0</code>,
-  continuing the numbering users have already seen on the releases page.</li>
+<li>The two streams number independently, and the letter must match the stream.</li>
 </ul>
 
 
