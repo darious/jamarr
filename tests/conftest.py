@@ -14,7 +14,7 @@ os.environ.setdefault("DB_PASS", "jamarr_test")
 os.environ.setdefault("DB_NAME", "jamarr_test")
 
 from app.main import app
-from app.db import init_db, close_db, get_db
+from app.db import init_db, close_db, db_conn
 
 # Test database settings. Destructive fixtures must never point at dev/prod.
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
@@ -112,7 +112,7 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
     Yield a database connection.
     We truncate tables to ensure a clean state for each test.
     """
-    async for conn in get_db():
+    async with db_conn() as conn:
         await _assert_connected_to_test_database(conn)
 
         # Clean relevant tables (only if they exist)

@@ -83,207 +83,210 @@ async def get_client_ip_endpoint(request: Request):
 
 
 @router.get("/api/player/state", response_model=PlayerState)
-async def get_player_state(client_id: str = Depends(get_client_id)):
-    async for db in get_db():
-        renderer_id, udn = await renderer_orchestrator.get_active(db, client_id)
-        state = await get_renderer_state_db(db, udn)
+async def get_player_state(
+    client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
+):
+    renderer_id, udn = await renderer_orchestrator.get_active(db, client_id)
+    state = await get_renderer_state_db(db, udn)
 
-        # UPnP uses the legacy polling monitor. Event-capable backends like Cast
-        # update state through the renderer orchestrator callback path.
-        if renderer_id.startswith("upnp:"):
-            if state["is_playing"]:
-                if udn not in playback_monitors or playback_monitors[udn].done():
-                    now = time.time()
-                    last_start = monitor_start_times.get(udn, 0)
-                    # Throttle rapid restarts: if 3+ restarts in 2 min, wait 60s
-                    history = _monitor_restart_history.setdefault(udn, [])
-                    history[:] = [t for t in history if now - t < 120]
-                    if len(history) >= 3:
-                        if now - last_start < 60:
-                            continue
-                        history.clear()
-                    if now - last_start > 30 and not _is_monitor_starting(udn):
-                        logger.info(f"[Player] Auto-restarting monitor for {udn}")
-                        history.append(now)
-                        start_monitor_task(udn)
-        elif not renderer_id.startswith("local:"):
-            state = await renderer_orchestrator.sync_status(db, renderer_id, udn, state)
+    # UPnP uses the legacy polling monitor. Event-capable backends like Cast
+    # update state through the renderer orchestrator callback path.
+    if renderer_id.startswith("upnp:"):
+        if state["is_playing"]:
+            if udn not in playback_monitors or playback_monitors[udn].done():
+                now = time.time()
+                last_start = monitor_start_times.get(udn, 0)
+                # Throttle rapid restarts: if 3+ restarts in 2 min, wait 60s
+                history = _monitor_restart_history.setdefault(udn, [])
+                history[:] = [t for t in history if now - t < 120]
+                if len(history) >= 3:
+                    if now - last_start < 60:
+                        # Throttled: report an empty local state rather than a
+                        # renderer whose monitor we are refusing to restart.
+                        return PlayerState(
+                            queue=[],
+                            current_index=-1,
+                            position_seconds=0,
+                            is_playing=False,
+                            renderer=f"local:{client_id}",
+                        )
+                    history.clear()
+                if now - last_start > 30 and not _is_monitor_starting(udn):
+                    logger.info(f"[Player] Auto-restarting monitor for {udn}")
+                    history.append(now)
+                    start_monitor_task(udn)
+    elif not renderer_id.startswith("local:"):
+        state = await renderer_orchestrator.sync_status(db, renderer_id, udn, state)
 
-        queue = state["queue"]
-        track_ids = [
-            t.get("id") for t in queue if isinstance(t, dict) and t.get("id")
-        ]
-        if track_ids:
-            # 1. Fetch Plays
-            plays_rows = await db.fetch(
-                """
-                SELECT h.track_id, COUNT(*) as plays
-                FROM combined_playback_history_mat h
-                WHERE h.track_id = ANY($1::bigint[])
-                GROUP BY h.track_id
-                """,
-                track_ids,
-            )
-            plays_map = {row["track_id"]: row["plays"] for row in plays_rows}
+    queue = state["queue"]
+    track_ids = [
+        t.get("id") for t in queue if isinstance(t, dict) and t.get("id")
+    ]
+    if track_ids:
+        # 1. Fetch Plays
+        plays_rows = await db.fetch(
+            """
+            SELECT h.track_id, COUNT(*) as plays
+            FROM combined_playback_history_mat h
+            WHERE h.track_id = ANY($1::bigint[])
+            GROUP BY h.track_id
+            """,
+            track_ids,
+        )
+        plays_map = {row["track_id"]: row["plays"] for row in plays_rows}
 
-            # 2. Fetch missing Art/Path/Mime
-            needs_enrich = False
-            for t in queue:
-                if isinstance(t, dict):
-                     if not t.get("art_sha1") or not t.get("path"):
-                         needs_enrich = True
-                         break
+        # 2. Fetch missing Art/Path/Mime
+        needs_enrich = False
+        for t in queue:
+            if isinstance(t, dict):
+                 if not t.get("art_sha1") or not t.get("path"):
+                     needs_enrich = True
+                     break
             
-            meta_map = {}
-            if needs_enrich:
-                meta_rows = await db.fetch(
-                    """
-                    SELECT t.id, t.path, t.codec, a.sha1 as art_sha1
-                    FROM track t
-                    LEFT JOIN artwork a ON t.artwork_id = a.id
-                    WHERE t.id = ANY($1::bigint[])
-                    """,
-                    track_ids
-                )
-                meta_map = {
-                    r["id"]: {
-                        "path": r["path"], 
-                        "art_sha1": r["art_sha1"], 
-                        "codec": r["codec"]
-                    } 
-                    for r in meta_rows
-                }
-
-            analysis_rows = await db.fetch(
+        meta_map = {}
+        if needs_enrich:
+            meta_rows = await db.fetch(
                 """
-                SELECT
-                    track_id,
-                    status,
-                    loudness_lufs,
-                    true_peak_db,
-                    replaygain_album_gain_db
-                FROM track_audio_analysis
-                WHERE track_id = ANY($1::bigint[])
+                SELECT t.id, t.path, t.codec, a.sha1 as art_sha1
+                FROM track t
+                LEFT JOIN artwork a ON t.artwork_id = a.id
+                WHERE t.id = ANY($1::bigint[])
                 """,
-                track_ids,
+                track_ids
             )
-            normalization_enabled = env_flag_enabled(
-                "JAMARR_LOUDNESS_NORMALIZATION",
-                True,
-            )
-            analysis_map = {row["track_id"]: row for row in analysis_rows}
+            meta_map = {
+                r["id"]: {
+                    "path": r["path"], 
+                    "art_sha1": r["art_sha1"], 
+                    "codec": r["codec"]
+                } 
+                for r in meta_rows
+            }
 
-            # 3. Apply updates
-            for queue_index, t in enumerate(queue):
-                if isinstance(t, dict) and t.get("id"):
-                    tid = t["id"]
+        analysis_rows = await db.fetch(
+            """
+            SELECT
+                track_id,
+                status,
+                loudness_lufs,
+                true_peak_db,
+                replaygain_album_gain_db
+            FROM track_audio_analysis
+            WHERE track_id = ANY($1::bigint[])
+            """,
+            track_ids,
+        )
+        normalization_enabled = env_flag_enabled(
+            "JAMARR_LOUDNESS_NORMALIZATION",
+            True,
+        )
+        analysis_map = {row["track_id"]: row for row in analysis_rows}
+
+        # 3. Apply updates
+        for queue_index, t in enumerate(queue):
+            if isinstance(t, dict) and t.get("id"):
+                tid = t["id"]
                     
-                    # Apply plays
-                    if "plays" not in t:
-                        t["plays"] = plays_map.get(tid, 0)
+                # Apply plays
+                if "plays" not in t:
+                    t["plays"] = plays_map.get(tid, 0)
                     
-                    # Apply Meta
-                    if needs_enrich and tid in meta_map:
-                        meta = meta_map[tid]
-                        if not t.get("art_sha1"):
-                            t["art_sha1"] = meta["art_sha1"]
-                        if not t.get("path"):
-                            t["path"] = meta["path"]
-                        if not t.get("codec"):
-                            t["codec"] = meta["codec"]
+                # Apply Meta
+                if needs_enrich and tid in meta_map:
+                    meta = meta_map[tid]
+                    if not t.get("art_sha1"):
+                        t["art_sha1"] = meta["art_sha1"]
+                    if not t.get("path"):
+                        t["path"] = meta["path"]
+                    if not t.get("codec"):
+                        t["codec"] = meta["codec"]
                         
-                        # Guess mime if missing and path exists
-                        if not t.get("mime") and t.get("path"):
-                            mime, _ = mimetypes.guess_type(t["path"])
-                            if not mime:
-                                ext = os.path.splitext(t["path"])[1].lower()
-                                if ext == ".flac":
-                                    mime = "audio/flac"
-                                elif ext == ".mp3":
-                                    mime = "audio/mpeg"
-                                elif ext == ".m4a":
-                                    mime = "audio/mp4"
-                                elif ext == ".wav":
-                                    mime = "audio/wav"
-                                elif ext == ".ogg":
-                                    mime = "audio/ogg"
-                                else:
-                                    mime = "audio/flac"
-                            t["mime"] = mime
+                    # Guess mime if missing and path exists
+                    if not t.get("mime") and t.get("path"):
+                        mime, _ = mimetypes.guess_type(t["path"])
+                        if not mime:
+                            ext = os.path.splitext(t["path"])[1].lower()
+                            if ext == ".flac":
+                                mime = "audio/flac"
+                            elif ext == ".mp3":
+                                mime = "audio/mpeg"
+                            elif ext == ".m4a":
+                                mime = "audio/mp4"
+                            elif ext == ".wav":
+                                mime = "audio/wav"
+                            elif ext == ".ogg":
+                                mime = "audio/ogg"
+                            else:
+                                mime = "audio/flac"
+                        t["mime"] = mime
 
-                    analysis = analysis_map.get(tid)
-                    can_normalize = (
-                        normalization_enabled
-                        and analysis is not None
-                        and analysis["status"] == "complete"
-                        and analysis["loudness_lufs"] is not None
+                analysis = analysis_map.get(tid)
+                can_normalize = (
+                    normalization_enabled
+                    and analysis is not None
+                    and analysis["status"] == "complete"
+                    and analysis["loudness_lufs"] is not None
+                )
+                if can_normalize:
+                    loudness_lufs = float(analysis["loudness_lufs"])
+                    true_peak_db = (
+                        float(analysis["true_peak_db"])
+                        if analysis["true_peak_db"] is not None
+                        else None
                     )
-                    if can_normalize:
-                        loudness_lufs = float(analysis["loudness_lufs"])
-                        true_peak_db = (
-                            float(analysis["true_peak_db"])
-                            if analysis["true_peak_db"] is not None
-                            else None
+                    use_album_gain = (
+                        analysis["replaygain_album_gain_db"] is not None
+                        and is_album_sequence_item(queue, queue_index)
+                    )
+                    if use_album_gain:
+                        album_track_ids = album_sequence_track_ids(
+                            queue,
+                            queue_index,
                         )
-                        use_album_gain = (
-                            analysis["replaygain_album_gain_db"] is not None
-                            and is_album_sequence_item(queue, queue_index)
+                        album_true_peak_db = max(
+                            (
+                                float(album_analysis["true_peak_db"])
+                                for album_track_id in album_track_ids
+                                if (album_analysis := analysis_map.get(album_track_id))
+                                and album_analysis["true_peak_db"] is not None
+                            ),
+                            default=None,
                         )
-                        if use_album_gain:
-                            album_track_ids = album_sequence_track_ids(
-                                queue,
-                                queue_index,
-                            )
-                            album_true_peak_db = max(
-                                (
-                                    float(album_analysis["true_peak_db"])
-                                    for album_track_id in album_track_ids
-                                    if (album_analysis := analysis_map.get(album_track_id))
-                                    and album_analysis["true_peak_db"] is not None
-                                ),
-                                default=None,
-                            )
-                            gain_db = calculate_album_gain_db(
-                                float(analysis["replaygain_album_gain_db"]),
-                                album_true_peak_db,
-                            )
-                            gain_mode = "album"
-                        else:
-                            gain_db = calculate_track_gain_db(
-                                loudness_lufs,
-                                true_peak_db,
-                            )
-                            gain_mode = "track"
-                        t["loudness_lufs"] = loudness_lufs
-                        t["true_peak_db"] = true_peak_db
-                        t["loudness_gain_db"] = gain_db
-                        t["loudness_gain_mode"] = gain_mode
-                        t["loudness_target_lufs"] = TARGET_LOUDNESS_LUFS
-                        t["loudness_normalized"] = True
+                        gain_db = calculate_album_gain_db(
+                            float(analysis["replaygain_album_gain_db"]),
+                            album_true_peak_db,
+                        )
+                        gain_mode = "album"
                     else:
-                        t["loudness_gain_db"] = None
-                        t["loudness_gain_mode"] = "raw"
-                        t["loudness_target_lufs"] = TARGET_LOUDNESS_LUFS
-                        t["loudness_normalized"] = False
+                        gain_db = calculate_track_gain_db(
+                            loudness_lufs,
+                            true_peak_db,
+                        )
+                        gain_mode = "track"
+                    t["loudness_lufs"] = loudness_lufs
+                    t["true_peak_db"] = true_peak_db
+                    t["loudness_gain_db"] = gain_db
+                    t["loudness_gain_mode"] = gain_mode
+                    t["loudness_target_lufs"] = TARGET_LOUDNESS_LUFS
+                    t["loudness_normalized"] = True
+                else:
+                    t["loudness_gain_db"] = None
+                    t["loudness_gain_mode"] = "raw"
+                    t["loudness_target_lufs"] = TARGET_LOUDNESS_LUFS
+                    t["loudness_normalized"] = False
 
-        return {
-            "queue": queue,
-            "current_index": state["current_index"],
-            "position_seconds": state["position_seconds"],
-            "is_playing": state["is_playing"],
-            "renderer": udn,
-            "renderer_id": renderer_id,
-            "renderer_kind": renderer_id.split(":", 1)[0] if ":" in renderer_id else "upnp",
-            "transport_state": state.get("transport_state", "STOPPED"),
-            "volume": state.get("volume"),
-        }
-    return PlayerState(
-        queue=[],
-        current_index=-1,
-        position_seconds=0,
-        is_playing=False,
-        renderer=f"local:{client_id}",
-    )
+    return {
+        "queue": queue,
+        "current_index": state["current_index"],
+        "position_seconds": state["position_seconds"],
+        "is_playing": state["is_playing"],
+        "renderer": udn,
+        "renderer_id": renderer_id,
+        "renderer_kind": renderer_id.split(":", 1)[0] if ":" in renderer_id else "upnp",
+        "transport_state": state.get("transport_state", "STOPPED"),
+        "volume": state.get("volume"),
+    }
 
 
 @router.post(
@@ -294,34 +297,34 @@ async def set_queue(
     request: Request,
     client_id: str = Depends(get_client_id),
     user: asyncpg.Record = Depends(get_current_user_jwt),
+    db: asyncpg.Connection = Depends(get_db),
 ):
-    async for db in get_db():
-        user_id = user["id"]
+    user_id = user["id"]
 
-        enriched_queue = []
-        for t in update.queue:
-            track_dict = t.model_dump()
-            if user_id is not None:
-                track_dict["user_id"] = user_id
-            enriched_queue.append(track_dict)
+    enriched_queue = []
+    for t in update.queue:
+        track_dict = t.model_dump()
+        if user_id is not None:
+            track_dict["user_id"] = user_id
+        enriched_queue.append(track_dict)
         
-        # Trigger Now Playing update for Last.fm
-        if enriched_queue:
-            current_index = max(
-                0, min(update.start_index, len(enriched_queue) - 1)
-            )
-            current_track = enriched_queue[current_index]
-            asyncio.create_task(
-                update_now_playing_lastfm(user_id, current_track["id"])
-            )
-        await renderer_orchestrator.set_queue(
-            db,
-            client_id,
-            enriched_queue,
-            update.start_index,
-            user_id,
-            request,
+    # Trigger Now Playing update for Last.fm
+    if enriched_queue:
+        current_index = max(
+            0, min(update.start_index, len(enriched_queue) - 1)
         )
+        current_track = enriched_queue[current_index]
+        asyncio.create_task(
+            update_now_playing_lastfm(user_id, current_track["id"])
+        )
+    await renderer_orchestrator.set_queue(
+        db,
+        client_id,
+        enriched_queue,
+        update.start_index,
+        user_id,
+        request,
+    )
 
     return {"status": "ok"}
 
@@ -334,21 +337,21 @@ async def append_queue(
     request: Request,
     client_id: str = Depends(get_client_id),
     user: asyncpg.Record = Depends(get_current_user_jwt),
+    db: asyncpg.Connection = Depends(get_db),
 ):
-    async for db in get_db():
-        _, udn = await renderer_orchestrator.get_active(db, client_id)
-        state = await get_renderer_state_db(db, udn)
-        user_id = user["id"]
+    _, udn = await renderer_orchestrator.get_active(db, client_id)
+    state = await get_renderer_state_db(db, udn)
+    user_id = user["id"]
 
-        new_tracks = []
-        for t in update.tracks:
-            track_dict = t.model_dump()
-            track_dict["user_id"] = user_id
-            new_tracks.append(track_dict)
-        state["queue"] = state["queue"] + new_tracks
+    new_tracks = []
+    for t in update.tracks:
+        track_dict = t.model_dump()
+        track_dict["user_id"] = user_id
+        new_tracks.append(track_dict)
+    state["queue"] = state["queue"] + new_tracks
 
-        await update_renderer_state_db(db, udn, state)
-        reset_history_tracker(client_id if udn.startswith("local") else udn)
+    await update_renderer_state_db(db, udn, state)
+    reset_history_tracker(client_id if udn.startswith("local") else udn)
     return {"status": "ok"}
 
 
@@ -356,126 +359,131 @@ async def append_queue(
     "/api/player/queue/reorder",
 )
 async def reorder_queue(
-    update: QueueUpdate, client_id: str = Depends(get_client_id)
+    update: QueueUpdate,
+    client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
 ):
     """
     Reorder the queue without changing playback state.
     Expects the same queue items in a new order.
     """
-    async for db in get_db():
-        _, udn = await renderer_orchestrator.get_active(db, client_id)
-        state = await get_renderer_state_db(db, udn)
-        existing_queue = state.get("queue") or []
+    _, udn = await renderer_orchestrator.get_active(db, client_id)
+    state = await get_renderer_state_db(db, udn)
+    existing_queue = state.get("queue") or []
 
-        # Preserve currently playing track (by id) to restore index
-        current_idx = state.get("current_index", -1)
-        current_track = (
-            existing_queue[current_idx] if 0 <= current_idx < len(existing_queue) else None
-        )
+    # Preserve currently playing track (by id) to restore index
+    current_idx = state.get("current_index", -1)
+    current_track = (
+        existing_queue[current_idx] if 0 <= current_idx < len(existing_queue) else None
+    )
 
-        # Normalize incoming queue (pydantic models -> dict)
-        incoming_queue = [
-            t.model_dump() if hasattr(t, "model_dump") else dict(t)
-            if hasattr(t, "keys")
-            else t
-            for t in update.queue
-        ]
+    # Normalize incoming queue (pydantic models -> dict)
+    incoming_queue = [
+        t.model_dump() if hasattr(t, "model_dump") else dict(t)
+        if hasattr(t, "keys")
+        else t
+        for t in update.queue
+    ]
 
-        # Rebuild queue based on ids, fallback to incoming order if mismatch
-        id_to_tracks = {}
-        for i, t in enumerate(existing_queue):
-            id_to_tracks.setdefault(t.get("id"), []).append((i, t))
+    # Rebuild queue based on ids, fallback to incoming order if mismatch
+    id_to_tracks = {}
+    for i, t in enumerate(existing_queue):
+        id_to_tracks.setdefault(t.get("id"), []).append((i, t))
 
-        reordered = []
-        used = set()
-        for incoming in incoming_queue:
-            tid = incoming.get("id") if isinstance(incoming, dict) else None
-            if tid in id_to_tracks:
-                # pop first unused occurrence
-                candidates = id_to_tracks[tid]
-                chosen = None
-                for pos, track in candidates:
-                    if pos in used:
-                        continue
-                    chosen = (pos, track)
-                    break
-                if chosen:
-                    used.add(chosen[0])
-                    reordered.append(chosen[1])
+    reordered = []
+    used = set()
+    for incoming in incoming_queue:
+        tid = incoming.get("id") if isinstance(incoming, dict) else None
+        if tid in id_to_tracks:
+            # pop first unused occurrence
+            candidates = id_to_tracks[tid]
+            chosen = None
+            for pos, track in candidates:
+                if pos in used:
                     continue
-            # fallback to provided object
-            reordered.append(incoming)
+                chosen = (pos, track)
+                break
+            if chosen:
+                used.add(chosen[0])
+                reordered.append(chosen[1])
+                continue
+        # fallback to provided object
+        reordered.append(incoming)
 
-        state["queue"] = reordered
+    state["queue"] = reordered
 
-        if current_track and current_track.get("id") is not None:
-            try:
-                new_idx = next(
-                    i for i, t in enumerate(reordered) if t.get("id") == current_track["id"]
-                )
-                state["current_index"] = new_idx
-            except StopIteration:
-                state["current_index"] = -1
-                state["is_playing"] = False
-                state["transport_state"] = "STOPPED"
+    if current_track and current_track.get("id") is not None:
+        try:
+            new_idx = next(
+                i for i, t in enumerate(reordered) if t.get("id") == current_track["id"]
+            )
+            state["current_index"] = new_idx
+        except StopIteration:
+            state["current_index"] = -1
+            state["is_playing"] = False
+            state["transport_state"] = "STOPPED"
 
-        await update_renderer_state_db(db, udn, state)
-        reset_history_tracker(client_id if udn.startswith("local") else udn)
+    await update_renderer_state_db(db, udn, state)
+    reset_history_tracker(client_id if udn.startswith("local") else udn)
 
-        return {
-            "status": "ok",
-            "state": {
-                "queue": state["queue"],
-                "current_index": state.get("current_index", -1),
-                "position_seconds": state.get("position_seconds", 0),
-                "is_playing": state.get("is_playing", False),
-                "transport_state": state.get("transport_state", "STOPPED"),
-                "renderer": udn,
-                "volume": state.get("volume"),
-            },
-        }
+    return {
+        "status": "ok",
+        "state": {
+            "queue": state["queue"],
+            "current_index": state.get("current_index", -1),
+            "position_seconds": state.get("position_seconds", 0),
+            "is_playing": state.get("is_playing", False),
+            "transport_state": state.get("transport_state", "STOPPED"),
+            "renderer": udn,
+            "volume": state.get("volume"),
+        },
+    }
 
 
 @router.post(
     "/api/player/queue/clear",
 )
-async def clear_queue(client_id: str = Depends(get_client_id)):
+async def clear_queue(
+    client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
+):
     """
     Empty the active renderer queue and stop playback.
     """
-    async for db in get_db():
-        try:
-            state, udn = await renderer_orchestrator.stop_or_clear(db, client_id)
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise _translate_renderer_error("clear", e)
+    try:
+        state, udn = await renderer_orchestrator.stop_or_clear(db, client_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _translate_renderer_error("clear", e)
 
-        return {
-            "status": "ok",
-            "state": {
-                "queue": state["queue"],
-                "current_index": state["current_index"],
-                "position_seconds": state["position_seconds"],
-                "is_playing": state["is_playing"],
-                "transport_state": state.get("transport_state", "STOPPED"),
-                "renderer": udn,
-                "volume": state.get("volume"),
-            },
-        }
+    return {
+        "status": "ok",
+        "state": {
+            "queue": state["queue"],
+            "current_index": state["current_index"],
+            "position_seconds": state["position_seconds"],
+            "is_playing": state["is_playing"],
+            "transport_state": state.get("transport_state", "STOPPED"),
+            "renderer": udn,
+            "volume": state.get("volume"),
+        },
+    }
 
 
 @router.post(
     "/api/player/index",
 )
-async def set_index(update: IndexUpdate, client_id: str = Depends(get_client_id)):
-    async for db in get_db():
-        try:
-            state, udn = await renderer_orchestrator.skip_to_index(db, client_id, update.index)
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise _translate_renderer_error("skip", e)
+async def set_index(
+    update: IndexUpdate, client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
+):
+    try:
+        state, udn = await renderer_orchestrator.skip_to_index(db, client_id, update.index)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _translate_renderer_error("skip", e)
     # Return the state so the client can sync immediately
     return {
         "status": "ok",
@@ -509,52 +517,52 @@ async def update_progress(
     request: Request,
     client_id: str = Depends(get_client_id),
     user: asyncpg.Record = Depends(get_current_user_jwt),
+    db: asyncpg.Connection = Depends(get_db),
 ):
-    async for db in get_db():
-        _, udn = await renderer_orchestrator.get_active(db, client_id)
-        client_ip = get_client_ip(request)
-        user_id = user["id"]
-        if udn.startswith("local:"):
-            state = await get_renderer_state_db(db, udn)
-            state["position_seconds"] = update.position_seconds
-            state["is_playing"] = update.is_playing
+    _, udn = await renderer_orchestrator.get_active(db, client_id)
+    client_ip = get_client_ip(request)
+    user_id = user["id"]
+    if udn.startswith("local:"):
+        state = await get_renderer_state_db(db, udn)
+        state["position_seconds"] = update.position_seconds
+        state["is_playing"] = update.is_playing
 
-            # Check for history logging
-            if state["current_index"] is not None and state["current_index"] >= 0:
-                queue = state.get("queue") or []
-                if 0 <= state["current_index"] < len(queue):
-                    track = queue[state["current_index"]]
+        # Check for history logging
+        if state["current_index"] is not None and state["current_index"] >= 0:
+            queue = state.get("queue") or []
+            if 0 <= state["current_index"] < len(queue):
+                track = queue[state["current_index"]]
                     
-                    # Only log if not already logged
-                    if not track.get("logged", False):
-                        duration = track.get("duration_seconds") or 0
-                        # Check threshold (30s or 20%)
-                        threshold = min(30, duration * 0.2) if duration > 0 else 30
+                # Only log if not already logged
+                if not track.get("logged", False):
+                    duration = track.get("duration_seconds") or 0
+                    # Check threshold (30s or 20%)
+                    threshold = min(30, duration * 0.2) if duration > 0 else 30
                         
-                        if update.position_seconds >= threshold:
-                            # Log it
-                            effective_user_id = user_id or track.get("user_id")
-                            try:
-                                await log_history(
-                                    db,
-                                    track.get("id"),
-                                    client_ip=client_ip,
-                                    client_id=client_id,
-                                    user_id=effective_user_id,
-                                )
-                            except Exception as e:
-                                logger.error(f"Failed to log history: {e}")
+                    if update.position_seconds >= threshold:
+                        # Log it
+                        effective_user_id = user_id or track.get("user_id")
+                        try:
+                            await log_history(
+                                db,
+                                track.get("id"),
+                                client_ip=client_ip,
+                                client_id=client_id,
+                                user_id=effective_user_id,
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to log history: {e}")
                             
-                            # Mark as logged and persist
-                            track["logged"] = True
-                            # Queue is already ref in state, so just save state
-                            await update_renderer_state_db(db, udn, state)
+                        # Mark as logged and persist
+                        track["logged"] = True
+                        # Queue is already ref in state, so just save state
+                        await update_renderer_state_db(db, udn, state)
             
-            # Save state (position/playing updates)
-            await update_renderer_state_db(db, udn, state)
-        else:
-            # For remote renderers, skip logging here to avoid double-reporting with UPnP monitor
-            state = await get_renderer_state_db(db, udn)
+        # Save state (position/playing updates)
+        await update_renderer_state_db(db, udn, state)
+    else:
+        # For remote renderers, skip logging here to avoid double-reporting with UPnP monitor
+        state = await get_renderer_state_db(db, udn)
     return {"status": "ok"}
 
 
@@ -574,13 +582,13 @@ async def get_scan_status(client_id: str = Depends(get_client_id)):
 async def get_renderers(
     refresh: bool = False,
     client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
 ):
-    async for db in get_db():
-        renderers = await renderer_orchestrator.list_renderers(
-            db,
-            client_id,
-            refresh=refresh,
-        )
+    renderers = await renderer_orchestrator.list_renderers(
+        db,
+        client_id,
+        refresh=refresh,
+    )
     if refresh:
         upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
         manager = getattr(upnp_backend, "manager", None)
@@ -592,13 +600,15 @@ async def get_renderers(
 @router.post(
     "/api/player/renderer",
 )
-async def set_renderer(data: dict, client_id: str = Depends(get_client_id)):
+async def set_renderer(
+    data: dict, client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
+):
     requested = data.get("renderer_id") or data.get("udn")
     if not requested:
         raise HTTPException(status_code=400, detail="Missing renderer_id")
 
-    async for db in get_db():
-        renderer_id, state_key = await renderer_orchestrator.set_active(db, client_id, requested)
+    renderer_id, state_key = await renderer_orchestrator.set_active(db, client_id, requested)
     return {"active": state_key, "renderer_id": renderer_id}
 
 
@@ -682,28 +692,32 @@ async def play_track(
 @router.post(
     "/api/player/pause",
 )
-async def pause_playback(client_id: str = Depends(get_client_id)):
-    async for db in get_db():
-        try:
-            await renderer_orchestrator.pause(db, client_id)
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise _translate_renderer_error("pause", e)
-        return {"status": "ok"}
+async def pause_playback(
+    client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
+):
+    try:
+        await renderer_orchestrator.pause(db, client_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _translate_renderer_error("pause", e)
+    return {"status": "ok"}
 
 
 @router.post(
     "/api/player/resume",
 )
-async def resume_playback(client_id: str = Depends(get_client_id)):
-    async for db in get_db():
-        try:
-            await renderer_orchestrator.resume(db, client_id)
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise _translate_renderer_error("resume", e)
+async def resume_playback(
+    client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
+):
+    try:
+        await renderer_orchestrator.resume(db, client_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _translate_renderer_error("resume", e)
 
     return {"status": "ok"}
 
@@ -711,14 +725,16 @@ async def resume_playback(client_id: str = Depends(get_client_id)):
 @router.post(
     "/api/player/volume",
 )
-async def set_volume(data: dict, client_id: str = Depends(get_client_id)):
+async def set_volume(
+    data: dict, client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
+):
     percent = data.get("percent")
     if percent is None:
         raise HTTPException(status_code=400, detail="Missing percent")
     percent = max(0, min(100, int(percent)))
 
-    async for db in get_db():
-        await renderer_orchestrator.set_volume(db, client_id, percent)
+    await renderer_orchestrator.set_volume(db, client_id, percent)
 
     return {"status": "ok", "percent": percent}
 
@@ -726,21 +742,23 @@ async def set_volume(data: dict, client_id: str = Depends(get_client_id)):
 @router.post(
     "/api/player/seek",
 )
-async def seek_track(data: dict, client_id: str = Depends(get_client_id)):
+async def seek_track(
+    data: dict, client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
+):
     seconds = data.get("seconds")
     if seconds is None:
         raise HTTPException(status_code=400, detail="Missing seconds")
 
-    async for db in get_db():
-        try:
-            target = await renderer_orchestrator.seek(db, client_id, float(seconds))
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise _translate_renderer_error("seek", e)
-        if target == "remote":
-            return {"status": "ok", "target": seconds}
-        return {"status": "local", "message": "Handle seek in browser"}
+    try:
+        target = await renderer_orchestrator.seek(db, client_id, float(seconds))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _translate_renderer_error("seek", e)
+    if target == "remote":
+        return {"status": "ok", "target": seconds}
+    return {"status": "local", "message": "Handle seek in browser"}
 
 
 @router.post(

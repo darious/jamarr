@@ -3,7 +3,7 @@ import os
 import time
 import logging
 import json
-from app.db import get_db
+from app.db import db_conn
 from app.upnp import UPnPManager
 from app.services.player.globals import (
     playback_monitors,
@@ -60,7 +60,7 @@ async def _sync_device_volume(upnp, udn: str) -> None:
         return
     if device_volume is None:
         return
-    async for db in get_db():
+    async with db_conn() as db:
         await db.execute(
             """
             UPDATE renderer_state
@@ -176,7 +176,7 @@ async def monitor_upnp_playback(udn: str):
             # 2. Update DB
             finished_reason = None
             replay_track = None
-            async for db in get_db():
+            async with db_conn() as db:
                 # What the DB currently thinks (may differ from the device)
                 state = await get_renderer_state_db(db, udn)
                 was_playing = state["is_playing"]

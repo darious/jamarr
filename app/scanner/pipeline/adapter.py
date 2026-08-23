@@ -7,7 +7,7 @@ This adapter integrates the v3 pipeline with scan_manager.py.
 import asyncio
 import logging
 from typing import Optional, Callable
-from app.db import get_pool
+from app.db import db_conn, get_pool
 from app.scanner.pipeline import (
     ArtistState,
     ScanOptions,
@@ -63,7 +63,7 @@ class PipelineAdapter:
                 mbids = [a["mbid"] for a in artists if a.get("mbid")]
                 if mbids:
                     try:
-                        async with self.pool.acquire() as db:
+                        async with db_conn() as db:
                             rows = await db.fetch(
                                 """
                                 SELECT aa.artist_mbid, array_agg(DISTINCT al.release_group_mbid) as rgs
@@ -156,7 +156,7 @@ class PipelineAdapter:
                 logger.info(f"[{mbid}] Saving to DB - {len(updates)} update keys, artwork={bool(art_res)}")
                 
                 try:
-                    async with self.pool.acquire() as db:
+                    async with db_conn() as db:
                         await self.save_artist_metadata(db, mbid, updates, art_res)
                         get_api_tracker().track_processed("artists", mbid)
                         get_api_tracker().track_processed("artists_metadata", mbid)
@@ -389,7 +389,7 @@ class PipelineAdapter:
             return (updates, art_res)
         
         # Save to database
-        async with self.pool.acquire() as db:
+        async with db_conn() as db:
             await self.save_artist_metadata(db, mbid, updates, art_res)
         
         return True

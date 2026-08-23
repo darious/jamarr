@@ -2,7 +2,7 @@ import os
 import mimetypes
 import logging
 import time
-from app.db import get_db
+from app.db import db_conn
 from app.upnp import UPnPManager
 from app.services.player.state import get_renderer_state_db, update_renderer_state_db
 from app.services.player.globals import (
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 async def play_next_track_internal(udn: str):
     """Internal helper to advance queue and play next track."""
     upnp = UPnPManager.get_instance()
-    async for db in get_db():
+    async with db_conn() as db:
         state = await get_renderer_state_db(db, udn)
         queue = state["queue"]
         current_index = state["current_index"]

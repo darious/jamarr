@@ -5,6 +5,7 @@ from typing import Optional
 import json
 
 from app.scanner.scan_manager import ScanManager
+from app.sse import HEARTBEAT, HEARTBEAT_FRAME
 from app.api.deps import (
     get_current_admin_user_jwt,
     get_current_admin_user_jwt_or_cookie,
@@ -181,6 +182,9 @@ async def sse_events():
         yield ": connected\n\n"
 
         async for event in manager.subscribe():
+            if event is HEARTBEAT:
+                yield HEARTBEAT_FRAME
+                continue
             # SSE format: "data: <json>\n\n"
             yield f"data: {json.dumps(event)}\n\n"
 

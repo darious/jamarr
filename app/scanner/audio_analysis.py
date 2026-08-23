@@ -11,7 +11,7 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 import asyncpg
 
 from app.config import get_music_path
-from app.db import get_db
+from app.db import db_conn
 
 
 logger = logging.getLogger("scanner.audio_analysis")
@@ -474,13 +474,13 @@ class AudioAnalysisRunner:
         processed = 0
         self._last_seen_track_id = 0
 
-        async for db in get_db():
+        async with db_conn() as db:
             total = await self._count_candidates(db, phase=1)
             stats["selected"] = total
             if self.progress_cb:
                 self.progress_cb(0, total, f"Selected {total} tracks for Phase 1 analysis")
             if total == 0:
-                break
+                return stats
 
             while True:
                 remaining = max(0, total - processed)
@@ -556,7 +556,6 @@ class AudioAnalysisRunner:
                 if len(candidates) < self.batch_size:
                     break
 
-            break
 
         return stats
 
@@ -566,7 +565,7 @@ class AudioAnalysisRunner:
         touched_albums: set[str] = set()
         self._last_seen_track_id = 0
 
-        async for db in get_db():
+        async with db_conn() as db:
             total = await self._count_candidates(db, phase=2)
             stats["selected"] = total
             if self.progress_cb:
@@ -574,7 +573,7 @@ class AudioAnalysisRunner:
             if total == 0:
                 if not self.dry_run:
                     await self._update_album_replaygain(db)
-                break
+                return stats
 
             while True:
                 remaining = max(0, total - processed)
@@ -623,7 +622,6 @@ class AudioAnalysisRunner:
 
             if not self.dry_run:
                 await self._update_album_replaygain(db, touched_albums)
-            break
 
         return stats
 
@@ -632,13 +630,13 @@ class AudioAnalysisRunner:
         processed = 0
         self._last_seen_track_id = 0
 
-        async for db in get_db():
+        async with db_conn() as db:
             total = await self._count_candidates(db, phase=3)
             stats["selected"] = total
             if self.progress_cb:
                 self.progress_cb(0, total, f"Selected {total} tracks for Phase 3 BPM")
             if total == 0:
-                break
+                return stats
 
             while True:
                 remaining = max(0, total - processed)
@@ -679,7 +677,6 @@ class AudioAnalysisRunner:
                 if len(candidates) < self.batch_size:
                     break
 
-            break
 
         return stats
 
@@ -688,13 +685,13 @@ class AudioAnalysisRunner:
         processed = 0
         self._last_seen_track_id = 0
 
-        async for db in get_db():
+        async with db_conn() as db:
             total = await self._count_candidates(db, phase=4)
             stats["selected"] = total
             if self.progress_cb:
                 self.progress_cb(0, total, f"Selected {total} tracks for Phase 4 hints")
             if total == 0:
-                break
+                return stats
 
             while True:
                 remaining = max(0, total - processed)
@@ -734,7 +731,6 @@ class AudioAnalysisRunner:
                 if len(rows) < self.batch_size:
                     break
 
-            break
 
         return stats
 

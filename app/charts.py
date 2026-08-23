@@ -9,7 +9,7 @@ import httpx
 from bs4 import BeautifulSoup
 from rapidfuzz import fuzz
 
-from app.db import get_pool
+from app.db import db_conn
 from app.config import get_musicbrainz_root_url
 
 logger = logging.getLogger(__name__)
@@ -240,8 +240,7 @@ MB_API_URL = get_musicbrainz_root_url()
 
 async def load_match_overrides() -> dict:
     """Manual release-group overrides keyed by (lower(artist), lower(title))."""
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         rows = await conn.fetch(
             "SELECT artist, title, release_group_mbid FROM chart_match_override"
         )
@@ -652,8 +651,7 @@ def _score_rg_candidate(entry: ChartEntry, rg: dict) -> int:
 
 
 async def update_chart_db(entries: List[ChartEntry]):
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         async with conn.transaction():
             await conn.execute("DELETE FROM chart_album")
 

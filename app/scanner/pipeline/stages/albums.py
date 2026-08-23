@@ -117,10 +117,9 @@ class AlbumMetadataStage(EnrichmentStage):
         album_ids: List[str]
     ) -> List[str]:
         """Filter to only albums missing descriptions."""
-        from app.db import get_pool
+        from app.db import db_conn
         
-        pool = get_pool()
-        async with pool.acquire() as conn:
+        async with db_conn() as conn:
             rows = await conn.fetch(
                 """
                 SELECT DISTINCT release_group_mbid 

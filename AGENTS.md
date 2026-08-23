@@ -95,6 +95,16 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   (`/api/library/events`, `/api/lastfm/events`) auth via the refresh cookie.
 - `DB_PASS` has no compose default — must be set in `.env`. Production startup
   fails fast if `JWT_SECRET_KEY` is unset or a placeholder.
+- DB connections: `Depends(get_db)` in FastAPI handlers, `async with db_conn()`
+  everywhere else. **Never** `async for db in get_db():` — a `break` or an
+  exception strands the generator and leaks the connection out of the pool for
+  good. Two other rules keep the pool (20 conns) alive: never acquire a second
+  connection while holding one (declare `Depends(get_db)` on the handler and
+  FastAPI shares the auth dependency's), and never let a yield-dependency reach
+  a long-lived response — dependency teardown waits for the response to finish,
+  so on SSE it waits forever. Health check: `/api/health` (unauthenticated,
+  touches the DB); `/` is the static SPA and answers 200 even when the API is
+  wedged, so it is useless for uptime monitoring.
 - UPnP needs host networking — discovery won't work in bridged containers.
 - UPnP renderers fetch streams/art via a header-recasing proxy on port 8112
   (`app/services/renderer/stream_proxy.py`), not uvicorn directly — uvicorn

@@ -1,5 +1,5 @@
 import logging
-from app.db import get_pool
+from app.db import db_conn, get_pool
 from app.scanner.services import musicbrainz
 from app.scanner.core import get_shared_client
 
@@ -36,7 +36,7 @@ class MissingAlbumsScanner:
                     logger.info(f"Normalized path '{path_filter}' to '{relative_path}'")
                     path_filter = relative_path
                 
-                async with self.db.acquire() as conn:
+                async with db_conn() as conn:
                     rows = await conn.fetch("""
                         SELECT DISTINCT ta.artist_mbid 
                         FROM track_artist ta
@@ -80,7 +80,7 @@ class MissingAlbumsScanner:
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
                 
-            async with self.db.acquire() as conn:
+            async with db_conn() as conn:
                 artists = await conn.fetch(query, *params)
             
             total = len(artists)
@@ -111,7 +111,7 @@ class MissingAlbumsScanner:
                     continue
 
                 # Local RGs
-                async with self.db.acquire() as conn:
+                async with db_conn() as conn:
                     rows = await conn.fetch("""
                         SELECT al.release_group_mbid 
                         FROM artist_album aa 
@@ -135,7 +135,7 @@ class MissingAlbumsScanner:
                         artist_missing_count += 1
                         
                         # Insert
-                        async with self.db.acquire() as conn:
+                        async with db_conn() as conn:
                             await conn.execute("""
                                 INSERT INTO missing_album
                                 (artist_mbid, release_group_mbid, title, release_date, primary_type, musicbrainz_url, updated_at)

@@ -109,10 +109,10 @@ class UPnPManager:
         if not udn or not icon or not icon.get("url"):
             return False
         from app.scanner.artwork import download_and_save_artwork, upsert_artwork_record, upsert_image_mapping
-        from app.db import get_db
+        from app.db import db_conn
 
         icon_url = icon["url"]
-        async for db in get_db():
+        async with db_conn() as db:
             row = await db.fetchrow(
                 """
                 SELECT r.icon_url, im.artwork_id
@@ -178,8 +178,8 @@ class UPnPManager:
         # This one writes to DB, kept here or moved?
         # It was on Manager. Let's keep it here or move to a persistence module.
         # Discovery uses it. Let's keep it here to allow Discovery to call back.
-        from app.db import get_db
-        async for db in get_db():
+        from app.db import db_conn
+        async with db_conn() as db:
             await db.execute(
                 """
                 INSERT INTO renderer 

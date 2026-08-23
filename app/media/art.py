@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
-from app.db import get_pool
+from app.db import db_conn
 from app.security import is_production
 import os
 import io
@@ -170,7 +170,7 @@ async def get_artwork_by_sha1(sha1: str, request: Request, max_size: int = 0):
 
     # Acquire briefly: the connection must not stay checked out while we do
     # file IO, image resizing, or send the response.
-    async with get_pool().acquire() as db:
+    async with db_conn() as db:
         row = await db.fetchrow(
             "SELECT path_on_disk, mime FROM artwork WHERE sha1 = $1", sha1
         )
@@ -214,7 +214,7 @@ async def get_artwork_by_sha1(sha1: str, request: Request, max_size: int = 0):
 
 @router.get("/art/renderer/{udn}")
 async def get_renderer_icon(udn: str, request: Request, max_size: int = 0):
-    async with get_pool().acquire() as db:
+    async with db_conn() as db:
         row = await db.fetchrow(
             """
             SELECT a.sha1

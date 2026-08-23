@@ -22,6 +22,7 @@ from app.api.deps import (
 from app.db import get_db
 from app import lastfm
 from app.lastfm_sync_manager import LastfmSyncManager
+from app.sse import HEARTBEAT, HEARTBEAT_FRAME
 
 logger = logging.getLogger(__name__)
 
@@ -669,6 +670,9 @@ async def lastfm_events(
     async def event_generator():
         yield ": connected\n\n"
         async for event in manager.subscribe():
+            if event is HEARTBEAT:
+                yield HEARTBEAT_FRAME
+                continue
             yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

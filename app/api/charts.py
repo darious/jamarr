@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.charts import refresh_chart_task
-from app.db import get_pool
+from app.db import db_conn
 from app.api.deps import get_current_admin_user_jwt, get_current_user_jwt
 
 router = APIRouter(
@@ -40,8 +40,7 @@ async def get_chart():
     from app.config import get_musicbrainz_root_url
     mb_root = get_musicbrainz_root_url()
     
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         # Join chart_album with album to detect library presence
         # Primarily match on release_group_mbid
         query = """
@@ -126,8 +125,7 @@ async def set_chart_override(body: ChartOverride):
     if not artist or not title:
         raise HTTPException(status_code=422, detail="artist and title are required")
 
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         async with conn.transaction():
             await conn.execute(
                 """
@@ -153,8 +151,7 @@ async def set_chart_override(body: ChartOverride):
 
 @router.delete("/override", dependencies=[Depends(get_current_admin_user_jwt)])
 async def delete_chart_override(body: ChartOverrideKey):
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         result = await conn.execute(
             """
             DELETE FROM chart_match_override

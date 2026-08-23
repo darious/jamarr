@@ -9,7 +9,7 @@ from async_upnp_client.client import UpnpDevice
 from async_upnp_client.profiles.dlna import DmrDevice
 from async_upnp_client.utils import CaseInsensitiveDict
 
-from app.db import get_db
+from app.db import db_conn
 from app.services.upnp.utils import select_renderer_icon
 
 logger = logging.getLogger(__name__)
@@ -185,7 +185,7 @@ class UPnPDiscovery:
                 logger.debug(f"  Supports {len(supported_mimes)} MIME types")
             else:
                 # Check DB for existing
-                async for db in get_db():
+                async with db_conn() as db:
                     row = await db.fetchrow(
                         "SELECT supported_mime_types FROM renderer WHERE udn = $1", udn
                     )
@@ -227,7 +227,7 @@ class UPnPDiscovery:
 
     async def load_persisted_renderers(self):
         """Load previously discovered renderers from database."""
-        async for db in get_db():
+        async with db_conn() as db:
             rows = await db.fetch("""
                 SELECT r.*, im.artwork_id as has_local_icon
                 FROM renderer r
