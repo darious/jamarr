@@ -2043,6 +2043,21 @@ too — or point readers at <code>.env.example</code> as the source of truth.</p
 <td><code>127.0.0.1</code></td>
 <td>Host interface the Postgres port binds to</td>
 </tr>
+<tr>
+<td><code>DB_POOL_MIN_SIZE</code></td>
+<td><code>5</code></td>
+<td>Connections the asyncpg pool keeps open</td>
+</tr>
+<tr>
+<td><code>DB_POOL_MAX_SIZE</code></td>
+<td><code>20</code></td>
+<td>Ceiling on pool connections</td>
+</tr>
+<tr>
+<td><code>DB_POOL_ACQUIRE_TIMEOUT</code></td>
+<td><code>15</code></td>
+<td>Seconds to wait for a free pool connection before failing the request with 503. Never set this to <code>0</code>/unbounded: an exhausted pool would then hang every DB-backed route silently instead of erroring</td>
+</tr>
 </tbody>
 </table>
 <h2 id="storage-paths">Storage paths<a class="headerlink" href="#storage-paths" title="Permanent link">&para;</a></h2>

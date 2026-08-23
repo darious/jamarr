@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FastAPI",
-    "version": "v1.8.0"
+    "version": "v1.8.1"
   },
   "paths": {
     "/art/test": {
@@ -5921,6 +5921,32 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Liveness and database reachability",
+        "description": "Report whether the app can still reach the database.\n\nUnauthenticated on purpose, and deliberately not `/`: every other route\nthat proves the DB works needs auth, and `/` is served by the static SPA\nmount, so it answers 200 even when the pool is exhausted and the whole API\nis wedged. Point uptime monitoring here, not at `/`.",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Api Health Get"
                 }
               }
             }
