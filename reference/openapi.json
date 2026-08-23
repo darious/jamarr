@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FastAPI",
-    "version": "v1.8.1"
+    "version": "v1.8.2"
   },
   "paths": {
     "/art/test": {
@@ -23,9 +23,9 @@
       }
     },
     "/art/file/{sha1}": {
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -68,9 +68,9 @@
           }
         }
       },
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -179,9 +179,9 @@
       }
     },
     "/api/art/file/{sha1}": {
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -224,9 +224,9 @@
           }
         }
       },
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -1102,9 +1102,9 @@
       }
     },
     "/api/stream/{track_id}": {
-      "get": {
+      "head": {
         "summary": "Stream Track",
-        "operationId": "stream_track_api_stream__track_id__get",
+        "operationId": "stream_track_api_stream__track_id__head",
         "parameters": [
           {
             "name": "track_id",
@@ -1185,9 +1185,9 @@
           }
         }
       },
-      "head": {
+      "get": {
         "summary": "Stream Track",
-        "operationId": "stream_track_api_stream__track_id__get",
+        "operationId": "stream_track_api_stream__track_id__head",
         "parameters": [
           {
             "name": "track_id",
@@ -6528,6 +6528,17 @@
               }
             ],
             "title": "Volume"
+          },
+          "stopped_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stopped Reason"
           }
         },
         "type": "object",
