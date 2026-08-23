@@ -2,6 +2,8 @@ import asyncio
 import time
 from typing import Any, Dict
 
+from app.sse import SSE_HEARTBEAT_SECONDS, HEARTBEAT
+
 
 class LastfmSyncManager:
     _instance = None
@@ -22,7 +24,13 @@ class LastfmSyncManager:
         try:
             yield {"type": "status", "status": self._status}
             while True:
-                event = await queue.get()
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(), timeout=SSE_HEARTBEAT_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    yield HEARTBEAT
+                    continue
                 if event is None:
                     break
                 yield event

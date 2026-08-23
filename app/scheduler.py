@@ -7,7 +7,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 import asyncpg
 from croniter import croniter
 
-from app.db import get_pool
+from app.db import DB_POOL_ACQUIRE_TIMEOUT, db_conn, get_pool
 from app.scanner.scan_manager import ScanManager
 from app.charts import refresh_chart_task
 from app.lastfm_jobs import sync_all_lastfm_scrobbles
@@ -149,7 +149,9 @@ class Scheduler:
         if self._task and not self._task.done():
             return
         pool = get_pool()
-        self._lock_conn = await pool.acquire()
+        # Held for the scheduler's whole lifetime to keep the advisory lock, so
+        # it cannot use db_conn(); it still must not wait on the pool forever.
+        self._lock_conn = await pool.acquire(timeout=DB_POOL_ACQUIRE_TIMEOUT)
         locked = await self._lock_conn.fetchval(
             "SELECT pg_try_advisory_lock($1)", LOCK_KEY
         )
@@ -191,8 +193,7 @@ class Scheduler:
         return task_id in self._running_ids
 
     async def run_task_now(self, task_id: int) -> bool:
-        pool = get_pool()
-        async with pool.acquire() as conn:
+        async with db_conn() as conn:
             task = await conn.fetchrow(
                 "SELECT * FROM scheduled_task WHERE id = $1", task_id
             )
@@ -211,8 +212,7 @@ class Scheduler:
         if not task_handle:
             return False
         try:
-            pool = get_pool()
-            async with pool.acquire() as conn:
+            async with db_conn() as conn:
                 job_key = await conn.fetchval(
                     "SELECT job_key FROM scheduled_task WHERE id = $1", task_id
                 )
@@ -233,8 +233,7 @@ class Scheduler:
 
     async def _ensure_next_runs(self) -> None:
         now = datetime.now(timezone.utc)
-        pool = get_pool()
-        async with pool.acquire() as conn:
+        async with db_conn() as conn:
             rows = await conn.fetch(
                 """
                 SELECT id, cron
@@ -255,8 +254,7 @@ class Scheduler:
                 )
 
     async def _run_due_tasks(self) -> None:
-        pool = get_pool()
-        async with pool.acquire() as conn:
+        async with db_conn() as conn:
             rows = await conn.fetch(
                 """
                 SELECT *
@@ -286,10 +284,9 @@ class Scheduler:
             )
             return
         start_time = datetime.now(timezone.utc)
-        pool = get_pool()
         run_id = None
         try:
-            async with pool.acquire() as conn:
+            async with db_conn() as conn:
                 run_id = await conn.fetchval(
                     """
                     INSERT INTO scheduled_task_run (task_id, started_at, status)
@@ -345,8 +342,7 @@ class Scheduler:
         if start_time:
             duration_ms = int((finish_time - start_time).total_seconds() * 1000)
         next_run = None
-        pool = get_pool()
-        async with pool.acquire() as conn:
+        async with db_conn() as conn:
             cron = await conn.fetchval(
                 "SELECT cron FROM scheduled_task WHERE id = $1", task_id
             )

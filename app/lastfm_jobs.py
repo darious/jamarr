@@ -1,10 +1,9 @@
 from app.api.lastfm import SyncRequest, sync_scrobbles_for_user
-from app.db import get_pool
+from app.db import db_conn
 
 
 async def sync_all_lastfm_scrobbles() -> int:
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         users = await conn.fetch(
             """
             SELECT id, username, lastfm_username, lastfm_session_key, lastfm_enabled
@@ -20,7 +19,7 @@ async def sync_all_lastfm_scrobbles() -> int:
 
     count = 0
     for user in users:
-        async with pool.acquire() as conn:
+        async with db_conn() as conn:
             await sync_scrobbles_for_user(
                 conn,
                 dict(user),

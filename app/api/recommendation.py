@@ -5,7 +5,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.db import get_pool
+from app.db import db_conn
 from app.api.deps import get_current_user_jwt
 
 
@@ -208,8 +208,7 @@ async def get_model_seeds(
     days: int = Query(30, description="Number of days to look back (0 for all time)"),
     user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         rows = await get_seeds(conn, user['id'], days)
         return [
             {
@@ -229,8 +228,7 @@ async def get_recommended_artists(
     days: int = Query(30, description="Number of days to look back"),
     user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         seeds = await get_seeds(conn, user['id'], days)
         recs = await get_recommendations(conn, user['id'], seeds, days)
         
@@ -259,8 +257,7 @@ async def get_recommended_albums(
     LIMIT: 1 Album per Artist.
     ORDER: Same as Artist Rank.
     """
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         seeds = await get_seeds(conn, user['id'], days)
         artist_recs = await get_recommendations(conn, user['id'], seeds, days)
         
@@ -366,8 +363,7 @@ async def get_recommended_tracks(
     Returns recommended tracks from the top recommended artists.
     LIMIT: 3 Tracks per Artist.
     """
-    pool = get_pool()
-    async with pool.acquire() as conn:
+    async with db_conn() as conn:
         seeds = await get_seeds(conn, user['id'], days)
         artist_recs = await get_recommendations(conn, user['id'], seeds, days)
         

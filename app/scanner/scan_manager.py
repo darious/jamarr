@@ -7,7 +7,8 @@ from app.scanner.core import Scanner, close_shared_client, warm_dns_cache
 from app.scanner.pipeline import PipelineAdapter
 from app.config import get_music_path
 from app.scanner.stats import get_api_tracker
-from app.db import get_db
+from app.db import db_conn
+from app.sse import SSE_HEARTBEAT_SECONDS, HEARTBEAT
 
 logger = logging.getLogger("scanner.manager")
 
@@ -60,7 +61,13 @@ class ScanManager:
         try:
             yield {"type": "status", "status": self._status, "stats": self._stats}
             while True:
-                event = await queue.get()
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(), timeout=SSE_HEARTBEAT_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    yield HEARTBEAT
+                    continue
                 if event is None:
                     break
                 yield event
@@ -130,7 +137,7 @@ class ScanManager:
             self._log_message(f"Starting filesystem scan. Force: {force}")
             self.scanner._stop_event = self._stop_event
             await self.scanner.scan_filesystem(root_path=path, force_rescan=force)
-            async for db in get_db():
+            async with db_conn() as db:
                 await self._sync_lastfm_matches(db)
             self._status = "Idle"
             self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
@@ -165,38 +172,38 @@ class ScanManager:
             self._broadcast({"type": "start", "mode": "metadata", "phase": self._phase})
             self._log_message(f"Starting metadata update. Filter: {artist_filter or mbid_filter or 'All'}")
             
-            async for db in get_db():
-                coordinator = PipelineAdapter(progress_cb=self._update_progress)
+            # Resolve the path filter before taking a connection:
+            # get_artists_in_path acquires one of its own, and holding two at
+            # once is how the pool deadlocks under concurrency.
+            path_mbids = None
+            if path:
+                path_mbids = await self.scanner.get_artists_in_path(path) or set()
 
-                # Scope to path if provided
-                path_mbids = None
-                if path:
-                    path_mbids = await self.scanner.get_artists_in_path(path)
-                    if path_mbids is None:
-                        path_mbids = set()
-                    if not path_mbids:
-                        self._log_message(f"No artists found in path: {path}")
-                        break
+            if path and not path_mbids:
+                self._log_message(f"No artists found in path: {path}")
+            else:
+                async with db_conn() as db:
+                    coordinator = PipelineAdapter(progress_cb=self._update_progress)
 
-                # Fetch Artists
-                artists = await self._fetch_artists_for_update(db, artist_filter, mbid_filter, path_mbids)
-                self._log_message(f"Found {len(artists)} artists to process.")
+                    # Fetch Artists
+                    artists = await self._fetch_artists_for_update(db, artist_filter, mbid_filter, path_mbids)
+                    self._log_message(f"Found {len(artists)} artists to process.")
 
-                # Warm DNS cache before metadata operations to prevent DNS errors
-                await warm_dns_cache()
-                
-                # Run Update
-                run_opts = options.copy()
-                run_opts["missing_only"] = missing_only
+                    # Warm DNS cache before metadata operations to prevent DNS errors
+                    await warm_dns_cache()
 
-                await coordinator.update_metadata(artists, run_opts)
-                
-                # After fetching top tracks/singles, try to match them to local tracks
-                if options.get("refresh_top_tracks") or options.get("refresh_singles"):
-                    artist_mbids = [a["mbid"] for a in artists if a.get("mbid")]
-                    if artist_mbids:
-                        await self._rematch_tracks(db, artist_mbids)
-                
+                    # Run Update
+                    run_opts = options.copy()
+                    run_opts["missing_only"] = missing_only
+
+                    await coordinator.update_metadata(artists, run_opts)
+
+                    # After fetching top tracks/singles, try to match them to local tracks
+                    if options.get("refresh_top_tracks") or options.get("refresh_singles"):
+                        artist_mbids = [a["mbid"] for a in artists if a.get("mbid")]
+                        if artist_mbids:
+                            await self._rematch_tracks(db, artist_mbids)
+
             self._status = "Idle"
             self._broadcast({"type": "complete", "status": "success", "phase": self._phase})
             self._log_message("Metadata update complete.")
@@ -357,7 +364,7 @@ class ScanManager:
             if filter_mbids is not None and len(filter_mbids) == 0 and not force:
                  self._log_message("No artists to update.")
             else:
-                 async for db in get_db():
+                 async with db_conn() as db:
                      coordinator = PipelineAdapter(progress_cb=self._update_progress)
                      artists = await self._fetch_artists_for_update(db, None, filter_mbids, scanned_mbids if is_partial or path else None)
                      # Apply missing_only default logic
@@ -377,7 +384,7 @@ class ScanManager:
                 self._broadcast({"type": "start", "mode": "prune", "phase": self._phase})
                 await self.scanner.prune_library()
 
-            async for db in get_db():
+            async with db_conn() as db:
                 await self._sync_lastfm_matches(db)
 
             self._status = "Idle"

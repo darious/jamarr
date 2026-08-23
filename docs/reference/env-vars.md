@@ -32,6 +32,9 @@ Non-secret app config (MusicBrainz URL, logging, concurrency) lives in
 | `DB_PORT` | `8110` | Runtime DB port |
 | `DB_USER` / `DB_PASS` / `DB_NAME` | `jamarr` | Runtime DB connection |
 | `DB_LISTEN_ADDR` | `127.0.0.1` | Host interface the Postgres port binds to |
+| `DB_POOL_MIN_SIZE` | `5` | Connections the asyncpg pool keeps open |
+| `DB_POOL_MAX_SIZE` | `20` | Ceiling on pool connections |
+| `DB_POOL_ACQUIRE_TIMEOUT` | `15` | Seconds to wait for a free pool connection before failing the request with 503. Never set this to `0`/unbounded: an exhausted pool would then hang every DB-backed route silently instead of erroring |
 
 ## Storage paths
 

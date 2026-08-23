@@ -11,7 +11,7 @@ from typing import Any
 import asyncpg
 from fastapi import HTTPException, Request
 
-from app.db import get_pool
+from app.db import db_conn
 from app.services.player.globals import (
     last_playing_position,
     last_track_start_time,
@@ -361,7 +361,7 @@ class RendererOrchestrator:
             # Nobody is awaiting this task, so a vanished device would otherwise
             # leave the session pinned to it with only an unobserved traceback.
             if not await self._renderer_available(renderer_id):
-                async with get_pool().acquire() as conn:
+                async with db_conn() as conn:
                     await self.clear_stale_renderer(conn, renderer_id, exc)
             raise
         finally:
@@ -379,7 +379,7 @@ class RendererOrchestrator:
         try:
             renderer_kind = renderer_id.split(":", 1)[0] if ":" in renderer_id else None
             stream = None
-            async with get_pool().acquire() as db:
+            async with db_conn() as db:
                 state = await get_renderer_state_db(db, state_key)
                 stream = await build_stream_url(
                     db,
@@ -529,7 +529,7 @@ class RendererOrchestrator:
         )
 
     async def handle_status(self, state_key: str, status: RendererStatus) -> None:
-        async with get_pool().acquire() as db:
+        async with db_conn() as db:
             state = await get_renderer_state_db(db, state_key)
             await self._apply_status(db, state_key, state, status)
 

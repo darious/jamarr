@@ -14,7 +14,7 @@ except ImportError:
     def blake3(data=b""):
         return hashlib.sha256(data)
 
-from app.db import get_db
+from app.db import DB_POOL_BACKGROUND_MAX, db_conn
 from app.scanner.tags import extract_tags
 from app.scanner.stats import get_api_tracker
 # DNS resolver imported lazily in warm_dns_cache() to avoid loading aiodns in web server
@@ -227,14 +227,14 @@ class Scanner:
         # Load Cache for Change Detection
         self.stats["current_status"] = "Loading DB Cache..."
         self._db_files_cache = {}
-        async for db in get_db():
+        async with db_conn() as db:
             # Fetch mtime, size, quick_hash from existing tracks
             query = "SELECT path, mtime, size_bytes, quick_hash FROM track"
             rows = await db.fetch(query)
             for r in rows:
                 self._db_files_cache[r["path"]] = (r["mtime"], r["size_bytes"], r["quick_hash"])
-            break # Only need one connection to load
-            
+
+
         self.stats["total_estimate"] = await count_task
         logger.info(f"Estimated file count: {self.stats['total_estimate']}")
         
@@ -245,7 +245,7 @@ class Scanner:
         await self._scan_recursive(root_path, artist_mbids, seen_paths, force_rescan)
         
         self.stats["current_status"] = "Cleaning Orphans"
-        async for db in get_db():
+        async with db_conn() as db:
             await self._cleanup_orphans(db, root_path, seen_paths)
             
             # Ensure Artists Exist
@@ -283,10 +283,14 @@ class Scanner:
         
         queue = asyncio.Queue()
         queue.put_nowait(root)
-        num_workers = max(1, int(get_max_workers() or 5))
-        
+        # Each worker holds a pool connection for the entire walk, so the scan
+        # must not be allowed to claim the whole pool and starve the API.
+        num_workers = min(
+            max(1, int(get_max_workers() or 5)), DB_POOL_BACKGROUND_MAX
+        )
+
         async def worker():
-            async for db in get_db():
+            async with db_conn() as db:
                 while True:
                     try:
                         path = await queue.get()
@@ -611,7 +615,7 @@ class Scanner:
             where = "path LIKE $1 OR path = $2"
             params = [f"{rel_root}/%", rel_root]
             
-        async for db in get_db():
+        async with db_conn() as db:
             q = f"SELECT DISTINCT ta.artist_mbid FROM track t JOIN track_artist ta ON t.id=ta.track_id WHERE {where}"
             rows = await db.fetch(q, *params)
             return {r[0] for r in rows if r[0]}
@@ -649,7 +653,7 @@ class Scanner:
         Clean up unused metadata: empty albums, unused artists, genres, images.
         """
         logger.info("Starting Library Prune...")
-        async for db in get_db():
+        async with db_conn() as db:
              # 1. Empty Albums (no tracks)
              # Be careful not to delete missing_albums references if we want to keep them?
              # But 'album' table is for local albums.

@@ -13,7 +13,7 @@ from app.audio_normalization import (
     env_flag_enabled,
 )
 from app.auth_tokens import verify_stream_token
-from app.db import get_db, get_pool
+from app.db import db_conn, get_db
 from app.services.audio_streaming import build_stream_url
 from app.services.stream_profiles import (
     PROFILES,
@@ -148,18 +148,17 @@ async def stream_track(
     # Deliberately no Depends(get_db): dependencies with yield are only torn
     # down after the response finishes, which would pin a pool connection for
     # the whole file transfer. Acquire briefly instead.
-    pool = get_pool()
     if token:
         stream_claims = verify_stream_token(token, track_id)
     else:
-        async with pool.acquire() as db:
+        async with db_conn() as db:
             user = await get_optional_user_jwt(
                 request.headers.get("authorization"), request, db
             )
         if not user:
             raise HTTPException(status_code=401, detail="Not authenticated")
         stream_claims = {}
-    async with pool.acquire() as db:
+    async with db_conn() as db:
         row = await db.fetchrow(
             """
             SELECT

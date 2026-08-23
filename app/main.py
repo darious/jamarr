@@ -1,12 +1,21 @@
 from contextlib import asynccontextmanager
+import asyncio
+import logging
 import os
 import re
 
 from fastapi import Depends, FastAPI, HTTPException
 from app.auth_tokens import validate_jwt_secret_at_startup
-from app.db import init_db, close_db
+from app.db import db_conn, init_db, close_db
 from app.security import configure_security_middleware, fastapi_docs_config, is_production
 from app.version import __version__
+
+logger = logging.getLogger(__name__)
+
+# Long enough to ride out a brief spike, short enough that a monitor's own
+# request timeout doesn't fire first and turn an outage into an ambiguous
+# timeout instead of a 503.
+HEALTH_TIMEOUT_SECONDS = 5
 
 
 @asynccontextmanager
@@ -114,6 +123,25 @@ app.include_router(favorites.router)
 async def app_version(_user=Depends(get_current_user_jwt)) -> dict[str, str]:
     """Version of this build, or ``dev`` when not built from a release tag."""
     return {"version": __version__}
+
+
+@app.get("/api/health", tags=["meta"], summary="Liveness and database reachability")
+async def health() -> dict[str, str]:
+    """Report whether the app can still reach the database.
+
+    Unauthenticated on purpose, and deliberately not `/`: every other route
+    that proves the DB works needs auth, and `/` is served by the static SPA
+    mount, so it answers 200 even when the pool is exhausted and the whole API
+    is wedged. Point uptime monitoring here, not at `/`.
+    """
+    try:
+        async with asyncio.timeout(HEALTH_TIMEOUT_SECONDS):
+            async with db_conn() as conn:
+                await conn.fetchval("SELECT 1")
+    except Exception:
+        logger.exception("Health check failed")
+        raise HTTPException(status_code=503, detail="Database unreachable")
+    return {"status": "ok"}
 
 
 # Serve built SvelteKit frontend (output lives in web/build)

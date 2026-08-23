@@ -24,119 +24,119 @@ async def get_playback_history(
     page: int = 1,
     limit: int = 20,
     current_user: asyncpg.Record = Depends(get_current_user_jwt),
+    db: asyncpg.Connection = Depends(get_db),
 ):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
-    async for db in get_db():
-        from datetime import date, timedelta
+    from datetime import date, timedelta
 
-        today = date.today()
-        default_from = today - timedelta(days=6)
-        default_to = today
+    today = date.today()
+    default_from = today - timedelta(days=6)
+    default_to = today
 
-        try:
-            from_date = date.fromisoformat(date_from) if date_from else default_from
-        except ValueError:
-            from_date = default_from
-        try:
-            to_date = date.fromisoformat(date_to) if date_to else default_to
-        except ValueError:
-            to_date = default_to
+    try:
+        from_date = date.fromisoformat(date_from) if date_from else default_from
+    except ValueError:
+        from_date = default_from
+    try:
+        to_date = date.fromisoformat(date_to) if date_to else default_to
+    except ValueError:
+        to_date = default_to
 
-        where_clauses = [
-            "h.played_at >= $1::date",
-            "h.played_at < ($2::date + INTERVAL '1 day')",
-        ]
-        params_list = [from_date, to_date]
+    where_clauses = [
+        "h.played_at >= $1::date",
+        "h.played_at < ($2::date + INTERVAL '1 day')",
+    ]
+    params_list = [from_date, to_date]
 
-        if scope == "mine":
-            where_clauses.append(f"h.user_id = ${len(params_list) + 1}")
-            params_list.append(current_user["id"])
+    if scope == "mine":
+        where_clauses.append(f"h.user_id = ${len(params_list) + 1}")
+        params_list.append(current_user["id"])
 
-        if source != "all":
-            where_clauses.append(f"h.source = ${len(params_list) + 1}")
-            params_list.append(source)
+    if source != "all":
+        where_clauses.append(f"h.source = ${len(params_list) + 1}")
+        params_list.append(source)
 
-        if artist_mbid:
-            where_clauses.append(f"ta.artist_mbid = ${len(params_list) + 1}")
-            params_list.append(artist_mbid)
+    if artist_mbid:
+        where_clauses.append(f"ta.artist_mbid = ${len(params_list) + 1}")
+        params_list.append(artist_mbid)
 
-        if album_mbid:
-            where_clauses.append(
-                f"(t.release_mbid = ${len(params_list) + 1} OR t.release_group_mbid = ${len(params_list) + 1})"
-            )
-            params_list.append(album_mbid)
+    if album_mbid:
+        where_clauses.append(
+            f"(t.release_mbid = ${len(params_list) + 1} OR t.release_group_mbid = ${len(params_list) + 1})"
+        )
+        params_list.append(album_mbid)
 
-        if track_id:
-            where_clauses.append(f"h.track_id = ${len(params_list) + 1}")
-            params_list.append(track_id)
+    if track_id:
+        where_clauses.append(f"h.track_id = ${len(params_list) + 1}")
+        params_list.append(track_id)
 
-        where_sql = "WHERE " + " AND ".join(where_clauses)
+    where_sql = "WHERE " + " AND ".join(where_clauses)
 
-        page = max(1, page)
-        limit = max(1, min(limit, 100))
-        offset = (page - 1) * limit
+    page = max(1, page)
+    limit = max(1, min(limit, 100))
+    offset = (page - 1) * limit
 
-        params_list.append(limit)
-        params_list.append(offset)
+    params_list.append(limit)
+    params_list.append(offset)
 
-        limit_idx = len(params_list) - 1
-        offset_idx = len(params_list)
+    limit_idx = len(params_list) - 1
+    offset_idx = len(params_list)
 
-        artist_join = "JOIN track_artist ta ON ta.track_id = t.id" if artist_mbid else ""
-        query = f"""
-            SELECT 
-                h.source_id as id, h.played_at as timestamp, h.client_ip, h.client_id, h.user_id,
-                t.id, t.title, t.artist, t.album, t.artwork_id, t.duration_seconds,
-                t.codec, t.bit_depth, t.sample_rate_hz, t.release_date,
-                t.release_mbid,
-                u.username, u.display_name, u.email,
-                a.sha1 as art_sha1
-                , h.source
-            FROM combined_playback_history_mat h
-            JOIN track t ON h.track_id = t.id
-            {artist_join}
-            LEFT JOIN artwork a ON t.artwork_id = a.id
-            LEFT JOIN "user" u ON u.id = h.user_id
-            {where_sql}
-            ORDER BY h.played_at DESC
-            LIMIT ${limit_idx} OFFSET ${offset_idx}
-        """
-        rows = await db.fetch(query, *params_list)
-        history = []
-        for row in rows:
-            history.append(
-                {
-                    "id": row[0],
-                    "timestamp": row[1],
-                    "client_ip": row[2],
-                    "client_id": row[3],
-                    "source": row[20],
-                    "user": {
-                        "id": row[4],
-                        "username": row[15],
-                        "display_name": row[16],
-                        "email": row[17],
-                    }
-                    if row[4]
-                    else None,
-                    "track": {
-                        "id": row[5],
-                        "title": row[6],
-                        "artist": row[7],
-                        "album": row[8],
-                        "art_sha1": row[19],
-                        "duration_seconds": row[10],
-                        "codec": row[11],
-                        "bit_depth": row[12],
-                        "sample_rate_hz": row[13],
-                        "release_date": row[14],
-                        "mb_release_id": row[15],
-                    },
+    artist_join = "JOIN track_artist ta ON ta.track_id = t.id" if artist_mbid else ""
+    query = f"""
+        SELECT 
+            h.source_id as id, h.played_at as timestamp, h.client_ip, h.client_id, h.user_id,
+            t.id, t.title, t.artist, t.album, t.artwork_id, t.duration_seconds,
+            t.codec, t.bit_depth, t.sample_rate_hz, t.release_date,
+            t.release_mbid,
+            u.username, u.display_name, u.email,
+            a.sha1 as art_sha1
+            , h.source
+        FROM combined_playback_history_mat h
+        JOIN track t ON h.track_id = t.id
+        {artist_join}
+        LEFT JOIN artwork a ON t.artwork_id = a.id
+        LEFT JOIN "user" u ON u.id = h.user_id
+        {where_sql}
+        ORDER BY h.played_at DESC
+        LIMIT ${limit_idx} OFFSET ${offset_idx}
+    """
+    rows = await db.fetch(query, *params_list)
+    history = []
+    for row in rows:
+        history.append(
+            {
+                "id": row[0],
+                "timestamp": row[1],
+                "client_ip": row[2],
+                "client_id": row[3],
+                "source": row[20],
+                "user": {
+                    "id": row[4],
+                    "username": row[15],
+                    "display_name": row[16],
+                    "email": row[17],
                 }
-            )
-        return history
+                if row[4]
+                else None,
+                "track": {
+                    "id": row[5],
+                    "title": row[6],
+                    "artist": row[7],
+                    "album": row[8],
+                    "art_sha1": row[19],
+                    "duration_seconds": row[10],
+                    "codec": row[11],
+                    "bit_depth": row[12],
+                    "sample_rate_hz": row[13],
+                    "release_date": row[14],
+                    "mb_release_id": row[15],
+                },
+            }
+        )
+    return history
     return []
 
 
@@ -151,185 +151,185 @@ async def get_playback_history_stats(
     date_from: str | None = Query(None, alias="from"),
     date_to: str | None = Query(None, alias="to"),
     current_user: asyncpg.Record = Depends(get_current_user_jwt),
+    db: asyncpg.Connection = Depends(get_db),
 ):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
 
-    async for db in get_db():
-        from datetime import date, timedelta
+    from datetime import date, timedelta
 
-        today = date.today()
-        default_from = today - timedelta(days=6)
-        default_to = today
+    today = date.today()
+    default_from = today - timedelta(days=6)
+    default_to = today
 
-        try:
-            from_date = date.fromisoformat(date_from) if date_from else default_from
-        except ValueError:
-            from_date = default_from
-        try:
-            to_date = date.fromisoformat(date_to) if date_to else default_to
-        except ValueError:
-            to_date = default_to
+    try:
+        from_date = date.fromisoformat(date_from) if date_from else default_from
+    except ValueError:
+        from_date = default_from
+    try:
+        to_date = date.fromisoformat(date_to) if date_to else default_to
+    except ValueError:
+        to_date = default_to
 
-        where_clauses = [
-            "h.played_at >= $1::date",
-            "h.played_at < ($2::date + INTERVAL '1 day')",
-        ]
-        params: List[Any] = [from_date, to_date]
-        if scope == "mine":
-            where_clauses.append(f"h.user_id = ${len(params) + 1}")
-            params.append(current_user["id"])
-        if source != "all":
-            where_clauses.append(f"h.source = ${len(params) + 1}")
-            params.append(source)
+    where_clauses = [
+        "h.played_at >= $1::date",
+        "h.played_at < ($2::date + INTERVAL '1 day')",
+    ]
+    params: List[Any] = [from_date, to_date]
+    if scope == "mine":
+        where_clauses.append(f"h.user_id = ${len(params) + 1}")
+        params.append(current_user["id"])
+    if source != "all":
+        where_clauses.append(f"h.source = ${len(params) + 1}")
+        params.append(source)
+    if artist_mbid:
+        where_clauses.append(f"ta.artist_mbid = ${len(params) + 1}")
+        params.append(artist_mbid)
+    if album_mbid:
+        where_clauses.append(
+            f"(t.release_mbid = ${len(params) + 1} OR t.release_group_mbid = ${len(params) + 1})"
+        )
+        params.append(album_mbid)
+    if track_id:
+        where_clauses.append(f"h.track_id = ${len(params) + 1}")
+        params.append(track_id)
+    where_sql = " AND ".join(where_clauses)
+
+    needs_track_join = bool(artist_mbid or album_mbid)
+    daily_artist_join = ""
+    if needs_track_join:
+        daily_artist_join = "JOIN track t ON t.id = h.track_id"
         if artist_mbid:
-            where_clauses.append(f"ta.artist_mbid = ${len(params) + 1}")
-            params.append(artist_mbid)
-        if album_mbid:
-            where_clauses.append(
-                f"(t.release_mbid = ${len(params) + 1} OR t.release_group_mbid = ${len(params) + 1})"
-            )
-            params.append(album_mbid)
-        if track_id:
-            where_clauses.append(f"h.track_id = ${len(params) + 1}")
-            params.append(track_id)
-        where_sql = " AND ".join(where_clauses)
+            daily_artist_join += " JOIN track_artist ta ON ta.track_id = t.id"
+    daily_query = f"""
+        SELECT DATE(played_at) as day, COUNT(*) as plays
+        FROM combined_playback_history_mat h
+        {daily_artist_join}
+        WHERE {where_sql}
+        GROUP BY day
+        ORDER BY day DESC
+    """
+    rows = await db.fetch(daily_query, *params)
+    daily = [{"day": row[0], "plays": row[1]} for row in rows]
 
-        needs_track_join = bool(artist_mbid or album_mbid)
-        daily_artist_join = ""
-        if needs_track_join:
-            daily_artist_join = "JOIN track t ON t.id = h.track_id"
-            if artist_mbid:
-                daily_artist_join += " JOIN track_artist ta ON ta.track_id = t.id"
-        daily_query = f"""
-            SELECT DATE(played_at) as day, COUNT(*) as plays
-            FROM combined_playback_history_mat h
-            {daily_artist_join}
-            WHERE {where_sql}
-            GROUP BY day
-            ORDER BY day DESC
-        """
-        rows = await db.fetch(daily_query, *params)
-        daily = [{"day": row[0], "plays": row[1]} for row in rows]
-
-        # Define artist_join for other queries (albums/tracks)
-        artist_join = "JOIN track_artist ta ON ta.track_id = t.id" if artist_mbid else ""
-        artist_join_cond = "JOIN track_artist ta_filter ON ta_filter.track_id = t.id" if artist_mbid else ""
+    # Define artist_join for other queries (albums/tracks)
+    artist_join = "JOIN track_artist ta ON ta.track_id = t.id" if artist_mbid else ""
+    artist_join_cond = "JOIN track_artist ta_filter ON ta_filter.track_id = t.id" if artist_mbid else ""
         
-        artists_query = f"""
-            SELECT 
-                a.name as artist_name, 
-                a.mbid as artist_mbid, 
-                a.artwork_id, 
-                ar.sha1 as art_sha1, 
-                COUNT(*) as plays
-            FROM combined_playback_history_mat h
-            JOIN track t ON t.id = h.track_id
-            JOIN track_artist ta ON ta.track_id = t.id
-            JOIN artist a ON ta.artist_mbid = a.mbid
-            LEFT JOIN artwork ar ON a.artwork_id = ar.id
-            {artist_join_cond if 'ta.' not in locals().get('where_sql', '') else ''} 
-            -- Note: where_sql might reference tables not in this join if we aren't careful.
-            -- standard where_sql uses 'h', 't', 'ta' (if alias matches).
-            -- original code used 'ta' for filter alias.
-            -- I'll ensure filter alias compatibility below.
-            WHERE {where_sql}
-            GROUP BY a.name, a.mbid, a.artwork_id, ar.sha1
-            ORDER BY plays DESC
-            LIMIT 10
-        """
+    artists_query = f"""
+        SELECT 
+            a.name as artist_name, 
+            a.mbid as artist_mbid, 
+            a.artwork_id, 
+            ar.sha1 as art_sha1, 
+            COUNT(*) as plays
+        FROM combined_playback_history_mat h
+        JOIN track t ON t.id = h.track_id
+        JOIN track_artist ta ON ta.track_id = t.id
+        JOIN artist a ON ta.artist_mbid = a.mbid
+        LEFT JOIN artwork ar ON a.artwork_id = ar.id
+        {artist_join_cond if 'ta.' not in locals().get('where_sql', '') else ''} 
+        -- Note: where_sql might reference tables not in this join if we aren't careful.
+        -- standard where_sql uses 'h', 't', 'ta' (if alias matches).
+        -- original code used 'ta' for filter alias.
+        -- I'll ensure filter alias compatibility below.
+        WHERE {where_sql}
+        GROUP BY a.name, a.mbid, a.artwork_id, ar.sha1
+        ORDER BY plays DESC
+        LIMIT 10
+    """
         
-        artists_query = f"""
-            SELECT 
-                a.name as artist_name, 
-                a.mbid as artist_mbid,
-                a.artwork_id, 
-                w.sha1 as art_sha1,
-                COUNT(*) as plays
-            FROM combined_playback_history_mat h
-            JOIN track t ON t.id = h.track_id
-            JOIN track_artist ta ON ta.track_id = t.id
-            JOIN artist a ON ta.artist_mbid = a.mbid
-            LEFT JOIN artwork w ON a.artwork_id = w.id
-            WHERE {where_sql}
-            GROUP BY a.name, a.mbid, a.artwork_id, w.sha1
-            ORDER BY plays DESC
-            LIMIT 10
-        """
-        rows = await db.fetch(artists_query, *params)
-        artists = [
-            {
-                "artist": row[0],
-                "mbid": row[1], # Ensure frontend can handle this new field or mapped correctly
-                "art_sha1": row[3],
-                "plays": row[4],
-            }
-            for row in rows
-            if row[0]
-        ]
+    artists_query = f"""
+        SELECT 
+            a.name as artist_name, 
+            a.mbid as artist_mbid,
+            a.artwork_id, 
+            w.sha1 as art_sha1,
+            COUNT(*) as plays
+        FROM combined_playback_history_mat h
+        JOIN track t ON t.id = h.track_id
+        JOIN track_artist ta ON ta.track_id = t.id
+        JOIN artist a ON ta.artist_mbid = a.mbid
+        LEFT JOIN artwork w ON a.artwork_id = w.id
+        WHERE {where_sql}
+        GROUP BY a.name, a.mbid, a.artwork_id, w.sha1
+        ORDER BY plays DESC
+        LIMIT 10
+    """
+    rows = await db.fetch(artists_query, *params)
+    artists = [
+        {
+            "artist": row[0],
+            "mbid": row[1], # Ensure frontend can handle this new field or mapped correctly
+            "art_sha1": row[3],
+            "plays": row[4],
+        }
+        for row in rows
+        if row[0]
+    ]
 
-        albums_query = f"""
-            SELECT 
-                t.album, 
-                COALESCE(NULLIF(t.album_artist, ''), t.artist) as artist_name, 
-                MIN(t.artwork_id) as artwork_id, 
-                MAX(a.sha1) as art_sha1, 
-                MAX(t.release_mbid) as mb_release_id,
-                COUNT(*) as plays
-            FROM combined_playback_history_mat h
-            JOIN track t ON t.id = h.track_id
-            {artist_join}
-            LEFT JOIN artwork a ON t.artwork_id = a.id
-            WHERE {where_sql}
-            GROUP BY t.album, COALESCE(NULLIF(t.album_artist, ''), t.artist)
-            ORDER BY plays DESC
-            LIMIT 10
-        """
-        rows = await db.fetch(albums_query, *params)
-        albums = [
-            {
-                "album": row[0],
-                "artist": row[1],
-                "art_sha1": row[3],
-                "mb_release_id": row[4],
-                "plays": row[5],
-            }
-            for row in rows
-            if row[0]
-        ]
-
-        tracks_query = f"""
-        SELECT t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
+    albums_query = f"""
+        SELECT 
+            t.album, 
+            COALESCE(NULLIF(t.album_artist, ''), t.artist) as artist_name, 
+            MIN(t.artwork_id) as artwork_id, 
+            MAX(a.sha1) as art_sha1, 
+            MAX(t.release_mbid) as mb_release_id,
+            COUNT(*) as plays
         FROM combined_playback_history_mat h
         JOIN track t ON t.id = h.track_id
         {artist_join}
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE {where_sql}
-            GROUP BY t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id
-            ORDER BY plays DESC
-            LIMIT 10
-        """
-        rows = await db.fetch(tracks_query, *params)
-        tracks = [
-            {
-                "id": row[0],
-                "title": row[1],
-                "artist": row[2],
-                "album": row[3],
-                "mb_release_id": row[4],
-                "art_sha1": row[6],
-                "plays": row[7],
-            }
-            for row in rows
-        ]
-
-        return {
-            "daily": daily,
-            "artists": artists,
-            "albums": albums,
-            "tracks": tracks,
+        GROUP BY t.album, COALESCE(NULLIF(t.album_artist, ''), t.artist)
+        ORDER BY plays DESC
+        LIMIT 10
+    """
+    rows = await db.fetch(albums_query, *params)
+    albums = [
+        {
+            "album": row[0],
+            "artist": row[1],
+            "art_sha1": row[3],
+            "mb_release_id": row[4],
+            "plays": row[5],
         }
+        for row in rows
+        if row[0]
+    ]
+
+    tracks_query = f"""
+    SELECT t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id, MAX(a.sha1) as art_sha1, COUNT(*) as plays
+    FROM combined_playback_history_mat h
+    JOIN track t ON t.id = h.track_id
+    {artist_join}
+    LEFT JOIN artwork a ON t.artwork_id = a.id
+    WHERE {where_sql}
+        GROUP BY t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id
+        ORDER BY plays DESC
+        LIMIT 10
+    """
+    rows = await db.fetch(tracks_query, *params)
+    tracks = [
+        {
+            "id": row[0],
+            "title": row[1],
+            "artist": row[2],
+            "album": row[3],
+            "mb_release_id": row[4],
+            "art_sha1": row[6],
+            "plays": row[7],
+        }
+        for row in rows
+    ]
+
+    return {
+        "daily": daily,
+        "artists": artists,
+        "albums": albums,
+        "tracks": tracks,
+    }
     return {"daily": [], "artists": [], "albums": [], "tracks": []}
 
 

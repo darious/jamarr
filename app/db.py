@@ -1,6 +1,13 @@
+import asyncio
 import asyncpg
+import logging
 import os
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+
+from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 # Connection pool (initialized on startup)
 _pool: asyncpg.Pool = None
@@ -12,16 +19,68 @@ DB_USER = os.getenv("DB_USER", "jamarr")
 DB_PASS = os.getenv("DB_PASS", "jamarr")
 DB_NAME = os.getenv("DB_NAME", "jamarr")
 
+DB_POOL_MIN_SIZE = int(os.getenv("DB_POOL_MIN_SIZE", "5"))
+DB_POOL_MAX_SIZE = int(os.getenv("DB_POOL_MAX_SIZE", "20"))
+
+# How long to wait for a free pool connection before giving up. asyncpg's
+# default is to wait forever, which turns a leaked or contended connection into
+# a silent, permanent hang: the process keeps serving static files while every
+# DB-backed route blocks with no error and no log line. Failing loudly instead
+# lets the caller see it and monitoring alert on it.
+DB_POOL_ACQUIRE_TIMEOUT = float(os.getenv("DB_POOL_ACQUIRE_TIMEOUT", "15"))
+
+# Ceiling on the connections any one background job may hold at once. A library
+# scan runs `max_workers` (16 in config.yaml) workers that each keep a
+# connection for the whole walk; unchecked, that alone claims most of the pool
+# and leaves request handling to fight over the remainder.
+DB_POOL_BACKGROUND_MAX = max(1, DB_POOL_MAX_SIZE // 2)
+
 
 async def get_db() -> AsyncGenerator[asyncpg.Connection, None]:
     """
     Dependency injection for database connections.
     Yields a connection from the pool.
-    """
-    if _pool is None:
-        raise RuntimeError("Database pool not initialized. Call init_db() first.")
 
-    async with _pool.acquire() as conn:
+    FastAPI caches dependencies per request, so a handler that declares this
+    alongside an auth dependency shares the one connection rather than taking a
+    second. Never acquire a second connection while holding one from here: with
+    enough concurrent requests that deadlocks the pool.
+
+    Outside of FastAPI dependencies, use :func:`db_conn` instead.
+    """
+    pool = get_pool()
+
+    try:
+        conn = await pool.acquire(timeout=DB_POOL_ACQUIRE_TIMEOUT)
+    except (asyncio.TimeoutError, TimeoutError):
+        logger.error(
+            "Timed out after %.1fs waiting for a DB connection (pool size %d). "
+            "The pool is exhausted — connections are leaking or a query is wedged.",
+            DB_POOL_ACQUIRE_TIMEOUT,
+            pool.get_max_size(),
+        )
+        raise HTTPException(
+            status_code=503, detail="Database is busy. Please try again shortly."
+        )
+
+    try:
+        yield conn
+    finally:
+        await pool.release(conn)
+
+
+@asynccontextmanager
+async def db_conn() -> AsyncGenerator[asyncpg.Connection, None]:
+    """Hold a pool connection for the duration of the block.
+
+    The way to reach the DB from anything that is not a FastAPI dependency.
+
+    Do not hand-iterate :func:`get_db`. It is an async generator, so
+    ``async for db in get_db():`` releases the connection only if the loop runs
+    to exhaustion — a ``break`` or an exception leaves the generator suspended
+    at its ``yield`` and the connection checked out of the pool forever.
+    """
+    async with get_pool().acquire(timeout=DB_POOL_ACQUIRE_TIMEOUT) as conn:
         yield conn
 
 
@@ -44,8 +103,8 @@ async def init_db():
         user=DB_USER,
         password=DB_PASS,
         database=DB_NAME,
-        min_size=5,
-        max_size=20,
+        min_size=DB_POOL_MIN_SIZE,
+        max_size=DB_POOL_MAX_SIZE,
         command_timeout=60,
     )
 

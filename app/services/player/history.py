@@ -4,7 +4,7 @@ import logging
 import asyncpg
 
 from app import lastfm
-from app.db import get_pool
+from app.db import db_conn
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +47,7 @@ def should_log_history(
 async def update_now_playing_lastfm(user_id: int, track_id: int):
     """Background task to update Now Playing on Last.fm"""
     try:
-        # Get our own database connection from the pool
-        pool = get_pool()
-        async with pool.acquire() as db:
+        async with db_conn() as db:
             # Check if user has Last.fm enabled
             user_row = await db.fetchrow(
                 'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',
@@ -93,9 +91,7 @@ async def update_now_playing_lastfm(user_id: int, track_id: int):
 async def scrobble_to_lastfm(user_id: int, track_id: int):
     """Background task to scrobble a track to Last.fm"""
     try:
-        # Get our own database connection from the pool
-        pool = get_pool()
-        async with pool.acquire() as db:
+        async with db_conn() as db:
             # Check if user has Last.fm enabled
             user_row = await db.fetchrow(
                 'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',

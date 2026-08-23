@@ -11,7 +11,7 @@ from app.auth_tokens import (
     hash_refresh_token,
     verify_access_token,
 )
-from app.db import get_db
+from app.db import db_conn, get_db
 from app.security import log_security_event
 
 
@@ -198,15 +198,20 @@ async def get_user_from_refresh_cookie(
 async def get_current_user_jwt_or_cookie(
     request: Request,
     authorization: Optional[str] = Header(None),
-    db: asyncpg.Connection = Depends(get_db),
 ) -> asyncpg.Record:
     """Require auth via Bearer header, falling back to the refresh cookie.
 
     Only for endpoints that browsers must reach without custom headers (SSE).
+
+    Deliberately no ``Depends(get_db)``: dependencies with yield are torn down
+    only once the response finishes, and an SSE response never finishes — the
+    connection would stay pinned for the life of the stream, and enough open
+    streams exhaust the pool. Acquire briefly instead.
     """
-    if authorization:
-        return await get_current_user_jwt(authorization, request, db)
-    return await get_user_from_refresh_cookie(request, db)
+    async with db_conn() as db:
+        if authorization:
+            return await get_current_user_jwt(authorization, request, db)
+        return await get_user_from_refresh_cookie(request, db)
 
 
 async def get_current_admin_user_jwt_or_cookie(
