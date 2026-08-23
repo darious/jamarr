@@ -50,32 +50,6 @@ else
     WAIT_FOR="release to be created"
 fi
 
-# The codename's first letter identifies the stream, and walks with the major
-# version: the app counts up from A (1.x=A, 2.x=B), the server counts down from
-# Z (1.x=Z, 2.x=Y). Derived rather than hardcoded so a major bump needs no edit
-# here (see docs/reference/release-names.md).
-MAJOR="${VERSION#android-}"
-MAJOR="${MAJOR#v}"
-MAJOR="${MAJOR%%.*}"
-if (( MAJOR < 1 || MAJOR > 13 )); then
-    echo "No letter defined for major version $MAJOR (the two chains meet at 13)" >&2
-    exit 64
-fi
-if [[ "$STREAM" == "server" ]]; then
-    LETTER_ORD=$(( 91 - MAJOR ))   # 1 -> Z
-else
-    LETTER_ORD=$(( 64 + MAJOR ))   # 1 -> A
-fi
-EXPECT_LETTER="$(printf "\\$(printf '%03o' "$LETTER_ORD")")"
-
-# "The Zutons" files under Z, matching how the library sorts.
-NAME_LETTER="$(printf '%s' "${NAME#The }" | cut -c1 | tr '[:lower:]' '[:upper:]')"
-if [[ "$NAME_LETTER" != "$EXPECT_LETTER" ]]; then
-    echo "A $STREAM release ($VERSION) takes a name starting with $EXPECT_LETTER (got: $NAME)" >&2
-    echo "Next name: see docs/reference/release-names.md" >&2
-    exit 64
-fi
-
 if ! command -v gh >/dev/null 2>&1; then
     echo "gh CLI is required" >&2
     exit 69

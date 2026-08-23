@@ -76,8 +76,7 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   the codename's letter says which: server `vX.Y.Z` takes a **Z** artist
   (Docker image incl. the web UI, `latest` moves, `JAMARR_VERSION` baked in);
   app `android-vX.Y.Z` takes an **A** artist (signed APK, `versionName` from
-  the tag, `versionCode` = `major*10000 + minor*100 + patch`). `release.sh`
-  rejects a name on the wrong stream. The numbers drift on purpose — align
+  the tag, `versionCode` = `major*10000 + minor*100 + patch`). The numbers drift on purpose — align
   them only when a change to one *requires* the other. Nothing else is
   versioned: the web UI ships inside the image, the TUI runs from a checkout,
   and the `0.1.0`s in `pyproject.toml`/`web/package.json` are inert. Cut with
