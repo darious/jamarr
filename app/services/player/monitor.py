@@ -447,7 +447,12 @@ async def monitor_upnp_playback(udn: str):
                     logger.exception(f"[Player] Play retry failed for {udn}")
                 await asyncio.sleep(4)  # Give the retried track a moment to start
             elif finished_reason:
-                await play_next_track_internal(udn)
+                # A single bad track must not take the monitor down with it --
+                # the loop is what drives auto-advance for this renderer.
+                try:
+                    await play_next_track_internal(udn)
+                except Exception:
+                    logger.exception(f"[Player] Auto-advance failed for {udn}")
                 await asyncio.sleep(4)  # Give the new track a moment to start
 
             await asyncio.sleep(1)

@@ -380,3 +380,47 @@ async def test_prewarm_triggers_near_track_end(db, monkeypatch, fast_sleep, adva
 
     assert warmed == ["/music/1.flac"]  # next track, warmed exactly once
     assert advances == []
+
+
+async def test_advance_failure_does_not_kill_monitor(db, monkeypatch, fast_sleep):
+    """A failing auto-advance must not take the monitor loop down.
+
+    Regression: an unguarded play_next_track_internal raised, killing
+    monitor_upnp_playback for the renderer, so auto-advance stayed dead
+    until restart.
+    """
+    udn = "uuid:monitor-advance-raises"
+    _reset_globals(udn)
+    last_track_start_time[udn] = time.time() - 60
+    await update_renderer_state_db(db, udn, _state())
+
+    calls = []
+
+    async def boom(target):
+        calls.append(target)
+        last_track_start_time[target] = time.time()
+        raise RuntimeError("advance exploded")
+
+    monkeypatch.setattr(monitor_module, "play_next_track_internal", boom)
+
+    async def no_history(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(monitor_module, "log_history", no_history)
+
+    upnp = ScriptedUpnp([(172, "PLAYING"), (174, "PLAYING"), (0, "STOPPED")])
+    monkeypatch.setattr(monitor_module.UPnPManager, "get_instance", lambda: upnp)
+
+    task = asyncio.create_task(monitor_module.monitor_upnp_playback(udn))
+    try:
+        await asyncio.wait_for(upnp.drained.wait(), timeout=5.0)
+        await _REAL_SLEEP(0.3)
+        assert calls == [udn]
+        # The loop survived the raise and is still polling the renderer.
+        assert not task.done()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

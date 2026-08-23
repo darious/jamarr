@@ -28,6 +28,21 @@ async def play_next_track_internal(udn: str):
                 f"[Player] Auto-advancing to track {next_index}: {track['title']}"
             )
 
+            # Clients POST their queue verbatim and not all of them carry the
+            # file path (the Android app sends metadata only), so resolve it
+            # from the track table -- reusing this connection, never acquiring
+            # a second one while we hold it.
+            if not track.get("path"):
+                track["path"] = await db.fetchval(
+                    "SELECT path FROM track WHERE id = $1", track.get("id")
+                )
+                if not track["path"]:
+                    logger.error(
+                        f"[Player] No path for track {track.get('id')} "
+                        f"('{track.get('title')}'); skipping auto-advance"
+                    )
+                    return
+
             # Setup UPnP
             # Note: We assume UPnPManager needs active renderer set.
             # This follows the pattern in play_track endpoint.
@@ -41,9 +56,9 @@ async def play_next_track_internal(udn: str):
 
             # Check if mime is present, else guess
             if "mime" not in track or not track["mime"]:
-                mime, _ = mimetypes.guess_type(track.get("path", ""))
+                mime, _ = mimetypes.guess_type(track["path"])
                 if not mime:
-                    ext = os.path.splitext(track.get("path", ""))[1].lower()
+                    ext = os.path.splitext(track["path"])[1].lower()
                     if ext == ".flac":
                         mime = "audio/flac"
                     elif ext == ".mp3":
