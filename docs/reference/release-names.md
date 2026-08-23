@@ -67,34 +67,13 @@ placeholders that nothing reads.
 - Ordering within a letter is not alphabetical and never has been. Pick
   whichever name fits; the queues below are just to avoid repeats and
   deliberation.
-- Move a name from the queue into the used table as part of the release.
-
-## Used
-
-Reconciled against the published releases on 2026-08-20.
-
-| Tag | Name | Released |
-|---|---|---|
-| v1.8.0 | Alter Bridge | 2026-08-11 |
-| android-v1.8.0 | Alter Bridge | 2026-08-11 |
-| v1.7.0 | Christina Aguilera | 2026-08-10 |
-| v1.6.0 | Bryan Adams | 2026-08-09 |
-| v1.5.0 | Tori Amos | 2026-08-02 |
-| v1.4.2 | Aphex Twin | 2026-07-29 |
-| v1.4.1 | AC/DC | 2026-07-24 |
-| v1.4.0 | Adele | 2026-07-23 |
-| v1.3.4 | Alice Cooper | 2026-05-13 |
-| v1.3.3 | Avicii | 2026-05-08 |
-| v1.3.2 | Angels & Airwaves | 2026-05-04 |
-| v1.3.1 | Alphaville | 2026-05-03 |
-| v1.3.0 | Alice in Chains | 2026-05-01 |
-| v1.2.1 | A-ha | 2026-04-29 |
-| v1.2.0 | Aerosmith | 2026-04-29 |
-| v1.1.0 | Arctic Monkeys | 2026-04-28 |
-| v1.0.0 | ABBA | 2026-04-27 |
-
-`android-v1.8.0` and `v1.8.0` share a name: they were cut three minutes apart
-when the streams split, and are the only pair that will.
+- Which names are already used comes from the git tags, not from this file:
+  `git tag -l 'v*' 'android-v*' --format='%(refname:short)  %(contents:subject)'`.
+  `release.sh` writes the codename into the annotated tag, so the tags are
+  the record. Nothing here needs updating when you cut a release.
+- One exception to "never reused": `android-v1.8.0` and `v1.8.0` share
+  Alter Bridge. They were cut three minutes apart when the streams split,
+  and are the only pair that will.
 
 ## Queue — server (Z)
 
