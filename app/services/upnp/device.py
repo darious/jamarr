@@ -247,22 +247,16 @@ class UPnPDeviceControl:
         if not dmr:
             raise ValueError(f"DMR device not found for {self.manager.active_renderer}")
 
-        try:
-            # Convert from 0-100 to 0.0-1.0 range
-            volume_level = volume / 100.0
-            await dmr.async_set_volume_level(volume_level)
-            self.manager.log(f"Volume set to {volume}")
-            return
-        except (UpnpError, AttributeError) as exc:
-            logger.debug("async_set_volume_level failed for %s: %s, trying direct action", self.manager.active_renderer, exc)
-
-        # Fallback to direct action call
-        action = dmr._action("RenderingControl", "SetVolume")
-        if not action:
-            raise UpnpError("RenderingControl/SetVolume action not found")
-
-        await action.async_call(InstanceID=0, Channel="Master", DesiredVolume=volume)
-        self.manager.log(f"Volume set to {volume} via RenderingControl")
+        # No fallback path here on purpose. There used to be one that called
+        # dmr._action("RenderingControl", "SetVolume"), but _action resolves its
+        # first argument through _SERVICE_TYPES, whose keys are abbreviations
+        # ("RC"). "RenderingControl" is not a key, so that lookup returned None
+        # on every device and raised a fabricated "action not found" -- which
+        # masked the real failure and read as a device capability report.
+        # async_set_volume_level already performs exactly that call, correctly.
+        volume_level = volume / 100.0  # device API is 0.0-1.0
+        await dmr.async_set_volume_level(volume_level)
+        self.manager.log(f"Volume set to {volume}")
 
     async def get_volume(self, udn: Optional[str] = None) -> Optional[int]:
         """Read the renderer's current volume as 0-100 percent, or None.

@@ -17,5 +17,10 @@ last_playing_position: Dict[str, float] = {}
 # Play re-issues attempted for the current track after a failed start.
 start_retries: Dict[str, int] = {}
 monitor_starting: Dict[str, float] = {}
+# Why the queue last halted on its own, per renderer, for the UI to explain
+# itself: {"reason": str, "position_seconds": float, "at": float}. A renderer
+# that drops out mid-track otherwise just goes quiet, which is indistinguishable
+# from the app being broken. Cleared when a new track is started.
+last_stop_reason: Dict[str, dict] = {}
 # Track rapid restart attempts: udn -> [(start_time, count_window_start)]
 _monitor_restart_history: Dict[str, list] = {}

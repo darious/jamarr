@@ -1025,6 +1025,28 @@
 <div
   class="fixed bottom-0 w-full surface-glass-panel border-t border-subtle p-3 md:p-4 text-default z-50"
 >
+  <!--
+    The queue can halt without the listener asking: the renderer drops out
+    mid-track and the app stops rather than fight it. Say so, otherwise the bar
+    simply goes quiet and reads as the app being broken. Position is preserved,
+    so pressing play resumes from where it stopped.
+  -->
+  {#if $playerState.stopped_reason === "renderer_stopped"}
+    <div
+      class="mx-auto mb-2 flex max-w-[1700px] items-center gap-2 rounded-lg border border-subtle bg-surface-3 px-3 py-1.5 text-xs text-muted"
+      role="status"
+    >
+      <svg class="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"
+        ></path>
+      </svg>
+      <span>Playback stopped on the device. Press play to resume.</span>
+    </div>
+  {/if}
   <div class="mx-auto flex max-w-[1700px] flex-col gap-3 md:hidden">
     <div class="flex items-center gap-3">
       {#if currentTrack}

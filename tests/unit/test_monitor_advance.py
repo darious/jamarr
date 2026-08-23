@@ -10,10 +10,11 @@ from app.services.player import monitor as monitor_module
 from app.services.player.globals import (
     last_playing_position,
     last_playing_seen,
+    last_stop_reason,
     last_track_start_time,
     start_retries,
 )
-from app.services.player.state import update_renderer_state_db
+from app.services.player.state import get_renderer_state_db, update_renderer_state_db
 
 # Captured before fast_sleep patches asyncio.sleep, so the harness can wait
 # real wall-clock time while monitor sleeps stay scaled down.
@@ -24,6 +25,7 @@ def _reset_globals(udn):
     last_playing_seen.pop(udn, None)
     last_playing_position.pop(udn, None)
     start_retries.pop(udn, None)
+    last_stop_reason.pop(udn, None)
     monitor_module._prewarmed_index.pop(udn, None)
 
 
@@ -189,6 +191,62 @@ async def test_stop_mid_track_halts_queue(db, monkeypatch, fast_sleep, advances)
 
     assert advances == []
     assert upnp.play_calls == []
+
+
+async def test_stop_mid_track_keeps_the_listeners_position(
+    db, monkeypatch, fast_sleep, advances
+):
+    """The halt must not throw away where the listener had got to.
+
+    A renderer reports position 0 once it stops, so persisting the reading taken
+    at the moment of the stop rewinds the track to the beginning and Resume
+    starts it over.
+    """
+    udn = "uuid:monitor-mid-stop-position"
+    _reset_globals(udn)
+    last_track_start_time[udn] = time.time() - 60
+    await update_renderer_state_db(db, udn, _state())
+
+    upnp = ScriptedUpnp([(90, "PLAYING"), (91, "PLAYING"), (0, "STOPPED")])
+    await _run_monitor(monkeypatch, udn, upnp)
+
+    state = await get_renderer_state_db(db, udn)
+    assert state["is_playing"] is False
+    assert state["position_seconds"] == pytest.approx(91, abs=1)
+
+
+async def test_stop_mid_track_records_a_reason(db, monkeypatch, fast_sleep, advances):
+    """The UI needs to be able to say why it went quiet."""
+    udn = "uuid:monitor-mid-stop-reason"
+    _reset_globals(udn)
+    last_track_start_time[udn] = time.time() - 60
+    await update_renderer_state_db(db, udn, _state())
+
+    upnp = ScriptedUpnp([(90, "PLAYING"), (91, "PLAYING"), (0, "STOPPED")])
+    await _run_monitor(monkeypatch, udn, upnp)
+
+    assert last_stop_reason[udn]["reason"] == "renderer_stopped"
+    assert last_stop_reason[udn]["position_seconds"] == pytest.approx(91, abs=1)
+
+
+async def test_playing_again_clears_the_stop_reason(
+    db, monkeypatch, fast_sleep, advances
+):
+    """However playback resumed, the old explanation must stop being shown."""
+    udn = "uuid:monitor-stop-reason-cleared"
+    _reset_globals(udn)
+    last_track_start_time[udn] = time.time() - 60
+    last_stop_reason[udn] = {
+        "reason": "renderer_stopped",
+        "position_seconds": 91.0,
+        "at": time.time(),
+    }
+    await update_renderer_state_db(db, udn, _state())
+
+    upnp = ScriptedUpnp([(92, "PLAYING"), (93, "PLAYING")])
+    await _run_monitor(monkeypatch, udn, upnp)
+
+    assert udn not in last_stop_reason
 
 
 async def test_never_started_track_gets_play_retry(db, monkeypatch, fast_sleep, advances):

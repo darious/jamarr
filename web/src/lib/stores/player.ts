@@ -28,6 +28,10 @@ export interface PlayerState {
     position_seconds: number;
     volume: number | null;
     transport_state?: string;
+    // Set by the server when the queue halted on its own rather than because
+    // the listener stopped it — a renderer dropping out mid-track. Without it
+    // the UI just goes quiet and looks broken.
+    stopped_reason?: string | null;
     repeatMode: 'off' | 'all' | 'one';
     stream_quality?: string;
     stream_quality_label?: string;
@@ -233,7 +237,8 @@ export async function loadQueueFromServer() {
                 renderer_kind: data.renderer_kind,
                 // If server returns null (no history), keep existing volume (e.g. locally restored)
                 // If server returns value, use it.
-                volume: (data.volume !== null && data.volume !== undefined) ? data.volume : s.volume
+                volume: (data.volume !== null && data.volume !== undefined) ? data.volume : s.volume,
+                stopped_reason: data.stopped_reason ?? null
             }));
 
         } else {
@@ -618,7 +623,28 @@ async function playCurrentTrack() {
     }
 }
 
-export async function setVolume(percent: number) {
+// A slider drag fires one input event per step, and for a UPnP renderer each
+// one becomes a SOAP call to the device. Sending them all buries it: a Naim
+// Uniti Atom took ~20 calls in two seconds, its responses slowed from 9ms to
+// 1.4s, and it dropped the track it was playing. So keep at most one request in
+// flight and coalesce everything that arrives meanwhile into a single follow-up
+// — the user only cares about the value they land on, not the ones they dragged
+// through.
+const VOLUME_MIN_INTERVAL_MS = 150;
+
+let volumeInFlight = false;
+let volumePending: number | null = null;
+let volumeLastSentAt = 0;
+let volumeTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function flushVolume() {
+    // Wait for the in-flight request; its finally block reschedules us.
+    if (volumeInFlight || volumePending === null) return;
+
+    const percent = volumePending;
+    volumePending = null;
+    volumeInFlight = true;
+    volumeLastSentAt = Date.now();
     try {
         await fetchWithAuth('/api/player/volume', {
             method: 'POST',
@@ -627,7 +653,25 @@ export async function setVolume(percent: number) {
         });
     } catch (e) {
         console.error('Failed to set volume', e);
+    } finally {
+        volumeInFlight = false;
+        // Someone moved the slider while we were away — send where they ended up.
+        if (volumePending !== null) scheduleVolume();
     }
+}
+
+function scheduleVolume() {
+    if (volumeTimer !== undefined) return;
+    const wait = Math.max(0, VOLUME_MIN_INTERVAL_MS - (Date.now() - volumeLastSentAt));
+    volumeTimer = setTimeout(() => {
+        volumeTimer = undefined;
+        flushVolume();
+    }, wait);
+}
+
+export function setVolume(percent: number) {
+    volumePending = percent;
+    scheduleVolume();
 }
 
 export function toggleNowPlaying() {
