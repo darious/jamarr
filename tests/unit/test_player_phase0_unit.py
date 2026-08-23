@@ -103,3 +103,109 @@ def test_phase0_fake_status_helpers_cover_expected_states():
     ended = status_ended("upnp:one")
     assert ended.state == "IDLE"
     assert ended.ended is True
+
+
+@pytest.mark.asyncio
+async def test_play_next_track_internal_resolves_missing_path(db, monkeypatch):
+    """Android posts its queue without `path`; the server must fill it in.
+
+    Clients POST the queue verbatim, so a metadata-only client leaves
+    `path` as None. Auto-advance has to resolve it from the track table
+    instead of handing None to mimetypes.
+    """
+    from app.services.player import queue as queue_module
+    from app.services.player.state import update_renderer_state_db
+
+    fake_upnp = FakeUpnpManager()
+    monkeypatch.setattr(queue_module.UPnPManager, "get_instance", lambda: fake_upnp)
+
+    await db.execute(
+        """
+        INSERT INTO track (id, title, artist, album, path, duration_seconds)
+        VALUES (7402, 'Second', 'Artist', 'Album', '/music/resolved.mp3', 100)
+        """
+    )
+
+    udn = "uuid:phase0-missing-path"
+    await update_renderer_state_db(
+        db,
+        udn,
+        {
+            "queue": [
+                {
+                    "id": 7401,
+                    "title": "First",
+                    "artist": "Artist",
+                    "album": "Album",
+                    "path": None,
+                    "duration_seconds": 100,
+                },
+                {
+                    "id": 7402,
+                    "title": "Second",
+                    "artist": "Artist",
+                    "album": "Album",
+                    "path": None,
+                    "duration_seconds": 100,
+                },
+            ],
+            "current_index": 0,
+            "position_seconds": 98,
+            "is_playing": True,
+            "transport_state": "PLAYING",
+            "volume": 30,
+        },
+    )
+
+    await queue_module.play_next_track_internal(udn)
+
+    play = fake_upnp.commands[-1]
+    assert play.name == "play_track"
+    assert play.args[1] == "/music/resolved.mp3"
+    assert play.args[2]["mime"] == "audio/mpeg"
+
+
+@pytest.mark.asyncio
+async def test_play_next_track_internal_skips_track_with_no_path(db, monkeypatch):
+    """A queue entry pointing at no row at all is skipped, not raised on."""
+    from app.services.player import queue as queue_module
+    from app.services.player.state import update_renderer_state_db
+
+    fake_upnp = FakeUpnpManager()
+    monkeypatch.setattr(queue_module.UPnPManager, "get_instance", lambda: fake_upnp)
+
+    udn = "uuid:phase0-unresolvable-path"
+    await update_renderer_state_db(
+        db,
+        udn,
+        {
+            "queue": [
+                {
+                    "id": 7501,
+                    "title": "First",
+                    "artist": "Artist",
+                    "album": "Album",
+                    "path": "/music/first.flac",
+                    "duration_seconds": 100,
+                },
+                {
+                    "id": 7502,
+                    "title": "Ghost",
+                    "artist": "Artist",
+                    "album": "Album",
+                    "path": None,
+                    "duration_seconds": 100,
+                },
+            ],
+            "current_index": 0,
+            "position_seconds": 98,
+            "is_playing": True,
+            "transport_state": "PLAYING",
+            "volume": 30,
+        },
+    )
+
+    await queue_module.play_next_track_internal(udn)
+
+    # Bailed before touching the renderer at all.
+    assert fake_upnp.commands == []
