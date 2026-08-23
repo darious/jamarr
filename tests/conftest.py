@@ -13,6 +13,12 @@ os.environ.setdefault("DB_USER", "jamarr_test")
 os.environ.setdefault("DB_PASS", "jamarr_test")
 os.environ.setdefault("DB_NAME", "jamarr_test")
 
+# Last.fm calls are mocked in tests, but the module still reads real
+# credentials to build the pylast network. CI injects these (pr_test.yml);
+# supply the same dummies so a local run does not fail on an unset key.
+os.environ.setdefault("LASTFM_API_KEY", "dummy_lastfm_key")
+os.environ.setdefault("LASTFM_SHARED_SECRET", "dummy_lastfm_secret")
+
 from app.main import app
 from app.db import init_db, close_db, db_conn
 
