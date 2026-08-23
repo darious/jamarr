@@ -29,6 +29,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
+private const val REMOTE_POLL_STATUS_PREFIX = "Remote poll: "
+
 class JamarrViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as JamarrApplication
     private val settingsStore = SettingsStore(application)
@@ -302,9 +304,13 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         runCatching {
             apiClient.getPlayerState(serverUrl, clientId)
         }.onSuccess { state ->
+            // A poll failure is usually a blip (a DNS hiccup on the way back
+            // from doze, say). Clear our own stale banner once polling
+            // recovers, but leave anything another action put there.
+            if (status.startsWith(REMOTE_POLL_STATUS_PREFIX)) status = ""
             applyServerPlaybackState(state)
         }.onFailure {
-            status = "Remote poll: ${it.message}"
+            status = "$REMOTE_POLL_STATUS_PREFIX${it.message}"
         }
     }
 
