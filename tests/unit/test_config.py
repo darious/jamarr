@@ -99,3 +99,23 @@ def test_required_env_missing_raises(monkeypatch, tmp_path, env_var, getter):
 
     with pytest.raises(ValueError):
         getter()
+
+
+def test_audio_analysis_settings_from_config(monkeypatch, tmp_path):
+    _set_config_path(
+        tmp_path,
+        """
+audio_analysis:
+  batch_size: 50
+  concurrency: 6
+""",
+        monkeypatch,
+    )
+
+    assert config.get_audio_analysis_settings() == {"batch_size": 50, "concurrency": 6}
+
+
+def test_audio_analysis_settings_absent(monkeypatch, tmp_path):
+    _set_config_path(tmp_path, "{}", monkeypatch)
+
+    assert config.get_audio_analysis_settings() == {}

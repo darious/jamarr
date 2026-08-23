@@ -7,7 +7,9 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 import asyncpg
 from croniter import croniter
 
+from app.config import get_audio_analysis_settings
 from app.db import DB_POOL_ACQUIRE_TIMEOUT, db_conn, get_pool
+from app.scanner.audio_analysis import AudioAnalysisRunner
 from app.scanner.scan_manager import ScanManager
 from app.charts import refresh_chart_task
 from app.lastfm_jobs import sync_all_lastfm_scrobbles
@@ -17,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 LOCK_KEY = 912337
 POLL_INTERVAL_SECONDS = 30
+AUDIO_ANALYSIS_PHASES = ("1", "2", "3", "4")
+AUDIO_ANALYSIS_LOG_INTERVAL_SECONDS = 60
 
 
 JobRunner = Callable[[], Awaitable[None]]
@@ -84,6 +88,34 @@ async def _run_lastfm_sync() -> None:
     await sync_all_lastfm_scrobbles()
 
 
+async def _run_audio_analysis() -> None:
+    """Run every audio-analysis phase over tracks that still need it.
+
+    The runner skips tracks whose cached analysis is current, so a scheduled
+    run is cheap once the library has been analysed and picks up only what a
+    library scan has since added.
+    """
+    last_log = 0.0
+
+    def progress_cb(current: int, total: Optional[int], message: str) -> None:
+        nonlocal last_log
+        now = asyncio.get_running_loop().time()
+        if current and total and current < total:
+            if now - last_log < AUDIO_ANALYSIS_LOG_INTERVAL_SECONDS:
+                return
+        last_log = now
+        logger.info("Audio analysis: %s", message)
+
+    runner = AudioAnalysisRunner(
+        **get_audio_analysis_settings(),
+        progress_cb=progress_cb,
+    )
+    for phase in AUDIO_ANALYSIS_PHASES:
+        last_log = 0.0
+        stats = await getattr(runner, f"run_phase{phase}")()
+        logger.info("Audio analysis phase %s complete: %s", phase, stats)
+
+
 JOB_DEFINITIONS: Dict[str, JobDefinition] = {
     "library_full_scan": JobDefinition(
         key="library_full_scan",
@@ -108,6 +140,14 @@ JOB_DEFINITIONS: Dict[str, JobDefinition] = {
         name="Refresh Chart",
         description="Refresh the charts list from the Charts page.",
         runner=_run_refresh_chart,
+    ),
+    "audio_analysis": JobDefinition(
+        key="audio_analysis",
+        name="Audio Analysis (All Phases)",
+        description=(
+            "Analyze new tracks for loudness, ReplayGain, BPM, and playback hints."
+        ),
+        runner=_run_audio_analysis,
     ),
     "lastfm_sync": JobDefinition(
         key="lastfm_sync",
