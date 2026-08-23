@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 import asyncpg
+from async_upnp_client.exceptions import UpnpError
 from fastapi import HTTPException, Request
 
 from app.db import db_conn
@@ -313,7 +314,15 @@ class RendererOrchestrator:
         state["volume"] = percent
         await update_renderer_state_db(db, state_key, state)
         if not is_local_renderer(renderer_id):
-            await self.registry.get_backend(renderer_id).set_volume(renderer_id, percent)
+            try:
+                await self.registry.get_backend(renderer_id).set_volume(renderer_id, percent)
+            except UpnpError as exc:
+                # A device that is slow, busy or briefly unreachable is not a
+                # server error. The value is already persisted above, so the app
+                # stays consistent and the next change will carry it across.
+                logger.warning(
+                    "Renderer %s rejected volume %d%%: %s", renderer_id, percent, exc
+                )
 
     @_heals_stale_renderer
     async def skip_to_index(

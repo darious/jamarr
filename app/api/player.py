@@ -32,6 +32,7 @@ from app.models.player import (
 from app.services.player.globals import (
     playback_monitors,
     monitor_start_times,
+    last_stop_reason,
     _monitor_restart_history,
 )
 from app.services.player.state import (
@@ -286,6 +287,7 @@ async def get_player_state(
         "renderer_kind": renderer_id.split(":", 1)[0] if ":" in renderer_id else "upnp",
         "transport_state": state.get("transport_state", "STOPPED"),
         "volume": state.get("volume"),
+        "stopped_reason": (last_stop_reason.get(udn) or {}).get("reason"),
     }
 
 

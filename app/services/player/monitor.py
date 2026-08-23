@@ -12,6 +12,7 @@ from app.services.player.globals import (
     last_track_start_time,
     last_playing_seen,
     last_playing_position,
+    last_stop_reason,
     start_retries,
 )
 from app.services.player.state import (
@@ -186,6 +187,9 @@ async def monitor_upnp_playback(udn: str):
 
                 if transport_state == "PLAYING":
                     last_playing_seen[udn] = time.time()
+                    # Playing again, however that came about: the last halt is
+                    # history and must not keep explaining itself to the UI.
+                    last_stop_reason.pop(udn, None)
                     if device_position:
                         last_playing_position[udn] = float(device_position)
                         if device_position > FAILED_START_MAX_POS_S:
@@ -269,12 +273,25 @@ async def monitor_upnp_playback(udn: str):
                                 )
                                 finished_reason = "stopped"
                         elif duration > 0:
-                            # Stopped mid-track: an external stop (TV remote,
-                            # another controller). Halt instead of fighting it.
-                            logger.info(
+                            # Stopped mid-track: either an external stop (TV
+                            # remote, another controller) or the renderer
+                            # dropping out. We cannot tell the two apart, so
+                            # halt rather than fight it -- but keep the position
+                            # so Resume carries on from here, and record why we
+                            # stopped so the UI can say so instead of just
+                            # falling silent.
+                            logger.warning(
                                 f"[Player] Playback stopped mid-track at {last_pos:.0f}s of "
                                 f"{duration:.0f}s; stopping queue"
                             )
+                            # The device reports 0 once stopped; persisting that
+                            # would throw away the listener's place in the track.
+                            state["position_seconds"] = last_pos
+                            last_stop_reason[udn] = {
+                                "reason": "renderer_stopped",
+                                "position_seconds": last_pos,
+                                "at": time.time(),
+                            }
                             await db.execute(
                                 """
                                 UPDATE renderer_state

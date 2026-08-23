@@ -41,6 +41,10 @@ class PlayerState(BaseModel):
     renderer_kind: Optional[str] = None
     transport_state: Optional[str] = "STOPPED"
     volume: Optional[int] = None
+    # Set when the queue halted by itself rather than because the listener
+    # stopped it -- currently only "renderer_stopped", when the device dropped
+    # out mid-track. Lets the UI say what happened instead of going quiet.
+    stopped_reason: Optional[str] = None
 
 
 class QueueUpdate(BaseModel):
