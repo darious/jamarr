@@ -1318,6 +1318,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#audio-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        audio-analysis
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1855,6 +1866,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#audio-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        audio-analysis
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1991,6 +2013,109 @@ uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </sp
 <p>Runs <code>scan</code> followed by <code>metadata</code> then <code>prune</code>.</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>app.scanner.cli<span class="w"> </span>full
 </code></pre></div>
+<h3 id="audio-analysis"><code>audio-analysis</code><a class="headerlink" href="#audio-analysis" title="Permanent link">&para;</a></h3>
+<p>Decodes local audio with ffmpeg and stores per-track metrics in
+<code>track_audio_analysis</code>. This is the data behind playback loudness
+normalization — it is not produced by <code>scan</code> or <code>metadata</code>, and nothing runs it
+automatically unless you schedule it (see
+<a href="../../guides/scanning/#scheduling-it">Scanning a Library</a>).</p>
+<p>Phases:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Phase</th>
+<th style="text-align: left;">Produces</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>1</code></td>
+<td style="text-align: left;">Loudness (LUFS), loudness range, sample peak, true peak, leading/trailing silence</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>2</code></td>
+<td style="text-align: left;">Track ReplayGain, plus album ReplayGain once all of an album's tracks have current track ReplayGain</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>3</code></td>
+<td style="text-align: left;">BPM estimate from decoded PCM</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>4</code></td>
+<td style="text-align: left;">Derived playback/quality hints and local energy score</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>all</code></td>
+<td style="text-align: left;">Runs 1 → 2 → 3 → 4</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Option</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>--phase &lt;1\|2\|3\|4\|all&gt;</code></td>
+<td style="text-align: left;">Phase to run (default: <code>1</code>)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--batch-size &lt;n&gt;</code></td>
+<td style="text-align: left;">DB rows selected per batch (default: <code>audio_analysis.batch_size</code> in <code>config.yaml</code>, else 25)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--concurrency &lt;n&gt;</code></td>
+<td style="text-align: left;">ffmpeg analyses run at once (default: <code>audio_analysis.concurrency</code>, else 2)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--limit &lt;n&gt;</code></td>
+<td style="text-align: left;">Stop after this many tracks — use to chunk the first full-library run</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--track-id &lt;id&gt;</code></td>
+<td style="text-align: left;">Analyze one track by ID</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--path &lt;path&gt;</code></td>
+<td style="text-align: left;">Analyze one relative file path, or every track under a relative directory</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--force</code></td>
+<td style="text-align: left;">Re-analyze even when the cached analysis is current</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--dry-run</code></td>
+<td style="text-align: left;">List the tracks that would be selected; no ffmpeg, no writes</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--silence-threshold-db &lt;db&gt;</code></td>
+<td style="text-align: left;">Silence threshold in dBFS (default: -60)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--silence-min-duration &lt;s&gt;</code></td>
+<td style="text-align: left;">Minimum silence duration in seconds (default: 0.2)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--timeout &lt;s&gt;</code></td>
+<td style="text-align: left;">Per-track ffmpeg timeout (default: <code>audio_analysis.timeout_seconds</code>, else 600)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>--verbose</code> / <code>-v</code></td>
+<td style="text-align: left;">Enable detailed debug logging</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>app.scanner.cli<span class="w"> </span>audio-analysis<span class="w"> </span>--phase<span class="w"> </span>all
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>app.scanner.cli<span class="w"> </span>audio-analysis<span class="w"> </span>--phase<span class="w"> </span>all<span class="w"> </span>--limit<span class="w"> </span><span class="m">500</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>app.scanner.cli<span class="w"> </span>audio-analysis<span class="w"> </span>--phase<span class="w"> </span><span class="m">1</span><span class="w"> </span>--path<span class="w"> </span><span class="s2">&quot;New Added&quot;</span><span class="w"> </span>--force
+</code></pre></div>
+<p>Analysis is cached per track against <code>track_quick_hash</code> and the analysis
+version, so re-runs skip tracks already current — the command is safe to repeat
+and safe to interrupt. It shows a Rich progress bar with selected count, <code>x/y</code>,
+percentage, elapsed time, and ETA.</p>
 <h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
 <p>For details on the v3 metadata pipeline architecture, see <a href="../../architecture/scanner-pipeline/">Scanner Pipeline</a>.</p>
 
