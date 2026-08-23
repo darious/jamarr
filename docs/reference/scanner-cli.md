@@ -76,6 +76,50 @@ Runs `scan` followed by `metadata` then `prune`.
 uv run python -m app.scanner.cli full
 ```
 
+### `audio-analysis`
+
+Decodes local audio with ffmpeg and stores per-track metrics in
+`track_audio_analysis`. This is the data behind playback loudness
+normalization — it is not produced by `scan` or `metadata`, and nothing runs it
+automatically unless you schedule it (see
+[Scanning a Library](../guides/scanning.md#scheduling-it)).
+
+Phases:
+
+| Phase | Produces |
+|:---|:---|
+| `1` | Loudness (LUFS), loudness range, sample peak, true peak, leading/trailing silence |
+| `2` | Track ReplayGain, plus album ReplayGain once all of an album's tracks have current track ReplayGain |
+| `3` | BPM estimate from decoded PCM |
+| `4` | Derived playback/quality hints and local energy score |
+| `all` | Runs 1 → 2 → 3 → 4 |
+
+| Option | Description |
+|:---|:---|
+| `--phase <1\|2\|3\|4\|all>` | Phase to run (default: `1`) |
+| `--batch-size <n>` | DB rows selected per batch (default: `audio_analysis.batch_size` in `config.yaml`, else 25) |
+| `--concurrency <n>` | ffmpeg analyses run at once (default: `audio_analysis.concurrency`, else 2) |
+| `--limit <n>` | Stop after this many tracks — use to chunk the first full-library run |
+| `--track-id <id>` | Analyze one track by ID |
+| `--path <path>` | Analyze one relative file path, or every track under a relative directory |
+| `--force` | Re-analyze even when the cached analysis is current |
+| `--dry-run` | List the tracks that would be selected; no ffmpeg, no writes |
+| `--silence-threshold-db <db>` | Silence threshold in dBFS (default: -60) |
+| `--silence-min-duration <s>` | Minimum silence duration in seconds (default: 0.2) |
+| `--timeout <s>` | Per-track ffmpeg timeout (default: `audio_analysis.timeout_seconds`, else 600) |
+| `--verbose` / `-v` | Enable detailed debug logging |
+
+```bash
+uv run python -m app.scanner.cli audio-analysis --phase all
+uv run python -m app.scanner.cli audio-analysis --phase all --limit 500
+uv run python -m app.scanner.cli audio-analysis --phase 1 --path "New Added" --force
+```
+
+Analysis is cached per track against `track_quick_hash` and the analysis
+version, so re-runs skip tracks already current — the command is safe to repeat
+and safe to interrupt. It shows a Rich progress bar with selected count, `x/y`,
+percentage, elapsed time, and ETA.
+
 ## Architecture
 
 For details on the v3 metadata pipeline architecture, see [Scanner Pipeline](../architecture/scanner-pipeline.md).

@@ -94,5 +94,24 @@ def get_max_workers():
     return load_config().get("max_workers", 4)
 
 
+AUDIO_ANALYSIS_SETTING_KEYS = ("batch_size", "concurrency", "timeout_seconds")
+
+
+def get_audio_analysis_settings():
+    """Return AudioAnalysisRunner overrides set in config.yaml.
+
+    Only keys actually present are returned, so the runner keeps its own
+    defaults for anything the deployment has not tuned.
+    """
+    section = load_config().get("audio_analysis") or {}
+    settings = {}
+    for key in AUDIO_ANALYSIS_SETTING_KEYS:
+        value = section.get(key)
+        if value is None:
+            continue
+        settings[key] = int(value)
+    return settings
+
+
 def get_user_agent():
     return "Jamarr/0.1 ( internal )"

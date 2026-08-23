@@ -14,10 +14,12 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from app.config import get_audio_analysis_settings
 from app.scanner.core import Scanner
 from app.scanner.audio_analysis import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_CONCURRENCY,
+    DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_SILENCE_MIN_DURATION_SECONDS,
     DEFAULT_SILENCE_THRESHOLD_DB,
     AudioAnalysisRunner,
@@ -109,6 +111,16 @@ async def main():
     )
 
     # Command: AUDIO ANALYSIS
+    # config.yaml `audio_analysis:` supplies the defaults the scheduled job
+    # uses, so the CLI honours the same tuning unless a flag overrides it.
+    try:
+        audio_config = get_audio_analysis_settings()
+    except FileNotFoundError:
+        # Parser construction must not depend on a config file being present.
+        audio_config = {}
+    audio_batch_size = audio_config.get("batch_size", DEFAULT_BATCH_SIZE)
+    audio_concurrency = audio_config.get("concurrency", DEFAULT_CONCURRENCY)
+    audio_timeout = audio_config.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
     audio_parser = subparsers.add_parser(
         "audio-analysis",
         help="Analyze local audio files and store derived track metrics",
@@ -123,14 +135,14 @@ async def main():
     audio_parser.add_argument(
         "--batch-size",
         type=int,
-        default=DEFAULT_BATCH_SIZE,
-        help=f"Number of DB rows to select per batch (default: {DEFAULT_BATCH_SIZE})",
+        default=audio_batch_size,
+        help=f"Number of DB rows to select per batch (default: {audio_batch_size})",
     )
     audio_parser.add_argument(
         "--concurrency",
         type=int,
-        default=DEFAULT_CONCURRENCY,
-        help=f"Number of ffmpeg analyses to run at once (default: {DEFAULT_CONCURRENCY})",
+        default=audio_concurrency,
+        help=f"Number of ffmpeg analyses to run at once (default: {audio_concurrency})",
     )
     audio_parser.add_argument(
         "--limit",
@@ -171,8 +183,8 @@ async def main():
     audio_parser.add_argument(
         "--timeout",
         type=int,
-        default=600,
-        help="Per-track ffmpeg timeout in seconds (default: 600)",
+        default=audio_timeout,
+        help=f"Per-track ffmpeg timeout in seconds (default: {audio_timeout})",
     )
 
     args = parser.parse_args()

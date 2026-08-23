@@ -64,6 +64,64 @@ uv run python -m app.scanner.cli full
 
 Add `-v` / `--verbose` to any command for debug logging.
 
+## Audio analysis (loudness, ReplayGain, BPM)
+
+Tag scans never open the audio itself. A second, separate pass decodes each file
+with ffmpeg and stores the results in `track_audio_analysis` — this is what
+feeds playback loudness normalization, so **until a track has been analysed it
+plays back un-normalized**.
+
+Run every phase (in production):
+
+```bash
+docker compose run --rm jamarr uv run python -m app.scanner.cli audio-analysis --phase all
+```
+
+Phases, in order:
+
+| Phase | Produces |
+|:---|:---|
+| `1` | Loudness (LUFS), loudness range, sample peak, true peak, leading/trailing silence |
+| `2` | Track ReplayGain via ffmpeg, plus album ReplayGain once every track on an album has current track ReplayGain |
+| `3` | BPM estimate from decoded PCM |
+| `4` | Derived playback/quality hints and a local energy score |
+
+Loudness normalization only needs phase 1 (phase 2 adds album-mode gain), so
+`--phase 1` is enough if that is all you are after.
+
+The first full-library run is long — it decodes every file. Chunk it and repeat
+until nothing is selected:
+
+```bash
+docker compose run --rm jamarr uv run python -m app.scanner.cli audio-analysis --phase all --limit 500
+```
+
+Results are cached per track against `track_quick_hash` and the analysis
+version, so re-runs skip anything already current and only pick up new or
+changed files. That makes the command safe to repeat and safe to interrupt.
+
+Full flag list: [Scanner CLI → `audio-analysis`](../reference/scanner-cli.md#audio-analysis).
+
+### Scheduling it
+
+The pass is **not** automatic — nothing triggers it after a library scan. To
+keep it current, add a schedule in the web UI under **Settings → Scheduler**
+using the **Audio Analysis (All Phases)** job, which runs phases 1–4 over
+whatever still needs them. A nightly cron after your scan job works well.
+
+Tuning lives in `config.yaml` (both the CLI and the scheduled job read it):
+
+```yaml
+audio_analysis:
+  batch_size: 25 # DB rows selected per batch
+  concurrency: 2 # ffmpeg analyses run at once
+  timeout_seconds: 600 # per-track ffmpeg timeout
+```
+
+`concurrency` is the one to raise on a machine with spare cores — analysis is
+ffmpeg-bound. Progress is logged (throttled to once a minute per phase) to the
+app log, and each phase logs its final counts.
+
 ## Scanning from the UI/API
 
 The web UI triggers scans via `POST /api/library/scan` and streams progress over
