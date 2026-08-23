@@ -10,7 +10,6 @@ from app.api.deps import get_current_user_jwt, get_optional_user_jwt
 from app.audio_normalization import (
     TARGET_LOUDNESS_LUFS,
     calculate_track_gain_db,
-    env_flag_enabled,
 )
 from app.auth_tokens import verify_stream_token
 from app.db import db_conn, get_db
@@ -188,9 +187,12 @@ async def stream_track(
         quality or stream_claims.get("stream_quality")
     )
 
-    normalization_requested = env_flag_enabled("JAMARR_LOUDNESS_NORMALIZATION", True)
-    if normalize is not None:
-        normalization_requested = normalize.strip().lower() not in {"0", "false", "off", "no"}
+    normalization_requested = normalize is None or normalize.strip().lower() not in {
+        "0",
+        "false",
+        "off",
+        "no",
+    }
     can_normalize = (
         normalization_requested
         and row["analysis_status"] == "complete"

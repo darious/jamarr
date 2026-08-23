@@ -30,12 +30,13 @@ Validation run before push:
 
 Jamarr now uses local analysis data to normalize playback loudness on the fly.
 
-Current defaults:
+Constants in `app/audio_normalization.py`:
 
-- Target loudness: `JAMARR_TARGET_LOUDNESS_LUFS`, default `-16`.
-- True-peak ceiling: `JAMARR_TRUE_PEAK_CEILING_DBTP`, default `-1`.
-- Max boost: `JAMARR_MAX_LOUDNESS_BOOST_DB`, default `6`.
-- Kill switch: `JAMARR_LOUDNESS_NORMALIZATION=0`.
+- Target loudness: `-16` LUFS.
+- True-peak ceiling: `-1` dBTP.
+- Max boost: `6` dB.
+
+Per-request opt-out: `?normalize=0` on `/api/stream`.
 
 Playback policy:
 

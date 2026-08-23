@@ -1,16 +1,9 @@
-import os
 from typing import Optional
 
-TARGET_LOUDNESS_LUFS = float(os.getenv("JAMARR_TARGET_LOUDNESS_LUFS", "-16"))
-TRUE_PEAK_CEILING_DBTP = float(os.getenv("JAMARR_TRUE_PEAK_CEILING_DBTP", "-1"))
-MAX_LOUDNESS_BOOST_DB = float(os.getenv("JAMARR_MAX_LOUDNESS_BOOST_DB", "6"))
-
-
-def env_flag_enabled(name: str, default: bool = True) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() not in {"0", "false", "off", "no"}
+# The values the normalization pipeline is designed and tested around.
+TARGET_LOUDNESS_LUFS = -16.0
+TRUE_PEAK_CEILING_DBTP = -1.0
+MAX_LOUDNESS_BOOST_DB = 6.0
 
 
 def calculate_normalization_gain_db(
