@@ -12,7 +12,6 @@ from app.audio_normalization import (
     album_sequence_track_ids,
     calculate_album_gain_db,
     calculate_track_gain_db,
-    env_flag_enabled,
     is_album_sequence_item,
 )
 from app.auth_tokens import create_stream_token
@@ -87,9 +86,6 @@ async def stream_normalization_claims(
     queue_index: int | None = None,
     client_id: str | None = None,
 ) -> dict[str, Any]:
-    if not env_flag_enabled("JAMARR_LOUDNESS_NORMALIZATION", True):
-        return raw_normalization_claims()
-
     row = await db.fetchrow(
         """
         SELECT loudness_lufs, true_peak_db, replaygain_album_gain_db

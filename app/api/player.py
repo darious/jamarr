@@ -11,7 +11,6 @@ from app.audio_normalization import (
     album_sequence_track_ids,
     calculate_album_gain_db,
     calculate_track_gain_db,
-    env_flag_enabled,
     is_album_sequence_item,
 )
 from app.db import get_db
@@ -178,10 +177,6 @@ async def get_player_state(
             """,
             track_ids,
         )
-        normalization_enabled = env_flag_enabled(
-            "JAMARR_LOUDNESS_NORMALIZATION",
-            True,
-        )
         analysis_map = {row["track_id"]: row for row in analysis_rows}
 
         # 3. Apply updates
@@ -224,8 +219,7 @@ async def get_player_state(
 
                 analysis = analysis_map.get(tid)
                 can_normalize = (
-                    normalization_enabled
-                    and analysis is not None
+                    analysis is not None
                     and analysis["status"] == "complete"
                     and analysis["loudness_lufs"] is not None
                 )
