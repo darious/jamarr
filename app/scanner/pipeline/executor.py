@@ -13,6 +13,7 @@ from app.scanner.pipeline.models import (
     StageResult,
 )
 from app.scanner.pipeline.base import EnrichmentStage
+from app.scanner.pipeline.stages import STAGE_NAMES
 import asyncio
 import logging
 
@@ -58,8 +59,12 @@ class PipelineExecutor:
             ready = self._find_ready_stages(plan.stages, dep_graph, completed, remaining)
             
             if not ready:
-                # Circular dependency or missing dependency
-                logger.error(f"No stages ready to execute. Remaining: {remaining}")
+                # Unplanned dependencies are pruned when the graph is built,
+                # so the only way to get here is a cycle between planned stages.
+                logger.error(
+                    f"Circular dependency between stages, cannot continue. "
+                    f"Remaining: {remaining}"
+                )
                 break
             
             # Execute ready stages in parallel
@@ -81,12 +86,38 @@ class PipelineExecutor:
         """
         Build a dependency graph from stages.
         
+        Dependencies on stages the plan does not include are dropped. A stage
+        that was never planned can never complete, so keeping it as a
+        prerequisite would deadlock the executor - which is what happened to
+        wikipedia_bio in bio-only refreshes, where core_metadata and
+        external_links are not planned. Stages guard their own prerequisites in
+        should_skip (bio skips when no Wikipedia URL turned up anywhere), so
+        running without an unplanned dependency is safe.
+        
+        A dependency naming a stage that does not exist at all is a bug rather
+        than a planning choice, so it is logged as an error before being
+        dropped.
+        
         Returns:
-            Dict mapping stage name to set of dependency names
+            Dict mapping stage name to set of dependency names, restricted to
+            the stages present in this plan
         """
+        planned = {stage.name for stage in stages}
         graph = {}
         for stage in stages:
-            graph[stage.name] = set(stage.dependencies())
+            deps = set(stage.dependencies())
+            for dep in sorted(deps - planned):
+                if dep in STAGE_NAMES:
+                    logger.debug(
+                        f"[{stage.name}] Dependency '{dep}' is not in this plan, "
+                        f"treating as satisfied"
+                    )
+                else:
+                    logger.error(
+                        f"[{stage.name}] Dependency '{dep}' is not a known stage, "
+                        f"treating as satisfied"
+                    )
+            graph[stage.name] = deps & planned
         return graph
     
     def _find_ready_stages(

@@ -14,6 +14,7 @@ from app.scanner.pipeline.models import (
     StageResult,
 )
 from app.scanner.pipeline.base import EnrichmentStage
+from app.scanner.pipeline.stages import WikipediaBioStage
 from unittest.mock import Mock
 import httpx
 
@@ -218,3 +219,136 @@ class TestPipelineExecutor:
         assert result.skip_count == 1
         assert result.success_count == 0
         assert stage.executed
+    
+    @pytest.mark.asyncio
+    async def test_v3_executor_unplanned_dependency_does_not_block(self, mock_context):
+        """A dependency the plan never included must not stall the stage."""
+        executor = PipelineExecutor()
+        plan = EnrichmentPlan()
+        
+        # stage2 depends on a stage that is not in the plan at all
+        stage1 = MockStage("stage1")
+        stage2 = MockStage("stage2", deps=["stage1", "never_planned"])
+        
+        plan.add_stage(stage1)
+        plan.add_stage(stage2)
+        
+        result = await executor.execute(plan, mock_context)
+        
+        assert result.success_count == 2
+        assert stage1.executed
+        assert stage2.executed
+    
+    @pytest.mark.asyncio
+    async def test_v3_executor_only_unplanned_dependencies(self, mock_context):
+        """A stage whose every dependency is unplanned still runs."""
+        executor = PipelineExecutor()
+        plan = EnrichmentPlan()
+        
+        stage = MockStage("stage", deps=["missing_a", "missing_b"])
+        plan.add_stage(stage)
+        
+        result = await executor.execute(plan, mock_context)
+        
+        assert result.success_count == 1
+        assert stage.executed
+    
+    @pytest.mark.asyncio
+    async def test_v3_executor_unknown_dependency_logged(self, mock_context, caplog):
+        """A dependency naming no real stage is an error, not a planning choice."""
+        executor = PipelineExecutor()
+        plan = EnrichmentPlan()
+        plan.add_stage(MockStage("stage", deps=["not_a_stage"]))
+        
+        with caplog.at_level("ERROR", logger="app.scanner.pipeline.executor"):
+            await executor.execute(plan, mock_context)
+        
+        assert "not a known stage" in caplog.text
+        assert "not_a_stage" in caplog.text
+    
+    @pytest.mark.asyncio
+    async def test_v3_executor_known_dependency_left_out_is_not_an_error(
+        self, mock_context, caplog
+    ):
+        """Leaving a real stage out of the plan is deliberate, so it stays quiet."""
+        executor = PipelineExecutor()
+        plan = EnrichmentPlan()
+        plan.add_stage(WikipediaBioStage())
+        
+        with caplog.at_level("ERROR", logger="app.scanner.pipeline.executor"):
+            await executor.execute(plan, mock_context)
+        
+        assert caplog.text == ""
+    
+    @pytest.mark.asyncio
+    async def test_v3_executor_circular_dependency_still_reported(
+        self, mock_context, caplog
+    ):
+        """A real cycle between planned stages must still surface and stop."""
+        executor = PipelineExecutor()
+        plan = EnrichmentPlan()
+        
+        stage1 = MockStage("stage1", deps=["stage2"])
+        stage2 = MockStage("stage2", deps=["stage1"])
+        
+        plan.add_stage(stage1)
+        plan.add_stage(stage2)
+        
+        with caplog.at_level("ERROR", logger="app.scanner.pipeline.executor"):
+            result = await executor.execute(plan, mock_context)
+        
+        assert "Circular dependency" in caplog.text
+        assert result.success_count == 0
+        assert not stage1.executed
+        assert not stage2.executed
+
+
+class TestDependencyGraphIsUnchangedForCompletePlans:
+    """Pruning must be invisible to any plan that includes all its dependencies.
+    
+    The full library scan plans every stage, so its dependency graph has to
+    come out byte-identical to the pre-pruning behaviour. Anything else means
+    the fix changed a path that was already working.
+    """
+    
+    @staticmethod
+    def _graph_without_pruning(stages):
+        """The graph the executor built before unplanned deps were pruned."""
+        return {s.name: set(s.dependencies()) for s in stages}
+    
+    @pytest.mark.parametrize("label,options", [
+        (
+            "scheduler full scan",
+            ScanOptions(
+                fetch_metadata=True, fetch_bio=True, fetch_artwork=True,
+                fetch_spotify_artwork=True, fetch_links=True,
+                refresh_top_tracks=True, refresh_singles=True,
+                fetch_similar_artists=True, fetch_album_metadata=True,
+                missing_only=True,
+            ),
+        ),
+        (
+            "metadata and links only",
+            ScanOptions(fetch_metadata=True, fetch_links=True),
+        ),
+        (
+            "bio with its dependencies planned",
+            ScanOptions(fetch_metadata=True, fetch_bio=True),
+        ),
+        (
+            "stages that declare no dependencies",
+            ScanOptions(
+                fetch_top_tracks=True, fetch_similar_artists=True,
+                fetch_singles=True,
+            ),
+        ),
+    ])
+    def test_v3_executor_complete_plan_graph_unchanged(self, label, options):
+        from app.scanner.pipeline.planner import EnrichmentPlanner
+        
+        artist = ArtistState(mbid="test-123", name="Test Artist")
+        plan = EnrichmentPlanner().create_plan(artist, options, {"rg-1"})
+        
+        assert plan.stage_count > 0, label
+        assert PipelineExecutor()._build_dependency_graph(plan.stages) == \
+            self._graph_without_pruning(plan.stages), label

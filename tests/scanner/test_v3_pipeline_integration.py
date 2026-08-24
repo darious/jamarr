@@ -282,3 +282,133 @@ class TestPipelineIntegration:
             
             # Should take ~0.1s (parallel) not ~0.3s (sequential)
             assert elapsed < 0.25, f"Took {elapsed}s, expected < 0.25s (parallel execution)"
+    
+    @pytest.mark.asyncio
+    async def test_v3_integration_bio_only_refresh_runs_bio(self, mock_http_client):
+        """The Refresh Artists job plans wikipedia_bio without its dependencies.
+        
+        core_metadata and external_links are deliberately not planned there, so
+        the bio stage has to run on the Wikipedia URL already stored on the
+        artist rather than waiting for stages that will never arrive.
+        """
+        
+        artist = ArtistState(
+            mbid="test-123",
+            name="Test Artist",
+            bio="Stale bio",
+            external_links={"wikipedia": "http://wikipedia.org/wiki/Test"},
+        )
+        
+        # Exactly the options the scheduled Refresh Artists job passes.
+        options = ScanOptions(
+            missing_only=False,
+            fetch_metadata=False,
+            fetch_links=False,
+            fetch_bio=True,
+            refresh_top_tracks=True,
+            refresh_singles=True,
+            fetch_similar_artists=True,
+        )
+        
+        async def fresh_bio(*args, **kwargs):
+            return "Refreshed bio"
+        
+        with patch("app.scanner.services.wikipedia.fetch_bio", side_effect=fresh_bio), \
+             patch("app.scanner.services.lastfm.fetch_top_tracks", return_value=[]), \
+             patch("app.scanner.services.lastfm.fetch_similar_artists", return_value=[]), \
+             patch("app.scanner.services.musicbrainz.fetch_release_groups", return_value=[]):
+            
+            context = EnrichmentContext(artist, options, mock_http_client)
+            
+            planner = EnrichmentPlanner()
+            plan = planner.create_plan(artist, options)
+            
+            # The plan itself is unchanged - no core_metadata, no external_links.
+            planned = {s.name for s in plan.stages}
+            assert planned == {
+                "wikipedia_bio", "top_tracks", "similar_artists", "singles"
+            }
+            
+            executor = PipelineExecutor()
+            result = await executor.execute(plan, context)
+        
+        # Every planned stage produced a result, bio included.
+        assert set(result.results) == planned
+        
+        bio_result = result.results["wikipedia_bio"]
+        assert bio_result.success
+        assert not bio_result.skipped
+        assert bio_result.data["bio"] == "Refreshed bio"
+    
+    @pytest.mark.asyncio
+    async def test_v3_integration_bio_refresh_reads_stored_wikipedia_link(
+        self, mock_http_client
+    ):
+        """The bio-only refresh has to find the URL on the artist row itself.
+        
+        Built through from_db_row with the shape _fetch_artists_for_update
+        emits (flattened link columns plus all_links), because that load path
+        is what decides whether the stage has a URL to work with once
+        core_metadata and external_links are not planned.
+        """
+        
+        row = {
+            "mbid": "test-123",
+            "name": "Test Artist",
+            "sort_name": "Artist, Test",
+            "bio": "Stale bio",
+            "image_url": None,
+            "image_source": None,
+            "artwork_id": None,
+            "wikipedia_url": "http://wikipedia.org/wiki/Test",
+            "wikidata_url": "http://wikidata.org/Q1",
+            "all_links": {
+                "wikipedia": "http://wikipedia.org/wiki/Test",
+                "wikidata": "http://wikidata.org/Q1",
+            },
+            "has_top_tracks": True,
+            "has_singles": True,
+            "has_similar": True,
+            "has_primary_album": True,
+        }
+        artist = ArtistState.from_db_row(row)
+        assert artist.get_link("wikipedia") == "http://wikipedia.org/wiki/Test"
+        
+        options = ScanOptions(
+            missing_only=False,
+            fetch_metadata=False,
+            fetch_links=False,
+            fetch_bio=True,
+        )
+        
+        with patch("app.scanner.services.wikipedia.fetch_bio", return_value="Refreshed bio"):
+            context = EnrichmentContext(artist, options, mock_http_client)
+            plan = EnrichmentPlanner().create_plan(artist, options)
+            result = await PipelineExecutor().execute(plan, context)
+        
+        bio_result = result.results["wikipedia_bio"]
+        assert bio_result.success
+        assert bio_result.data["bio"] == "Refreshed bio"
+    
+    @pytest.mark.asyncio
+    async def test_v3_integration_bio_refresh_skips_without_stored_link(
+        self, mock_http_client
+    ):
+        """No stored Wikipedia URL and no link stages planned means a clean skip."""
+        
+        artist = ArtistState(mbid="test-123", name="Test Artist", bio="Stale bio")
+        options = ScanOptions(
+            missing_only=False,
+            fetch_metadata=False,
+            fetch_links=False,
+            fetch_bio=True,
+        )
+        
+        context = EnrichmentContext(artist, options, mock_http_client)
+        plan = EnrichmentPlanner().create_plan(artist, options)
+        result = await PipelineExecutor().execute(plan, context)
+        
+        bio_result = result.results["wikipedia_bio"]
+        assert bio_result.skipped
+        assert bio_result.skip_reason == "No Wikipedia URL available"
+        assert result.error_count == 0
