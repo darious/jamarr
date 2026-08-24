@@ -187,6 +187,21 @@ class StageResult:
         )
     
     @classmethod
+    def no_data(cls, stage_name: str, metrics: Optional[Dict[str, int]] = None) -> 'StageResult':
+        """Create a result for a stage whose upstream source had nothing.
+        
+        This is neither a success nor a failure: the stage ran, the API
+        answered, and the answer was empty. Kept distinct from an error so an
+        artist Last.fm simply does not know about does not make a healthy run
+        look degraded.
+        """
+        return cls(
+            stage_name=stage_name,
+            success=False,
+            metrics=metrics or {}
+        )
+    
+    @classmethod
     def from_error(cls, stage_name: str, error_msg: str) -> 'StageResult':
         """Create an error result."""
         return cls(
@@ -302,6 +317,14 @@ class PipelineResult:
     def error_count(self) -> int:
         """Count failed stages."""
         return sum(1 for r in self.results.values() if r.error)
+    
+    @property
+    def no_data_count(self) -> int:
+        """Count stages that ran but found nothing upstream."""
+        return sum(
+            1 for r in self.results.values()
+            if not r.success and not r.skipped and not r.error
+        )
     
     @property
     def skip_count(self) -> int:

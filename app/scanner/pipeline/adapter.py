@@ -368,13 +368,12 @@ class PipelineAdapter:
         executor = PipelineExecutor()
         result = await executor.execute(plan, context)
         
-        # Log results
-        success_count = sum(1 for r in result.results.values() if r.success)
-        skip_count = sum(1 for r in result.results.values() if r.skipped)
-        error_count = sum(1 for r in result.results.values() if not r.success and not r.skipped)
-        
+        # Log results. A stage that ran and found nothing upstream is counted
+        # separately - it is an empty answer, not a failure.
         logger.info(
-            f"[{mbid}] Complete - Success: {success_count}, Skipped: {skip_count}, Errors: {error_count}, "
+            f"[{mbid}] Complete - Success: {result.success_count}, "
+            f"Skipped: {result.skip_count}, No data: {result.no_data_count}, "
+            f"Errors: {result.error_count}, "
             f"API calls: {result.total_api_calls}"
         )
         

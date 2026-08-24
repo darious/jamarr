@@ -42,9 +42,8 @@ class TopTracksStage(EnrichmentStage):
         tracks = await lastfm.fetch_top_tracks(mbid, name, context.client)
         
         if not tracks:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
+            return StageResult.no_data(
+                self.name,
                 metrics={"api_calls": 1, "searched": 1, "found": False}
             )
         
