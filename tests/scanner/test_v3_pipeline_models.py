@@ -273,6 +273,37 @@ class TestPipelineResult:
         assert result.error_count == 1
         assert result.total_api_calls == 2
     
+    def test_v3_pipeline_result_no_data_is_not_an_error(self):
+        """A stage that found nothing upstream is not a failed stage."""
+        result = PipelineResult(results={
+            "stage1": StageResult.success("stage1", {"a": 1}, {"api_calls": 1}),
+            "stage2": StageResult.no_data("stage2", {"api_calls": 1, "found": False}),
+            "stage3": StageResult.skip("stage3", "skipped"),
+            "stage4": StageResult.from_error("stage4", "failed"),
+        })
+        
+        assert result.no_data_count == 1
+        assert result.error_count == 1
+        assert result.success_count == 1
+        assert result.skip_count == 1
+        # Every stage lands in exactly one bucket.
+        assert (
+            result.success_count + result.skip_count
+            + result.no_data_count + result.error_count
+        ) == len(result.results)
+        assert result.total_api_calls == 2
+    
+    def test_v3_pipeline_result_no_data_shape(self):
+        """no_data results carry metrics but neither error nor skip."""
+        res = StageResult.no_data("stage", {"api_calls": 1, "found": False})
+        
+        assert not res.success
+        assert not res.skipped
+        assert res.error is None
+        assert res.skip_reason is None
+        assert res.data is None
+        assert res.metrics == {"api_calls": 1, "found": False}
+    
     def test_v3_pipeline_result_merge_data(self):
         """Test merging data from all successful stages."""
         result = PipelineResult(results={

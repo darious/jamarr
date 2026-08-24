@@ -83,9 +83,8 @@ class AlbumMetadataStage(EnrichmentStage):
                 success_count += 1
         
         if not albums_metadata:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
+            return StageResult.no_data(
+                self.name,
                 metrics={
                     "api_calls": len(tasks),
                     "searched": len(tasks),

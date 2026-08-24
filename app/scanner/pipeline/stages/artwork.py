@@ -117,9 +117,8 @@ class ArtworkStage(EnrichmentStage):
                         source = "spotify"
         
         if not data:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
+            return StageResult.no_data(
+                self.name,
                 metrics={"api_calls": api_calls, "searched": 1, "found": False}
             )
         

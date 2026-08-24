@@ -63,9 +63,8 @@ class CoreMetadataStage(EnrichmentStage):
         data = await musicbrainz.fetch_core(mbid, context.client, artist_name=name)
         
         if not data:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
+            return StageResult.no_data(
+                self.name,
                 metrics={"api_calls": 1, "searched": 1, "found": False}
             )
         

@@ -350,6 +350,19 @@ class TestTopTracksStage:
         assert result.success
         assert result.data["top_tracks"] == mock_tracks
         assert result.metrics["tracks_found"] == 2
+    
+    @pytest.mark.asyncio
+    async def test_v3_stage_top_tracks_empty_is_not_an_error(self, basic_context):
+        """Last.fm knowing nothing about an artist is an empty answer, not a failure."""
+        stage = TopTracksStage()
+        
+        with patch("app.scanner.services.lastfm.fetch_top_tracks", AsyncMock(return_value=[])):
+            result = await stage.execute(basic_context)
+        
+        assert not result.success
+        assert result.error is None
+        assert not result.skipped
+        assert result.metrics["found"] is False
 
 
 class TestSimilarArtistsStage:

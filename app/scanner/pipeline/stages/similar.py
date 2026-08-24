@@ -42,9 +42,8 @@ class SimilarArtistsStage(EnrichmentStage):
         similar = await lastfm.fetch_similar_artists(mbid, name, context.client)
         
         if not similar:
-            return StageResult(
-                stage_name=self.name,
-                success=False,
+            return StageResult.no_data(
+                self.name,
                 metrics={"api_calls": 1, "searched": 1, "found": False}
             )
         
