@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/logo.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2370,7 +2370,7 @@
 
 <span class="c1"># Plan contains only the stages needed for this artist</span>
 <span class="k">for</span> <span class="n">stage</span> <span class="ow">in</span> <span class="n">plan</span><span class="o">.</span><span class="n">stages</span><span class="p">:</span>
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Will run: </span><span class="si">{</span><span class="n">stage</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Will run: </span><span class="si">{</span><span class="n">stage</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div></p>
 <h3 id="2-enrichment-stages">2. Enrichment Stages<a class="headerlink" href="#2-enrichment-stages" title="Permanent link">&para;</a></h3>
 <p><strong>Location:</strong> <code>app/scanner/pipeline/stages/</code></p>
@@ -2391,22 +2391,22 @@
 <p><strong>Example Stage:</strong>
 <div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">ExternalLinksStage</span><span class="p">(</span><span class="n">EnrichmentStage</span><span class="p">):</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">dependencies</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
-        <span class="k">return</span> <span class="p">[</span><span class="s2">&quot;core_metadata&quot;</span><span class="p">]</span>  <span class="c1"># Needs Wikidata URL</span>
+        <span class="k">return</span> <span class="p">[</span><span class="s2">"core_metadata"</span><span class="p">]</span>  <span class="c1"># Needs Wikidata URL</span>
 
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">context</span><span class="p">:</span> <span class="n">EnrichmentContext</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">StageResult</span><span class="p">:</span>
         <span class="c1"># Fetch from Wikidata</span>
         <span class="n">links</span> <span class="o">=</span> <span class="k">await</span> <span class="n">wikidata</span><span class="o">.</span><span class="n">fetch_external_links</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
 
         <span class="c1"># Fallback to Qobuz search if no Qobuz link found</span>
-        <span class="k">if</span> <span class="ow">not</span> <span class="n">links</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;qobuz_url&quot;</span><span class="p">):</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">links</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"qobuz_url"</span><span class="p">):</span>
             <span class="n">qobuz_url</span> <span class="o">=</span> <span class="k">await</span> <span class="n">qobuz_client</span><span class="o">.</span><span class="n">search_artist</span><span class="p">(</span><span class="n">artist_name</span><span class="p">)</span>
             <span class="k">if</span> <span class="n">qobuz_url</span><span class="p">:</span>
-                <span class="n">links</span><span class="p">[</span><span class="s2">&quot;qobuz_url&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">qobuz_url</span>
+                <span class="n">links</span><span class="p">[</span><span class="s2">"qobuz_url"</span><span class="p">]</span> <span class="o">=</span> <span class="n">qobuz_url</span>
 
         <span class="k">return</span> <span class="n">StageResult</span><span class="o">.</span><span class="n">success</span><span class="p">(</span>
             <span class="n">stage_name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
             <span class="n">data</span><span class="o">=</span><span class="n">links</span><span class="p">,</span>
-            <span class="n">metrics</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;searched&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;found&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">(</span><span class="n">links</span><span class="p">)}</span>
+            <span class="n">metrics</span><span class="o">=</span><span class="p">{</span><span class="s2">"searched"</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">"found"</span><span class="p">:</span> <span class="nb">bool</span><span class="p">(</span><span class="n">links</span><span class="p">)}</span>
         <span class="p">)</span>
 </code></pre></div></p>
 <h3 id="3-pipeline-executor">3. Pipeline Executor<a class="headerlink" href="#3-pipeline-executor" title="Permanent link">&para;</a></h3>
@@ -2475,16 +2475,16 @@
 <div class="highlight"><pre><span></span><code><span class="c1"># Pre-scan: Count missing data</span>
 <span class="k">for</span> <span class="n">artist</span> <span class="ow">in</span> <span class="n">artists</span><span class="p">:</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">artist</span><span class="o">.</span><span class="n">bio</span><span class="p">:</span>
-        <span class="n">missing_counts</span><span class="p">[</span><span class="s2">&quot;Bio&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
-    <span class="k">if</span> <span class="ow">not</span> <span class="n">artist</span><span class="o">.</span><span class="n">get_link</span><span class="p">(</span><span class="s2">&quot;qobuz&quot;</span><span class="p">):</span>
-        <span class="n">missing_counts</span><span class="p">[</span><span class="s2">&quot;External Links&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">missing_counts</span><span class="p">[</span><span class="s2">"Bio"</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">artist</span><span class="o">.</span><span class="n">get_link</span><span class="p">(</span><span class="s2">"qobuz"</span><span class="p">):</span>
+        <span class="n">missing_counts</span><span class="p">[</span><span class="s2">"External Links"</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
 
 <span class="c1"># Post-scan: Aggregate from stage results</span>
 <span class="k">for</span> <span class="n">pipeline_result</span> <span class="ow">in</span> <span class="n">results</span><span class="p">:</span>
     <span class="k">for</span> <span class="n">stage_name</span><span class="p">,</span> <span class="n">stage_result</span> <span class="ow">in</span> <span class="n">pipeline_result</span><span class="o">.</span><span class="n">results</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
         <span class="n">metrics</span> <span class="o">=</span> <span class="n">stage_result</span><span class="o">.</span><span class="n">metrics</span> <span class="ow">or</span> <span class="p">{}</span>
-        <span class="n">searched</span> <span class="o">+=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;searched&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
-        <span class="k">if</span> <span class="n">metrics</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;found&quot;</span><span class="p">):</span>
+        <span class="n">searched</span> <span class="o">+=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"searched"</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">metrics</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"found"</span><span class="p">):</span>
             <span class="n">hits</span> <span class="o">+=</span> <span class="mi">1</span>
 
 <span class="c1"># Calculate misses</span>
@@ -2542,18 +2542,18 @@
 <p>Each component is independently testable:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Test planner logic</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">test_planner_missing_only_skips_existing_metadata</span><span class="p">():</span>
-    <span class="n">artist</span> <span class="o">=</span> <span class="n">ArtistState</span><span class="p">(</span><span class="n">mbid</span><span class="o">=</span><span class="s2">&quot;123&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;Beatles&quot;</span><span class="p">,</span> <span class="n">bio</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">)</span>
+    <span class="n">artist</span> <span class="o">=</span> <span class="n">ArtistState</span><span class="p">(</span><span class="n">mbid</span><span class="o">=</span><span class="s2">"123"</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"Beatles"</span><span class="p">,</span> <span class="n">bio</span><span class="o">=</span><span class="s2">"..."</span><span class="p">)</span>
     <span class="n">options</span> <span class="o">=</span> <span class="n">ScanOptions</span><span class="p">(</span><span class="n">fetch_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">missing_only</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 
     <span class="n">planner</span> <span class="o">=</span> <span class="n">EnrichmentPlanner</span><span class="p">()</span>
     <span class="n">plan</span> <span class="o">=</span> <span class="n">planner</span><span class="o">.</span><span class="n">create_plan</span><span class="p">(</span><span class="n">artist</span><span class="p">,</span> <span class="n">options</span><span class="p">)</span>
 
-    <span class="k">assert</span> <span class="s2">&quot;core_metadata&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">plan</span><span class="o">.</span><span class="n">stages</span><span class="p">]</span>
+    <span class="k">assert</span> <span class="s2">"core_metadata"</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">plan</span><span class="o">.</span><span class="n">stages</span><span class="p">]</span>
 
 <span class="c1"># Test stage execution</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_external_links_stage_searches_qobuz</span><span class="p">():</span>
     <span class="n">context</span> <span class="o">=</span> <span class="n">EnrichmentContext</span><span class="p">(</span>
-        <span class="n">artist</span><span class="o">=</span><span class="n">ArtistState</span><span class="p">(</span><span class="n">mbid</span><span class="o">=</span><span class="s2">&quot;123&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;Travis Barker&quot;</span><span class="p">),</span>
+        <span class="n">artist</span><span class="o">=</span><span class="n">ArtistState</span><span class="p">(</span><span class="n">mbid</span><span class="o">=</span><span class="s2">"123"</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"Travis Barker"</span><span class="p">),</span>
         <span class="n">options</span><span class="o">=</span><span class="n">ScanOptions</span><span class="p">(),</span>
         <span class="n">client</span><span class="o">=</span><span class="n">mock_client</span>
     <span class="p">)</span>
@@ -2562,12 +2562,12 @@
     <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">stage</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">context</span><span class="p">)</span>
 
     <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">success</span>
-    <span class="k">assert</span> <span class="s2">&quot;qobuz_url&quot;</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">data</span>
+    <span class="k">assert</span> <span class="s2">"qobuz_url"</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">data</span>
 </code></pre></div>
 <h3 id="integration-tests">Integration Tests<a class="headerlink" href="#integration-tests" title="Permanent link">&para;</a></h3>
 <p>Test complete pipeline flows:</p>
 <div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_full_enrichment_pipeline</span><span class="p">():</span>
-    <span class="n">artist</span> <span class="o">=</span> <span class="n">ArtistState</span><span class="p">(</span><span class="n">mbid</span><span class="o">=</span><span class="s2">&quot;123&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">artist</span> <span class="o">=</span> <span class="n">ArtistState</span><span class="p">(</span><span class="n">mbid</span><span class="o">=</span><span class="s2">"123"</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
     <span class="n">options</span> <span class="o">=</span> <span class="n">ScanOptions</span><span class="p">(</span><span class="n">fetch_metadata</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">fetch_bio</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 
     <span class="n">planner</span> <span class="o">=</span> <span class="n">EnrichmentPlanner</span><span class="p">()</span>
@@ -2577,8 +2577,8 @@
     <span class="n">context</span> <span class="o">=</span> <span class="n">EnrichmentContext</span><span class="p">(</span><span class="n">artist</span><span class="p">,</span> <span class="n">options</span><span class="p">,</span> <span class="n">real_client</span><span class="p">)</span>
     <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">executor</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">plan</span><span class="p">,</span> <span class="n">context</span><span class="p">)</span>
 
-    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="s2">&quot;core_metadata&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">success</span>
-    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="s2">&quot;bio&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">success</span>
+    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="s2">"core_metadata"</span><span class="p">]</span><span class="o">.</span><span class="n">success</span>
+    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="s2">"bio"</span><span class="p">]</span><span class="o">.</span><span class="n">success</span>
 </code></pre></div>
 <h2 id="benefits">Benefits<a class="headerlink" href="#benefits" title="Permanent link">&para;</a></h2>
 <h3 id="for-developers">For Developers<a class="headerlink" href="#for-developers" title="Permanent link">&para;</a></h3>
@@ -2613,12 +2613,12 @@
 </ol>
 <p><strong>Example:</strong>
 <div class="highlight"><pre><span></span><code><span class="c1"># In external_links.py</span>
-<span class="k">if</span> <span class="ow">not</span> <span class="n">links</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;qobuz_url&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">existing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;qobuz&quot;</span><span class="p">):</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">links</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"qobuz_url"</span><span class="p">)</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">existing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"qobuz"</span><span class="p">):</span>
     <span class="n">qobuz_client</span> <span class="o">=</span> <span class="n">QobuzClient</span><span class="p">(</span><span class="n">client</span><span class="o">=</span><span class="n">context</span><span class="o">.</span><span class="n">client</span><span class="p">)</span>
     <span class="n">qobuz_url</span> <span class="o">=</span> <span class="k">await</span> <span class="n">qobuz_client</span><span class="o">.</span><span class="n">search_artist</span><span class="p">(</span><span class="n">artist_name</span><span class="p">)</span>
 
     <span class="k">if</span> <span class="n">qobuz_url</span><span class="p">:</span>
-        <span class="n">links</span><span class="p">[</span><span class="s2">&quot;qobuz_url&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">qobuz_url</span>
+        <span class="n">links</span><span class="p">[</span><span class="s2">"qobuz_url"</span><span class="p">]</span> <span class="o">=</span> <span class="n">qobuz_url</span>
         <span class="c1"># Counter increments automatically</span>
 </code></pre></div></p>
 <h2 id="migration-from-v2">Migration from V2<a class="headerlink" href="#migration-from-v2" title="Permanent link">&para;</a></h2>
@@ -2690,7 +2690,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.top", "navigation.indexes", "content.code.copy", "content.action.edit", "search.suggest", "search.highlight", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

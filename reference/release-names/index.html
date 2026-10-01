@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/logo.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1887,8 +1887,8 @@
 <h1 id="release-names">Release names<a class="headerlink" href="#release-names" title="Permanent link">&para;</a></h1>
 <p>Every Jamarr release gets a musician or band as a codename, passed to
 <code>release.sh</code> alongside the version:</p>
-<div class="highlight"><pre><span></span><code>./release.sh<span class="w"> </span>v1.8.1<span class="w"> </span><span class="s2">&quot;Hans Zimmer&quot;</span><span class="w">           </span><span class="c1"># server: Docker image</span>
-./release.sh<span class="w"> </span>android-v1.9.0<span class="w"> </span><span class="s2">&quot;All Time Low&quot;</span><span class="w">  </span><span class="c1"># app: signed APK</span>
+<div class="highlight"><pre><span></span><code>./release.sh<span class="w"> </span>v1.8.1<span class="w"> </span><span class="s2">"Hans Zimmer"</span><span class="w">           </span><span class="c1"># server: Docker image</span>
+./release.sh<span class="w"> </span>android-v1.9.0<span class="w"> </span><span class="s2">"All Time Low"</span><span class="w">  </span><span class="c1"># app: signed APK</span>
 </code></pre></div>
 <p>That produces the tag and a GitHub release titled <code>&lt;tag&gt; - &lt;Name&gt;</code>. Use
 <code>--dry-run</code> first to validate without pushing.</p>
@@ -2155,7 +2155,7 @@ matching how the library browses.</p>
 <div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="k">DISTINCT</span><span class="w"> </span><span class="n">ta</span><span class="p">.</span><span class="n">track_id</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">tracks</span>
 <span class="k">FROM</span><span class="w"> </span><span class="n">artist</span><span class="w"> </span><span class="n">a</span>
 <span class="k">JOIN</span><span class="w"> </span><span class="n">track_artist</span><span class="w"> </span><span class="n">ta</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">ta</span><span class="p">.</span><span class="n">artist_mbid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">mbid</span>
-<span class="k">WHERE</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">letter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;Z&#39;</span>
+<span class="k">WHERE</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">letter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'Z'</span>
 <span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">name</span>
 <span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">tracks</span><span class="w"> </span><span class="k">DESC</span><span class="p">,</span><span class="w"> </span><span class="n">a</span><span class="p">.</span><span class="n">name</span>
 <span class="k">LIMIT</span><span class="w"> </span><span class="mi">45</span><span class="p">;</span>
@@ -2246,7 +2246,7 @@ It does not check:</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.top", "navigation.indexes", "content.code.copy", "content.action.edit", "search.suggest", "search.highlight", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
