@@ -18,6 +18,13 @@ def reset_history_tracker(key: str):
         del _history_tracker[key]
 
 
+def play_threshold_seconds(duration: float | None) -> float:
+    """How long a track must play to count: 30s or 20% of it, whichever is smaller."""
+    if duration and duration > 0:
+        return min(30, duration * 0.2)
+    return 30
+
+
 def should_log_history(
     key: str, track_id: int, position: float, duration: float
 ) -> bool:
@@ -32,13 +39,7 @@ def should_log_history(
         # Already logged this track for this key
         return False
 
-    # Threshold: 30s or 20% of track, whichever is smaller
-    if duration and duration > 0:
-        threshold = min(30, duration * 0.2)
-    else:
-        threshold = 30
-
-    if position >= threshold:
+    if position >= play_threshold_seconds(duration):
         _history_tracker[key] = {"track_id": track_id, "logged_at": time.time()}
         return True
     return False
@@ -88,8 +89,12 @@ async def update_now_playing_lastfm(user_id: int, track_id: int):
         logger.error(f"Failed to update Now Playing on Last.fm: {e}")
 
 
-async def scrobble_to_lastfm(user_id: int, track_id: int):
-    """Background task to scrobble a track to Last.fm"""
+async def scrobble_to_lastfm(user_id: int, track_id: int, played_at: int | None = None):
+    """Background task to scrobble a track to Last.fm.
+
+    ``played_at`` is the Unix time the track started; it defaults to now, and
+    is only passed for plays reported after the fact (offline playback).
+    """
     try:
         async with db_conn() as db:
             # Check if user has Last.fm enabled
@@ -124,7 +129,7 @@ async def scrobble_to_lastfm(user_id: int, track_id: int):
                     'duration': int(track_row['duration_seconds']) if track_row['duration_seconds'] else None,
                     'mbid': track_row['artist_mbid'],
                 },
-                timestamp=int(time.time())
+                timestamp=played_at if played_at is not None else int(time.time())
             )
             
             logger.info(f"Scrobbled track {track_id} to Last.fm for user {user_id}")
