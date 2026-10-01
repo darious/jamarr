@@ -46,13 +46,22 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.jamarr.android.data.AlbumDetail
 import com.jamarr.android.data.ArtistDetail
-import com.jamarr.android.data.ArtistTrackEntry
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.data.SimilarArtist
 import com.jamarr.android.data.sortedReleasesDesc
-import com.jamarr.android.data.sortedSinglesAsc
+import com.jamarr.android.download.DownloadGroupIds
+import com.jamarr.android.download.GroupDownloadRequest
+import com.jamarr.android.download.GroupDownloadStatus
+import com.jamarr.android.download.db.DownloadGroupKind
+import com.jamarr.android.download.estimateDownloadBytes
+import com.jamarr.android.download.formatBytes
+import com.jamarr.android.data.TopTrackList
+import com.jamarr.android.data.toSearchTrack
+import com.jamarr.android.data.topTrackEntries
 import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.ArtistArt
+import com.jamarr.android.ui.components.ConfirmDialog
+import com.jamarr.android.ui.components.GroupDownloadButton
 import com.jamarr.android.ui.components.HeartIcon
 import com.jamarr.android.ui.components.PlayIcon
 import com.jamarr.android.ui.components.TrackRow
@@ -67,12 +76,6 @@ import com.jamarr.android.ui.theme.JamarrType
 
 /** Roughly six rows; the rest of the list scrolls within the section. */
 private val TopTracksMaxHeight = 340.dp
-
-private enum class TopTracksTab(val label: String) {
-    MostScrobbled("Most Scrobbled"),
-    MostListened("Most Listened"),
-    Singles("Singles"),
-}
 
 private enum class DiscographyTab(val label: String) {
     Albums("Albums"),
@@ -109,15 +112,23 @@ fun ArtistDetailScreen(
     onSimilarArtistClick: (mbid: String?, name: String) -> Unit,
     onPlayTrack: (SearchTrack, List<SearchTrack>) -> Unit,
     contentPadding: PaddingValues,
+    groupStatus: (String) -> GroupDownloadStatus? = { null },
+    onToggleGroupDownload: ((GroupDownloadRequest) -> Unit)? = null,
 ) {
     val ctx = LocalJamarrContext.current
     val scope = rememberCoroutineScope()
     val detail = remember { mutableStateOf<ArtistDetail?>(null) }
     val albums = remember { mutableStateOf<List<AlbumDetail>>(emptyList()) }
-    val tab = remember { mutableStateOf(TopTracksTab.MostScrobbled) }
+    val tab = remember { mutableStateOf(TopTrackList.MostScrobbled) }
     val discoTab = remember { mutableStateOf(DiscographyTab.Albums) }
     val errorState = remember { mutableStateOf<String?>(null) }
     val isFavorite = remember { mutableStateOf(false) }
+    // "Download all releases": tracks are gathered first so the confirm dialog
+    // can state the real count and size, never a one-tap discography.
+    val preparingAll = remember { mutableStateOf(false) }
+    val pendingAll = remember { mutableStateOf<GroupDownloadRequest?>(null) }
+    val pendingAllReleases = remember { mutableStateOf(0) }
+    val confirmRemoveAll = remember { mutableStateOf(false) }
 
     LaunchedEffect(initialMbid, initialName) {
         errorState.value = null
@@ -208,11 +219,7 @@ fun ArtistDetailScreen(
 
             // Order mirrors the web UI: scrobbled/listened keep the server order
             // (top_track.rank, plays DESC); singles are re-sorted oldest-first.
-            val topList = when (tab.value) {
-                TopTracksTab.MostScrobbled -> detail.value?.topTracks.orEmpty()
-                TopTracksTab.MostListened -> detail.value?.mostListened.orEmpty()
-                TopTracksTab.Singles -> detail.value?.singles.orEmpty().sortedSinglesAsc()
-            }
+            val topList = detail.value?.topTrackEntries(tab.value).orEmpty()
             val resolvedQueue = topList.mapNotNull { it.toSearchTrack(artistName) }
             item {
                 Row(
@@ -233,6 +240,28 @@ fun ArtistDetailScreen(
                             style = JamarrType.CaptionSmall,
                             color = JamarrColors.Muted,
                             modifier = Modifier.padding(end = 10.dp),
+                        )
+                    }
+                    val topMbid = resolvedMbid
+                    if (onToggleGroupDownload != null && !topMbid.isNullOrBlank() && resolvedQueue.isNotEmpty()) {
+                        val groupId = DownloadGroupIds.artistTop(topMbid, tab.value)
+                        GroupDownloadButton(
+                            status = groupStatus(groupId),
+                            size = 30.dp,
+                            onClick = {
+                                onToggleGroupDownload(
+                                    GroupDownloadRequest(
+                                        groupId = groupId,
+                                        kind = DownloadGroupKind.ARTIST_TOP,
+                                        title = artistName,
+                                        subtitle = tab.value.label,
+                                        artSha1 = detail.value?.artSha1 ?: initialArtSha1,
+                                        tracks = resolvedQueue,
+                                        artistMbid = topMbid,
+                                    ),
+                                )
+                            },
+                            modifier = Modifier.padding(end = 8.dp),
                         )
                     }
                     if (resolvedQueue.isNotEmpty()) {
@@ -257,9 +286,9 @@ fun ArtistDetailScreen(
             }
             item {
                 PillTabs(
-                    tabs = TopTracksTab.entries.map { it.label },
+                    tabs = TopTrackList.entries.map { it.label },
                     selectedIndex = tab.value.ordinal,
-                    onSelect = { idx -> tab.value = TopTracksTab.entries[idx] },
+                    onSelect = { idx -> tab.value = TopTrackList.entries[idx] },
                     modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding),
                 )
             }
@@ -301,15 +330,63 @@ fun ArtistDetailScreen(
             }
             if (availableTabs.isNotEmpty()) {
                 item {
-                    Text(
-                        text = "Discography",
-                        style = JamarrType.SectionHeader,
-                        color = JamarrColors.Text,
-                        modifier = Modifier.padding(
-                            horizontal = JamarrDims.ScreenPadding,
-                            vertical = 12.dp,
-                        ),
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = JamarrDims.ScreenPadding, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Discography",
+                            style = JamarrType.SectionHeader,
+                            color = JamarrColors.Text,
+                            modifier = Modifier.weight(1f),
+                        )
+                        val allMbid = resolvedMbid
+                        if (onToggleGroupDownload != null && !allMbid.isNullOrBlank()) {
+                            val status = groupStatus(DownloadGroupIds.artist(allMbid))
+                            if (preparingAll.value) {
+                                Text(text = "…", style = JamarrType.Caption, color = JamarrColors.Muted)
+                            } else {
+                                GroupDownloadButton(
+                                    status = status,
+                                    size = 30.dp,
+                                    onClick = {
+                                        if (status != null) {
+                                            confirmRemoveAll.value = true
+                                            return@GroupDownloadButton
+                                        }
+                                        preparingAll.value = true
+                                        scope.launch {
+                                            val releases = albums.value.filter { it.type != "appears_on" }
+                                            val tracks = releases.flatMap { album ->
+                                                runCatching {
+                                                    ctx.apiClient.albumTracks(
+                                                        serverUrl = ctx.serverUrl,
+                                                        accessToken = ctx.accessToken,
+                                                        albumMbid = album.albumMbid ?: album.mbReleaseId,
+                                                        album = album.album,
+                                                        artist = album.artistName ?: artistName,
+                                                    )
+                                                }.getOrDefault(emptyList())
+                                            }.distinctBy { it.id }
+                                            pendingAllReleases.value = releases.size
+                                            pendingAll.value = GroupDownloadRequest(
+                                                groupId = DownloadGroupIds.artist(allMbid),
+                                                kind = DownloadGroupKind.ARTIST,
+                                                title = artistName,
+                                                subtitle = "All releases",
+                                                artSha1 = detail.value?.artSha1 ?: initialArtSha1,
+                                                tracks = tracks,
+                                                artistMbid = allMbid,
+                                            )
+                                            preparingAll.value = false
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
                 item {
                     val selectedTab = if (discoTab.value in availableTabs) discoTab.value else availableTabs.first()
@@ -355,6 +432,46 @@ fun ArtistDetailScreen(
                 }
             }
         }
+    }
+
+    pendingAll.value?.let { request ->
+        val releases = pendingAllReleases.value
+        ConfirmDialog(
+            title = "Download all releases?",
+            text = "${request.tracks.size} tracks from $releases " +
+                "release${if (releases == 1) "" else "s"}, about " +
+                "${formatBytes(estimateDownloadBytes(request.tracks))}.",
+            confirmLabel = "Download",
+            onConfirm = {
+                pendingAll.value = null
+                onToggleGroupDownload?.invoke(request)
+            },
+            onDismiss = { pendingAll.value = null },
+        )
+    }
+
+    val removeMbid = resolvedMbid
+    if (confirmRemoveAll.value && removeMbid != null) {
+        ConfirmDialog(
+            title = "Remove downloads?",
+            text = "All releases by $artistName will be removed from this device, " +
+                "except tracks another download still holds.",
+            confirmLabel = "Remove",
+            onConfirm = {
+                confirmRemoveAll.value = false
+                onToggleGroupDownload?.invoke(
+                    GroupDownloadRequest(
+                        groupId = DownloadGroupIds.artist(removeMbid),
+                        kind = DownloadGroupKind.ARTIST,
+                        title = artistName,
+                        subtitle = null,
+                        artSha1 = null,
+                        tracks = emptyList(),
+                    ),
+                )
+            },
+            onDismiss = { confirmRemoveAll.value = false },
+        )
     }
 }
 
@@ -603,17 +720,4 @@ private fun SimilarArtistTile(artist: SimilarArtist, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
         )
     }
-}
-
-private fun ArtistTrackEntry.toSearchTrack(artistName: String): SearchTrack? {
-    val id = localTrackId ?: return null
-    return SearchTrack(
-        id = id,
-        title = displayTitle,
-        artist = artistName,
-        album = album,
-        durationSeconds = durationSeconds,
-        artSha1 = artSha1,
-        mbReleaseId = mbReleaseId,
-    )
 }

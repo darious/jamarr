@@ -1,13 +1,21 @@
 package com.jamarr.android
 
 import android.app.Application
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
 import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.auth.TokenHolder
+import com.jamarr.android.data.ConnectivityMonitor
+import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrCookieJar
 import com.jamarr.android.download.JamarrDownloads
+import com.jamarr.android.download.OfflineArtworkInterceptor
+import com.jamarr.android.download.OfflineArtworkStore
 import com.jamarr.android.playback.JamarrMediaCache
+import java.io.File
 
-class JamarrApplication : Application() {
+class JamarrApplication : Application(), SingletonImageLoader.Factory {
     lateinit var tokenHolder: TokenHolder
         private set
     lateinit var cookieJar: JamarrCookieJar
@@ -23,6 +31,16 @@ class JamarrApplication : Application() {
     /** Download engine and its metadata store; see `JamarrDownloads`. */
     val downloads: JamarrDownloads by lazy { JamarrDownloads(this) }
 
+    /** Cover art for downloads, served to Coil ahead of the network. */
+    val artworkStore: OfflineArtworkStore by lazy { OfflineArtworkStore(File(filesDir, "art")) }
+
+    /** Online/offline state, shared by the UI and the download sync. */
+    val connectivity: ConnectivityMonitor by lazy {
+        // Unauthenticated: the probe only ever calls /api/health.
+        val probeClient = JamarrApiClient()
+        ConnectivityMonitor(this, SettingsStore(this)) { url -> probeClient.isServerReachable(url) }
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -30,6 +48,11 @@ class JamarrApplication : Application() {
         tokenHolder = TokenHolder()
         cookieJar = JamarrCookieJar(settingsStore)
     }
+
+    override fun newImageLoader(context: PlatformContext): ImageLoader =
+        ImageLoader.Builder(context)
+            .components { add(OfflineArtworkInterceptor(artworkStore)) }
+            .build()
 
     companion object {
         @Volatile

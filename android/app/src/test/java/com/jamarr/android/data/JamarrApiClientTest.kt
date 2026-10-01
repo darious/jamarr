@@ -1,6 +1,7 @@
 package com.jamarr.android.data
 
 import com.jamarr.android.auth.TokenHolder
+import java.io.IOException
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -24,6 +25,55 @@ class JamarrApiClientTest {
     @After
     fun tearDown() {
         server.close()
+    }
+
+    /**
+     * Offline mode depends on this: with the server out of reach there is no
+     * 401, so no refresh, so the saved session survives however long the
+     * phone stays offline. A change that cleared the token on any failure
+     * would sign people out of their downloads.
+     */
+    @Test
+    fun anUnreachableServerLeavesTheSessionAlone() = runTest {
+        val serverUrl = server.url("/").toString()
+        server.close()
+        val tokenHolder = TokenHolder("token")
+        val client = JamarrApiClient(tokenHolder)
+
+        try {
+            client.search(serverUrl, "token", "abc")
+            fail("Expected the request to fail")
+        } catch (_: IOException) {
+        }
+
+        assertEquals("token", tokenHolder.get())
+    }
+
+    @Test
+    fun aRejectedRefreshDoesEndTheSession() = runTest {
+        server.enqueue(MockResponse.Builder().code(401).build())
+        server.enqueue(MockResponse.Builder().code(401).build())
+        val tokenHolder = TokenHolder("token")
+        val client = JamarrApiClient(tokenHolder)
+
+        runCatching { client.search(server.url("/").toString(), "token", "abc") }
+
+        server.takeRequest() // the search itself
+        assertEquals("/api/auth/refresh", server.takeRequest().url.encodedPath)
+        assertEquals("", tokenHolder.get())
+    }
+
+    @Test
+    fun healthProbeReportsReachability() = runTest {
+        server.enqueue(MockResponse.Builder().code(200).body("""{"status":"ok"}""").build())
+        val serverUrl = server.url("/").toString()
+        val client = JamarrApiClient()
+
+        assertTrue(client.isServerReachable(serverUrl))
+        assertEquals("/api/health", server.takeRequest().url.encodedPath)
+
+        server.close()
+        assertEquals(false, client.isServerReachable(serverUrl))
     }
 
     @Test

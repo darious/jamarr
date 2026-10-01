@@ -17,8 +17,11 @@ import com.jamarr.android.JamarrApplication
 import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.data.toSearchTrack
+import com.jamarr.android.data.topTrackEntries
 import com.jamarr.android.download.db.DownloadGroupEntity
 import com.jamarr.android.download.db.DownloadGroupKind
+import com.jamarr.android.download.db.DownloadGroupTrackEntity
 import com.jamarr.android.download.db.DownloadRecordState
 import com.jamarr.android.download.db.DownloadedTrackEntity
 import com.jamarr.android.download.db.JamarrDownloadDatabase
@@ -39,6 +42,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Everything the download engine needs, built once per process.
@@ -91,6 +96,16 @@ class JamarrDownloads(context: Context) {
     /** Everything the user has downloaded, newest first. */
     fun observeTracks(): Flow<List<DownloadedTrackEntity>> = database.downloadDao().observeTracks()
 
+    fun observeGroups(): Flow<List<DownloadGroupEntity>> = database.downloadDao().observeGroups()
+
+    fun observeLinks(): Flow<List<DownloadGroupTrackEntity>> = database.downloadDao().observeLinks()
+
+    fun observeGroupTracks(groupId: String): Flow<List<DownloadedTrackEntity>> =
+        database.downloadDao().observeGroupTracks(groupId)
+
+    /** One sync at a time; a reconnect during a start-up sync waits its turn. */
+    private val syncLock = Mutex()
+
     init {
         downloadManager.addListener(
             object : DownloadManager.Listener {
@@ -127,6 +142,11 @@ class JamarrDownloads(context: Context) {
                 downloadManager.requirements = requirements(wifiOnly)
             }
         }
+        scope.launch {
+            settingsLoaded.await()
+            if (!app.connectivity.state.value.isOffline) syncTopTracks()
+            app.connectivity.reconnected.collect { syncTopTracks() }
+        }
     }
 
     /**
@@ -135,35 +155,87 @@ class JamarrDownloads(context: Context) {
      * A standalone track gets a group of its own so removal is uniform: a track
      * disappears when its last group goes, and one shared by an album survives.
      */
-    suspend fun downloadTrack(track: SearchTrack) {
+    suspend fun downloadTrack(track: SearchTrack) = downloadGroup(
+        groupId = DownloadGroupIds.track(track.id),
+        kind = DownloadGroupKind.TRACK,
+        title = track.title,
+        subtitle = track.artist,
+        artSha1 = track.artSha1,
+        tracks = listOf(track),
+    )
+
+    /**
+     * Records a group and queues every track in it that is not already on disk.
+     *
+     * Asking again replaces the group's track list rather than adding to it, so
+     * re-requesting a playlist that lost tracks drops them too — and deletes
+     * their bytes if nothing else holds them.
+     */
+    suspend fun downloadGroup(
+        groupId: String,
+        kind: DownloadGroupKind,
+        title: String,
+        subtitle: String?,
+        artSha1: String?,
+        tracks: List<SearchTrack>,
+        artistMbid: String? = null,
+    ) {
         val now = System.currentTimeMillis()
-        database.downloadDao().addGroup(
+        val orphans = database.downloadDao().replaceGroupTracks(
             group = DownloadGroupEntity(
-                groupId = trackGroupId(track.id),
-                kind = DownloadGroupKind.TRACK,
-                title = track.title,
-                subtitle = track.artist,
-                artSha1 = track.artSha1,
+                groupId = groupId,
+                kind = kind,
+                title = title,
+                subtitle = subtitle,
+                artSha1 = artSha1,
                 requestedAt = now,
             ),
-            tracks = listOf(
-                DownloadedTrackEntity(
-                    trackId = track.id,
-                    title = track.title,
-                    artist = track.artist,
-                    album = track.album,
-                    albumMbid = track.mbReleaseId,
-                    artistMbid = null,
-                    artSha1 = track.artSha1,
-                    durationSeconds = track.durationSeconds,
-                    quality = DOWNLOAD_QUALITY,
-                    sizeBytes = 0L,
-                    state = DownloadRecordState.QUEUED,
-                    addedAt = now,
-                ),
-            ),
+            tracks = tracks.distinctBy { it.id }.map { it.toEntity(artistMbid, now) },
         )
+        deleteBytes(orphans)
+        tracks.filter { _states.value[it.id]?.isComplete != true }.forEach(::enqueue)
+        scope.launch { fetchArtwork(listOfNotNull(artSha1) + tracks.mapNotNull { it.artSha1 }) }
+    }
 
+    suspend fun removeTrack(trackId: Long) = removeGroup(DownloadGroupIds.track(trackId))
+
+    /** Drops a group and deletes the cached bytes of tracks nothing else holds. */
+    suspend fun removeGroup(groupId: String) {
+        deleteBytes(database.downloadDao().removeGroup(groupId))
+        pruneArtwork()
+    }
+
+    /**
+     * Brings every synced top-tracks group up to date with its artist's list:
+     * new entries are queued, ones that fell off are dropped (their bytes too,
+     * unless another group holds them), and positions follow the new order.
+     *
+     * A list that fails to load is left alone — an unreachable server must not
+     * read as "the list is empty" and wipe the downloads.
+     */
+    suspend fun syncTopTracks() = syncLock.withLock {
+        val dao = database.downloadDao()
+        dao.groups(DownloadGroupKind.ARTIST_TOP).forEach { group ->
+            val (artistMbid, list) = DownloadGroupIds.parseArtistTop(group.groupId) ?: return@forEach
+            val detail = runCatching {
+                apiClient.artistDetail(serverUrl.get(), app.tokenHolder.get(), mbid = artistMbid, name = null)
+            }.getOrNull() ?: return@forEach
+            val latest = detail.topTrackEntries(list).mapNotNull { it.toSearchTrack(detail.name) }
+            // Same tracks in the same order: nothing to queue, drop or reorder.
+            if (dao.groupTrackIds(group.groupId) == latest.map { it.id }) return@forEach
+            downloadGroup(
+                groupId = group.groupId,
+                kind = DownloadGroupKind.ARTIST_TOP,
+                title = group.title,
+                subtitle = group.subtitle,
+                artSha1 = detail.artSha1 ?: group.artSha1,
+                tracks = latest,
+                artistMbid = artistMbid,
+            )
+        }
+    }
+
+    private fun enqueue(track: SearchTrack) {
         val key = StreamCacheKeys.trackKey(track.id, DOWNLOAD_QUALITY)
         DownloadService.sendAddDownload(
             appContext,
@@ -175,11 +247,8 @@ class JamarrDownloads(context: Context) {
         )
     }
 
-    suspend fun removeTrack(trackId: Long) = removeGroup(trackGroupId(trackId))
-
-    /** Drops a group and deletes the cached bytes of tracks nothing else holds. */
-    suspend fun removeGroup(groupId: String) {
-        database.downloadDao().removeGroup(groupId).forEach { trackId ->
+    private fun deleteBytes(trackIds: List<Long>) {
+        trackIds.forEach { trackId ->
             DownloadService.sendRemoveDownload(
                 appContext,
                 JamarrDownloadService::class.java,
@@ -189,6 +258,37 @@ class JamarrDownloads(context: Context) {
             _states.update { it - trackId }
         }
     }
+
+    private suspend fun fetchArtwork(artSha1s: List<String>) {
+        settingsLoaded.await()
+        artSha1s.distinct().forEach { sha ->
+            runCatching {
+                app.artworkStore.ensure(sha) {
+                    apiClient.fetchArtworkBytes(serverUrl.get(), it, OfflineArtworkStore.SIZE)
+                }
+            }
+        }
+    }
+
+    private suspend fun pruneArtwork() {
+        val keep = database.downloadDao().referencedArtSha1s().toSet()
+        runCatching { app.artworkStore.prune(keep) }
+    }
+
+    private fun SearchTrack.toEntity(artistMbid: String?, now: Long) = DownloadedTrackEntity(
+        trackId = id,
+        title = title,
+        artist = artist,
+        album = album,
+        albumMbid = mbReleaseId,
+        artistMbid = artistMbid,
+        artSha1 = artSha1,
+        durationSeconds = durationSeconds,
+        quality = DOWNLOAD_QUALITY,
+        sizeBytes = 0L,
+        state = DownloadRecordState.QUEUED,
+        addedAt = now,
+    )
 
     private fun publish(download: Download) {
         val trackId = StreamCacheKeys.trackIdFromUri(download.request.uri.toString()) ?: return
@@ -229,8 +329,6 @@ class JamarrDownloads(context: Context) {
             }
         }
     }
-
-    private fun trackGroupId(trackId: Long): String = "track:$trackId"
 
     private fun buildDownloadManager(): DownloadManager {
         val cache = app.mediaCache.downloadCache

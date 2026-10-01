@@ -473,6 +473,17 @@ class JamarrApiClient(
         }.getOrNull()
     }
 
+    /**
+     * True when the server answers `/api/health`. Unauthenticated, and the one
+     * route that proves the API works rather than just the static SPA.
+     */
+    suspend fun isServerReachable(serverUrl: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = Request.Builder().url(apiUrl(serverUrl, "/api/health")).get().build()
+            httpClient.newCall(request).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
     fun normalizeServerUrl(serverUrl: String): String {
         val trimmed = serverUrl.trim().trimEnd('/')
         require(trimmed.startsWith("http://") || trimmed.startsWith("https://")) {

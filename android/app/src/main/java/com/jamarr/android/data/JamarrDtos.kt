@@ -63,6 +63,8 @@ data class SearchTrack(
     val durationSeconds: Double? = null,
     @SerialName("art_sha1")
     val artSha1: String? = null,
+    /** Source bitrate in bits per second; only `/api/tracks` sends it. */
+    val bitrate: Long? = null,
 )
 
 @Serializable

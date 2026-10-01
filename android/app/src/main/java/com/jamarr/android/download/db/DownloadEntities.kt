@@ -29,7 +29,8 @@ data class DownloadedTrackEntity(
 )
 
 /**
- * An album, artist, playlist or single track the user chose to download.
+ * An album, artist, playlist, artist top-tracks list or single track the user
+ * chose to download.
  *
  * Every download belongs to at least one group — a standalone track download
  * gets a [DownloadGroupKind.TRACK] group of its own. That keeps removal
@@ -73,6 +74,11 @@ data class DownloadGroupTrackEntity(
     val position: Int,
 )
 
-enum class DownloadGroupKind { TRACK, ALBUM, ARTIST, PLAYLIST }
+/**
+ * Stored by name, so adding a kind needs no schema change. [ARTIST_TOP] is the
+ * one kind that is not fixed at request time: it follows an artist's Top Tracks
+ * list and is re-synced as that list moves.
+ */
+enum class DownloadGroupKind { TRACK, ALBUM, ARTIST, PLAYLIST, ARTIST_TOP }
 
 enum class DownloadRecordState { QUEUED, DOWNLOADING, COMPLETED, FAILED }

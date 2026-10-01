@@ -29,6 +29,7 @@ fun PlayShuffleActions(
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
     modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier,
@@ -66,5 +67,6 @@ fun PlayShuffleActions(
                 color = JamarrColors.Text,
             )
         }
+        trailing?.invoke()
     }
 }

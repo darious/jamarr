@@ -33,6 +33,11 @@ import androidx.compose.ui.unit.dp
 import com.jamarr.android.data.PlaylistDetail
 import com.jamarr.android.data.PlaylistTrack
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.download.DownloadGroupIds
+import com.jamarr.android.download.GroupDownloadRequest
+import com.jamarr.android.download.GroupDownloadStatus
+import com.jamarr.android.download.db.DownloadGroupKind
+import com.jamarr.android.ui.components.GroupDownloadButton
 import com.jamarr.android.ui.components.PlayShuffleActions
 import com.jamarr.android.ui.components.PlaylistCover
 import com.jamarr.android.ui.components.TrackRow
@@ -51,6 +56,8 @@ fun PlaylistDetailScreen(
     onBack: () -> Unit,
     onPlayTracks: (List<SearchTrack>, Int) -> Unit,
     contentPadding: PaddingValues,
+    groupStatus: (String) -> GroupDownloadStatus? = { null },
+    onToggleGroupDownload: ((GroupDownloadRequest) -> Unit)? = null,
 ) {
     val ctx = LocalJamarrContext.current
     val detail = remember { mutableStateOf<PlaylistDetail?>(null) }
@@ -90,6 +97,7 @@ fun PlaylistDetailScreen(
             }
             item {
                 Column(modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding, vertical = 16.dp)) {
+                    val groupId = DownloadGroupIds.playlist(playlistId)
                     PlayShuffleActions(
                         onPlay = {
                             if (searchTracks.isNotEmpty()) onPlayTracks(searchTracks, 0)
@@ -98,6 +106,27 @@ fun PlaylistDetailScreen(
                             if (searchTracks.isNotEmpty()) {
                                 onPlayTracks(searchTracks.shuffled(), 0)
                             }
+                        },
+                        trailing = if (onToggleGroupDownload != null && d != null && searchTracks.isNotEmpty()) {
+                            {
+                                GroupDownloadButton(
+                                    status = groupStatus(groupId),
+                                    onClick = {
+                                        onToggleGroupDownload(
+                                            GroupDownloadRequest(
+                                                groupId = groupId,
+                                                kind = DownloadGroupKind.PLAYLIST,
+                                                title = d.name,
+                                                subtitle = d.description,
+                                                artSha1 = tracks.firstNotNullOfOrNull { it.artSha1 },
+                                                tracks = searchTracks,
+                                            ),
+                                        )
+                                    },
+                                )
+                            }
+                        } else {
+                            null
                         },
                     )
                 }

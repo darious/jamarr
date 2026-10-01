@@ -15,8 +15,13 @@ import com.jamarr.android.data.PlayerStateResponse
 import com.jamarr.android.data.Renderer
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.data.OnlineState
 import com.jamarr.android.download.DownloadProgress
+import com.jamarr.android.download.GroupDownloadRequest
+import com.jamarr.android.download.GroupDownloadStatus
+import com.jamarr.android.download.db.DownloadGroupEntity
 import com.jamarr.android.download.db.DownloadedTrackEntity
+import com.jamarr.android.download.groupDownloadStatus
 import com.jamarr.android.playback.JamarrPlaybackController
 import com.jamarr.android.playback.ResolvedTrack
 import com.jamarr.android.cast.CastDeviceController
@@ -86,6 +91,17 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         private set
     var downloadedTracks by mutableStateOf<List<DownloadedTrackEntity>>(emptyList())
         private set
+    var downloadGroups by mutableStateOf<List<DownloadGroupEntity>>(emptyList())
+        private set
+
+    /** Track ids per group, in group order. */
+    var downloadGroupTracks by mutableStateOf<Map<String, List<Long>>>(emptyMap())
+        private set
+
+    // Offline state: the manual switch, no network, or an unreachable server.
+    var onlineState by mutableStateOf(OnlineState())
+        private set
+    val isOffline: Boolean get() = onlineState.isOffline
 
     // Renderer / remote playback state
     var renderers by mutableStateOf<List<Renderer>>(emptyList())
@@ -141,6 +157,31 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             app.downloads.observeTracks().collectLatest { downloadedTracks = it }
+        }
+
+        viewModelScope.launch {
+            app.downloads.observeGroups().collectLatest { downloadGroups = it }
+        }
+
+        viewModelScope.launch {
+            app.downloads.observeLinks().collectLatest { links ->
+                downloadGroupTracks = links
+                    .groupBy { it.groupId }
+                    .mapValues { (_, groupLinks) -> groupLinks.sortedBy { it.position }.map { it.trackId } }
+            }
+        }
+
+        viewModelScope.launch {
+            app.connectivity.state.collectLatest { onlineState = it }
+        }
+
+        // Back online: the home feed and renderer list are stale or were never
+        // loaded at all, so fetch them now rather than on the next manual refresh.
+        viewModelScope.launch {
+            app.connectivity.reconnected.collectLatest {
+                refreshHome()
+                loadCachedRenderers()
+            }
         }
 
         viewModelScope.launch {
@@ -377,11 +418,16 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshHome() {
         val token = tokenHolder.get()
-        if (serverUrl.isBlank() || token.isBlank()) return
+        if (serverUrl.isBlank() || token.isBlank() || isOffline) return
         viewModelScope.launch {
             runCatching { apiClient.home(serverUrl, token) }
                 .onSuccess { homeContent = it }
-                .onFailure { status = it.message ?: "Failed to load home." }
+                .onFailure {
+                    // Usually the server dropping out of reach; let the probe
+                    // decide before showing an error the offline view replaces.
+                    app.connectivity.recheck()
+                    status = it.message ?: "Failed to load home."
+                }
         }
     }
 
@@ -397,6 +443,11 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
     suspend fun playTracks(queue: List<SearchTrack>, startIndex: Int) {
         if (queue.isEmpty()) return
+
+        if (isOffline) {
+            playOffline(queue, startIndex)
+            return
+        }
 
         if (isDeviceRenderer) {
             playbackController.clearQueue()
@@ -452,7 +503,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                 ResolvedTrack(
                     track = queueTrack,
                     streamUrl = "",
-                    artworkUrl = apiClient.artworkUrl(serverUrl, queueTrack.artSha1),
+                    artworkUrl = playbackArtworkUrl(queueTrack.artSha1),
                 )
             }
             playbackQueue = resolved
@@ -461,6 +512,51 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             nowPlayingTrack = startTrack.track
             nowPlayingArtworkUrl = startTrack.artworkUrl
         }
+    }
+
+    /**
+     * Offline, only this device can play, and only what is on it: every renderer
+     * streams from the server, and a track that is not downloaded would stall
+     * the queue on a network fetch that cannot succeed. Nothing is reported to
+     * the server, whose calls would each sit out the connect timeout first.
+     */
+    private suspend fun playOffline(queue: List<SearchTrack>, startIndex: Int) {
+        val start = queue.getOrNull(startIndex)
+        val playable = queue.filter { downloadStates[it.id]?.isComplete == true }
+        if (playable.isEmpty()) {
+            status = "Not downloaded — unavailable offline."
+            return
+        }
+        val resolved = playable.map { track ->
+            ResolvedTrack(
+                track = track,
+                streamUrl = "",
+                artworkUrl = playbackArtworkUrl(track.artSha1),
+            )
+        }
+        val index = resolved.indexOfFirst { it.track.id == start?.id }.coerceAtLeast(0)
+        if (isRemoteMode) selectLocalRendererOffline()
+        playbackController.clearQueue()
+        playbackQueue = resolved
+        playbackController.playQueue(resolved, index)
+        nowPlayingTrack = resolved[index].track
+        nowPlayingArtworkUrl = resolved[index].artworkUrl
+    }
+
+    /**
+     * Artwork for a locally played queue: the downloaded file when there is one.
+     * Media3 loads notification and lock-screen art with its own loader, not
+     * Coil, so the offline interceptor never sees those requests.
+     */
+    private fun playbackArtworkUrl(artSha1: String?): String? =
+        artSha1?.let { app.artworkStore.existing(it)?.toURI()?.toString() }
+            ?: apiClient.artworkUrl(serverUrl, artSha1)
+
+    private fun selectLocalRendererOffline() {
+        val device = if (isDeviceRenderer) activeDeviceController() else null
+        if (device != null) viewModelScope.launch { runCatching { device.stopPlayback() } }
+        activeRendererUdn = "local:$clientId"
+        activeRendererSource = RendererSource.SERVER
     }
 
     fun playTrack(track: SearchTrack, queue: List<SearchTrack> = listOf(track)) {
@@ -491,6 +587,48 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             runCatching { app.downloads.removeTrack(trackId) }
                 .onFailure { status = it.message ?: "Could not remove download." }
         }
+    }
+
+    /** Aggregate download state of a group, or null if it was never requested. */
+    fun groupStatus(groupId: String): GroupDownloadStatus? =
+        downloadGroupTracks[groupId]?.let { groupDownloadStatus(it, downloadStates) }
+
+    /** Queues a group, or removes it if it has already been requested. */
+    fun toggleGroupDownload(request: GroupDownloadRequest) {
+        if (downloadGroupTracks.containsKey(request.groupId)) {
+            removeDownloadGroup(request.groupId)
+            return
+        }
+        if (request.tracks.isEmpty()) {
+            status = "Nothing in the library to download."
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                app.downloads.downloadGroup(
+                    groupId = request.groupId,
+                    kind = request.kind,
+                    title = request.title,
+                    subtitle = request.subtitle,
+                    artSha1 = request.artSha1,
+                    tracks = request.tracks,
+                    artistMbid = request.artistMbid,
+                )
+            }.onFailure { status = it.message ?: "Download failed." }
+        }
+    }
+
+    fun removeDownloadGroup(groupId: String) {
+        viewModelScope.launch {
+            runCatching { app.downloads.removeGroup(groupId) }
+                .onFailure { status = it.message ?: "Could not remove download." }
+        }
+    }
+
+    fun observeDownloadGroupTracks(groupId: String) = app.downloads.observeGroupTracks(groupId)
+
+    fun setOfflineMode(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.saveOfflineMode(enabled) }
     }
 
     fun playQueueFromUi(queue: List<SearchTrack>, startIndex: Int) {
@@ -667,6 +805,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun refreshRenderers() {
+        if (isOffline) return
         if (useDeviceUpnp) {
             upnpController.search()
             castController.search()
@@ -680,6 +819,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun loadCachedRenderers() {
+        if (isOffline) return
         viewModelScope.launch {
             runCatching { apiClient.getRenderers(serverUrl, refresh = false) }
                 .onSuccess { renderers = it }
