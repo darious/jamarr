@@ -398,3 +398,27 @@ data class PlayerStateTrack(
     @SerialName("duration_seconds") val durationSeconds: Double? = null,
     @SerialName("mb_release_id") val mbReleaseId: String? = null,
 )
+
+/** One play made offline, as `POST /api/history/offline` takes it. */
+@Serializable
+data class OfflinePlayUpload(
+    @SerialName("track_id") val trackId: Long,
+    /** ISO-8601 instant the track started playing. */
+    @SerialName("played_at") val playedAt: String,
+    @SerialName("ms_played") val msPlayed: Long,
+)
+
+@Serializable
+data class OfflinePlayBatch(
+    @SerialName("client_id") val clientId: String?,
+    val plays: List<OfflinePlayUpload>,
+)
+
+@Serializable
+data class OfflinePlayResult(
+    val recorded: Int = 0,
+    val duplicates: Int = 0,
+    @SerialName("too_short") val tooShort: Int = 0,
+    @SerialName("unknown_tracks") val unknownTracks: Int = 0,
+    val invalid: Int = 0,
+)

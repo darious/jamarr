@@ -474,6 +474,23 @@ class JamarrApiClient(
     }
 
     /**
+     * Uploads plays made offline. Safe to resend: the server skips a play it
+     * already holds for this user, track and start time.
+     */
+    suspend fun uploadOfflinePlays(
+        serverUrl: String,
+        clientId: String?,
+        plays: List<OfflinePlayUpload>,
+    ): OfflinePlayResult = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(OfflinePlayBatch(clientId, plays)).toRequestBody(jsonMediaType)
+        val request = Request.Builder()
+            .url(apiUrl(serverUrl, "/api/history/offline"))
+            .post(body)
+            .build()
+        execute(request)
+    }
+
+    /**
      * True when the server answers `/api/health`. Unauthenticated, and the one
      * route that proves the API works rather than just the static SPA.
      */
