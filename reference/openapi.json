@@ -23,9 +23,9 @@
       }
     },
     "/art/file/{sha1}": {
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -68,9 +68,9 @@
           }
         }
       },
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -179,9 +179,9 @@
       }
     },
     "/api/art/file/{sha1}": {
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -224,9 +224,9 @@
           }
         }
       },
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -1102,9 +1102,9 @@
       }
     },
     "/api/stream/{track_id}": {
-      "get": {
+      "head": {
         "summary": "Stream Track",
-        "operationId": "stream_track_api_stream__track_id__get",
+        "operationId": "stream_track_api_stream__track_id__head",
         "parameters": [
           {
             "name": "track_id",
@@ -1185,9 +1185,9 @@
           }
         }
       },
-      "head": {
+      "get": {
         "summary": "Stream Track",
-        "operationId": "stream_track_api_stream__track_id__get",
+        "operationId": "stream_track_api_stream__track_id__head",
         "parameters": [
           {
             "name": "track_id",
@@ -4826,6 +4826,63 @@
         }
       }
     },
+    "/api/history/offline": {
+      "post": {
+        "summary": "Record plays made while offline",
+        "description": "Upload plays the Android app logged with no server reachable.\n\nEach play is held to the same threshold as live playback (30s or 20% of\nthe track, whichever is smaller) and recorded at the time it happened, not\nthe time of upload. Uploading the same play twice is harmless: a play\nalready on record for this user, track and start time is skipped, so a\nclient can resend a batch whose response it never saw. Plays recent\nenough for Last.fm are scrobbled with their original timestamps.",
+        "operationId": "record_offline_plays_api_history_offline_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfflinePlayBatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflinePlayResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/scheduler/jobs": {
       "get": {
         "tags": [
@@ -6445,6 +6502,99 @@
           "alerts"
         ],
         "title": "MonitoringSummary"
+      },
+      "OfflinePlay": {
+        "properties": {
+          "track_id": {
+            "type": "integer",
+            "title": "Track Id"
+          },
+          "played_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Played At",
+            "description": "When playback started; naive values are taken as UTC."
+          },
+          "ms_played": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Ms Played",
+            "description": "How long the track actually played."
+          }
+        },
+        "type": "object",
+        "required": [
+          "track_id",
+          "played_at",
+          "ms_played"
+        ],
+        "title": "OfflinePlay"
+      },
+      "OfflinePlayBatch": {
+        "properties": {
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "plays": {
+            "items": {
+              "$ref": "#/components/schemas/OfflinePlay"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "title": "Plays"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plays"
+        ],
+        "title": "OfflinePlayBatch"
+      },
+      "OfflinePlayResult": {
+        "properties": {
+          "recorded": {
+            "type": "integer",
+            "title": "Recorded",
+            "description": "New history rows written."
+          },
+          "duplicates": {
+            "type": "integer",
+            "title": "Duplicates",
+            "description": "Already recorded by an earlier upload of the same play."
+          },
+          "too_short": {
+            "type": "integer",
+            "title": "Too Short",
+            "description": "Played for less than 30s or 20% of the track."
+          },
+          "unknown_tracks": {
+            "type": "integer",
+            "title": "Unknown Tracks",
+            "description": "Track no longer in the library."
+          },
+          "invalid": {
+            "type": "integer",
+            "title": "Invalid",
+            "description": "Timestamped in the future."
+          }
+        },
+        "type": "object",
+        "required": [
+          "recorded",
+          "duplicates",
+          "too_short",
+          "unknown_tracks",
+          "invalid"
+        ],
+        "title": "OfflinePlayResult"
       },
       "PearlarrDownloadRequest": {
         "properties": {
