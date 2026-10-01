@@ -3,8 +3,11 @@ package com.jamarr.android.data
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.jamarr.android.auth.SettingsStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.Cookie
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
@@ -38,9 +41,13 @@ class JamarrCookieJarInstrumentedTest {
             .build()
 
         jar.saveFromResponse(url, listOf(cookie))
-        repeat(20) {
-            if (settingsStore.loadCookies().isNotEmpty()) return@repeat
-            delay(100)
+        // The jar persists on its own IO coroutine. Wait for it in real time:
+        // delay() inside runTest is virtual and returns at once, which let the
+        // second jar prime from a store the write had not reached yet.
+        withContext(Dispatchers.Default) {
+            withTimeout(5_000) {
+                while (settingsStore.loadCookies().none { "\"abc\"" in it }) delay(25)
+            }
         }
 
         val primed = JamarrCookieJar(settingsStore)
