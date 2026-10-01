@@ -25,6 +25,15 @@
                 ]
             }
         ],
+        "at-rule-prelude-no-invalid": [
+            true,
+            {
+                "ignoreAtRules": [
+                    "media",
+                    "apply"
+                ]
+            }
+        ],
         "at-rule-empty-line-before": null,
         "no-descending-specificity": null,
         "selector-pseudo-class-no-unknown": [
