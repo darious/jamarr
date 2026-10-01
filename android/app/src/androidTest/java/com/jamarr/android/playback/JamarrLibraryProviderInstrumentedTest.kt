@@ -6,6 +6,11 @@ import androidx.media3.session.SessionError
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.JamarrApiClient
+import com.jamarr.android.download.db.DownloadGroupEntity
+import com.jamarr.android.download.db.DownloadGroupKind
+import com.jamarr.android.download.db.DownloadRecordState
+import com.jamarr.android.download.db.DownloadedTrackEntity
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
@@ -162,14 +167,71 @@ class JamarrLibraryProviderInstrumentedTest {
         """.trimIndent()
     }
 
-    private fun provider(token: String = "test-token"): JamarrLibraryProvider {
+    private fun provider(
+        token: String = "test-token",
+        downloads: DownloadedLibrary? = null,
+    ): JamarrLibraryProvider {
         val url = server.url("/").toString().trimEnd('/')
         return JamarrLibraryProvider(
             apiClient = JamarrApiClient(TokenHolder(token)),
             credentials = { JamarrLibraryProvider.Credentials(url, token) },
             scope = scope,
+            downloads = downloads,
         )
     }
+
+    /** Downloads held in memory; tracks not marked complete are filtered as the real one does. */
+    private class FakeDownloads(
+        private val groups: List<DownloadGroupEntity>,
+        private val tracks: Map<String, List<DownloadedTrackEntity>>,
+        private val art: Map<String, File> = emptyMap(),
+    ) : DownloadedLibrary {
+        override suspend fun groups() = groups
+
+        override suspend fun completedTracks(groupId: String?) =
+            (if (groupId == null) tracks.values.flatten().distinctBy { it.trackId } else tracks[groupId].orEmpty())
+                .filter { it.state == DownloadRecordState.COMPLETED }
+
+        override fun localArtwork(artSha1: String) = art[artSha1]
+    }
+
+    private fun dlGroup(id: String, kind: DownloadGroupKind, title: String) = DownloadGroupEntity(
+        groupId = id,
+        kind = kind,
+        title = title,
+        subtitle = "Portishead",
+        artSha1 = SHA_A,
+        requestedAt = 0L,
+    )
+
+    private fun dlTrack(id: Long, state: DownloadRecordState = DownloadRecordState.COMPLETED) = DownloadedTrackEntity(
+        trackId = id,
+        title = "Track $id",
+        artist = "Portishead",
+        album = "Dummy",
+        albumMbid = null,
+        artistMbid = null,
+        artSha1 = SHA_A,
+        durationSeconds = 200.0,
+        quality = "original",
+        sizeBytes = 1L,
+        state = state,
+        addedAt = 0L,
+    )
+
+    private fun fakeDownloads(art: Map<String, File> = emptyMap()) = FakeDownloads(
+        groups = listOf(
+            dlGroup("album:dummy", DownloadGroupKind.ALBUM, "Dummy"),
+            dlGroup("playlist:9", DownloadGroupKind.PLAYLIST, "Still Downloading"),
+            dlGroup("track:5", DownloadGroupKind.TRACK, "Track 5"),
+        ),
+        tracks = mapOf(
+            "album:dummy" to listOf(dlTrack(1), dlTrack(2)),
+            "playlist:9" to listOf(dlTrack(3, DownloadRecordState.DOWNLOADING)),
+            "track:5" to listOf(dlTrack(5)),
+        ),
+        art = art,
+    )
 
     private fun LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>.items(): List<MediaItem> =
         checkNotNull(value) { "expected items, got error ${this.resultCode}" }
@@ -178,14 +240,53 @@ class JamarrLibraryProviderInstrumentedTest {
 
     private fun hitsFor(path: String) = hits[path]?.get() ?: 0
 
+    // ----- downloads ----------------------------------------------------
+
+    @Test
+    fun downloadsFolderListsWhatIsOnTheDevice() = runTest {
+        val items = provider(downloads = fakeDownloads())
+            .childrenResult(BrowseTree.ID_DOWNLOADS, 0, Int.MAX_VALUE).items()
+
+        // A group with nothing finished yet is left out, and single-track
+        // downloads only show under "All tracks".
+        assertEquals(listOf("All tracks", "Dummy"), titles(items))
+        assertEquals(0, hits.values.sumOf { it.get() })
+    }
+
+    @Test
+    fun aTappedDownloadedTrackQueuesItsGroupWithoutTheServer() = runTest {
+        val provider = provider(downloads = fakeDownloads())
+        val folder = BrowseTree.downloadId("album:dummy")
+        val rows = provider.childrenResult(folder, 0, Int.MAX_VALUE).items()
+        assertEquals(listOf(JamarrLibraryProvider.PLAY_ALL_TITLE, "Track 1", "Track 2"), titles(rows))
+
+        val expansion = provider.expandForPlayback(listOf(rows[2]))
+
+        assertEquals(listOf(1L, 2L), expansion.items.map { BrowseTree.trackIdOf(it.mediaId) })
+        assertEquals(1, expansion.startIndex)
+        assertEquals(0, hits.values.sumOf { it.get() })
+    }
+
+    @Test
+    fun downloadedArtIsReadFromDisk() = runTest {
+        val bytes = byteArrayOf(9, 8, 7)
+        val file = File.createTempFile("art", ".img").apply { writeBytes(bytes) }
+
+        val items = provider(downloads = fakeDownloads(art = mapOf(SHA_A to file)))
+            .childrenResult(BrowseTree.downloadId("album:dummy"), 0, Int.MAX_VALUE).items()
+
+        assertTrue(items[1].mediaMetadata.artworkData.contentEquals(bytes))
+        assertEquals(0, hitsFor("/api/art/file/$SHA_A"))
+    }
+
     // ----- tree shape ---------------------------------------------------
 
     @Test
-    fun rootListsTheSixTopLevelFolders() = runTest {
+    fun rootListsTheTopLevelFoldersDownloadsFirst() = runTest {
         val items = provider().childrenResult(BrowseTree.ID_ROOT, 0, Int.MAX_VALUE).items()
 
         assertEquals(
-            listOf("Favourites", "Playlists", "Recently Played", "Charts", "History", "Recently Added"),
+            listOf("Downloads", "Favourites", "Playlists", "Recently Played", "Charts", "History", "Recently Added"),
             titles(items),
         )
         assertTrue(items.all { it.mediaMetadata.isBrowsable == true })

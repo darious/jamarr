@@ -43,6 +43,7 @@ android/app/src/main/java/com/jamarr/android/
                      roadmap: android/OFFLINE_PLAYBACK.md
   data/ConnectivityMonitor.kt  offline state (network + /api/health probe +
                      manual switch); offline UI = Downloads screens
+  history/           plays made offline (own Room db) -> POST /api/history/offline
 migrations/          NNN_*.sql  (raw SQL; auto-applied on app startup + by deploy.sh)
 tests/               pytest: api/ auth/ integration/ scanner/ unit/ + top-level
 docs/                outline.md, DATABASE_SCHEMA.md, api.md, auth.md, scanner.md,

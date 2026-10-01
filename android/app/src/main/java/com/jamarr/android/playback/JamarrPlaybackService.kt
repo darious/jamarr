@@ -27,6 +27,8 @@ import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.download.RoomDownloadedLibrary
+import com.jamarr.android.download.db.DownloadRecordState
 import com.jamarr.android.history.PlayThresholdTracker
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -38,6 +40,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -112,7 +117,16 @@ class JamarrPlaybackService : MediaLibraryService() {
                 JamarrLibraryProvider.Credentials(serverUrl.get(), tokenHolder.get())
             },
             scope = serviceScope,
+            downloads = RoomDownloadedLibrary(app.downloads, app.artworkStore),
         )
+        // Only a new group or a newly finished (or removed) track changes what
+        // the car's Downloads folder lists; progress ticks do not.
+        serviceScope.launch {
+            combine(app.downloads.observeGroups(), app.downloads.observeTracks()) { groups, tracks ->
+                groups.map { it.groupId }.toSet() to
+                    tracks.filter { it.state == DownloadRecordState.COMPLETED }.map { it.trackId }.toSet()
+            }.distinctUntilChanged().drop(1).collect { libraryProvider.onDownloadsChanged() }
+        }
 
         // DataStore reads are suspend functions; doing them with runBlocking
         // would block the main thread on the same path the car uses to start

@@ -1,7 +1,7 @@
 # Offline Playback and Stream Buffering Plan
 
-Status: **Phases 1-3 implemented** (written 2026-08-02, updated 2026-10-01).
-Phases 4-5 not started.
+Status: **Phases 1-4 implemented** (written 2026-08-02, updated 2026-10-01).
+Phase 5 not started.
 
 Two features, one shared piece of infrastructure:
 
@@ -254,23 +254,65 @@ Not done in this phase: the instrumented download → airplane mode → play cyc
 (see Testing), and the online album/artist/playlist screens are still
 API-only — reached offline via the back stack they show their load error.
 
-## Phase 4 — offline history + Android Auto
+## Phase 4 — offline history + Android Auto — **done**
 
-16. Blocking bug fix: in the `JamarrPlaybackService` reporting loop,
+16. ✅ Blocking bug fix: in the `JamarrPlaybackService` reporting loop,
     `apiClient.reportProgress(...)` is not wrapped in `runCatching`, unlike the
     queue and index reports above it. A throw escapes the `while (true)` loop
     and permanently kills the reporting coroutine — the
     `CoroutineExceptionHandler` logs it but does not restart it. Offline
     playback makes that failure routine.
-17. Offline play log: Room table `pending_play` (trackId, playedAtUtc,
+17. ✅ Offline play log: Room table `pending_play` (trackId, playedAtUtc,
     msPlayed). Flush on reconnect.
-18. Backend addition — `POST /api/history/offline`, taking a batch of
+18. ✅ Backend addition — `POST /api/history/offline`, taking a batch of
     `{track_id, played_at, ms_played}`, applying the same 30 s / 20 % threshold
     the web UI uses, idempotent on `(track_id, played_at)`. First check whether
     the history table accepts an explicit `played_at`; if not, that is one new
     `migrations/NNN_*.sql` plus the matching DDL in `app/db.py` `init_db`.
-19. Android Auto: add a `Downloads` node to `JamarrLibraryProvider`'s root,
+19. ✅ Android Auto: add a `Downloads` node to `JamarrLibraryProvider`'s root,
     served from Room. Biggest practical win — a car with no signal still plays.
+
+Deviations from the plan above:
+
+- **Item 16 went further than `runCatching`.** The progress report now also
+  backs off on failure like its siblings, and the whole reporting block is
+  skipped while offline: each call would otherwise sit out the 5 s connect
+  timeout, stalling the loop — and the resume snapshots it also takes.
+- **Which plays are recorded locally:** exactly those that cross the history
+  threshold while the app is offline (`history/PlayThresholdTracker`). Online,
+  the server logs a play from progress reports at that same moment, so a play
+  is never counted twice when the network drops mid-track, and none is lost
+  when it returns mid-track. As on the server, a track counts once per run of
+  it (repeat-one does not recount), and only time actually playing counts.
+  `played_at` is when the track started.
+- **Pending plays live in their own Room database** (`jamarr_history.db`), not
+  a table in the downloads one, so neither schema has to migrate for the
+  other. Uploaded on app start and every reconnect, oldest first in batches of
+  500, deleted only once the server has answered.
+- **Backend: no migration was needed** — `playback_history.timestamp` takes an
+  explicit value. Idempotency is a `NOT EXISTS` on (user, track, timestamp),
+  not a unique index, so existing duplicate history rows cannot block it. The
+  threshold is shared with live logging (`play_threshold_seconds`). Plays
+  timestamped more than 5 min in the future are rejected as `invalid`; plays
+  within Last.fm's 14-day window are scrobbled with their original time.
+- **The app works against an older server**: until the server has
+  `POST /api/history/offline`, uploads fail and plays wait on the device.
+- **Android Auto (item 19):** a `Downloads` folder first in the root —
+  "All tracks", then one folder per download group with finished tracks
+  (`dl:<groupId>`), each with "Play all". Rows, sibling queues and art all come
+  from the device; art in that folder is local-only, so a missing file shows
+  no art rather than a network wait per row. The folder is re-published when a
+  group appears or a track finishes or is removed.
+
+Tests: `PlayThresholdTrackerTest` (JVM), `PendingPlayDaoInstrumentedTest`,
+three Downloads cases in `JamarrLibraryProviderInstrumentedTest` (each asserts
+zero server requests), `JamarrApiClientTest.offlinePlaysAreUploadedAsOneBatch`,
+and `tests/api/test_history_offline.py` (threshold, original timestamp,
+resend idempotency, unknown/future plays, auth). On the emulator with the
+network cut, a play was recorded once at 30 s, and on reconnect a failed
+upload (prod not yet released) kept it.
+
+Not done: an end-to-end upload against a released server.
 
 ## Phase 5 — settings and polish
 

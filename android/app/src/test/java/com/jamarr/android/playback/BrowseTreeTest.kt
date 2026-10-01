@@ -45,9 +45,10 @@ class BrowseTreeTest {
     }
 
     @Test
-    fun `root lists the six top-level folders in order`() {
+    fun `root lists the top-level folders in order, downloads first`() {
         assertEquals(
             listOf(
+                BrowseTree.ID_DOWNLOADS,
                 BrowseTree.ID_FAVOURITES,
                 BrowseTree.ID_PLAYLISTS,
                 BrowseTree.ID_RECENT,
@@ -57,6 +58,19 @@ class BrowseTreeTest {
             ),
             BrowseTree.node(BrowseTree.ID_ROOT)?.children,
         )
+    }
+
+    @Test
+    fun `download ids carry their group id whole`() {
+        val id = BrowseTree.downloadId("artist_top:mbid-1:scrobbled")
+        assertEquals("dl:artist_top:mbid-1:scrobbled", id)
+        assertEquals("artist_top:mbid-1:scrobbled", BrowseTree.downloadGroupOf(id))
+        assertNull(BrowseTree.downloadGroupOf("album:x"))
+        assertNull(BrowseTree.downloadGroupOf("dl:"))
+        // A track inside a download keeps the whole group id as its parent.
+        val track = BrowseTree.trackId(7L, id)
+        assertEquals(id, BrowseTree.parentOf(track))
+        assertEquals(7L, BrowseTree.trackIdOf(track))
     }
 
     @Test

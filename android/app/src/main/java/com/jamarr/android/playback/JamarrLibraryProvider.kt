@@ -34,6 +34,7 @@ import com.jamarr.android.data.PlaylistSummary
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.data.sortedReleasesDesc
 import com.jamarr.android.data.sortedSinglesAsc
+import com.jamarr.android.download.db.DownloadGroupKind
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +67,8 @@ class JamarrLibraryProvider(
     private val credentials: suspend () -> Credentials,
     private val scope: CoroutineScope,
     cacheTtlMs: Long = CACHE_TTL_MS,
+    /** Finished downloads, for the Downloads folder; null leaves it empty. */
+    private val downloads: DownloadedLibrary? = null,
 ) {
     /** Server + token, resolved once the service has finished loading settings. */
     data class Credentials(val serverUrl: String, val token: String) {
@@ -185,8 +188,12 @@ class JamarrLibraryProvider(
             return LibraryResult.ofError(errorCodeFor(e))
         }
         val window = BrowseTree.page(rows, page, pageSize)
+        // The Downloads folder must work with no signal, so its art comes from
+        // disk or not at all: one network fetch per row would each sit out the
+        // connect timeout before the folder could render.
+        val localArtOnly = parentId == BrowseTree.ID_DOWNLOADS || BrowseTree.isDownloaded(parentId)
         return LibraryResult.ofItemList(
-            ImmutableList.copyOf(buildItems(window, creds, forBrowse = true)),
+            ImmutableList.copyOf(buildItems(window, creds, forBrowse = true, localArtOnly = localArtOnly)),
             params,
         )
     }
@@ -202,6 +209,17 @@ class JamarrLibraryProvider(
             cache.invalidateAll()
             val current = session ?: return@launch
             for (id in BrowseTree.staticNodeIds()) {
+                runCatching { current.notifyChildrenChanged(id, Int.MAX_VALUE, null) }
+                    .onFailure { Log.w(TAG, "notifyChildrenChanged($id) failed", it) }
+            }
+        }
+    }
+
+    /** Re-publishes the Downloads folder after a download is added, finished or removed. */
+    fun onDownloadsChanged() {
+        scope.launch(Dispatchers.Main) {
+            val current = session ?: return@launch
+            for (id in listOf(BrowseTree.ID_DOWNLOADS, BrowseTree.ID_DOWNLOADED_TRACKS)) {
                 runCatching { current.notifyChildrenChanged(id, Int.MAX_VALUE, null) }
                     .onFailure { Log.w(TAG, "notifyChildrenChanged($id) failed", it) }
             }
@@ -249,8 +267,14 @@ class JamarrLibraryProvider(
         BrowseTree.ID_ADDED -> recentlyAddedRows(creds)
         BrowseTree.ID_HISTORY_ALBUMS -> historyAlbumRows(creds)
         BrowseTree.ID_HISTORY_ARTISTS -> historyArtistRows(creds)
+        BrowseTree.ID_DOWNLOADS -> downloadRows()
+        BrowseTree.ID_DOWNLOADED_TRACKS ->
+            withPlayAll(parentId, downloadedTracks(null).map { trackRow(it, parentId) })
 
         else -> when {
+            parentId.startsWith(BrowseTree.PREFIX_DOWNLOAD) ->
+                withPlayAll(parentId, downloadedTracks(BrowseTree.downloadGroupOf(parentId)).map { trackRow(it, parentId) })
+
             parentId.startsWith(BrowseTree.PREFIX_ARTIST) ->
                 artistRows(parentId.removePrefix(BrowseTree.PREFIX_ARTIST), creds)
 
@@ -297,6 +321,60 @@ class JamarrLibraryProvider(
         )
         return listOf(playAll) + tracks
     }
+
+    // ----- downloaded rows ----------------------------------------------
+
+    /**
+     * "All tracks", then one folder per download group that has at least one
+     * finished track. Standalone single-track downloads only appear under
+     * "All tracks", as on the phone.
+     */
+    private suspend fun downloadRows(): List<Row> {
+        val library = downloads ?: return emptyList()
+        val all = library.completedTracks(null)
+        if (all.isEmpty()) return emptyList()
+        val allTracks = Row(
+            mediaId = BrowseTree.ID_DOWNLOADED_TRACKS,
+            title = BrowseTree.node(BrowseTree.ID_DOWNLOADED_TRACKS)?.title ?: "All tracks",
+            browsable = true,
+            mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
+            subtitle = trackCountLabel(all.size),
+            artShas = all.mapNotNull { it.artSha1 },
+        )
+        val groups = library.groups()
+            .filter { it.kind != DownloadGroupKind.TRACK }
+            .mapNotNull { group ->
+                val tracks = library.completedTracks(group.groupId)
+                if (tracks.isEmpty()) return@mapNotNull null
+                Row(
+                    mediaId = BrowseTree.downloadId(group.groupId),
+                    title = group.title,
+                    browsable = true,
+                    mediaType = when (group.kind) {
+                        DownloadGroupKind.ALBUM -> MediaMetadata.MEDIA_TYPE_ALBUM
+                        DownloadGroupKind.PLAYLIST -> MediaMetadata.MEDIA_TYPE_PLAYLIST
+                        else -> MediaMetadata.MEDIA_TYPE_FOLDER_MIXED
+                    },
+                    subtitle = listOfNotNull(group.subtitle?.takeIf { it.isNotBlank() }, trackCountLabel(tracks.size))
+                        .joinToString(" · "),
+                    artSha1 = group.artSha1,
+                    artShas = tracks.mapNotNull { it.artSha1 },
+                )
+            }
+        return listOf(allTracks) + groups
+    }
+
+    private suspend fun downloadedTracks(groupId: String?): List<SearchTrack> =
+        downloads?.completedTracks(groupId).orEmpty().map { t ->
+            SearchTrack(
+                id = t.trackId,
+                title = t.title,
+                artist = t.artist,
+                album = t.album,
+                durationSeconds = t.durationSeconds,
+                artSha1 = t.artSha1,
+            )
+        }
 
     // ----- data-backed rows ---------------------------------------------
 
@@ -684,6 +762,12 @@ class JamarrLibraryProvider(
                 creds,
             )
 
+            mediaId.startsWith(BrowseTree.PREFIX_DOWNLOAD) -> {
+                val groupId = BrowseTree.downloadGroupOf(mediaId) ?: return null
+                val title = downloads?.groups()?.firstOrNull { it.groupId == groupId }?.title ?: "Download"
+                folderItem(mediaId, title, downloadedTracks(groupId), creds)
+            }
+
             mediaId.startsWith(BrowseTree.PREFIX_PLAY_ALL) -> buildItem(
                 Row(
                     mediaId = mediaId,
@@ -797,7 +881,8 @@ class JamarrLibraryProvider(
 
                 mediaId.startsWith(BrowseTree.PREFIX_TRACK) -> expandTrack(single, creds)
 
-                mediaId.startsWith(BrowseTree.PREFIX_ALBUM) ||
+                BrowseTree.isDownloaded(mediaId) ||
+                    mediaId.startsWith(BrowseTree.PREFIX_ALBUM) ||
                     mediaId.startsWith(BrowseTree.PREFIX_PLAYLIST) ||
                     mediaId.startsWith(BrowseTree.PREFIX_SINGLES) ||
                     mediaId.startsWith(BrowseTree.PREFIX_TOP) -> {
@@ -826,6 +911,11 @@ class JamarrLibraryProvider(
 
     /** The track list a media id queues, or empty when it queues nothing. */
     private suspend fun siblingTracks(parentId: String, creds: Credentials): List<SearchTrack> = when {
+        parentId == BrowseTree.ID_DOWNLOADED_TRACKS -> downloadedTracks(null)
+
+        parentId.startsWith(BrowseTree.PREFIX_DOWNLOAD) ->
+            downloadedTracks(BrowseTree.downloadGroupOf(parentId))
+
         parentId.startsWith(BrowseTree.PREFIX_ALBUM) ->
             albumTracks(parentId.removePrefix(BrowseTree.PREFIX_ALBUM), creds)
 
@@ -879,35 +969,44 @@ class JamarrLibraryProvider(
         rows: List<Row>,
         creds: Credentials,
         forBrowse: Boolean,
+        localArtOnly: Boolean = false,
     ): List<MediaItem> {
         if (rows.isEmpty()) return emptyList()
-        val artwork = if (ArtworkPolicy.embedsBytes(creds.serverUrl, forBrowse)) {
-            fetchArtwork(rows, creds)
+        val artwork = if (localArtOnly || ArtworkPolicy.embedsBytes(creds.serverUrl, forBrowse)) {
+            fetchArtwork(rows, creds, localArtOnly)
         } else {
             List(rows.size) { null }
         }
         return rows.mapIndexed { index, row -> buildItem(row, creds, forBrowse, artwork[index]) }
     }
 
-    private suspend fun fetchArtwork(rows: List<Row>, creds: Credentials): List<ByteArray?> =
+    private suspend fun fetchArtwork(
+        rows: List<Row>,
+        creds: Credentials,
+        localOnly: Boolean = false,
+    ): List<ByteArray?> =
         coroutineScope {
             rows.map { row ->
                 async {
                     artworkGate.withPermit {
                         when {
-                            row.artSha1 != null -> apiClient.fetchArtworkBytes(
-                                creds.serverUrl,
-                                row.artSha1,
-                                ArtworkPolicy.ART_SIZE_PX,
-                            )
+                            row.artSha1 != null -> artworkBytes(row.artSha1, creds, localOnly)
 
-                            row.artShas.isNotEmpty() -> gridArtwork(row.artShas, creds)
+                            row.artShas.isNotEmpty() -> gridArtwork(row.artShas, creds, localOnly)
                             else -> null
                         }
                     }
                 }
             }.awaitAll()
         }
+
+    /**
+     * Downloaded art from disk, anything else from the server. Offline every
+     * network fetch would sit out the connect timeout, one per browse row.
+     */
+    private suspend fun artworkBytes(sha: String, creds: Credentials, localOnly: Boolean = false): ByteArray? =
+        downloads?.localArtwork(sha)?.let { file -> runCatching { file.readBytes() }.getOrNull() }
+            ?: if (localOnly) null else apiClient.fetchArtworkBytes(creds.serverUrl, sha, ArtworkPolicy.ART_SIZE_PX)
 
     private fun buildItem(
         row: Row,
@@ -935,7 +1034,7 @@ class JamarrLibraryProvider(
             metadata.setSubtitle(it)
         }
 
-        artworkUri(row, creds)?.let { metadata.setArtworkUri(it) }
+        artworkUri(row, creds, forBrowse)?.let { metadata.setArtworkUri(it) }
         if (artBytes != null) {
             metadata.setArtworkData(artBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
         }
@@ -948,8 +1047,12 @@ class JamarrLibraryProvider(
         return builder.build()
     }
 
-    private fun artworkUri(row: Row, creds: Credentials): Uri? {
+    private fun artworkUri(row: Row, creds: Credentials, forBrowse: Boolean): Uri? {
         val sha = row.artSha1 ?: row.artShas.firstOrNull() ?: return null
+        // Queue items feed our own notification art, loaded in this process, so
+        // a downloaded file works there with no network. Browse items keep the
+        // server URL: the car's host app loads those and cannot read our files.
+        if (!forBrowse) downloads?.localArtwork(sha)?.let { return Uri.fromFile(it) }
         if (sha.isBlank() || creds.serverUrl.isBlank()) return null
         val url = apiClient.artworkUrl(creds.serverUrl, sha, ArtworkPolicy.ART_SIZE_PX) ?: return null
         return runCatching { Uri.parse(url) }.getOrNull()
@@ -965,7 +1068,7 @@ class JamarrLibraryProvider(
      * covers in the phone UI. Sources are taken in order rather than shuffled
      * so a folder keeps the same cover between visits.
      */
-    private suspend fun gridArtwork(shas: List<String>, creds: Credentials): ByteArray? {
+    private suspend fun gridArtwork(shas: List<String>, creds: Credentials, localOnly: Boolean = false): ByteArray? {
         if (creds.serverUrl.isBlank()) return null
         val size = ArtworkPolicy.ART_SIZE_PX
         val candidates = shas.filter { it.isNotBlank() }.distinct().take(4)
@@ -973,7 +1076,7 @@ class JamarrLibraryProvider(
 
         val fetched = coroutineScope {
             candidates.map { sha ->
-                async { apiClient.fetchArtworkBytes(creds.serverUrl, sha, size) }
+                async { artworkBytes(sha, creds, localOnly) }
             }.awaitAll()
         }.filterNotNull()
         if (fetched.isEmpty()) return null
