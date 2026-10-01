@@ -27,6 +27,7 @@ import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.history.PlayThresholdTracker
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
@@ -248,6 +249,7 @@ class JamarrPlaybackService : MediaLibraryService() {
             var lastResumeSnapshot = 0L
             var wasPlaying = false
             var nextReportAttemptMs = 0L
+            val playTracker = PlayThresholdTracker()
             while (true) {
                 val url = serverUrl.get()
                 val token = tokenHolder.get()
@@ -263,7 +265,18 @@ class JamarrPlaybackService : MediaLibraryService() {
                     saveResumeQueue(player)
                 }
                 wasPlaying = playing
-                if (url.isNotBlank() && id.isNotBlank() && token.isNotBlank() && !authFailed.get()) {
+                // Offline, every report would sit out the connect timeout first,
+                // stalling this loop — and with it the resume snapshots above.
+                val online = !app.connectivity.state.value.isOffline
+                // Online the server logs plays from the progress reports below;
+                // offline the app has to write them down itself.
+                playTracker.onTick(
+                    currentTrackId = player.currentMediaItem?.mediaId?.let(::extractTrackId)?.takeIf { it > 0 },
+                    isPlaying = playing,
+                    durationMs = player.duration.takeIf { it != C.TIME_UNSET && it > 0 },
+                    offline = !online,
+                )?.let(app.offlinePlays::record)
+                if (online && url.isNotBlank() && id.isNotBlank() && token.isNotBlank() && !authFailed.get()) {
                     val qKey = queueKey(player)
                     val canReport = System.currentTimeMillis() >= nextReportAttemptMs
                     if (qKey != null && qKey != lastReportedQueueKey && canReport) {
@@ -303,13 +316,21 @@ class JamarrPlaybackService : MediaLibraryService() {
                         }
                     }
                     val now = System.currentTimeMillis()
-                    if (player.isPlaying && now - lastProgressReport >= 5000) {
+                    if (player.isPlaying && now - lastProgressReport >= 5000 && canReport) {
                         lastProgressReport = now
-                        apiClient.reportProgress(
-                            url, id,
-                            positionSeconds = player.currentPosition / 1000.0,
-                            isPlaying = true,
-                        )
+                        // Guarded like the reports above: unguarded, one failure
+                        // escaped the loop and ended reporting (and resume
+                        // snapshots) for the life of the service.
+                        runCatching {
+                            apiClient.reportProgress(
+                                url, id,
+                                positionSeconds = player.currentPosition / 1000.0,
+                                isPlaying = true,
+                            )
+                        }.onFailure {
+                            Log.w(TAG, "reportProgress failed", it)
+                            nextReportAttemptMs = System.currentTimeMillis() + REPORT_RETRY_BACKOFF_MS
+                        }
                     }
                 }
                 // Idle sessions do not need 500 ms granularity; the tick only

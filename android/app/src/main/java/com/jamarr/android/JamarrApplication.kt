@@ -12,6 +12,7 @@ import com.jamarr.android.data.JamarrCookieJar
 import com.jamarr.android.download.JamarrDownloads
 import com.jamarr.android.download.OfflineArtworkInterceptor
 import com.jamarr.android.download.OfflineArtworkStore
+import com.jamarr.android.history.OfflinePlays
 import com.jamarr.android.playback.JamarrMediaCache
 import java.io.File
 
@@ -33,6 +34,9 @@ class JamarrApplication : Application(), SingletonImageLoader.Factory {
 
     /** Cover art for downloads, served to Coil ahead of the network. */
     val artworkStore: OfflineArtworkStore by lazy { OfflineArtworkStore(File(filesDir, "art")) }
+
+    /** Plays made offline, held until the server can take them. */
+    val offlinePlays: OfflinePlays by lazy { OfflinePlays(this) }
 
     /** Online/offline state, shared by the UI and the download sync. */
     val connectivity: ConnectivityMonitor by lazy {

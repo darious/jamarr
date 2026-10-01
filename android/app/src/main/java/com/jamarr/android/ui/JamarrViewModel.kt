@@ -175,6 +175,10 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             app.connectivity.state.collectLatest { onlineState = it }
         }
 
+        // Created here as well as by the playback service, so plays logged
+        // offline go up when the app opens, not only once something plays.
+        app.offlinePlays
+
         // Back online: the home feed and renderer list are stale or were never
         // loaded at all, so fetch them now rather than on the next manual refresh.
         viewModelScope.launch {

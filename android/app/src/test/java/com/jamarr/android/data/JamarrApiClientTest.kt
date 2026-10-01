@@ -64,6 +64,37 @@ class JamarrApiClientTest {
     }
 
     @Test
+    fun offlinePlaysAreUploadedAsOneBatch() = runTest {
+        server.enqueue(
+            MockResponse.Builder()
+                .code(200)
+                .body("""{"recorded":1,"duplicates":1,"too_short":0,"unknown_tracks":0,"invalid":0}""")
+                .addHeader("Content-Type", "application/json")
+                .build(),
+        )
+        val client = JamarrApiClient(TokenHolder("token"))
+
+        val result = client.uploadOfflinePlays(
+            server.url("/").toString(),
+            "phone-1",
+            listOf(
+                OfflinePlayUpload(trackId = 7, playedAt = "2026-10-01T08:00:00Z", msPlayed = 40_000),
+                OfflinePlayUpload(trackId = 8, playedAt = "2026-10-01T08:05:00Z", msPlayed = 31_000),
+            ),
+        )
+        val request = server.takeRequest()
+
+        assertEquals("/api/history/offline", request.url.encodedPath)
+        assertEquals("POST", request.method)
+        assertEquals("Bearer token", request.headers["Authorization"])
+        val body = request.body?.utf8().orEmpty()
+        assertTrue(body.contains(""""client_id":"phone-1""""))
+        assertTrue(body.contains(""""track_id":7,"played_at":"2026-10-01T08:00:00Z","ms_played":40000"""))
+        assertEquals(1, result.recorded)
+        assertEquals(1, result.duplicates)
+    }
+
+    @Test
     fun healthProbeReportsReachability() = runTest {
         server.enqueue(MockResponse.Builder().code(200).body("""{"status":"ok"}""").build())
         val serverUrl = server.url("/").toString()
