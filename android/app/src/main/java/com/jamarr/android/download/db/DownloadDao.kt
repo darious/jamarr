@@ -41,6 +41,12 @@ interface DownloadDao {
     @Query("SELECT * FROM download_group WHERE kind = :kind")
     suspend fun groups(kind: DownloadGroupKind): List<DownloadGroupEntity>
 
+    @Query("SELECT * FROM download_group ORDER BY title COLLATE NOCASE")
+    suspend fun allGroups(): List<DownloadGroupEntity>
+
+    @Query("SELECT * FROM downloaded_track WHERE state = :state ORDER BY addedAt DESC")
+    suspend fun tracksByState(state: DownloadRecordState): List<DownloadedTrackEntity>
+
     /** Every group membership; small enough to hold whole for the UI. */
     @Query("SELECT * FROM download_group_track")
     fun observeLinks(): Flow<List<DownloadGroupTrackEntity>>

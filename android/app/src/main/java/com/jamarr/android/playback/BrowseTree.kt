@@ -15,6 +15,7 @@ package com.jamarr.android.playback
  *   singles:<mbid>                      browsable -> artist's singles tracks
  *   top:<mbid>                          browsable -> artist's most-scrobbled tracks
  *   playlist:<id>                       browsable -> tracks
+ *   dl:<groupId>                        browsable -> a download group's tracks, from Room
  *   playall:<parent>                    playable, queues the whole parent from the top
  *   track:<id>|p:<parent>               playable, parent encodes the siblings to queue
  *   track:<id>                          playable, no siblings
@@ -36,6 +37,8 @@ object BrowseTree {
     const val ID_HISTORY = "node:history"
     const val ID_HISTORY_ALBUMS = "node:history-albums"
     const val ID_HISTORY_ARTISTS = "node:history-artists"
+    const val ID_DOWNLOADS = "node:downloads"
+    const val ID_DOWNLOADED_TRACKS = "node:downloaded-tracks"
 
     const val PREFIX_ARTIST = "artist:"
     const val PREFIX_ALBUM = "album:"
@@ -44,6 +47,7 @@ object BrowseTree {
     const val PREFIX_SINGLES = "singles:"
     const val PREFIX_TOP = "top:"
     const val PREFIX_PLAY_ALL = "playall:"
+    const val PREFIX_DOWNLOAD = "dl:"
 
     /** Marks the sibling list handed to the player by a "Play all" row. */
     const val ID_TRACK_LIST = "node:track-list"
@@ -73,7 +77,15 @@ object BrowseTree {
     data class Node(val id: String, val title: String, val children: List<String> = emptyList())
 
     private val NODE_LIST = listOf(
-        Node(ID_ROOT, "Jamarr", listOf(ID_FAVOURITES, ID_PLAYLISTS, ID_RECENT, ID_CHARTS, ID_HISTORY, ID_ADDED)),
+        // Downloads first: it is the one folder that still works with no signal.
+        Node(
+            ID_ROOT,
+            "Jamarr",
+            listOf(ID_DOWNLOADS, ID_FAVOURITES, ID_PLAYLISTS, ID_RECENT, ID_CHARTS, ID_HISTORY, ID_ADDED),
+        ),
+        // Children are the download groups, so they are built at browse time.
+        Node(ID_DOWNLOADS, "Downloads"),
+        Node(ID_DOWNLOADED_TRACKS, "All tracks"),
         Node(ID_FAVOURITES, "Favourites", listOf(ID_FAV_ARTISTS, ID_FAV_RELEASES)),
         Node(ID_FAV_ARTISTS, "Artists"),
         Node(ID_FAV_RELEASES, "Releases"),
@@ -112,6 +124,20 @@ object BrowseTree {
     fun topId(artistMbid: String): String = "$PREFIX_TOP$artistMbid"
 
     fun playAllId(parentId: String): String = "$PREFIX_PLAY_ALL$parentId"
+
+    fun downloadId(groupId: String): String = "$PREFIX_DOWNLOAD$groupId"
+
+    /** The download group a `dl:` media id browses, or null for anything else. */
+    fun downloadGroupOf(mediaId: String): String? =
+        if (mediaId.startsWith(PREFIX_DOWNLOAD)) {
+            mediaId.removePrefix(PREFIX_DOWNLOAD).takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
+
+    /** True for the ids whose tracks come from the device rather than the server. */
+    fun isDownloaded(mediaId: String): Boolean =
+        mediaId == ID_DOWNLOADED_TRACKS || mediaId.startsWith(PREFIX_DOWNLOAD)
 
     fun trackId(trackId: Long, parentId: String?): String =
         if (parentId.isNullOrBlank()) "$PREFIX_TRACK$trackId" else "$PREFIX_TRACK$trackId|p:$parentId"
