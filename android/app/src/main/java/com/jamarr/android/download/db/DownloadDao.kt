@@ -105,16 +105,17 @@ interface DownloadDao {
 
     /**
      * Tracks left with no group after a removal. Their cached bytes are the
-     * caller's problem — the download cache is not touched from here.
+     * caller's problem — the download cache is not touched from here. Whole
+     * rows, because the bytes are keyed by the quality each was fetched at.
      */
     @Query(
         """
-        SELECT t.trackId FROM downloaded_track t
+        SELECT t.* FROM downloaded_track t
         LEFT JOIN download_group_track gt ON gt.trackId = t.trackId
         WHERE gt.trackId IS NULL
         """,
     )
-    suspend fun orphanedTrackIds(): List<Long>
+    suspend fun orphanedTracks(): List<DownloadedTrackEntity>
 
     /**
      * Records a request and its tracks in one go, so a crash mid-write cannot
@@ -143,10 +144,10 @@ interface DownloadDao {
      * the caller can remove exactly those from the download cache.
      */
     @Transaction
-    suspend fun removeGroup(groupId: String): List<Long> {
+    suspend fun removeGroup(groupId: String): List<DownloadedTrackEntity> {
         deleteGroup(groupId)
-        val orphans = orphanedTrackIds()
-        orphans.forEach { deleteTrack(it) }
+        val orphans = orphanedTracks()
+        orphans.forEach { deleteTrack(it.trackId) }
         return orphans
     }
 
@@ -159,11 +160,29 @@ interface DownloadDao {
     suspend fun replaceGroupTracks(
         group: DownloadGroupEntity,
         tracks: List<DownloadedTrackEntity>,
-    ): List<Long> {
+    ): List<DownloadedTrackEntity> {
         deleteLinks(group.groupId)
         addGroup(group, tracks)
-        val orphans = orphanedTrackIds()
-        orphans.forEach { deleteTrack(it) }
+        val orphans = orphanedTracks()
+        orphans.forEach { deleteTrack(it.trackId) }
         return orphans
     }
+
+    /** Everything, for "delete all downloads". */
+    @Transaction
+    suspend fun removeAll(): List<DownloadedTrackEntity> {
+        val all = allTracks()
+        deleteAllGroups()
+        deleteAllTracks()
+        return all
+    }
+
+    @Query("SELECT * FROM downloaded_track")
+    suspend fun allTracks(): List<DownloadedTrackEntity>
+
+    @Query("DELETE FROM download_group")
+    suspend fun deleteAllGroups()
+
+    @Query("DELETE FROM downloaded_track")
+    suspend fun deleteAllTracks()
 }

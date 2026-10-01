@@ -82,6 +82,17 @@ class DownloadGroupsTest {
     }
 
     @Test
+    fun `size estimate follows the download quality`() {
+        val hiRes = listOf(track(seconds = 80.0, bitrate = 4_000_000L))
+
+        assertEquals(40_000_000L, estimateDownloadBytes(hiRes, "original"))
+        assertEquals(10_000_000L, estimateDownloadBytes(hiRes, "flac_16_48"))
+        assertEquals(3_200_000L, estimateDownloadBytes(hiRes, "mp3_320"))
+        // A FLAC rung never estimates above a smaller source.
+        assertEquals(5_000_000L, estimateDownloadBytes(listOf(track(seconds = 80.0, bitrate = 500_000L)), "flac_24_48"))
+    }
+
+    @Test
     fun `byte counts format as MB below a gigabyte`() {
         assertEquals("1 MB", formatBytes(10))
         assertEquals("512 MB", formatBytes(512L * 1024 * 1024))

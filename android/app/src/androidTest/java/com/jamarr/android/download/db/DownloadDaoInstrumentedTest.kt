@@ -41,7 +41,7 @@ class DownloadDaoInstrumentedTest {
 
         val orphans = dao.removeGroup("album:1")
 
-        assertEquals(listOf(10L, 11L), orphans.sorted())
+        assertEquals(listOf(10L, 11L), orphans.map { it.trackId }.sorted())
         assertNull(dao.track(10))
         assertNull(dao.track(11))
     }
@@ -53,7 +53,7 @@ class DownloadDaoInstrumentedTest {
 
         val orphans = dao.removeGroup("album:1")
 
-        assertEquals(listOf(11L), orphans)
+        assertEquals(listOf(11L), orphans.map { it.trackId })
         assertNotNull(dao.track(10))
         assertNull(dao.track(11))
     }
@@ -106,7 +106,7 @@ class DownloadDaoInstrumentedTest {
             listOf(track(12), track(10)),
         )
 
-        assertEquals(listOf(11L), orphans)
+        assertEquals(listOf(11L), orphans.map { it.trackId })
         assertNull(dao.track(11))
         assertEquals(listOf(12L, 10L), dao.groupTrackIds("artist_top:a:scrobbled"))
     }
@@ -158,6 +158,17 @@ class DownloadDaoInstrumentedTest {
         dao.removeGroup("album:1")
 
         assertTrue(dao.referencedArtSha1s().isEmpty())
+    }
+
+    @Test
+    fun removingEverythingReturnsEachTrackWithItsQuality() = runTest {
+        dao.addGroup(group("album:1", DownloadGroupKind.ALBUM), listOf(track(10), track(11).copy(quality = "flac_16_48")))
+
+        val removed = dao.removeAll()
+
+        assertEquals(mapOf(10L to "original", 11L to "flac_16_48"), removed.associate { it.trackId to it.quality })
+        assertTrue(dao.allTracks().isEmpty())
+        assertTrue(dao.allGroups().isEmpty())
     }
 
     private fun group(id: String, kind: DownloadGroupKind) = DownloadGroupEntity(

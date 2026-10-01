@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -42,6 +43,8 @@ class SettingsStore(private val context: Context) : CookieStore {
     // is about to play anyway, so it costs no more data than playing on.
     private val wifiOnlyKey = booleanPreferencesKey("wifi_only_transfers")
     private val offlineModeKey = booleanPreferencesKey("offline_mode")
+    private val downloadQualityKey = stringPreferencesKey("download_quality")
+    private val prefetchMaxBytesKey = longPreferencesKey("prefetch_max_bytes")
 
     suspend fun load(): StoredSession {
         val prefs = context.jamarrDataStore.data.first()
@@ -63,6 +66,30 @@ class SettingsStore(private val context: Context) : CookieStore {
 
     suspend fun saveWifiOnlyTransfers(enabled: Boolean) {
         context.jamarrDataStore.edit { prefs -> prefs[wifiOnlyKey] = enabled }
+    }
+
+    /**
+     * Quality new downloads are fetched at. FLAC 16/48 by default: lossless,
+     * and a fraction of a hi-res original's size on a phone. Existing downloads
+     * keep the quality they were fetched at.
+     */
+    fun observeDownloadQuality(): Flow<String> = context.jamarrDataStore.data
+        .map { prefs -> prefs[downloadQualityKey] ?: DEFAULT_DOWNLOAD_QUALITY }
+        .distinctUntilChanged()
+
+    suspend fun downloadQuality(): String = observeDownloadQuality().first()
+
+    suspend fun saveDownloadQuality(quality: String) {
+        context.jamarrDataStore.edit { prefs -> prefs[downloadQualityKey] = quality }
+    }
+
+    /** Ceiling for read-ahead data on disk; downloads are not counted. */
+    fun observePrefetchMaxBytes(): Flow<Long> = context.jamarrDataStore.data
+        .map { prefs -> prefs[prefetchMaxBytesKey] ?: DEFAULT_PREFETCH_MAX_BYTES }
+        .distinctUntilChanged()
+
+    suspend fun savePrefetchMaxBytes(bytes: Long) {
+        context.jamarrDataStore.edit { prefs -> prefs[prefetchMaxBytesKey] = bytes }
     }
 
     /** The user's own offline switch, on top of automatic detection. */
@@ -142,5 +169,10 @@ class SettingsStore(private val context: Context) : CookieStore {
         val newId = UUID.randomUUID().toString()
         context.jamarrDataStore.edit { it[clientIdKey] = newId }
         return newId
+    }
+
+    companion object {
+        const val DEFAULT_DOWNLOAD_QUALITY = "flac_16_48"
+        const val DEFAULT_PREFETCH_MAX_BYTES = 1024L * 1024L * 1024L
     }
 }

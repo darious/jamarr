@@ -94,6 +94,7 @@ fun HomeScreen(
     onDownloadsClick: () -> Unit = {},
     offlineMode: Boolean = false,
     onOfflineModeChange: (Boolean) -> Unit = {},
+    onSettingsClick: () -> Unit = {},
 ) {
     val isSearching = searchQuery.trim().isNotEmpty()
     val showAccountSheet = remember { mutableStateOf(false) }
@@ -225,6 +226,10 @@ fun HomeScreen(
             serverUrl = serverUrl,
             offlineMode = offlineMode,
             onOfflineModeChange = onOfflineModeChange,
+            onSettingsClick = {
+                showAccountSheet.value = false
+                onSettingsClick()
+            },
             onDismiss = { showAccountSheet.value = false },
             onLogout = {
                 showAccountSheet.value = false
@@ -642,6 +647,7 @@ private fun AccountDialog(
     serverUrl: String,
     offlineMode: Boolean,
     onOfflineModeChange: (Boolean) -> Unit,
+    onSettingsClick: () -> Unit,
     onDismiss: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -678,6 +684,15 @@ private fun AccountDialog(
                         ),
                     )
                 }
+                Text(
+                    text = "Settings",
+                    style = JamarrType.CardTitle,
+                    color = JamarrColors.Primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onSettingsClick)
+                        .padding(vertical = 8.dp),
+                )
             }
         },
         confirmButton = {

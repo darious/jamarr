@@ -1,7 +1,6 @@
 # Offline Playback and Stream Buffering Plan
 
-Status: **Phases 1-4 implemented** (written 2026-08-02, updated 2026-10-01).
-Phase 5 not started.
+Status: **All five phases implemented** (written 2026-08-02, updated 2026-10-01).
 
 Two features, one shared piece of infrastructure:
 
@@ -314,18 +313,53 @@ upload (prod not yet released) kept it.
 
 Not done: an end-to-end upload against a released server.
 
-## Phase 5 — settings and polish
+## Phase 5 — settings and polish — **done**
 
-20. Settings: download quality picker (reuse the server ladder from
+20. ✅ Settings: download quality picker (reuse the server ladder from
     `app/services/stream_profiles.py`: original / FLAC 24-48 / FLAC 16-48 /
     MP3 320 / Opus 128), wifi-only downloads, prefetch cache cap, storage used,
     delete-all.
-21. Default download quality: `flac_16_48` rather than `original`, for phone
+21. ✅ Default download quality: `flac_16_48` rather than `original`, for phone
     storage. **This cannot ship on its own.** Cache keys carry the quality, so
     the player must first learn to accept a downloaded track at *any* quality
     rather than only the active one — otherwise a track downloaded at
     `flac_16_48` is a cache miss during `original` playback and re-streams over
     the network. Phase 2 pins downloads to `original` for exactly this reason.
+
+Deviations from the plan above:
+
+- **Item 21 was built first, as a lookup by what is on disk.** The download
+  layer of playback uses `DownloadedCacheKeyFactory`: the active quality if
+  that is downloaded, else the best other quality that is, checked straight
+  in the download cache (no Room, so it works on a cold start with no
+  network). The read-ahead layer still keys on the active quality. Labels
+  follow: a 16/48 download reads "FLAC 16/48" while playback is on Original.
+- **Each download carries its quality in its cache key** (`track:{id}:{q}`),
+  and the downloader resolves at the quality in the key, so downloads queued
+  before a setting change keep fetching (and resuming) at their own quality.
+  Removal deletes by the quality stored on the row; the DAO now returns the
+  orphaned rows rather than ids. Downloads made before this all keyed
+  `original` and are still found.
+- **The read-ahead cap needed its own evictor.** Media3's LRU evictor fixes
+  its ceiling at construction and `SimpleCache` cannot be reopened in-process,
+  so `AdjustableLruCacheEvictor` is a copy with a settable ceiling; lowering
+  it trims at once.
+- **Settings is a screen**, reached from the Account dialog and from the
+  Downloads screen header (the latter so it works offline, where Downloads
+  replaces Home). It holds download quality, Wi-Fi only (one setting for
+  downloads and read-ahead, as before), the read-ahead cap (256 MB–4 GB),
+  storage used by downloads, read-ahead and art, a read-ahead clear, and
+  delete-all.
+- **The "download all" size estimate follows the quality** — fixed rate for
+  the lossy rungs, capped near a 48 kHz FLAC's rate for the FLAC ones, never
+  above the source.
+
+Checked on the emulator against prod: an album downloaded at the new default
+took 220 MB where Original took 426 MB, and played with the network cut while
+playback was on Original. Delete-all freed it all. Tests:
+`StreamCacheKeysTest` (lookup order), `DownloadGroupsTest` (estimate by
+quality), `DownloadDaoInstrumentedTest.removingEverythingReturnsEachTrackWithItsQuality`,
+`SettingsScreenTest`.
 
 ## Testing
 

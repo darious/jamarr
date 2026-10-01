@@ -6,6 +6,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.exoplayer.offline.DefaultDownloadIndex
 import androidx.media3.exoplayer.offline.DefaultDownloaderFactory
 import androidx.media3.exoplayer.offline.Download
@@ -25,7 +26,6 @@ import com.jamarr.android.download.db.DownloadGroupTrackEntity
 import com.jamarr.android.download.db.DownloadRecordState
 import com.jamarr.android.download.db.DownloadedTrackEntity
 import com.jamarr.android.download.db.JamarrDownloadDatabase
-import com.jamarr.android.playback.JamarrCacheKeyFactory
 import com.jamarr.android.playback.JamarrPlaybackService
 import com.jamarr.android.playback.StreamCacheKeys
 import com.jamarr.android.playback.StreamUrlResolver
@@ -181,6 +181,7 @@ class JamarrDownloads(context: Context) {
         artistMbid: String? = null,
     ) {
         val now = System.currentTimeMillis()
+        val quality = settingsStore.downloadQuality()
         val orphans = database.downloadDao().replaceGroupTracks(
             group = DownloadGroupEntity(
                 groupId = groupId,
@@ -190,10 +191,12 @@ class JamarrDownloads(context: Context) {
                 artSha1 = artSha1,
                 requestedAt = now,
             ),
-            tracks = tracks.distinctBy { it.id }.map { it.toEntity(artistMbid, now) },
+            tracks = tracks.distinctBy { it.id }.map { it.toEntity(artistMbid, quality, now) },
         )
         deleteBytes(orphans)
-        tracks.filter { _states.value[it.id]?.isComplete != true }.forEach(::enqueue)
+        // A track already on disk stays at the quality it was fetched at; its
+        // row (and so its quality) is kept by insertTrackIfAbsent above.
+        tracks.filter { _states.value[it.id]?.isComplete != true }.forEach { enqueue(it, quality) }
         scope.launch { fetchArtwork(listOfNotNull(artSha1) + tracks.mapNotNull { it.artSha1 }) }
     }
 
@@ -202,6 +205,12 @@ class JamarrDownloads(context: Context) {
     /** Drops a group and deletes the cached bytes of tracks nothing else holds. */
     suspend fun removeGroup(groupId: String) {
         deleteBytes(database.downloadDao().removeGroup(groupId))
+        pruneArtwork()
+    }
+
+    /** Deletes every download: rows, bytes and art. */
+    suspend fun removeAll() {
+        deleteBytes(database.downloadDao().removeAll())
         pruneArtwork()
     }
 
@@ -235,8 +244,8 @@ class JamarrDownloads(context: Context) {
         }
     }
 
-    private fun enqueue(track: SearchTrack) {
-        val key = StreamCacheKeys.trackKey(track.id, DOWNLOAD_QUALITY)
+    private fun enqueue(track: SearchTrack, quality: String) {
+        val key = StreamCacheKeys.trackKey(track.id, quality)
         DownloadService.sendAddDownload(
             appContext,
             JamarrDownloadService::class.java,
@@ -247,15 +256,15 @@ class JamarrDownloads(context: Context) {
         )
     }
 
-    private fun deleteBytes(trackIds: List<Long>) {
-        trackIds.forEach { trackId ->
+    private fun deleteBytes(tracks: List<DownloadedTrackEntity>) {
+        tracks.forEach { track ->
             DownloadService.sendRemoveDownload(
                 appContext,
                 JamarrDownloadService::class.java,
-                StreamCacheKeys.trackKey(trackId, DOWNLOAD_QUALITY),
+                StreamCacheKeys.trackKey(track.trackId, track.quality),
                 /* foreground= */ false,
             )
-            _states.update { it - trackId }
+            _states.update { it - track.trackId }
         }
     }
 
@@ -275,7 +284,7 @@ class JamarrDownloads(context: Context) {
         runCatching { app.artworkStore.prune(keep) }
     }
 
-    private fun SearchTrack.toEntity(artistMbid: String?, now: Long) = DownloadedTrackEntity(
+    private fun SearchTrack.toEntity(artistMbid: String?, quality: String, now: Long) = DownloadedTrackEntity(
         trackId = id,
         title = title,
         artist = artist,
@@ -284,7 +293,7 @@ class JamarrDownloads(context: Context) {
         artistMbid = artistMbid,
         artSha1 = artSha1,
         durationSeconds = durationSeconds,
-        quality = DOWNLOAD_QUALITY,
+        quality = quality,
         sizeBytes = 0L,
         state = DownloadRecordState.QUEUED,
         addedAt = now,
@@ -332,15 +341,18 @@ class JamarrDownloads(context: Context) {
 
     private fun buildDownloadManager(): DownloadManager {
         val cache = app.mediaCache.downloadCache
+        // Each request carries its own key, `track:{id}:{quality}`, so the
+        // quality to fetch at is read from it — downloads made under an older
+        // quality setting keep fetching (and resuming) at that quality.
         val resolvingFactory = ResolvingDataSource.Factory(DefaultHttpDataSource.Factory()) { spec ->
-            resolver.resolveDataSpec(spec, DOWNLOAD_QUALITY)
+            resolver.resolveDataSpec(spec, StreamCacheKeys.qualityFromKey(spec.key) ?: FALLBACK_QUALITY)
         }
-        // Same key factory as playback. A download written under a different key
-        // would be invisible to the player and re-fetched over the network.
+        // Bytes are written under that same key, which is the key playback's
+        // DownloadedCacheKeyFactory looks for.
         val downloadDataSourceFactory = CacheDataSource.Factory()
             .setCache(cache)
             .setUpstreamDataSourceFactory(resolvingFactory)
-            .setCacheKeyFactory(JamarrCacheKeyFactory { DOWNLOAD_QUALITY })
+            .setCacheKeyFactory { spec -> spec.key ?: CacheKeyFactory.DEFAULT.buildCacheKey(spec) }
 
         return DownloadManager(
             appContext,
@@ -356,13 +368,8 @@ class JamarrDownloads(context: Context) {
     )
 
     companion object {
-        /**
-         * Downloads are fetched at the playback default so a downloaded track
-         * is a cache hit under the key the player looks up. A download-quality
-         * setting (phase 5) has to come with a player-side lookup that accepts
-         * any downloaded quality, not just the active one.
-         */
-        const val DOWNLOAD_QUALITY = "original"
+        /** Only reached by a request without a quality in its key, which none are. */
+        private const val FALLBACK_QUALITY = "original"
 
         const val MAX_PARALLEL_DOWNLOADS = 2
     }

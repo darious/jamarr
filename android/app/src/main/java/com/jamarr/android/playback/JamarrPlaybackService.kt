@@ -180,10 +180,13 @@ class JamarrPlaybackService : MediaLibraryService() {
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         // Downloads are read-only during playback; only the download manager
         // writes that cache. Passing a null sink factory disables writes.
+        // The download layer looks a track up at whatever quality it was
+        // downloaded at, not the active one: downloads follow their own
+        // quality setting, and adaptive playback may have stepped down since.
         val playbackFactory = CacheDataSource.Factory()
             .setCache(mediaCache.downloadCache)
             .setUpstreamDataSourceFactory(prefetchFactory)
-            .setCacheKeyFactory(cacheKeyFactory)
+            .setCacheKeyFactory(DownloadedCacheKeyFactory(mediaCache) { activeQuality.get() })
             .setCacheWriteDataSinkFactory(null)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
@@ -207,6 +210,9 @@ class JamarrPlaybackService : MediaLibraryService() {
 
         // Started only after the prefetcher exists — the first emission is
         // immediate and would otherwise touch a lateinit field.
+        serviceScope.launch {
+            settingsStore.observePrefetchMaxBytes().collect { mediaCache.setPrefetchMaxBytes(it) }
+        }
         serviceScope.launch {
             settingsStore.observeWifiOnlyTransfers().collect { enabled ->
                 wifiOnlyTransfers.set(enabled)
@@ -532,8 +538,10 @@ class JamarrPlaybackService : MediaLibraryService() {
      * runs for prefetched tracks that are not the current one.
      */
     private fun applyStreamLabels(mediaItem: MediaItem?) {
-        val quality = activeQuality.get()
         val trackId = mediaItem?.mediaId?.let { extractTrackId(it) } ?: 0L
+        // A downloaded track plays at the quality it was downloaded at.
+        val quality = (if (trackId > 0L) mediaCache.downloadedQuality(trackId, activeQuality.get()) else null)
+            ?: activeQuality.get()
         val known = if (trackId > 0L) streamResolver.labels(trackId, quality) else null
         currentStreamQuality.set(known?.quality ?: quality)
         currentStreamQualityLabel.set(known?.qualityLabel ?: qualityLabel(quality))
