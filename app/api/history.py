@@ -1,11 +1,16 @@
+import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Any, List
 
 import asyncpg
-from fastapi import APIRouter, Depends, Response, Query
+from fastapi import APIRouter, Depends, Request, Response, Query
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user_jwt
 from app.db import get_db
 from app.api.library import sha1_to_hex
+from app.security import get_client_ip
+from app.services.player.history import play_threshold_seconds, scrobble_to_lastfm
 
 
 router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
@@ -406,3 +411,103 @@ async def get_recently_played_artists(
         }
         for row in rows
     ]
+
+
+# Last.fm refuses scrobbles timestamped more than 14 days ago.
+LASTFM_MAX_SCROBBLE_AGE = timedelta(days=14)
+# Slack for a phone clock running slightly ahead of the server's.
+FUTURE_TOLERANCE = timedelta(minutes=5)
+
+
+class OfflinePlay(BaseModel):
+    track_id: int
+    played_at: datetime = Field(description="When playback started; naive values are taken as UTC.")
+    ms_played: int = Field(ge=0, description="How long the track actually played.")
+
+
+class OfflinePlayBatch(BaseModel):
+    client_id: str | None = None
+    plays: List[OfflinePlay] = Field(max_length=1000)
+
+
+class OfflinePlayResult(BaseModel):
+    recorded: int = Field(description="New history rows written.")
+    duplicates: int = Field(description="Already recorded by an earlier upload of the same play.")
+    too_short: int = Field(description="Played for less than 30s or 20% of the track.")
+    unknown_tracks: int = Field(description="Track no longer in the library.")
+    invalid: int = Field(description="Timestamped in the future.")
+
+
+@router.post(
+    "/api/history/offline",
+    response_model=OfflinePlayResult,
+    summary="Record plays made while offline",
+)
+async def record_offline_plays(
+    batch: OfflinePlayBatch,
+    request: Request,
+    current_user: asyncpg.Record = Depends(get_current_user_jwt),
+    db: asyncpg.Connection = Depends(get_db),
+) -> OfflinePlayResult:
+    """Upload plays the Android app logged with no server reachable.
+
+    Each play is held to the same threshold as live playback (30s or 20% of
+    the track, whichever is smaller) and recorded at the time it happened, not
+    the time of upload. Uploading the same play twice is harmless: a play
+    already on record for this user, track and start time is skipped, so a
+    client can resend a batch whose response it never saw. Plays recent
+    enough for Last.fm are scrobbled with their original timestamps.
+    """
+    user_id = current_user["id"]
+    rows = await db.fetch(
+        "SELECT id, duration_seconds FROM track WHERE id = ANY($1::bigint[])",
+        list({play.track_id for play in batch.plays}),
+    )
+    durations = {row["id"]: row["duration_seconds"] for row in rows}
+    client_ip = get_client_ip(request)
+    now = datetime.now(timezone.utc)
+    result = OfflinePlayResult(recorded=0, duplicates=0, too_short=0, unknown_tracks=0, invalid=0)
+    to_scrobble: list[tuple[int, int]] = []
+
+    for play in batch.plays:
+        played_at = play.played_at
+        if played_at.tzinfo is None:
+            played_at = played_at.replace(tzinfo=timezone.utc)
+        if played_at > now + FUTURE_TOLERANCE:
+            result.invalid += 1
+            continue
+        if play.track_id not in durations:
+            result.unknown_tracks += 1
+            continue
+        if play.ms_played / 1000 < play_threshold_seconds(durations[play.track_id]):
+            result.too_short += 1
+            continue
+        inserted = await db.fetchval(
+            """
+            INSERT INTO playback_history (track_id, timestamp, client_ip, client_id, user_id)
+            SELECT $1, $2, $3, $4, $5
+            WHERE NOT EXISTS (
+                SELECT 1 FROM playback_history
+                WHERE track_id = $1 AND timestamp = $2 AND user_id = $5
+            )
+            RETURNING id
+            """,
+            play.track_id,
+            played_at,
+            client_ip,
+            batch.client_id,
+            user_id,
+        )
+        if inserted is None:
+            result.duplicates += 1
+            continue
+        result.recorded += 1
+        if now - played_at <= LASTFM_MAX_SCROBBLE_AGE:
+            to_scrobble.append((play.track_id, int(played_at.timestamp())))
+
+    if result.recorded:
+        await db.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
+        for track_id, played_at_unix in to_scrobble:
+            asyncio.create_task(scrobble_to_lastfm(user_id, track_id, played_at=played_at_unix))
+
+    return result
