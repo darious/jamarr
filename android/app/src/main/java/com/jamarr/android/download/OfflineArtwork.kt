@@ -30,6 +30,9 @@ class OfflineArtworkStore(private val dir: File) {
         if (!tmp.renameTo(file(artSha1))) tmp.delete()
     }
 
+    /** Bytes of art on disk. */
+    fun totalBytes(): Long = dir.listFiles()?.sumOf { it.length() } ?: 0L
+
     /** Deletes stored art that nothing downloaded refers to any more. */
     fun prune(keep: Set<String>) {
         dir.listFiles()?.forEach { f ->

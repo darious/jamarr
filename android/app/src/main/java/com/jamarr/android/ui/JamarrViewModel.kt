@@ -31,10 +31,13 @@ import com.jamarr.android.renderer.QueuedTrack
 import com.jamarr.android.ui.nav.JamarrTab
 import com.jamarr.android.ui.nav.Routes
 import com.jamarr.android.ui.nav.route
+import com.jamarr.android.ui.screens.StorageUsage
 import com.jamarr.android.upnp.UpnpDeviceController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val REMOTE_POLL_STATUS_PREFIX = "Remote poll: "
 
@@ -96,6 +99,16 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Track ids per group, in group order. */
     var downloadGroupTracks by mutableStateOf<Map<String, List<Long>>>(emptyMap())
+        private set
+
+    // Settings (phase 5): mirrored from SettingsStore so the screen is plain state.
+    var downloadQuality by mutableStateOf(SettingsStore.DEFAULT_DOWNLOAD_QUALITY)
+        private set
+    var prefetchMaxBytes by mutableStateOf(SettingsStore.DEFAULT_PREFETCH_MAX_BYTES)
+        private set
+    var wifiOnlyTransfers by mutableStateOf(false)
+        private set
+    var storageUsage by mutableStateOf<StorageUsage?>(null)
         private set
 
     // Offline state: the manual switch, no network, or an unreachable server.
@@ -174,6 +187,10 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             app.connectivity.state.collectLatest { onlineState = it }
         }
+
+        viewModelScope.launch { settingsStore.observeDownloadQuality().collectLatest { downloadQuality = it } }
+        viewModelScope.launch { settingsStore.observePrefetchMaxBytes().collectLatest { prefetchMaxBytes = it } }
+        viewModelScope.launch { settingsStore.observeWifiOnlyTransfers().collectLatest { wifiOnlyTransfers = it } }
 
         // Created here as well as by the playback service, so plays logged
         // offline go up when the app opens, not only once something plays.
@@ -635,6 +652,61 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { settingsStore.saveOfflineMode(enabled) }
     }
 
+    fun updateDownloadQuality(quality: String) {
+        viewModelScope.launch { settingsStore.saveDownloadQuality(quality) }
+    }
+
+    fun updateWifiOnlyTransfers(enabled: Boolean) {
+        viewModelScope.launch { settingsStore.saveWifiOnlyTransfers(enabled) }
+    }
+
+    /**
+     * Applied here as well as by the playback service, which also follows the
+     * setting: a lower cap should free space now, not on the next play.
+     */
+    fun updatePrefetchMaxBytes(bytes: Long) {
+        viewModelScope.launch {
+            settingsStore.savePrefetchMaxBytes(bytes)
+            withContext(Dispatchers.IO) { app.mediaCache.setPrefetchMaxBytes(bytes) }
+            refreshStorageUsage()
+        }
+    }
+
+    fun refreshStorageUsage() {
+        viewModelScope.launch {
+            storageUsage = withContext(Dispatchers.IO) {
+                StorageUsage(
+                    downloadBytes = app.mediaCache.downloadBytes(),
+                    readAheadBytes = app.mediaCache.readAheadBytes(),
+                    artworkBytes = app.artworkStore.totalBytes(),
+                )
+            }
+        }
+    }
+
+    fun clearReadAhead() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { app.mediaCache.clearPrefetch() }
+            refreshStorageUsage()
+        }
+    }
+
+    fun deleteAllDownloads() {
+        viewModelScope.launch {
+            runCatching { app.downloads.removeAll() }
+                .onFailure { status = it.message ?: "Could not delete downloads." }
+            // The download service deletes the bytes after this returns; wait
+            // for it (briefly) so the figure does not show the old total.
+            withContext(Dispatchers.IO) {
+                repeat(DELETE_SETTLE_POLLS) {
+                    if (app.mediaCache.downloadBytes() == 0L) return@withContext
+                    delay(DELETE_SETTLE_POLL_MS)
+                }
+            }
+            refreshStorageUsage()
+        }
+    }
+
     fun playQueueFromUi(queue: List<SearchTrack>, startIndex: Int) {
         viewModelScope.launch {
             runCatching { playTracks(queue, startIndex) }
@@ -910,5 +982,8 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         return "audio/flac"
     }
 }
+
+private const val DELETE_SETTLE_POLLS = 40
+private const val DELETE_SETTLE_POLL_MS = 250L
 
 enum class RendererSource { SERVER, DEVICE }

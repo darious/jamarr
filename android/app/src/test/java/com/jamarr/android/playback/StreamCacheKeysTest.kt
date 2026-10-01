@@ -30,4 +30,34 @@ class StreamCacheKeysTest {
         assertNull(StreamCacheKeys.trackIdFromUri("jamarr://album/12"))
         assertNull(StreamCacheKeys.trackIdFromUri("jamarr://track/not-a-number"))
     }
+
+    @Test
+    fun `quality is read back from a track key`() {
+        assertEquals("flac_16_48", StreamCacheKeys.qualityFromKey(StreamCacheKeys.trackKey(9L, "flac_16_48")))
+        assertNull(StreamCacheKeys.qualityFromKey(null))
+        assertNull(StreamCacheKeys.qualityFromKey("track:9:bogus"))
+        assertNull(StreamCacheKeys.qualityFromKey("jamarr://track/9"))
+    }
+
+    @Test
+    fun `a download is found at whatever quality it was fetched at`() {
+        val onDisk = setOf("flac_16_48")
+
+        // Playing at original, downloaded at 16/48: read the 16/48 bytes, not the network.
+        assertEquals("flac_16_48", StreamCacheKeys.downloadedQuality("original") { it in onDisk })
+    }
+
+    @Test
+    fun `the active quality wins when it is downloaded too`() {
+        val onDisk = setOf("original", "mp3_320")
+
+        assertEquals("mp3_320", StreamCacheKeys.downloadedQuality("mp3_320") { it in onDisk })
+        // Otherwise the best quality on disk.
+        assertEquals("original", StreamCacheKeys.downloadedQuality("opus_128") { it in onDisk })
+    }
+
+    @Test
+    fun `nothing downloaded means no quality`() {
+        assertNull(StreamCacheKeys.downloadedQuality("original") { false })
+    }
 }

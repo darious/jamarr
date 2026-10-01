@@ -91,12 +91,28 @@ fun groupDownloadStatus(
  */
 const val FALLBACK_BITRATE_BPS = 968_000L
 
-/** Rough on-disk size of downloading [tracks] at `original` quality. */
-fun estimateDownloadBytes(tracks: Collection<SearchTrack>): Long = tracks.sumOf { track ->
-    val seconds = track.durationSeconds ?: 0.0
-    val bitrate = track.bitrate?.takeIf { it > 0 } ?: FALLBACK_BITRATE_BPS
-    (seconds * bitrate / 8).toLong()
-}
+/**
+ * Rough on-disk size of downloading [tracks] at [quality]. Lossy rungs are
+ * fixed-rate; the FLAC rungs are capped at about what a 48 kHz FLAC of that
+ * depth compresses to, and never exceed the source (the server does not
+ * upsample a download onto a bigger file).
+ */
+fun estimateDownloadBytes(tracks: Collection<SearchTrack>, quality: String = "original"): Long =
+    tracks.sumOf { track ->
+        val seconds = track.durationSeconds ?: 0.0
+        val source = track.bitrate?.takeIf { it > 0 } ?: FALLBACK_BITRATE_BPS
+        val bitrate = when (quality) {
+            "mp3_320" -> 320_000L
+            "opus_128" -> 128_000L
+            "flac_16_48" -> minOf(source, FLAC_16_48_BPS)
+            "flac_24_48" -> minOf(source, FLAC_24_48_BPS)
+            else -> source
+        }
+        (seconds * bitrate / 8).toLong()
+    }
+
+private const val FLAC_16_48_BPS = 1_000_000L
+private const val FLAC_24_48_BPS = 1_500_000L
 
 fun formatBytes(bytes: Long): String {
     val gib = bytes / (1024.0 * 1024 * 1024)

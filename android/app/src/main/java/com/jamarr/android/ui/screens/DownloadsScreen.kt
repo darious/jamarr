@@ -82,6 +82,7 @@ fun DownloadsScreen(
     onGroupClick: (String) -> Unit,
     artworkUrl: (String?, Int) -> String?,
     contentPadding: PaddingValues = PaddingValues(0.dp),
+    onSettingsClick: (() -> Unit)? = null,
 ) {
     var tab by rememberSaveable { mutableStateOf(DownloadsTab.Tracks) }
     val onDisk = tracks.filter { it.state == DownloadRecordState.COMPLETED }
@@ -93,7 +94,26 @@ fun DownloadsScreen(
                 .statusBarsPadding()
                 .padding(horizontal = JamarrDims.ScreenPadding, vertical = 12.dp),
         ) {
-            Text(text = "Downloads", style = JamarrType.ScreenTitle, color = JamarrColors.Text)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Downloads",
+                    style = JamarrType.ScreenTitle,
+                    color = JamarrColors.Text,
+                    modifier = Modifier.weight(1f),
+                )
+                // Offline this screen stands in for Home, whose account dialog is
+                // the other way in, so settings have to be reachable from here too.
+                if (onSettingsClick != null) {
+                    Text(
+                        text = "Settings",
+                        style = JamarrType.Caption,
+                        color = JamarrColors.Primary,
+                        modifier = Modifier
+                            .clickable(onClick = onSettingsClick)
+                            .padding(8.dp),
+                    )
+                }
+            }
             Text(
                 text = if (tracks.isEmpty()) {
                     "Nothing downloaded yet"

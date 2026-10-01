@@ -114,6 +114,7 @@ fun ArtistDetailScreen(
     contentPadding: PaddingValues,
     groupStatus: (String) -> GroupDownloadStatus? = { null },
     onToggleGroupDownload: ((GroupDownloadRequest) -> Unit)? = null,
+    downloadQuality: String = "original",
 ) {
     val ctx = LocalJamarrContext.current
     val scope = rememberCoroutineScope()
@@ -440,7 +441,7 @@ fun ArtistDetailScreen(
             title = "Download all releases?",
             text = "${request.tracks.size} tracks from $releases " +
                 "release${if (releases == 1) "" else "s"}, about " +
-                "${formatBytes(estimateDownloadBytes(request.tracks))}.",
+                "${formatBytes(estimateDownloadBytes(request.tracks, downloadQuality))}.",
             confirmLabel = "Download",
             onConfirm = {
                 pendingAll.value = null

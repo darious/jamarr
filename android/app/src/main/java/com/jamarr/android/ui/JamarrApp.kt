@@ -55,6 +55,7 @@ import com.jamarr.android.ui.screens.NowPlayingSheet
 import com.jamarr.android.ui.screens.OfflinePlaceholder
 import com.jamarr.android.ui.screens.PlaylistDetailScreen
 import com.jamarr.android.ui.screens.PlaylistsScreen
+import com.jamarr.android.ui.screens.SettingsScreen
 import com.jamarr.android.ui.state.JamarrAppContext
 import com.jamarr.android.ui.state.LocalJamarrContext
 import com.jamarr.android.ui.theme.JamarrColors
@@ -186,6 +187,7 @@ private fun JamarrRoot() {
                         onGroupClick = { groupId -> navController.navigate(Routes.downloadGroup(groupId)) },
                         artworkUrl = artworkUrl,
                         contentPadding = contentPadding,
+                        onSettingsClick = { navController.navigate(Routes.SETTINGS) },
                     )
                         return@composable
                     }
@@ -247,6 +249,24 @@ private fun JamarrRoot() {
                         onDownloadsClick = { navController.navigate(Routes.DOWNLOADS) },
                         offlineMode = vm.onlineState.manualOffline,
                         onOfflineModeChange = { vm.setOfflineMode(it) },
+                        onSettingsClick = { navController.navigate(Routes.SETTINGS) },
+                    )
+                }
+
+                composable(Routes.SETTINGS) {
+                    LaunchedEffect(Unit) { vm.refreshStorageUsage() }
+                    SettingsScreen(
+                        downloadQuality = vm.downloadQuality,
+                        wifiOnly = vm.wifiOnlyTransfers,
+                        readAheadMaxBytes = vm.prefetchMaxBytes,
+                        storage = vm.storageUsage,
+                        onBack = { navController.popBackStack() },
+                        onDownloadQualityChange = vm::updateDownloadQuality,
+                        onWifiOnlyChange = vm::updateWifiOnlyTransfers,
+                        onReadAheadMaxBytesChange = vm::updatePrefetchMaxBytes,
+                        onClearReadAhead = vm::clearReadAhead,
+                        onDeleteAllDownloads = vm::deleteAllDownloads,
+                        contentPadding = contentPadding,
                     )
                 }
 
@@ -264,6 +284,7 @@ private fun JamarrRoot() {
                         onGroupClick = { groupId -> navController.navigate(Routes.downloadGroup(groupId)) },
                         artworkUrl = artworkUrl,
                         contentPadding = contentPadding,
+                        onSettingsClick = { navController.navigate(Routes.SETTINGS) },
                     )
                 }
 
@@ -392,6 +413,7 @@ private fun JamarrRoot() {
                         contentPadding = contentPadding,
                         groupStatus = vm::groupStatus,
                         onToggleGroupDownload = vm::toggleGroupDownload,
+                        downloadQuality = vm.downloadQuality,
                     )
                 }
 
