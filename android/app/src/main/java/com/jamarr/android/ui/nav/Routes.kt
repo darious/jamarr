@@ -13,6 +13,7 @@ object Routes {
     const val ARTIST = "artist?mbid={mbid}&name={name}&artSha1={artSha1}"
     const val ALBUM = "album?mbid={mbid}&album={album}&artist={artist}&artistMbid={artistMbid}&artSha1={artSha1}"
     const val PLAYLIST = "playlist/{id}"
+    const val DOWNLOAD_GROUP = "downloads/group?id={id}"
 
     fun artist(mbid: String?, name: String?, artSha1: String? = null): String =
         "artist?mbid=${encode(mbid)}&name=${encode(name)}&artSha1=${encode(artSha1)}"
@@ -26,6 +27,8 @@ object Routes {
     ): String = "album?mbid=${encode(albumMbid)}&album=${encode(album)}&artist=${encode(artist)}&artistMbid=${encode(artistMbid)}&artSha1=${encode(artSha1)}"
 
     fun playlist(id: Long): String = "playlist/$id"
+
+    fun downloadGroup(groupId: String): String = "downloads/group?id=${encode(groupId)}"
 
     private fun encode(value: String?): String =
         if (value.isNullOrBlank()) "" else Uri.encode(value)

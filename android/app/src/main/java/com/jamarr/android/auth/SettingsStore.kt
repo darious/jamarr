@@ -41,6 +41,7 @@ class SettingsStore(private val context: Context) : CookieStore {
     // unmetered networks. Off by default: read-ahead only pulls the track that
     // is about to play anyway, so it costs no more data than playing on.
     private val wifiOnlyKey = booleanPreferencesKey("wifi_only_transfers")
+    private val offlineModeKey = booleanPreferencesKey("offline_mode")
 
     suspend fun load(): StoredSession {
         val prefs = context.jamarrDataStore.data.first()
@@ -62,6 +63,15 @@ class SettingsStore(private val context: Context) : CookieStore {
 
     suspend fun saveWifiOnlyTransfers(enabled: Boolean) {
         context.jamarrDataStore.edit { prefs -> prefs[wifiOnlyKey] = enabled }
+    }
+
+    /** The user's own offline switch, on top of automatic detection. */
+    fun observeOfflineMode(): Flow<Boolean> = context.jamarrDataStore.data
+        .map { prefs -> prefs[offlineModeKey] ?: false }
+        .distinctUntilChanged()
+
+    suspend fun saveOfflineMode(enabled: Boolean) {
+        context.jamarrDataStore.edit { prefs -> prefs[offlineModeKey] = enabled }
     }
 
     fun observeSession(): Flow<StoredSession> = context.jamarrDataStore.data

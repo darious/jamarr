@@ -25,6 +25,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -90,6 +92,8 @@ fun HomeScreen(
     rendererName: String = "This Device",
     onRendererClick: () -> Unit = {},
     onDownloadsClick: () -> Unit = {},
+    offlineMode: Boolean = false,
+    onOfflineModeChange: (Boolean) -> Unit = {},
 ) {
     val isSearching = searchQuery.trim().isNotEmpty()
     val showAccountSheet = remember { mutableStateOf(false) }
@@ -219,6 +223,8 @@ fun HomeScreen(
     if (showAccountSheet.value) {
         AccountDialog(
             serverUrl = serverUrl,
+            offlineMode = offlineMode,
+            onOfflineModeChange = onOfflineModeChange,
             onDismiss = { showAccountSheet.value = false },
             onLogout = {
                 showAccountSheet.value = false
@@ -634,6 +640,8 @@ private fun SearchTrackRow(track: SearchTrack, onClick: () -> Unit) {
 @Composable
 private fun AccountDialog(
     serverUrl: String,
+    offlineMode: Boolean,
+    onOfflineModeChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -644,11 +652,33 @@ private fun AccountDialog(
         textContentColor = JamarrColors.Muted,
         title = { Text("Account", style = JamarrType.SectionHeader, color = JamarrColors.Text) },
         text = {
-            Text(
-                text = if (serverUrl.isNotBlank()) "Signed in to $serverUrl" else "Signed in",
-                style = JamarrType.Body,
-                color = JamarrColors.Muted,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = if (serverUrl.isNotBlank()) "Signed in to $serverUrl" else "Signed in",
+                    style = JamarrType.Body,
+                    color = JamarrColors.Muted,
+                )
+                // Forces the offline view even with the server in reach: for a
+                // flight, or to stay on downloads over a metered connection.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Offline mode", style = JamarrType.CardTitle, color = JamarrColors.Text)
+                        Text(
+                            text = "Only play what is downloaded",
+                            style = JamarrType.CaptionSmall,
+                            color = JamarrColors.Muted,
+                        )
+                    }
+                    Switch(
+                        checked = offlineMode,
+                        onCheckedChange = onOfflineModeChange,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = JamarrColors.Primary,
+                        ),
+                    )
+                }
+            }
         },
         confirmButton = {
             TextButton(

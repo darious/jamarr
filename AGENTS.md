@@ -38,8 +38,11 @@ android/app/src/main/java/com/jamarr/android/
                      ui/ data/ auth/ cast/ upnp/ renderer/
   playback/          ExoPlayer + MediaLibraryService (Android Auto), stream URL
                      resolver, disk caches, read-ahead prefetch
-  download/          offline downloads: Media3 DownloadManager + Room (db/)
+  download/          offline downloads: Media3 DownloadManager + Room (db/),
+                     group/top-tracks sync, offline art (Coil interceptor)
                      roadmap: android/OFFLINE_PLAYBACK.md
+  data/ConnectivityMonitor.kt  offline state (network + /api/health probe +
+                     manual switch); offline UI = Downloads screens
 migrations/          NNN_*.sql  (raw SQL; auto-applied on app startup + by deploy.sh)
 tests/               pytest: api/ auth/ integration/ scanner/ unit/ + top-level
 docs/                outline.md, DATABASE_SCHEMA.md, api.md, auth.md, scanner.md,

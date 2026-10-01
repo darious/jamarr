@@ -45,6 +45,7 @@ import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.ArtistArt
 import com.jamarr.android.ui.components.HeartIcon
 import com.jamarr.android.ui.components.RefreshIcon
+import com.jamarr.android.ui.components.SubTabButton
 import com.jamarr.android.ui.state.LocalJamarrContext
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
@@ -199,34 +200,6 @@ private fun SubTabs(selected: FavTab, onSelect: (FavTab) -> Unit) {
             selected = selected == FavTab.Releases,
             onClick = { onSelect(FavTab.Releases) },
             modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun SubTabButton(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val borderColor = if (selected) JamarrColors.Primary else JamarrColors.Border
-    val bg = if (selected) JamarrColors.PrimaryTint else JamarrColors.Card
-    val textColor = if (selected) JamarrColors.Primary else JamarrColors.Muted
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(10.dp))
-            .background(bg)
-            .clickable(onClick = onClick)
-            .padding(vertical = 9.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            style = JamarrType.Body,
-            color = textColor,
-            fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.W600 else androidx.compose.ui.text.font.FontWeight.W500,
         )
     }
 }

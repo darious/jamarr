@@ -41,8 +41,13 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.jamarr.android.data.AlbumDetail
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.download.DownloadGroupIds
 import com.jamarr.android.download.DownloadProgress
+import com.jamarr.android.download.GroupDownloadRequest
+import com.jamarr.android.download.GroupDownloadStatus
+import com.jamarr.android.download.db.DownloadGroupKind
 import com.jamarr.android.ui.components.AlbumArt
+import com.jamarr.android.ui.components.GroupDownloadButton
 import com.jamarr.android.ui.components.HeartIcon
 import com.jamarr.android.ui.components.PlayShuffleActions
 import com.jamarr.android.ui.components.TrackRow
@@ -69,6 +74,8 @@ fun AlbumDetailScreen(
     contentPadding: PaddingValues,
     downloadStates: Map<Long, DownloadProgress> = emptyMap(),
     onToggleDownload: ((SearchTrack) -> Unit)? = null,
+    groupStatus: (String) -> GroupDownloadStatus? = { null },
+    onToggleGroupDownload: ((GroupDownloadRequest) -> Unit)? = null,
 ) {
     val ctx = LocalJamarrContext.current
     val scope = rememberCoroutineScope()
@@ -113,6 +120,32 @@ fun AlbumDetailScreen(
     val currentMediaId = ctx.playbackController.currentMediaId?.toLongOrNull()
 
     val resolvedAlbumMbid = detail.value?.albumMbid ?: albumMbid
+    // Keyed on the album's MBID, so an album opened without one (by title only)
+    // has nothing stable to file the download under and gets no button.
+    val downloadButton: (@Composable () -> Unit)? =
+        if (onToggleGroupDownload == null || resolvedAlbumMbid.isNullOrBlank() || tracks.value.isEmpty()) {
+            null
+        } else {
+            {
+                val groupId = DownloadGroupIds.album(resolvedAlbumMbid)
+                GroupDownloadButton(
+                    status = groupStatus(groupId),
+                    onClick = {
+                        onToggleGroupDownload(
+                            GroupDownloadRequest(
+                                groupId = groupId,
+                                kind = DownloadGroupKind.ALBUM,
+                                title = title,
+                                subtitle = artist,
+                                artSha1 = detail.value?.artSha1 ?: fallbackArtSha1,
+                                tracks = tracks.value,
+                                artistMbid = artistMbid,
+                            ),
+                        )
+                    },
+                )
+            }
+        }
     val onPlay: () -> Unit = {
         if (tracks.value.isNotEmpty()) onPlayTracks(tracks.value, 0)
     }
@@ -155,6 +188,7 @@ fun AlbumDetailScreen(
                     onToggleFavorite = onToggleFavorite,
                     onPlay = onPlay,
                     onShuffle = onShuffle,
+                    downloadButton = downloadButton,
                     modifier = Modifier
                         .width(500.dp)
                         .fillMaxHeight()
@@ -220,7 +254,7 @@ fun AlbumDetailScreen(
                 }
                 item {
                     Column(modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding, vertical = 16.dp)) {
-                        PlayShuffleActions(onPlay = onPlay, onShuffle = onShuffle)
+                        PlayShuffleActions(onPlay = onPlay, onShuffle = onShuffle, trailing = downloadButton)
                     }
                 }
                 if (errorState.value != null && tracks.value.isEmpty()) {
@@ -269,6 +303,7 @@ private fun AlbumLeftPane(
     onToggleFavorite: () -> Unit,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
+    downloadButton: (@Composable () -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -347,7 +382,7 @@ private fun AlbumLeftPane(
             )
         }
         Spacer(Modifier.height(20.dp))
-        PlayShuffleActions(onPlay = onPlay, onShuffle = onShuffle)
+        PlayShuffleActions(onPlay = onPlay, onShuffle = onShuffle, trailing = downloadButton)
     }
 }
 

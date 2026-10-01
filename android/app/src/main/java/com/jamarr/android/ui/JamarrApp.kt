@@ -45,12 +45,14 @@ import com.jamarr.android.ui.nav.routeToTab
 import com.jamarr.android.ui.screens.AlbumDetailScreen
 import com.jamarr.android.ui.screens.ArtistDetailScreen
 import com.jamarr.android.ui.screens.ChartsScreen
+import com.jamarr.android.ui.screens.DownloadGroupScreen
 import com.jamarr.android.ui.screens.DownloadsScreen
 import com.jamarr.android.ui.screens.FavouritesScreen
 import com.jamarr.android.ui.screens.HistoryScreen
 import com.jamarr.android.ui.screens.HomeScreen
 import com.jamarr.android.ui.screens.LoginScreen
 import com.jamarr.android.ui.screens.NowPlayingSheet
+import com.jamarr.android.ui.screens.OfflinePlaceholder
 import com.jamarr.android.ui.screens.PlaylistDetailScreen
 import com.jamarr.android.ui.screens.PlaylistsScreen
 import com.jamarr.android.ui.state.JamarrAppContext
@@ -145,12 +147,48 @@ private fun JamarrRoot() {
             var bottomStackHeight by remember { mutableStateOf(navBarHeight + miniHeight) }
             val contentPadding = PaddingValues(bottom = bottomStackHeight)
 
+            val artworkUrl: (String?, Int) -> String? = { sha, size ->
+                vm.apiClient.artworkUrl(vm.serverUrl, sha, size)
+            }
+            val offlinePlaceholder: @Composable (String) -> Unit = { title ->
+                OfflinePlaceholder(
+                    title = title,
+                    onlineState = vm.onlineState,
+                    onGoOnline = { vm.setOfflineMode(false) },
+                    onOpenDownloads = {
+                        navController.navigate(Routes.HOME) {
+                            popUpTo(Routes.HOME) { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    },
+                )
+            }
+
             NavHost(
                 navController = navController,
                 startDestination = Routes.HOME,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 composable(Routes.HOME) {
+                    // Offline, Home has nothing to show but would render as a dead
+                    // screen; the downloads are what can actually be played.
+                    if (vm.isOffline) {
+                        DownloadsScreen(
+                        tracks = vm.downloadedTracks,
+                        groups = vm.downloadGroups,
+                        groupTracks = vm.downloadGroupTracks,
+                        downloadStates = vm.downloadStates,
+                        nowPlayingTrackId = vm.nowPlayingTrack?.id,
+                        onlineState = vm.onlineState,
+                        onGoOnline = { vm.setOfflineMode(false) },
+                        onTrackClick = { track, queue -> vm.playTrack(track, queue) },
+                        onRemoveTrack = { trackId -> vm.removeDownload(trackId) },
+                        onGroupClick = { groupId -> navController.navigate(Routes.downloadGroup(groupId)) },
+                        artworkUrl = artworkUrl,
+                        contentPadding = contentPadding,
+                    )
+                        return@composable
+                    }
                     HomeScreen(
                         greetingInitial = vm.username.firstOrNull()?.toString().orEmpty(),
                         serverUrl = vm.serverUrl,
@@ -207,21 +245,55 @@ private fun JamarrRoot() {
                         rendererName = vm.activeRendererName,
                         onRendererClick = { vm.showRendererPicker = true },
                         onDownloadsClick = { navController.navigate(Routes.DOWNLOADS) },
+                        offlineMode = vm.onlineState.manualOffline,
+                        onOfflineModeChange = { vm.setOfflineMode(it) },
                     )
                 }
 
                 composable(Routes.DOWNLOADS) {
                     DownloadsScreen(
                         tracks = vm.downloadedTracks,
+                        groups = vm.downloadGroups,
+                        groupTracks = vm.downloadGroupTracks,
                         downloadStates = vm.downloadStates,
                         nowPlayingTrackId = vm.nowPlayingTrack?.id,
+                        onlineState = vm.onlineState,
+                        onGoOnline = { vm.setOfflineMode(false) },
                         onTrackClick = { track, queue -> vm.playTrack(track, queue) },
-                        onRemove = { trackId -> vm.removeDownload(trackId) },
+                        onRemoveTrack = { trackId -> vm.removeDownload(trackId) },
+                        onGroupClick = { groupId -> navController.navigate(Routes.downloadGroup(groupId)) },
+                        artworkUrl = artworkUrl,
+                        contentPadding = contentPadding,
+                    )
+                }
+
+                composable(
+                    route = Routes.DOWNLOAD_GROUP,
+                    arguments = listOf(navArgument("id") { type = NavType.StringType; defaultValue = "" }),
+                ) { entry ->
+                    val groupId = entry.arguments?.getString("id").orEmpty()
+                    val tracksFlow = remember(groupId) { vm.observeDownloadGroupTracks(groupId) }
+                    DownloadGroupScreen(
+                        group = vm.downloadGroups.firstOrNull { it.groupId == groupId },
+                        tracksFlow = tracksFlow,
+                        downloadStates = vm.downloadStates,
+                        nowPlayingTrackId = vm.nowPlayingTrack?.id,
+                        artworkUrl = artworkUrl,
+                        onBack = { navController.popBackStack() },
+                        onPlayTracks = { queue, startIndex -> vm.playQueueFromUi(queue, startIndex) },
+                        onRemove = {
+                            vm.removeDownloadGroup(groupId)
+                            navController.popBackStack()
+                        },
                         contentPadding = contentPadding,
                     )
                 }
 
                 composable(Routes.FAVOURITES) {
+                    if (vm.isOffline) {
+                        offlinePlaceholder("Favourites")
+                        return@composable
+                    }
                     FavouritesScreen(
                         onArtistClick = { mbid, name ->
                             navController.navigate(Routes.artist(mbid = mbid, name = name))
@@ -236,6 +308,10 @@ private fun JamarrRoot() {
                 }
 
                 composable(Routes.PLAYLISTS) {
+                    if (vm.isOffline) {
+                        offlinePlaceholder("Playlists")
+                        return@composable
+                    }
                     PlaylistsScreen(
                         onPlaylistClick = { id -> navController.navigate(Routes.playlist(id)) },
                         contentPadding = contentPadding,
@@ -243,6 +319,10 @@ private fun JamarrRoot() {
                 }
 
                 composable(Routes.CHARTS) {
+                    if (vm.isOffline) {
+                        offlinePlaceholder("Charts")
+                        return@composable
+                    }
                     ChartsScreen(
                         onAlbumClick = { chart ->
                             navController.navigate(
@@ -259,6 +339,10 @@ private fun JamarrRoot() {
                 }
 
                 composable(Routes.HISTORY) {
+                    if (vm.isOffline) {
+                        offlinePlaceholder("History")
+                        return@composable
+                    }
                     HistoryScreen(
                         onArtistClick = { mbid, name ->
                             navController.navigate(Routes.artist(mbid = mbid, name = name))
@@ -306,6 +390,8 @@ private fun JamarrRoot() {
                         },
                         onPlayTrack = { track, queue -> vm.playTrack(track, queue) },
                         contentPadding = contentPadding,
+                        groupStatus = vm::groupStatus,
+                        onToggleGroupDownload = vm::toggleGroupDownload,
                     )
                 }
 
@@ -340,6 +426,8 @@ private fun JamarrRoot() {
                         contentPadding = contentPadding,
                         downloadStates = vm.downloadStates,
                         onToggleDownload = { track -> vm.toggleDownload(track) },
+                        groupStatus = vm::groupStatus,
+                        onToggleGroupDownload = vm::toggleGroupDownload,
                     )
                 }
 
@@ -355,6 +443,8 @@ private fun JamarrRoot() {
                             vm.playQueueFromUi(queue, startIndex)
                         },
                         contentPadding = contentPadding,
+                        groupStatus = vm::groupStatus,
+                        onToggleGroupDownload = vm::toggleGroupDownload,
                     )
                 }
             }

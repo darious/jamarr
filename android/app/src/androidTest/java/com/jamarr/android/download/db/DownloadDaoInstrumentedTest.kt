@@ -97,6 +97,69 @@ class DownloadDaoInstrumentedTest {
         assertTrue(dao.groupTracks("album:1").isEmpty())
     }
 
+    @Test
+    fun replacingAGroupsTracksDropsTheOnesThatLeft() = runTest {
+        dao.addGroup(group("artist_top:a:scrobbled", DownloadGroupKind.ARTIST_TOP), listOf(track(10), track(11)))
+
+        val orphans = dao.replaceGroupTracks(
+            group("artist_top:a:scrobbled", DownloadGroupKind.ARTIST_TOP),
+            listOf(track(12), track(10)),
+        )
+
+        assertEquals(listOf(11L), orphans)
+        assertNull(dao.track(11))
+        assertEquals(listOf(12L, 10L), dao.groupTrackIds("artist_top:a:scrobbled"))
+    }
+
+    @Test
+    fun aTrackThatLeftASyncedListSurvivesIfAnAlbumHoldsIt() = runTest {
+        dao.addGroup(group("album:1", DownloadGroupKind.ALBUM), listOf(track(10)))
+        dao.addGroup(group("artist_top:a:scrobbled", DownloadGroupKind.ARTIST_TOP), listOf(track(10), track(11)))
+
+        val orphans = dao.replaceGroupTracks(
+            group("artist_top:a:scrobbled", DownloadGroupKind.ARTIST_TOP),
+            listOf(track(11)),
+        )
+
+        assertTrue(orphans.isEmpty())
+        assertNotNull(dao.track(10))
+    }
+
+    @Test
+    fun requestingAGroupKeepsAFinishedTracksState() = runTest {
+        dao.addGroup(group("track:10", DownloadGroupKind.TRACK), listOf(track(10)))
+        dao.updateState(10, DownloadRecordState.COMPLETED, sizeBytes = 4_096)
+
+        dao.addGroup(group("album:1", DownloadGroupKind.ALBUM), listOf(track(10), track(11)))
+
+        assertEquals(DownloadRecordState.COMPLETED, dao.track(10)!!.state)
+        assertEquals(listOf(10L), dao.groupTrackIds("track:10"))
+    }
+
+    @Test
+    fun reRequestingAGroupKeepsOtherGroupsLinks() = runTest {
+        dao.addGroup(group("album:1", DownloadGroupKind.ALBUM), listOf(track(10)))
+        dao.addGroup(group("playlist:5", DownloadGroupKind.PLAYLIST), listOf(track(10)))
+
+        dao.replaceGroupTracks(group("album:1", DownloadGroupKind.ALBUM), listOf(track(10)))
+
+        assertEquals(listOf(10L), dao.groupTrackIds("playlist:5"))
+    }
+
+    @Test
+    fun referencedArtCoversTracksAndGroups() = runTest {
+        dao.addGroup(
+            group("album:1", DownloadGroupKind.ALBUM).copy(artSha1 = "aa"),
+            listOf(track(10).copy(artSha1 = "bb"), track(11)),
+        )
+
+        assertEquals(setOf("aa", "bb"), dao.referencedArtSha1s().toSet())
+
+        dao.removeGroup("album:1")
+
+        assertTrue(dao.referencedArtSha1s().isEmpty())
+    }
+
     private fun group(id: String, kind: DownloadGroupKind) = DownloadGroupEntity(
         groupId = id,
         kind = kind,

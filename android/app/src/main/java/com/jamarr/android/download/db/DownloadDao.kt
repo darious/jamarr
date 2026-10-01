@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -34,10 +35,51 @@ interface DownloadDao {
     )
     suspend fun groupTracks(groupId: String): List<DownloadedTrackEntity>
 
+    @Query("SELECT * FROM download_group WHERE groupId = :groupId")
+    suspend fun group(groupId: String): DownloadGroupEntity?
+
+    @Query("SELECT * FROM download_group WHERE kind = :kind")
+    suspend fun groups(kind: DownloadGroupKind): List<DownloadGroupEntity>
+
+    /** Every group membership; small enough to hold whole for the UI. */
+    @Query("SELECT * FROM download_group_track")
+    fun observeLinks(): Flow<List<DownloadGroupTrackEntity>>
+
+    @Query(
+        """
+        SELECT t.* FROM downloaded_track t
+        JOIN download_group_track gt ON gt.trackId = t.trackId
+        WHERE gt.groupId = :groupId
+        ORDER BY gt.position
+        """,
+    )
+    fun observeGroupTracks(groupId: String): Flow<List<DownloadedTrackEntity>>
+
+    @Query("SELECT trackId FROM download_group_track WHERE groupId = :groupId ORDER BY position")
+    suspend fun groupTrackIds(groupId: String): List<Long>
+
+    /** Art still referenced by something on disk; everything else can go. */
+    @Query(
+        """
+        SELECT artSha1 FROM downloaded_track WHERE artSha1 IS NOT NULL
+        UNION
+        SELECT artSha1 FROM download_group WHERE artSha1 IS NOT NULL
+        """,
+    )
+    suspend fun referencedArtSha1s(): List<String>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTrack(track: DownloadedTrackEntity)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    /**
+     * A track another group already holds keeps its row: replacing it would
+     * reset a finished download's state to queued.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTrackIfAbsent(track: DownloadedTrackEntity)
+
+    /** An update in place: REPLACE would delete the row and cascade its links away. */
+    @Upsert
     suspend fun upsertGroup(group: DownloadGroupEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -51,6 +93,9 @@ interface DownloadDao {
 
     @Query("DELETE FROM downloaded_track WHERE trackId = :trackId")
     suspend fun deleteTrack(trackId: Long)
+
+    @Query("DELETE FROM download_group_track WHERE groupId = :groupId")
+    suspend fun deleteLinks(groupId: String)
 
     /**
      * Tracks left with no group after a removal. Their cached bytes are the
@@ -75,7 +120,7 @@ interface DownloadDao {
         tracks: List<DownloadedTrackEntity>,
     ) {
         upsertGroup(group)
-        tracks.forEach { upsertTrack(it) }
+        tracks.forEach { insertTrackIfAbsent(it) }
         upsertLinks(
             tracks.mapIndexed { index, track ->
                 DownloadGroupTrackEntity(
@@ -94,6 +139,23 @@ interface DownloadDao {
     @Transaction
     suspend fun removeGroup(groupId: String): List<Long> {
         deleteGroup(groupId)
+        val orphans = orphanedTrackIds()
+        orphans.forEach { deleteTrack(it) }
+        return orphans
+    }
+
+    /**
+     * Points a group at a new track list — the top-tracks sync — and returns
+     * the tracks that no group holds any more, for the caller to delete from
+     * the download cache. Positions follow [tracks]' order.
+     */
+    @Transaction
+    suspend fun replaceGroupTracks(
+        group: DownloadGroupEntity,
+        tracks: List<DownloadedTrackEntity>,
+    ): List<Long> {
+        deleteLinks(group.groupId)
+        addGroup(group, tracks)
         val orphans = orphanedTrackIds()
         orphans.forEach { deleteTrack(it) }
         return orphans
