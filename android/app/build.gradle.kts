@@ -97,9 +97,9 @@ dependencies {
     implementation("androidx.media3:media3-session:1.11.1")
     // Requeues interrupted downloads after a reboot or a network return.
     implementation("androidx.media3:media3-exoplayer-workmanager:1.11.1")
-    implementation("androidx.room:room-runtime:2.8.4")
-    implementation("androidx.room:room-ktx:2.8.4")
-    ksp("androidx.room:room-compiler:2.8.4")
+    implementation("androidx.room:room-runtime:2.8.5")
+    implementation("androidx.room:room-ktx:2.8.5")
+    ksp("androidx.room:room-compiler:2.8.5")
     implementation("androidx.mediarouter:mediarouter:1.8.1")
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
