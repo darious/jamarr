@@ -141,6 +141,11 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     var pendingSavedRoute by mutableStateOf<String?>(null)
 
     init {
+        // UPnP stream tokens are short-lived: mint each track's URL when the
+        // renderer is about to load or stage it, not when the queue was built.
+        upnpController.streamUrlResolver = { t ->
+            apiClient.streamUrl(serverUrl, tokenHolder.get(), t.id, upnpController.kind)
+        }
         viewModelScope.launch {
             cookieJar.prime()
             clientId = settingsStore.getClientId()
@@ -498,7 +503,19 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             isPlaying = true
             playbackPosition = 0L
             playbackDuration = ((startTrack.durationSeconds ?: 0.0) * 1000).toLong()
-            activeDeviceController()?.playQueue(tracks, startIdx)
+            val controller = activeDeviceController()
+            controller?.playQueue(tracks, startIdx)
+            // A renderer that refused the track keeps what it had, and so must
+            // the UI rather than showing the new track as playing.
+            val st = controller?.state?.value
+            if (st != null && st.queue.getOrNull(st.currentIndex)?.id != startTrack.id) {
+                applyDevicePlaybackState(st)
+                if (st.queue.getOrNull(st.currentIndex) == null) {
+                    nowPlayingTrack = null
+                    nowPlayingArtworkUrl = null
+                    isPlaying = false
+                }
+            }
             return
         }
 
