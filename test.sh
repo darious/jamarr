@@ -83,7 +83,7 @@ if [[ "$RUN_BACKEND_TESTS" == "true" ]]; then
     # We use set +e to capture the exit code
     set +e
     docker compose -f docker-compose.test.yml run --rm jamarr_test_runner \
-        env PYTHONPATH=/app uv run pytest -m "$PYTEST_MARK_EXPR" "${BACKEND_ARGS[@]}"
+        env PYTHONPATH=/app uv run --locked pytest -m "$PYTEST_MARK_EXPR" "${BACKEND_ARGS[@]}"
     BACKEND_EXIT_CODE=$?
     set -e
 else

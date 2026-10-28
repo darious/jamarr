@@ -32,6 +32,8 @@ services:
       - ./config.yaml:/app/config.yaml
       - ./pyproject.toml:/app/pyproject.toml
       - ./uv.lock:/app/uv.lock
+      # Workspace member: without it uv relocks, and can't replace a bind-mounted file
+      - ./tui:/app/tui:ro
 
   jamarr_test_web:
     build:

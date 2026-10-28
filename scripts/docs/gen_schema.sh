@@ -32,7 +32,7 @@ done
 # on (see tests/conftest.py). Migrations are historical upgrade steps for
 # existing databases and must NOT be replayed on a fresh schema.
 echo "==> Building schema (init_db)"
-$COMPOSE run --rm "$RUNNER" env PYTHONPATH=/app uv run python -c "$(cat <<'PY'
+$COMPOSE run --rm "$RUNNER" env PYTHONPATH=/app uv run --locked python -c "$(cat <<'PY'
 import asyncio
 from app.db import init_db, close_db
 
