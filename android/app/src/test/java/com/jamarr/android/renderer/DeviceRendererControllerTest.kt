@@ -36,8 +36,27 @@ class DeviceRendererControllerTest {
         assertEquals(true, state.isPlaying)
     }
 
+    @Test
+    fun streamUrlsAreMintedUpFrontOnlyForControllersThatNeedThem() = runTest {
+        val tracks = (1L..100L).toList()
+        var mints = 0
+        val mint: suspend (Long) -> String = { id -> mints++; "https://jamarr.example/api/stream/$id?token=t" }
+
+        val lazy = deviceQueueStreamUrls(tracks, FakeDeviceRendererController("upnp", resolvesStreamUrls = true), mint)
+        assertEquals(0, mints)
+        assertEquals(List(100) { "" }, lazy)
+
+        val eager = deviceQueueStreamUrls(tracks, FakeDeviceRendererController("cast"), mint)
+        assertEquals(100, mints)
+        assertEquals("https://jamarr.example/api/stream/42?token=t", eager[41])
+
+        deviceQueueStreamUrls(listOf(1L), null, mint)
+        assertEquals(101, mints)
+    }
+
     private class FakeDeviceRendererController(
         override val kind: String,
+        override val resolvesStreamUrls: Boolean = false,
     ) : DeviceRendererController {
         val calls = mutableListOf<String>()
         private val rendererState = MutableStateFlow(

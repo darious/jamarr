@@ -47,10 +47,18 @@ class UpnpTrackSequencerTest {
 
     private var mints = 0
 
+    /** The sequencer's clock, in ms; loads happen at whatever it reads. */
+    private var clock = 0L
+
+    private fun pastLoadGuard() {
+        clock += UpnpTrackSequencer.POST_LOAD_GUARD_MS
+    }
+
     private fun sequencer(supportsSetNext: Boolean = true) = UpnpTrackSequencer(
         // Every resolve mints a new token, as /api/stream-url does.
         resolveUri = { "http://jamarr.lan/api/stream/${it.id}?token=t${++mints}" },
         settleMs = 0,
+        nowMs = { clock },
     ).apply { attach(supportsSetNext) }
 
     @Test
@@ -162,12 +170,14 @@ class UpnpTrackSequencerTest {
         seq.syncNext(port, 199.0, 200.0)
         assertFalse(port.calls.any { it.startsWith("setNext") })
 
+        pastLoadGuard()
         assertEquals(PollOutcome.Ended(1), seq.observe(seq.currentUri, "STOPPED"))
         // Reported once, not on every poll that stays STOPPED.
         assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
 
         seq.load(port, 2)
         seq.observe(seq.currentUri, "PLAYING")
+        pastLoadGuard()
         assertEquals(PollOutcome.Ended(null), seq.observe("", "STOPPED"))
     }
 
@@ -233,6 +243,7 @@ class UpnpTrackSequencerTest {
         port.calls.clear()
         seq.syncNext(port, 160.0, 200.0)
         assertTrue("no retries once disabled", port.calls.isEmpty())
+        pastLoadGuard()
         assertEquals(PollOutcome.Ended(1), seq.observe(seq.currentUri, "STOPPED"))
     }
 
@@ -246,6 +257,9 @@ class UpnpTrackSequencerTest {
             seq.observe(seq.currentUri, "PLAYING")
             seq.syncNext(port, 150.0, 200.0)
             // The renderer accepted SetNext but stopped on the old track anyway.
+            pastLoadGuard()
+            assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+            clock += UpnpTrackSequencer.STAGED_STOP_GRACE_MS
             assertEquals(PollOutcome.Ended(i + 1), seq.observe(seq.currentUri, "STOPPED"))
             seq.load(port, i + 1)
         }
@@ -285,5 +299,200 @@ class UpnpTrackSequencerTest {
         seq.load(FakePort(), 0, queue)
         seq.observe(seq.currentUri, "PLAYING")
         assertNull(seq.stageCandidate(195.0, 200.0))
+    }
+
+    // --- A failed load keeps the renderer's staged next track ---
+
+    @Test
+    fun failedLoadKeepsTheStagedTrackSoTheTransitionIsStillSeen() = runTest {
+        val port = FakePort()
+        val seq = sequencer()
+        seq.load(port, 0, queue)
+        seq.observe(seq.currentUri, "PLAYING")
+        seq.syncNext(port, 150.0, 200.0)
+        val staged = seq.staged!!
+
+        port.failSetUri = true
+        assertTrue(seq.load(port, 2) is LoadResult.LoadFailed)
+        assertEquals("the renderer still holds it", staged, seq.staged)
+        port.failSetUri = false
+        port.calls.clear()
+
+        // The renderer rolls into the staged track it still had.
+        assertEquals(PollOutcome.Transitioned(1, needsPlay = false), seq.observe(staged.uri, "PLAYING"))
+        assertEquals(1, seq.currentIndex)
+        seq.syncNext(port, 150.0, 200.0)
+        assertEquals("stages the track after it, not the one already playing", 2, seq.staged?.index)
+        assertEquals(listOf("setNext:http://jamarr.lan/api/stream/3?token=t4"), port.calls)
+    }
+
+    @Test
+    fun failedLoadKeepsTheEndOfTrackFallbackArmed() = runTest {
+        val port = FakePort()
+        val seq = sequencer(supportsSetNext = false)
+        seq.load(port, 0, queue)
+        seq.observe(seq.currentUri, "PLAYING")
+
+        port.failSetUri = true
+        assertTrue(seq.load(port, 2) is LoadResult.LoadFailed)
+
+        // The old track carries on and ends: still an advance, and no fresh
+        // post-load guard from a load that never happened.
+        pastLoadGuard()
+        assertEquals(PollOutcome.Ended(1), seq.observe(seq.currentUri, "STOPPED"))
+    }
+
+    @Test
+    fun failedResolveKeepsTheStagedTrackToo() = runTest {
+        val port = FakePort()
+        var failResolve = false
+        val seq = UpnpTrackSequencer(
+            resolveUri = { if (failResolve) error("offline") else "http://jamarr.lan/api/stream/${it.id}?token=t${++mints}" },
+            settleMs = 0,
+            nowMs = { clock },
+        ).apply { attach(true) }
+        seq.load(port, 0, queue)
+        seq.observe(seq.currentUri, "PLAYING")
+        seq.syncNext(port, 150.0, 200.0)
+        val staged = seq.staged
+
+        failResolve = true
+        assertTrue(seq.load(port, 2) is LoadResult.LoadFailed)
+        assertEquals(staged, seq.staged)
+    }
+
+    // --- TrackURI matching ---
+
+    @Test
+    fun sameUriMatchesTheEchoesRenderersSendBack() {
+        val ours = "http://192.168.0.22:8112/api/stream/7?token=abc-123_x&quality=lossless"
+        assertTrue(UpnpTrackSequencer.sameUri(ours, ours))
+        assertTrue(UpnpTrackSequencer.sameUri(ours.replace("&", "&amp;"), ours))
+        assertTrue(UpnpTrackSequencer.sameUri(ours.replace("&", "&#38;"), ours))
+        assertTrue("re-encoded", UpnpTrackSequencer.sameUri(ours.replace("-", "%2D").replace("_", "%5F"), ours))
+        assertTrue(
+            "host rewritten",
+            UpnpTrackSequencer.sameUri("http://jamarr.local:8112/api/stream/7?token=abc-123_x&quality=lossless", ours),
+        )
+        assertTrue(
+            "query reordered",
+            UpnpTrackSequencer.sameUri("http://10.0.0.5/api/stream/7?quality=lossless&token=abc-123_x", ours),
+        )
+    }
+
+    @Test
+    fun sameUriNeverConfusesDifferentTracks() {
+        val ours = "http://192.168.0.22:8112/api/stream/7?token=abc"
+        assertFalse("other token", UpnpTrackSequencer.sameUri("http://192.168.0.22:8112/api/stream/7?token=abd", ours))
+        assertFalse("other track", UpnpTrackSequencer.sameUri("http://192.168.0.22:8112/api/stream/8?token=abc", ours))
+        assertFalse("no token", UpnpTrackSequencer.sameUri("http://other/api/stream/7", "http://host/api/stream/7"))
+        assertFalse("empty token", UpnpTrackSequencer.sameUri("http://a/api/stream/7?token=", "http://b/api/stream/7?token="))
+        assertFalse("malformed", UpnpTrackSequencer.sameUri("http://a/api/stream/7?token=abc%G", ours.replace("192.168.0.22", "b")))
+        assertFalse(UpnpTrackSequencer.sameUri("", ours))
+        assertFalse(UpnpTrackSequencer.sameUri(ours, null))
+    }
+
+    @Test
+    fun transitionIsSeenThroughARewrittenHost() = runTest {
+        val port = FakePort()
+        val seq = sequencer()
+        seq.load(port, 0, queue)
+        seq.observe(seq.currentUri, "PLAYING")
+        seq.syncNext(port, 150.0, 200.0)
+
+        val echoed = seq.staged!!.uri.replace("jamarr.lan", "192.168.0.22:8112")
+        assertEquals(PollOutcome.Transitioned(1, needsPlay = false), seq.observe(echoed, "PLAYING"))
+    }
+
+    // --- STOPPED handling ---
+
+    @Test
+    fun stoppedWithATrackStagedWaitsForTheRendererToTakeIt() = runTest {
+        val port = FakePort()
+        val seq = sequencer()
+        seq.load(port, 0, queue)
+        seq.observe(seq.currentUri, "PLAYING")
+        seq.syncNext(port, 150.0, 200.0)
+        val staged = seq.staged!!
+        pastLoadGuard()
+
+        // Passing through STOPPED on the way into the staged URI.
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+        clock += 1_000
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+        clock += 1_000
+        assertEquals(PollOutcome.Transitioned(1, needsPlay = false), seq.observe(staged.uri, "PLAYING"))
+        assertFalse(seq.stagingDisabled)
+    }
+
+    @Test
+    fun stoppedPastTheGraceIsAMissAndAnEnd() = runTest {
+        val port = FakePort()
+        val seq = sequencer()
+        seq.load(port, 0, queue)
+        seq.observe(seq.currentUri, "PLAYING")
+        seq.syncNext(port, 150.0, 200.0)
+        pastLoadGuard()
+
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+        clock += UpnpTrackSequencer.STAGED_STOP_GRACE_MS - 1
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+        clock += 1
+        assertEquals(PollOutcome.Ended(1), seq.observe(seq.currentUri, "STOPPED"))
+        assertNull(seq.staged)
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+    }
+
+    @Test
+    fun graceRestartsAfterTheRendererResumes() = runTest {
+        val port = FakePort()
+        val seq = sequencer()
+        seq.load(port, 0, queue)
+        seq.observe(seq.currentUri, "PLAYING")
+        seq.syncNext(port, 150.0, 200.0)
+        pastLoadGuard()
+
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+        clock += 2_000
+        seq.observe(seq.currentUri, "PLAYING")
+        clock += 2_000
+        // A fresh STOPPED, not 4s into the first one.
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+    }
+
+    @Test
+    fun stoppedChurnRightAfterALoadIsNotTheEndOfTheTrack() = runTest {
+        val port = FakePort()
+        val seq = sequencer(supportsSetNext = false)
+        seq.load(port, 0, queue)
+
+        clock += 2_000
+        seq.observe(seq.currentUri, "PLAYING")
+        clock += 1_000
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+        clock += 1_000
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "PLAYING"))
+        assertEquals(0, seq.currentIndex)
+
+        // A track that really is that short still ends once the guard is over.
+        clock += 1_000
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
+        clock = UpnpTrackSequencer.POST_LOAD_GUARD_MS
+        assertEquals(PollOutcome.Ended(1), seq.observe(seq.currentUri, "STOPPED"))
+    }
+
+    @Test
+    fun loadGuardRestartsOnAStagedTransition() = runTest {
+        val port = FakePort()
+        val seq = sequencer(supportsSetNext = true)
+        seq.load(port, 0, queue)
+        seq.observe(seq.currentUri, "PLAYING")
+        seq.syncNext(port, 150.0, 200.0)
+        pastLoadGuard()
+        seq.observe(seq.staged!!.uri, "PLAYING")
+        assertEquals(1, seq.currentIndex)
+
+        clock += 1_000
+        assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
     }
 }
