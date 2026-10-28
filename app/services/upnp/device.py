@@ -3,6 +3,7 @@ import html
 from typing import Dict, Any, Optional, Set
 from async_upnp_client.exceptions import UpnpError
 from app.auth_tokens import create_stream_token
+from app.services.upnp.staging import staging, staging_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,74 @@ def format_didl_duration(seconds: float | None) -> Optional[str]:
     return f"{h}:{m:02d}:{s:02d}.{ms:03d}"
 
 
+def negotiate_mime(mime_type: str, supported_mimes: Set[str]) -> str:
+    """Pick the alias of mime_type the renderer advertises, if it has one."""
+    if mime_type == "audio/flac":
+        if "audio/flac" in supported_mimes:
+            logger.debug("Device supports audio/flac")
+            return "audio/flac"
+        if "audio/x-flac" in supported_mimes:
+            logger.debug("Device supports audio/x-flac")
+            return "audio/x-flac"
+        logger.debug("Device protocols unknown, using audio/flac as default")
+        return "audio/flac"
+    if mime_type == "audio/mp4":
+        if "audio/mp4" in supported_mimes:
+            return "audio/mp4"
+        if "audio/x-m4a" in supported_mimes:
+            return "audio/x-m4a"
+    return mime_type
+
+
+def build_didl_lite(
+    *,
+    media_url: str,
+    mime_type: str,
+    title: str,
+    artist: str,
+    album: str,
+    art_url: Optional[str] = None,
+    duration_seconds: float | None = None,
+    size_bytes: int | None = None,
+) -> str:
+    """DIDL-Lite item for SetAVTransportURI / SetNextAVTransportURI metadata."""
+    title_esc = html.escape(title)
+    artist_esc = html.escape(artist)
+    album_esc = html.escape(album)
+
+    art_element = ""
+    if art_url:
+        art_element = f"<upnp:albumArtURI>{html.escape(art_url)}</upnp:albumArtURI>"
+
+    # Duration lets renderers show a progress bar without probing the file
+    res_attrs = ""
+    duration_str = format_didl_duration(duration_seconds)
+    if duration_str:
+        res_attrs += f' duration="{duration_str}"'
+    if size_bytes:
+        res_attrs += f' size="{size_bytes}"'
+
+    return f"""
+        <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">
+            <item id="1" parentID="0" restricted="1">
+                <dc:title>{title_esc}</dc:title>
+                <dc:creator>{artist_esc}</dc:creator>
+                <upnp:artist>{artist_esc}</upnp:artist>
+                <upnp:album>{album_esc}</upnp:album>
+                <upnp:class>object.item.audioItem.musicTrack</upnp:class>
+                {art_element}
+                <res protocolInfo="http-get:*:{mime_type}:*"{res_attrs}>{media_url}</res>
+            </item>
+        </DIDL-Lite>
+        """
+
+
 class UPnPDeviceControl:
     def __init__(self, manager):
         self.manager = manager
+        # udn -> TrackURI from the last GetPositionInfo, for transition
+        # detection (the renderer's current track vs the staged one).
+        self._track_uris: Dict[str, Optional[str]] = {}
 
     async def get_supported_protocols(self, udn: str, dmr=None) -> Set[str]:
         """
@@ -70,23 +136,18 @@ class UPnPDeviceControl:
             logger.debug(f"Error querying protocols for {udn}: {e}")
             return set()
 
-    async def play_track(
+    def _media_for_track(
         self,
+        udn: str,
         track_id: int,
-        track_path: str,
         metadata: Dict[str, Any],
-        username: str = None,
-    ):
-        """
-        Play a track on the active renderer.
-        """
-        if not self.manager.active_renderer:
-            raise ValueError("No active renderer set")
+    ) -> Dict[str, Any]:
+        """Stream URL, negotiated MIME and DIDL-Lite for one track on udn.
 
-        dmr = self.manager.dmr_devices.get(self.manager.active_renderer)
-        if not dmr:
-            raise ValueError(f"DMR device not found for {self.manager.active_renderer}")
-
+        Shared by SetAVTransportURI (play_track) and SetNextAVTransportURI
+        (set_next_track) so a staged track is described exactly like a
+        loaded one.
+        """
         # Prefer the URL the renderer stack already built: it carries the
         # loudness-normalization claims in its stream token, which a token
         # minted here would not. The fallback keeps legacy direct calls working.
@@ -100,32 +161,13 @@ class UPnPDeviceControl:
                 f"?token={stream_token}"
             )
 
-        # Get MIME type from metadata
-        mime_type = metadata.get("mime", "audio/flac")
-
         # Get supported MIME types from renderer info
-        renderer_info = self.manager.renderers.get(self.manager.active_renderer, {})
+        renderer_info = self.manager.renderers.get(udn, {})
         supported_mimes_str = renderer_info.get("supported_mime_types", "")
         supported_mimes = (
             set(supported_mimes_str.split(",")) if supported_mimes_str else set()
         )
-
-        # Choose the best MIME type
-        if mime_type == "audio/flac":
-            if "audio/flac" in supported_mimes:
-                mime_type = "audio/flac"
-                logger.debug("Device supports audio/flac")
-            elif "audio/x-flac" in supported_mimes:
-                mime_type = "audio/x-flac"
-                logger.debug("Device supports audio/x-flac")
-            else:
-                mime_type = "audio/flac"
-                logger.debug("Device protocols unknown, using audio/flac as default")
-        elif mime_type == "audio/mp4":
-            if "audio/mp4" in supported_mimes:
-                mime_type = "audio/mp4"
-            elif "audio/x-m4a" in supported_mimes:
-                mime_type = "audio/x-m4a"
+        mime_type = negotiate_mime(metadata.get("mime", "audio/flac"), supported_mimes)
 
         # Build art URL if available
         art_url = None
@@ -135,12 +177,51 @@ class UPnPDeviceControl:
                 f"?max_size=600"
             )
 
-        # Extract metadata fields
         title = metadata.get("title", "Unknown Track")
         artist = metadata.get("artist", "Unknown Artist")
         album = metadata.get("album", "Unknown Album")
+        didl_lite = build_didl_lite(
+            media_url=media_url,
+            mime_type=mime_type,
+            title=title,
+            artist=artist,
+            album=album,
+            art_url=art_url,
+            duration_seconds=metadata.get("duration_seconds"),
+            size_bytes=metadata.get("size_bytes"),
+        )
+        return {
+            "media_url": media_url,
+            "mime_type": mime_type,
+            "title": title,
+            "artist": artist,
+            "didl": didl_lite,
+            "renderer_info": renderer_info,
+        }
+
+    async def play_track(
+        self,
+        track_id: int,
+        track_path: str,
+        metadata: Dict[str, Any],
+        username: str = None,
+    ):
+        """
+        Play a track on the active renderer.
+        """
+        if not self.manager.active_renderer:
+            raise ValueError("No active renderer set")
+
+        udn = self.manager.active_renderer
+        dmr = self.manager.dmr_devices.get(udn)
+        if not dmr:
+            raise ValueError(f"DMR device not found for {udn}")
+
+        media = self._media_for_track(udn, track_id, metadata)
+        title, artist, mime_type = media["title"], media["artist"], media["mime_type"]
 
         # Get renderer info
+        renderer_info = media["renderer_info"]
         friendly_name = renderer_info.get("friendly_name", "Unknown")
         location = renderer_info.get("location", "")
         renderer_ip = (
@@ -157,40 +238,13 @@ class UPnPDeviceControl:
             log_parts.append(f"requested by {username}")
         logger.info(" ".join(log_parts))
 
-        # Construct DIDL-Lite XML
-        title_esc = html.escape(title)
-        artist_esc = html.escape(artist)
-        album_esc = html.escape(album)
-
-        art_element = ""
-        if art_url:
-            art_element = f"<upnp:albumArtURI>{html.escape(art_url)}</upnp:albumArtURI>"
-
-        # Duration lets renderers show a progress bar without probing the file
-        res_attrs = ""
-        duration_str = format_didl_duration(metadata.get("duration_seconds"))
-        if duration_str:
-            res_attrs += f' duration="{duration_str}"'
-        if metadata.get("size_bytes"):
-            res_attrs += f' size="{metadata["size_bytes"]}"'
-
-        didl_lite = f"""
-        <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">
-            <item id="1" parentID="0" restricted="1">
-                <dc:title>{title_esc}</dc:title>
-                <dc:creator>{artist_esc}</dc:creator>
-                <upnp:artist>{artist_esc}</upnp:artist>
-                <upnp:album>{album_esc}</upnp:album>
-                <upnp:class>object.item.audioItem.musicTrack</upnp:class>
-                {art_element}
-                <res protocolInfo="http-get:*:{mime_type}:*"{res_attrs}>{media_url}</res>
-            </item>
-        </DIDL-Lite>
-        """
+        # A new current URI supersedes whatever was staged as next; the
+        # monitor re-stages once this track is confirmed playing.
+        staging.forget(udn)
 
         # Set transport URI
         await dmr.async_set_transport_uri(
-            media_url=media_url, media_title=title, meta_data=didl_lite
+            media_url=media["media_url"], media_title=title, meta_data=media["didl"]
         )
 
         # Wait for device
@@ -204,6 +258,71 @@ class UPnPDeviceControl:
                 logger.info("Device already playing, ignoring play command")
             else:
                 raise
+
+    def next_track_staging_allowed(self, udn: str) -> bool:
+        """Whether to stage the next track on udn (config, faults, advert)."""
+        dmr = self.manager.dmr_devices.get(udn)
+        if not dmr:
+            return False
+        try:
+            advertised = bool(dmr.has_next_transport_uri)
+        except Exception:
+            advertised = False
+        return staging_allowed(udn, advertised)
+
+    async def set_next_track(
+        self,
+        udn: str,
+        track_id: int,
+        metadata: Dict[str, Any],
+    ) -> str:
+        """Stage track_id as udn's next URI (SetNextAVTransportURI).
+
+        Returns the URI staged. Raises whatever the device raised; the caller
+        decides whether that disables staging.
+        """
+        dmr = self.manager.dmr_devices.get(udn)
+        if not dmr:
+            raise ValueError(f"DMR device not found for {udn}")
+        media = self._media_for_track(udn, track_id, metadata)
+        await dmr.async_set_next_transport_uri(
+            media_url=media["media_url"],
+            media_title=media["title"],
+            meta_data=media["didl"],
+        )
+        logger.info(
+            f"[Gapless] Staged next track on {udn}: {media['title']} by "
+            f"{media['artist']} ({media['mime_type']})"
+        )
+        return media["media_url"]
+
+    async def clear_next_track(self, udn: str) -> None:
+        """Best-effort: empty udn's NextAVTransportURI if we may have set one."""
+        if not staging.get(udn) and udn not in staging.needs_clear:
+            return
+        dmr = self.manager.dmr_devices.get(udn)
+        try:
+            if dmr and not staging.is_disabled(udn):
+                await dmr.async_set_next_transport_uri(
+                    media_url="", media_title="", meta_data=""
+                )
+                logger.info(f"[Gapless] Cleared staged next track on {udn}")
+        except Exception as exc:
+            # Plenty of renderers reject an empty NextURI; nothing to fall
+            # back to, and it does not mean staging itself is broken.
+            logger.debug(f"Clearing next URI on {udn} failed: {exc}")
+        finally:
+            staging.cleared(udn)
+
+    def current_track_uri(self, udn: str) -> Optional[str]:
+        """TrackURI from the last GetPositionInfo answered by udn."""
+        return self._track_uris.get(udn)
+
+    async def stop_renderer(self, udn: str) -> None:
+        """Stop udn's transport (used when it rolled into a dropped track)."""
+        dmr = self.manager.dmr_devices.get(udn)
+        if dmr:
+            await dmr.async_stop()
 
     async def pause(self):
         """Pause playback on active renderer."""
@@ -311,6 +430,7 @@ class UPnPDeviceControl:
 
             result = await action.async_call(InstanceID=0)
             
+            self._track_uris[target_udn] = result.get("TrackURI") or None
             rel_time = result.get("RelTime", "0:00:00")
             track_duration = result.get("TrackDuration", "0:00:00")
 
@@ -330,6 +450,7 @@ class UPnPDeviceControl:
             return p_secs, d_secs
 
         except Exception as e:
+            self._track_uris.pop(target_udn, None)
             logger.warning(f"get_position({target_udn}) failed: {e}")
             return 0, 0
 

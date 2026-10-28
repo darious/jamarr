@@ -294,7 +294,16 @@ class UPnPManager:
         self.discovery.note_control_failure(udn)
 
     def diagnostics(self) -> Dict[str, Any]:
-        return self.discovery.diagnostics()
+        data = self.discovery.diagnostics()
+        from app.services.upnp.staging import staging
+
+        # Which renderers had next-track staging switched off, and why.
+        data["gapless_disabled"] = dict(staging.disabled)
+        data["gapless_staged"] = {
+            udn: {"queue_index": s.queue_index, "track_id": s.track_id}
+            for udn, s in staging.staged.items()
+        }
+        return data
 
     @property
     def is_scanning_subnet(self):
@@ -406,6 +415,21 @@ class UPnPManager:
 
     async def play_track(self, track_id: int, track_path: str, metadata: Dict[str, Any], username: str = None):
         return await self.control.play_track(track_id, track_path, metadata, username)
+
+    def next_track_staging_allowed(self, udn: str) -> bool:
+        return self.control.next_track_staging_allowed(udn)
+
+    async def set_next_track(self, udn: str, track_id: int, metadata: Dict[str, Any]) -> str:
+        return await self.control.set_next_track(udn, track_id, metadata)
+
+    async def clear_next_track(self, udn: str) -> None:
+        return await self.control.clear_next_track(udn)
+
+    def current_track_uri(self, udn: str) -> Optional[str]:
+        return self.control.current_track_uri(udn)
+
+    async def stop_renderer(self, udn: str) -> None:
+        return await self.control.stop_renderer(udn)
 
     async def pause(self):
         return await self.control.pause()

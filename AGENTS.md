@@ -128,6 +128,10 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   `GET /api/player/upnp/diagnostics`. Bind address: `renderer.upnp_source_ip` /
   `UPNP_SOURCE_IP`. Tests use the in-memory fakes in `tests/helpers/upnp_fakes.py`,
   never real SSDP.
+- UPnP next-track staging (`SetNextAVTransportURI`): state/policy in
+  `app/services/upnp/staging.py`, driven by the monitor; transitions are matched on
+  `TrackURI`, STOPPED-based advance is the fallback. Per-renderer override:
+  `renderer.upnp_gapless` in `config.yaml`. Tests: `tests/unit/test_upnp_gapless.py`.
 - `HOST_IP` auto-derived in `dev.sh`/`deploy.sh` via route lookup; override by exporting it.
 - Frontend dev caches (`web/.svelte-kit`, `web/.vite`) are cleared on `dev.sh` start.
 - `test-web.sh`/`lint.sh` run in containers as root and leave root-owned artifacts in

@@ -30,6 +30,9 @@ Non-secret application config that ships in the repo. Typical contents:
 - UPnP renderer stream-proxy port (`renderer.stream_proxy_port`, default 8112)
 - UPnP discovery interface address (`renderer.upnp_source_ip`, default: the
   default-route address) — set it on multi-homed hosts or with a VPN up
+- UPnP next-track staging overrides (`renderer.upnp_gapless`: `enabled`,
+  `disabled_udns`, `forced_udns`) — see
+  [Renderers](../architecture/renderers.md#upnp-next-track-staging)
 
 Edit it directly and restart the stack (or rely on hot-reload in
 [Dev Mode](dev-mode.md)).

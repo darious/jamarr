@@ -71,7 +71,8 @@ backend speaks in:
   `available`, group info.
 - **`RendererStatus`** — normalised `state` (`PLAYING`/`PAUSED`/`STOPPED`/
   `BUFFERING`/`IDLE`/`UNKNOWN`), `position_seconds`, `duration_seconds`,
-  `volume_percent`, `current_track_id`, `ended`.
+  `volume_percent`, `current_track_id`, `current_media_url` (UPnP: the
+  renderer's `TrackURI`), `ended`.
 - **`PlaybackContext`** — `base_url`, `user_id`, `username`, `token_ttl_seconds`.
 - **`RendererBackend`** (Protocol) — the interface every backend implements;
   optional **`SupportsStatusEvents`** for callback-driven protocols.
@@ -94,6 +95,74 @@ The orchestrator does not care whether a `RendererStatus` came from polling
   track-finished (the `PAUSED` poll alone must not swallow the advance), and a
   watchdog force-advances renderers stuck reporting `PLAYING` at position 0 for
   longer than the track duration plus a margin.
+- On renderers with next-track staging (below) the poll loop also advances when
+  the renderer's `TrackURI` turns into the staged URI, without any `STOPPED`.
+
+## UPnP next-track staging
+
+`SetNextAVTransportURI` hands a renderer the track after the current one, so
+it can fetch and buffer it and move on by itself. Whether the result is truly
+gapless depends on the renderer; this has not been measured on hardware yet.
+Code: `app/services/upnp/staging.py` (state, policy), `monitor.py`
+(`_sync_staged_next`, `_reconcile_staged_transition`), `device.py`
+(`set_next_track`, which shares DIDL/MIME building with `play_track`).
+
+**When.** Each `PLAYING` poll, once the current track has played past
+`STAGE_AFTER_S` (10 s, so a flaky start settles first), the monitor makes the
+staged item match `queue[current_index + 1]`: stage it, re-stage it if the
+queue changed, or send an empty `NextURI` when there is no next item. The URL
+is built like a normal load (`build_stream_url`, so loudness-normalization
+claims ride in the token) and goes via the stream proxy. Its token TTL covers
+the rest of the current track plus twice the staged track's duration (floor
+1800 s, cap 24 h, `staged_stream_token_ttl_seconds`); the monitor re-stages
+before expiry, e.g. after a long pause. Nothing is staged when the renderer
+reports no `TrackURI`, since the transition could then not be followed.
+
+**Transitions.** Every poll reads `TrackURI` from `GetPositionInfo`. When it
+matches the staged URI (exactly, or by its unique stream token) while
+`PLAYING`, `TRANSITIONING` or `PAUSED_PLAYBACK`, the monitor consumes the
+staged record and moves `current_index` on with a conditional `UPDATE … WHERE
+current_index = <old>` — so the queue and history advance exactly once and the
+already-started track is not reloaded. History then logs the new track at the
+usual threshold. If the renderer started a staged track that a queue edit has
+since dropped, the monitor loads the real next track (or stops at the end of
+the queue).
+
+**Consistency.** Loading any track (`play_track`: play, skip, jump, new queue,
+start retry, STOPPED fallback) forgets the staged record, and the monitor
+re-stages once the new track is playing. Reorder, delete and append are
+reconciled on the next poll. Stop clears the device's `NextURI`. A seek within
+the current track leaves the staged next as it is. There is no server-side
+shuffle or repeat to account for.
+
+**Fallback.** The STOPPED-based path above stays in charge whenever nothing is
+staged. A `STOPPED` at track end while something is staged gets
+`STAGED_STOP_GRACE_S` (3 s) to turn into the staged track, after which the
+next track is loaded as usual.
+
+**Provisional support.** Discovery's `supports_gapless` (the action and state
+variable exist) is only a starting point. Staging is switched off for a
+renderer, in memory until restart and with a warning in the log, when
+`SetNextAVTransportURI` returns a SOAP fault or other non-transient error,
+fails transiently 3 times in a row, or when the renderer twice accepts a
+staged URI but stops at track end instead of playing it. Rejection of the
+empty "clear" URI is ignored. `GET /api/player/upnp/diagnostics` lists
+switched-off renderers under `gapless_disabled` and what is staged under
+`gapless_staged`.
+
+**Override.** `config.yaml`:
+
+```yaml
+renderer:
+  upnp_gapless:
+    enabled: true             # false = never stage, on any renderer
+    disabled_udns: [uuid:…]   # never stage on these
+    forced_udns: [uuid:…]     # stage even when not advertised
+```
+
+UDNs match case-insensitively, with or without `uuid:`. `disabled_udns` (and
+`enabled: false`) wins over everything; runtime faults still switch off a
+`forced_udns` renderer. No vendor-specific rules are built in.
 
 ## UPnP discovery
 
@@ -184,6 +253,10 @@ a longer, duration-aware TTL for `kind == "cast"`:
 ```python
 min(CAST_STREAM_TOKEN_TTL_SECONDS, max(1800, duration_seconds * 2))   # default cap 86400
 ```
+
+UPnP next tracks staged ahead of time get their own TTL (see
+[next-track staging](#upnp-next-track-staging)); other UPnP loads keep the
+default.
 
 Tokens stay bound to `track_id`, so scope is narrow even with a long TTL. Full
 rationale and the trade-offs: [ADR-0003](decisions/0003-cast-stream-token-policy.md).

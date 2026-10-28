@@ -14,14 +14,14 @@
 
 ---
 
-Scan a local music library, enrich it with metadata from MusicBrainz and Spotify, then browse and play music through a fast web UI. Supports local playback, UPnP renderers (e.g., Naim Uniti Atom) with gapless queue management, and Chromecast.
+Scan a local music library, enrich it with metadata from MusicBrainz and Spotify, then browse and play music through a fast web UI. Supports local playback, UPnP renderers (e.g., Naim Uniti Atom) with next-track staging, and Chromecast.
 
 ## Features
 
 - **Library scanning** — fast tag-based scan with incremental updates and MusicBrainz ID extraction
 - **Rich metadata** — artist bios, artwork, similar artists, top tracks, and external links
 - **Local + UPnP playback** — local streaming and UPnP control (play/pause/seek/volume)
-- **Gapless playback** — via UPnP SetNextAVTransportURI queue management
+- **Next-track staging** — UPnP renderers that support SetNextAVTransportURI get the next track ahead of time (gapless where the renderer is; not yet measured on hardware)
 - **Instant search** — across artists, albums, and tracks
 - **History + Last.fm** — local playback history with matched Last.fm scrobbles
 - **Recommendations** — artist/album/track recommendations from listening history
