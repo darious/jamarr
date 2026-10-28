@@ -106,7 +106,12 @@ class UpnpRendererBackend(RendererBackend):
         return RendererStatus(renderer_id=renderer_id, state="PLAYING")
 
     async def stop_playback(self, renderer_id: str) -> RendererStatus:
-        await self._set_active(renderer_id)
+        udn = await self._set_active(renderer_id)
+        # Without this a renderer resumed from its own remote would roll from
+        # the stopped track into whatever was staged after it.
+        clear_next = getattr(self.manager, "clear_next_track", None)
+        if clear_next is not None:
+            await clear_next(udn)
         control = getattr(self.manager, "control", None)
         if control and hasattr(control, "stop"):
             await control.stop()
@@ -131,11 +136,13 @@ class UpnpRendererBackend(RendererBackend):
         _, udn = split_renderer_id(renderer_id)
         position, duration = await self.manager.get_position(udn)
         transport = await self.manager.get_transport_info(udn)
+        track_uri = getattr(self.manager, "current_track_uri", None)
         return RendererStatus(
             renderer_id=renderer_id,
             state=self.normalize_transport_state(transport),
             position_seconds=float(position or 0),
             duration_seconds=float(duration) if duration is not None else None,
+            current_media_url=track_uri(udn) if track_uri else None,
         )
 
     async def _set_active(self, renderer_id: str) -> str:

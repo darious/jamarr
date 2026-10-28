@@ -16,11 +16,16 @@ from app.services.player.globals import (
     start_retries,
 )
 from app.services.player.state import (
+    enrich_track_metadata,
     get_renderer_state_db,
     strip_art_ids,
+    track_path_exists,
 )
 from app.services.player.queue import play_next_track_internal
-from app.services.player.history import log_history
+from app.services.player.history import log_history, reset_history_tracker
+from app.services.audio_streaming import build_stream_url
+from app.services.renderer.token_policy import staged_stream_token_ttl_seconds
+from app.services.upnp.staging import StagedTrack, same_media_uri, staging
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +47,21 @@ PREWARM_BYTES = 8 * 1024 * 1024
 # Refresh the device volume every this many polls (~seconds), so volume
 # changes made on the device itself (TV remote) reach the app slider.
 VOLUME_REFRESH_POLLS = 15
+# Next-track staging (SetNextAVTransportURI). Stage once the current track has
+# played this far, so a flaky start is settled before the device is told
+# what comes after it, while leaving it the rest of the track to buffer.
+STAGE_AFTER_S = 10.0
+# Don't retry staging the same queue item more often than this after a
+# failure that did not disable staging (unplayable file, transient error).
+STAGE_RETRY_S = 10.0
+# Re-stage this long before the staged token expires (long pauses).
+STAGE_REFRESH_MARGIN_S = 300.0
+# A STOPPED at track end with a next track staged: wait this long for the
+# renderer to roll into it before loading the next track ourselves.
+STAGED_STOP_GRACE_S = 3.0
+# Transport states in which a TrackURI equal to the staged URI means the
+# renderer has moved on to the staged track.
+STAGED_ADVANCE_STATES = ("PLAYING", "TRANSITIONING", "PAUSED_PLAYBACK")
 
 
 async def _sync_device_volume(upnp, udn: str) -> None:
@@ -75,6 +95,244 @@ async def _sync_device_volume(upnp, udn: str) -> None:
 # Queue index already prewarmed per renderer, and the task doing it.
 _prewarmed_index: dict[str, int] = {}
 _prewarm_tasks: dict[str, asyncio.Task] = {}
+# When a STOPPED-at-track-end was first seen while a next track was staged.
+_staged_stop_seen: dict[str, float] = {}
+
+
+def _current_track_uri(upnp, udn: str) -> str | None:
+    getter = getattr(upnp, "current_track_uri", None)
+    if getter is None:
+        return None
+    try:
+        return getter(udn)
+    except Exception:
+        logger.debug("TrackURI lookup failed for %s", udn, exc_info=True)
+        return None
+
+
+async def _reconcile_staged_transition(
+    udn: str,
+    track_uri: str | None,
+    transport_state: str,
+    device_position,
+) -> str | None:
+    """Advance the queue when the renderer has started the staged track.
+
+    Returns "advanced" (queue moved on, nothing reloaded), "stale" (renderer
+    rolled into a track that is no longer next in the queue) or None. The
+    staged record is consumed here, so one transition advances exactly once.
+    """
+    staged = staging.get(udn)
+    if (
+        staged is None
+        or transport_state not in STAGED_ADVANCE_STATES
+        or not same_media_uri(track_uri, staged.url)
+    ):
+        return None
+    staging.take(udn)
+    _staged_stop_seen.pop(udn, None)
+    async with db_conn() as db:
+        state = await get_renderer_state_db(db, udn)
+        queue = state.get("queue") or []
+        idx = state.get("current_index")
+        next_idx = (idx if idx is not None else -1) + 1
+        if not (0 <= next_idx < len(queue)) or queue[next_idx].get("id") != staged.track_id:
+            logger.warning(
+                f"[Gapless] {udn} started staged track {staged.track_id}, which is no "
+                f"longer next in the queue"
+            )
+            return "stale"
+        is_playing = transport_state != "PAUSED_PLAYBACK"
+        # Conditional on current_index so a skip racing this poll wins and the
+        # transition can never be applied twice.
+        result = await db.execute(
+            """
+            UPDATE renderer_state
+            SET current_index = $1, position_seconds = $2, transport_state = $3,
+                is_playing = $4, updated_at = NOW()
+            WHERE renderer_udn = $5 AND current_index = $6
+            """,
+            next_idx,
+            float(device_position or 0),
+            transport_state,
+            is_playing,
+            udn,
+            idx,
+        )
+    if not result or result.rsplit(" ", 1)[-1] == "0":
+        logger.info(f"[Gapless] {udn}: queue moved during transition; not advancing")
+        return None
+    now = time.time()
+    # Per-track bookkeeping, as play_next_track_internal does for a load.
+    last_track_start_time[udn] = now
+    last_playing_seen[udn] = now
+    last_stop_reason.pop(udn, None)
+    start_retries.pop(udn, None)
+    if device_position:
+        last_playing_position[udn] = float(device_position)
+    else:
+        last_playing_position.pop(udn, None)
+    reset_history_tracker(udn)
+    logger.info(
+        f"[Gapless] {udn} rolled into staged track {next_idx}: "
+        f"{queue[next_idx].get('title')}"
+    )
+    return "advanced"
+
+
+async def _recover_stale_transition(upnp, udn: str) -> None:
+    async with db_conn() as db:
+        state = await get_renderer_state_db(db, udn)
+    queue = state.get("queue") or []
+    idx = state.get("current_index")
+    next_idx = (idx if idx is not None else -1) + 1
+    if 0 <= next_idx < len(queue):
+        await play_next_track_internal(udn)
+        return
+    logger.info(f"[Gapless] Nothing left in the queue; stopping {udn}")
+    stopper = getattr(upnp, "stop_renderer", None)
+    if stopper is not None:
+        await stopper(udn)
+    # Our own Stop: the STOPPED that follows is neither a finished track
+    # nor a failed start, so leave nothing for the monitor to misread.
+    last_playing_seen.pop(udn, None)
+    last_playing_position.pop(udn, None)
+    async with db_conn() as db:
+        await db.execute(
+            """
+            UPDATE renderer_state
+            SET is_playing = FALSE, transport_state = 'STOPPED', updated_at = NOW()
+            WHERE renderer_udn = $1
+            """,
+            udn,
+        )
+
+
+def _awaiting_staged_transition(udn: str, queue: list, idx) -> bool:
+    """Hold off a STOPPED-at-end advance briefly while a next track is staged.
+
+    Some renderers pass through STOPPED on their way into the staged URI.
+    Past the grace period this counts as a miss and the caller loads the next
+    track itself, exactly as without staging.
+    """
+    staged = staging.get(udn)
+    next_idx = (idx if idx is not None else -1) + 1
+    if (
+        staged is None
+        or not (0 <= next_idx < len(queue))
+        or queue[next_idx].get("id") != staged.track_id
+    ):
+        _staged_stop_seen.pop(udn, None)
+        return False
+    first_seen = _staged_stop_seen.setdefault(udn, time.time())
+    if time.time() - first_seen < STAGED_STOP_GRACE_S:
+        return True
+    _staged_stop_seen.pop(udn, None)
+    staging.note_staged_miss(udn)
+    return False
+
+
+async def _sync_staged_next(
+    upnp,
+    udn: str,
+    queue: list,
+    idx,
+    device_position,
+    track_uri: str | None,
+) -> None:
+    """Make the renderer's staged next track match queue[idx + 1].
+
+    Runs every PLAYING poll, so queue edits (reorder, delete, append, a new
+    queue) re-stage or clear within a poll without each mutation path having
+    to know about staging.
+    """
+    allowed = getattr(upnp, "next_track_staging_allowed", None)
+    if allowed is None or not hasattr(upnp, "set_next_track"):
+        return
+    if not allowed(udn):
+        return
+    # Without a TrackURI the transition could not be recognised, and the
+    # queue would silently fall a track behind the renderer.
+    if not track_uri:
+        return
+    staged = staging.get(udn)
+    if staged and same_media_uri(track_uri, staged.url):
+        return  # transition in flight; the next poll reconciles it
+    started_at = last_track_start_time.get(udn, 0)
+    if last_playing_seen.get(udn, 0) < started_at:
+        return
+    if (device_position or 0) < STAGE_AFTER_S:
+        return
+
+    next_idx = (idx if idx is not None else -1) + 1
+    if not (0 <= next_idx < len(queue)):
+        if staged or udn in staging.needs_clear:
+            await upnp.clear_next_track(udn)
+        return
+    target = queue[next_idx]
+    target_id = target.get("id")
+    if target_id is None:
+        return
+    now = time.time()
+    if (
+        staged
+        and staged.track_id == target_id
+        and (staged.expires_at is None or now < staged.expires_at - STAGE_REFRESH_MARGIN_S)
+    ):
+        return
+    attempt = staging.last_attempt.get(udn)
+    if attempt and attempt[0] == target_id and now - attempt[1] < STAGE_RETRY_S:
+        return
+    staging.last_attempt[udn] = (target_id, now)
+
+    current_duration = 0
+    if idx is not None and 0 <= idx < len(queue):
+        current_duration = queue[idx].get("duration_seconds") or 0
+    lead_s = max(0.0, float(current_duration) - float(device_position or 0))
+    base_url = getattr(upnp, "renderer_base_url", None) or upnp.base_url
+    async with db_conn() as db:
+        enriched = await enrich_track_metadata(target, db)
+        if not track_path_exists(enriched):
+            logger.info(f"[Gapless] Next track {target_id} is not on disk; not staging it")
+            if staged:
+                staging.forget(udn)
+            return
+        ttl = staged_stream_token_ttl_seconds(lead_s, enriched.get("duration_seconds"))
+        stream = await build_stream_url(
+            db,
+            track_id=int(target_id),
+            base_url=base_url,
+            user_id=enriched.get("user_id"),
+            duration_seconds=enriched.get("duration_seconds"),
+            renderer_kind="upnp",
+            queue=queue,
+            queue_index=next_idx,
+            ttl_seconds=ttl,
+        )
+    metadata = dict(enriched)
+    metadata["stream_url"] = stream.url
+    if stream.mime_type:
+        metadata["mime"] = stream.mime_type
+    try:
+        staged_url = await upnp.set_next_track(udn, int(target_id), metadata)
+    except Exception as exc:
+        # The device may still hold the old staged URI; never trust it again.
+        if staged:
+            staging.forget(udn)
+        if isinstance(exc, ValueError):
+            return  # not registered right now; not the device's fault
+        staging.note_failure(udn, exc)
+        return
+    staging.record(
+        udn,
+        StagedTrack(
+            queue_index=next_idx,
+            track_id=target_id,
+            url=staged_url or stream.url,
+            staged_at=now,
+            expires_at=now + ttl,
+        ),
+    )
 
 
 async def _prewarm_next_track(path: str) -> None:
@@ -150,6 +408,7 @@ async def monitor_upnp_playback(udn: str):
                 logger.info(f"[Player] Monitor {udn}: Polling...")
                 rel_time, _ = await upnp.get_position(udn)
                 transport_state = await upnp.get_transport_info(udn)
+                track_uri = _current_track_uri(upnp, udn)
                 logger.info(f"[Player] Monitor {udn}: Got pos={rel_time}, state={transport_state}")
                 consecutive_errors = 0  # Reset on success
                 error_started_at = 0.0
@@ -174,9 +433,26 @@ async def monitor_upnp_playback(udn: str):
                 await asyncio.sleep(backoff)
                 continue
 
+            # 1b. Gapless: has the renderer rolled into the staged next track?
+            # That never shows up as STOPPED, so it is matched on TrackURI.
+            transition = await _reconcile_staged_transition(
+                udn, track_uri, transport_state, rel_time
+            )
+            if transition == "stale":
+                # The queue changed after staging and the renderer already
+                # started the old next track: load the right one (or stop at
+                # the end of the queue) rather than let it play on.
+                try:
+                    await _recover_stale_transition(upnp, udn)
+                except Exception:
+                    logger.exception(f"[Gapless] Recovering stale transition failed for {udn}")
+                await asyncio.sleep(4)
+                continue
+
             # 2. Update DB
             finished_reason = None
             replay_track = None
+            stage_context = None
             async with db_conn() as db:
                 # What the DB currently thinks (may differ from the device)
                 state = await get_renderer_state_db(db, udn)
@@ -187,6 +463,7 @@ async def monitor_upnp_playback(udn: str):
 
                 if transport_state == "PLAYING":
                     last_playing_seen[udn] = time.time()
+                    _staged_stop_seen.pop(udn, None)
                     # Playing again, however that came about: the last halt is
                     # history and must not keep explaining itself to the UI.
                     last_stop_reason.pop(udn, None)
@@ -246,12 +523,18 @@ async def monitor_upnp_playback(udn: str):
                                 f"[Player] Ignoring STOPPED state during transition (started {time_since_start:.1f}s ago)"
                             )
                         elif duration > 0 and played_since_start and last_pos >= finish_threshold:
-                            logger.info(
-                                f"[Player] Track finished detection: stopped at "
-                                f"{last_pos:.0f}s of {duration:.0f}s"
-                            )
-                            # Trigger next track outside DB loop; helper opens its own connection.
-                            finished_reason = "stopped"
+                            if _awaiting_staged_transition(udn, queue, idx):
+                                logger.info(
+                                    "[Gapless] STOPPED at track end with a next track "
+                                    "staged; waiting for the renderer to start it"
+                                )
+                            else:
+                                logger.info(
+                                    f"[Player] Track finished detection: stopped at "
+                                    f"{last_pos:.0f}s of {duration:.0f}s"
+                                )
+                                # Trigger next track outside DB loop; helper opens its own connection.
+                                finished_reason = "stopped"
                         elif duration > 0 and (
                             not played_since_start or last_pos <= FAILED_START_MAX_POS_S
                         ):
@@ -351,6 +634,13 @@ async def monitor_upnp_playback(udn: str):
                         bool(state["is_playing"]),
                         udn,
                     )
+
+                    # Staging runs after this block, off the DB connection.
+                    if transport_state == "PLAYING":
+                        stage_context = (
+                            list(state.get("queue") or []),
+                            state.get("current_index"),
+                        )
 
                     # Watchdog: some renderers get stuck reporting PLAYING at position 0
                     # after the audio actually ended, never emitting STOPPED. If the device
@@ -454,6 +744,13 @@ async def monitor_upnp_playback(udn: str):
                 except Exception:
                     logger.exception(f"[Player] Auto-advance failed for {udn}")
                 await asyncio.sleep(4)  # Give the new track a moment to start
+            elif stage_context is not None:
+                try:
+                    await _sync_staged_next(
+                        upnp, udn, *stage_context, device_position, track_uri
+                    )
+                except Exception:
+                    logger.exception(f"[Gapless] Staging the next track failed for {udn}")
 
             await asyncio.sleep(1)
 

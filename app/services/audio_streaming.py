@@ -46,13 +46,15 @@ async def build_stream_url(
     queue_index: int | None = None,
     client_id: str | None = None,
     extra_claims: dict[str, Any] | None = None,
+    ttl_seconds: int | None = None,
 ) -> StreamUrl:
     if duration_seconds is None:
         duration_seconds = await db.fetchval(
             "SELECT duration_seconds FROM track WHERE id = $1",
             track_id,
         )
-    ttl_seconds = stream_token_ttl_seconds(renderer_kind, duration_seconds)
+    if ttl_seconds is None:
+        ttl_seconds = stream_token_ttl_seconds(renderer_kind, duration_seconds)
     expires_delta = timedelta(seconds=ttl_seconds) if ttl_seconds is not None else None
     claims = await stream_normalization_claims(
         db,

@@ -32,5 +32,12 @@ renderer:
   # LAN address UPnP discovery binds to and advertises in stream URLs.
   # Unset = default-route address. Env override: UPNP_SOURCE_IP.
   # upnp_source_ip: 192.168.1.50
+  # Next-track staging (SetNextAVTransportURI) for renderers that advertise
+  # it. A renderer that faults on the action is switched off automatically
+  # until restart; list UDNs here to pin the choice.
+  # upnp_gapless:
+  #   enabled: true          # false = never stage, on any renderer
+  #   disabled_udns: []      # never stage on these
+  #   forced_udns: []        # stage even if not advertised
 
 pearlarr: {}

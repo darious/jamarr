@@ -131,3 +131,42 @@ def get_upnp_source_ip():
             value = None
     value = str(value).strip() if value else ""
     return value or None
+
+
+def _normalize_udn(value) -> str:
+    udn = str(value or "").strip().lower()
+    return udn[len("uuid:"):] if udn.startswith("uuid:") else udn
+
+
+def get_upnp_gapless_config():
+    """Per-renderer SetNextAVTransportURI staging policy from config.yaml.
+
+    ``renderer.upnp_gapless``: ``enabled: false`` switches staging off for
+    every renderer; ``disabled_udns`` never stage; ``forced_udns`` stage even
+    when the device description does not advertise the action. UDNs match
+    case-insensitively, with or without the ``uuid:`` prefix.
+    """
+    try:
+        section = (load_config().get("renderer") or {}).get("upnp_gapless") or {}
+    except (FileNotFoundError, AttributeError):
+        section = {}
+    if not isinstance(section, dict):
+        section = {}
+    return {
+        "enabled": section.get("enabled", True) is not False,
+        "disabled_udns": {_normalize_udn(u) for u in section.get("disabled_udns") or [] if u},
+        "forced_udns": {_normalize_udn(u) for u in section.get("forced_udns") or [] if u},
+    }
+
+
+def upnp_gapless_override(udn: str):
+    """``"off"``, ``"on"`` or ``None`` (follow the device) for one renderer."""
+    cfg = get_upnp_gapless_config()
+    if not cfg["enabled"]:
+        return "off"
+    key = _normalize_udn(udn)
+    if key in cfg["disabled_udns"]:
+        return "off"
+    if key in cfg["forced_udns"]:
+        return "on"
+    return None
