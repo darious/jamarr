@@ -83,6 +83,8 @@ class RendererOrchestrator:
         self.registry = registry or get_renderer_registry()
         self._status_unsubscribers: dict[str, Any] = {}
         self._last_ended_at: dict[str, float] = {}
+        # Strong refs: the loop only keeps weak ones to running tasks.
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def get_active(self, db: asyncpg.Connection, client_id: str) -> tuple[str, str]:
         return await self.registry.get_active(db, client_id)
@@ -296,10 +298,14 @@ class RendererOrchestrator:
             backend = self.registry.get_backend(renderer_id)
             halted = last_stop_reason.get(state_key)
             track = self._current_track(state)
-            if halted and track and hasattr(backend, "register_status_listener"):
+            if halted and track and (
+                hasattr(backend, "register_status_listener")
+                or halted.get("reason") == "load_failed"
+            ):
                 # A Cast halt (cancel, error, refused load) ends the media
                 # session, so play() has nothing to resume: reload the track
-                # and pick up where it stopped.
+                # and pick up where it stopped. A refused load (any renderer)
+                # never got the track onto the device at all.
                 await self._play_remote(
                     renderer_id, state_key, track, track.get("user_id"), None, db=db
                 )
@@ -399,7 +405,7 @@ class RendererOrchestrator:
         state_key: str,
         track: dict[str, Any],
         user_id: int | None,
-        request: Request,
+        request: Request | None,
     ) -> None:
         _mark_monitor_starting(state_key)
         try:
@@ -466,7 +472,15 @@ class RendererOrchestrator:
             try:
                 await backend.play_track(renderer_id, track, context)
             except RendererLoadError as exc:
-                await self._record_load_failure(state_key, track, exc, db=db)
+                if exc.reason == "superseded" or not await self._record_load_failure(
+                    state_key, track, exc, db=db
+                ):
+                    # A newer load replaced this one (rapid skips): that load
+                    # owns the player state, and this is no failure to report.
+                    logger.info(
+                        "Load of track %s on %s superseded: %s", track.get("id"), state_key, exc
+                    )
+                    return
                 raise
             if hasattr(backend, "register_status_listener"):
                 self._register_status_listener(backend, renderer_id, state_key)
@@ -485,31 +499,45 @@ class RendererOrchestrator:
         track: dict[str, Any],
         exc: RendererLoadError,
         db: asyncpg.Connection | None = None,
-    ) -> None:
+    ) -> bool:
         """Undo the optimistic is_playing=True for a track the device refused.
 
         Callers mark the new track as playing before the load is confirmed; a
         rejected or timed-out load must not leave that standing, or the UI
-        reports playback that is not happening.
+        reports playback that is not happening. Returns False (nothing
+        recorded) if a different track has become current since.
         """
-        logger.warning("Playback of track %s failed on %s: %s", track.get("id"), state_key, exc)
-        last_stop_reason[state_key] = {
-            "reason": "load_failed",
-            "detail": exc.detail or exc.reason,
-            "track_id": track.get("id"),
-            "position_seconds": 0,
-            "at": time.time(),
-        }
         async with self._conn(db) as conn:
             state = await get_renderer_state_db(conn, state_key)
             current = self._current_track(state)
             if current is not None and current.get("id") != track.get("id"):
                 # Something else was started meanwhile; leave its state alone.
-                return
+                return False
+            logger.warning(
+                "Playback of track %s failed on %s: %s", track.get("id"), state_key, exc
+            )
+            last_stop_reason[state_key] = {
+                "reason": "load_failed",
+                "detail": exc.detail or exc.reason,
+                "track_id": track.get("id"),
+                "position_seconds": 0,
+                "at": time.time(),
+            }
             state["is_playing"] = False
             state["transport_state"] = "STOPPED"
             state["position_seconds"] = 0
             await update_playback_progress_db(conn, state_key, state)
+        return True
+
+    def _spawn(self, coro: Any) -> None:
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_done)
+
+    def _background_done(self, task: asyncio.Task) -> None:
+        self._background_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.warning("Background renderer load failed: %s", task.exception())
 
     async def _cancel_monitor(self, state_key: str, remove: bool = False) -> None:
         if state_key in playback_monitors:
@@ -657,7 +685,11 @@ class RendererOrchestrator:
             logger.debug("Renderer status sync failed for %s", renderer_id, exc_info=True)
             return state or await get_renderer_state_db(db, state_key)
         current_state = state or await get_renderer_state_db(db, state_key)
-        return await self._apply_status(db, state_key, current_state, status)
+        # Polled from GET /api/player/state: an end-of-track advance must not
+        # hold the request (and its connection) for the next track's load.
+        return await self._apply_status(
+            db, state_key, current_state, status, load_in_background=True
+        )
 
     async def _apply_status(
         self,
@@ -665,6 +697,7 @@ class RendererOrchestrator:
         state_key: str,
         state: dict[str, Any],
         status: RendererStatus,
+        load_in_background: bool = False,
     ) -> dict[str, Any]:
         if status.state == "TRANSITIONING" and status.completion_reported:
             # The backend is mid-load and confirms the outcome itself; statuses
@@ -698,7 +731,9 @@ class RendererOrchestrator:
             allow_stopped=status.ended,
         )
         if status.ended or self._detect_track_ended(state, status, prev_position):
-            await self._advance_queue_from_status(db, state_key, state)
+            await self._advance_queue_from_status(
+                db, state_key, state, load_in_background=load_in_background
+            )
             state = await get_renderer_state_db(db, state_key)
         return state
 
@@ -738,6 +773,7 @@ class RendererOrchestrator:
         db: asyncpg.Connection,
         state_key: str,
         state: dict[str, Any],
+        load_in_background: bool = False,
     ) -> None:
         now = time.time()
         if now - self._last_ended_at.get(state_key, 0) < 3:
@@ -758,6 +794,15 @@ class RendererOrchestrator:
         await update_renderer_state_db(db, state_key, state)
         track = queue[next_index]
         renderer_id = self.registry.state_key_to_renderer_id(state_key)
+        if load_in_background:
+            # The queue has already moved (and the debounce above is set), so
+            # this load happens once; it takes its own connection.
+            self._spawn(
+                self._play_remote_background(
+                    renderer_id, state_key, track, track.get("user_id"), None
+                )
+            )
+            return
         try:
             await self._play_remote(
                 renderer_id, state_key, track, track.get("user_id"), None, db=db

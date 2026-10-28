@@ -121,20 +121,35 @@ async def _reconcile_staged_transition(
     Returns "advanced" (queue moved on, nothing reloaded), "stale" (renderer
     rolled into a track that is no longer next in the queue) or None. The
     staged record is consumed here, so one transition advances exactly once.
+    A record dropped while the device may still have held it (staging
+    disabled, a clear refused) is matched too: the renderer can still roll
+    into it, and must not leave the queue a track behind when it does.
     """
-    staged = staging.get(udn)
-    if (
-        staged is None
-        or transport_state not in STAGED_ADVANCE_STATES
-        or not same_media_uri(track_uri, staged.url)
-    ):
+    if transport_state not in STAGED_ADVANCE_STATES:
         return None
-    staging.take(udn)
+    from_dropped = False
+    staged = staging.get(udn)
+    if staged is not None and same_media_uri(track_uri, staged.url):
+        staging.take(udn)
+    else:
+        staged = staging.dropped.get(udn)
+        if staged is None or not same_media_uri(track_uri, staged.url):
+            return None
+        staging.take_dropped(udn)
+        from_dropped = True
     _staged_stop_seen.pop(udn, None)
     async with db_conn() as db:
         state = await get_renderer_state_db(db, udn)
         queue = state.get("queue") or []
         idx = state.get("current_index")
+        if (
+            from_dropped
+            and idx is not None
+            and 0 <= idx < len(queue)
+            and queue[idx].get("id") == staged.track_id
+        ):
+            # Already the current track (we loaded it ourselves meanwhile).
+            return None
         next_idx = (idx if idx is not None else -1) + 1
         if not (0 <= next_idx < len(queue)) or queue[next_idx].get("id") != staged.track_id:
             logger.warning(
@@ -249,6 +264,11 @@ async def _sync_staged_next(
     allowed = getattr(upnp, "next_track_staging_allowed", None)
     if allowed is None or not hasattr(upnp, "set_next_track"):
         return
+    # A record dropped since the last poll (new load, unplayable next, fault)
+    # may still be on the device: clear it first, even if staging was just
+    # switched off, or the renderer rolls into a track the queue moved past.
+    if udn in staging.needs_clear:
+        await _clear_staged_next(upnp, udn)
     if not allowed(udn):
         return
     # Without a TrackURI the transition could not be recognised, and the
@@ -266,8 +286,8 @@ async def _sync_staged_next(
 
     next_idx = (idx if idx is not None else -1) + 1
     if not (0 <= next_idx < len(queue)):
-        if staged or udn in staging.needs_clear:
-            await upnp.clear_next_track(udn)
+        if staged:
+            await _clear_staged_next(upnp, udn)
         return
     target = queue[next_idx]
     target_id = target.get("id")
@@ -296,6 +316,7 @@ async def _sync_staged_next(
             logger.info(f"[Gapless] Next track {target_id} is not on disk; not staging it")
             if staged:
                 staging.forget(udn)
+                await _clear_staged_next(upnp, udn)
             return
         ttl = staged_stream_token_ttl_seconds(lead_s, enriched.get("duration_seconds"))
         stream = await build_stream_url(
@@ -316,12 +337,14 @@ async def _sync_staged_next(
     try:
         staged_url = await upnp.set_next_track(udn, int(target_id), metadata)
     except Exception as exc:
-        # The device may still hold the old staged URI; never trust it again.
+        # The device may still hold the old staged URI: stop tracking it as
+        # staged, but clear it (best effort) and keep recognising it.
         if staged:
             staging.forget(udn)
-        if isinstance(exc, ValueError):
-            return  # not registered right now; not the device's fault
-        staging.note_failure(udn, exc)
+        if not isinstance(exc, ValueError):  # ValueError: not registered now
+            staging.note_failure(udn, exc)
+        if udn in staging.needs_clear:
+            await _clear_staged_next(upnp, udn)
         return
     staging.record(
         udn,
@@ -333,6 +356,19 @@ async def _sync_staged_next(
             expires_at=now + ttl,
         ),
     )
+
+
+async def _clear_staged_next(upnp, udn: str) -> None:
+    """Best-effort empty SetNextAVTransportURI; never raises."""
+    clear = getattr(upnp, "clear_next_track", None)
+    if clear is None:
+        staging.needs_clear.discard(udn)
+        return
+    try:
+        await clear(udn)
+    except Exception:
+        logger.debug("Clearing the staged next track failed for %s", udn, exc_info=True)
+        staging.cleared(udn, ok=False)
 
 
 async def _prewarm_next_track(path: str) -> None:

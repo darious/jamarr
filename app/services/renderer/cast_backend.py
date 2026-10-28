@@ -234,6 +234,12 @@ class CastRendererBackend(RendererBackend):
                     track_id,
                     self.load_timeout,
                 )
+                if not self._is_current_load(renderer_id, load):
+                    # A newer LOAD replaced this one; stopping now would stop
+                    # that media instead.
+                    raise RendererLoadError(
+                        renderer_id, "superseded", "replaced by a newer load"
+                    ) from None
                 # The receiver may still start it later; stop it so the device
                 # does not play something the player state says has failed.
                 await asyncio.to_thread(self._safe_media_stop, cast, renderer_id)
@@ -241,6 +247,15 @@ class CastRendererBackend(RendererBackend):
                     renderer_id, "load_timeout", f"no response within {self.load_timeout:g}s"
                 ) from None
             accepted, reason, detail, entry = self._classify_load_response(success, data)
+            if not accepted and not self._is_current_load(renderer_id, load):
+                # Typically LOAD_CANCELLED by our own next LOAD (rapid skips).
+                logger.info(
+                    "Cast load superseded renderer=%s track_id=%s detail=%s",
+                    renderer_id,
+                    track_id,
+                    detail,
+                )
+                raise RendererLoadError(renderer_id, "superseded", detail)
             if not accepted:
                 logger.warning(
                     "Cast load rejected renderer=%s track_id=%s reason=%s detail=%s",
@@ -387,6 +402,7 @@ class CastRendererBackend(RendererBackend):
             volume_muted = self._status_attr(status, "volume_muted")
         ended = False
         stop_reason = None
+        completion_reported = True
         with self._loads_lock:
             load = self._loads.get(renderer_id)
             if load is not None and not load.confirmed:
@@ -414,6 +430,14 @@ class CastRendererBackend(RendererBackend):
                     and previous_state == "PLAYING"
                     and (started_at is None or time.time() - started_at > 3)
                 )
+                if state == "IDLE" and not ended and (
+                    not idle_reason or idle_reason == IDLE_REASON_FINISHED
+                ):
+                    # No reason, or a FINISHED without the PLAYING before it
+                    # (first status seen): not conclusive either way, so the
+                    # orchestrator's position-vs-duration check decides.
+                    # CANCELLED / INTERRUPTED / ERROR stay non-advancing.
+                    completion_reported = False
         if state == "IDLE" and not ended and not stop_reason and not trust_idle:
             state = "UNKNOWN"
         return RendererStatus(
@@ -425,9 +449,13 @@ class CastRendererBackend(RendererBackend):
             volume_muted=volume_muted,
             current_media_url=content_id,
             ended=ended,
-            completion_reported=True,
+            completion_reported=completion_reported,
             stop_reason=stop_reason,
         )
+
+    def _is_current_load(self, renderer_id: str, load: _CastLoad) -> bool:
+        with self._loads_lock:
+            return self._loads.get(renderer_id) is load
 
     def _forget_load(self, renderer_id: str, load: _CastLoad | None = None) -> None:
         """Drop the tracked load (only ``load`` itself, when given)."""

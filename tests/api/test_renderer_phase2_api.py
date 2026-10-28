@@ -448,3 +448,202 @@ async def test_cast_resume_after_halt_reloads_and_seeks(
     assert len(_play_media_calls(cast)) == 2
     assert "/api/stream/901" in _play_media_calls(cast)[1][1][0]
     assert ("seek", (120,), {}) in cast.media_controller.calls
+
+
+@pytest.mark.asyncio
+async def test_polled_cast_finished_advances_in_background_once(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+):
+    """GET /api/player/state seeing FINISHED moves the queue, but the next
+    LOAD (seconds on a slow receiver) does not hold the request."""
+    backend, cast, _ = two_track_cast_queue
+    orchestrator = clean_cast_player_globals
+    backend.load_timeout = 5
+    _receiver_goes_idle(cast, "FINISHED")
+    cast.media_controller.pending_load_callback = None
+    cast.media_controller.load_response = None  # the next LOAD hangs
+
+    state = await asyncio.wait_for(
+        auth_client.get("/api/player/state", headers=HEADERS), timeout=2
+    )
+
+    assert state.status_code == 200, state.text
+    assert state.json()["current_index"] == 1
+    assert state.json()["is_playing"] is True
+    for _ in range(200):
+        if cast.media_controller.pending_load_callback:
+            break
+        await asyncio.sleep(0.01)
+    assert len(_play_media_calls(cast)) == 2
+    assert "/api/stream/902" in _play_media_calls(cast)[1][1][0]
+
+    # Polling again while that LOAD is pending neither reloads nor advances.
+    again = await asyncio.wait_for(
+        auth_client.get("/api/player/state", headers=HEADERS), timeout=2
+    )
+    assert again.json()["current_index"] == 1
+    assert len(_play_media_calls(cast)) == 2
+
+    from tests.unit.test_renderer_phase2_cast import LOAD_ACCEPTED
+
+    cast.media_controller.pending_load_callback(*LOAD_ACCEPTED)
+    await asyncio.wait_for(
+        asyncio.gather(*orchestrator._background_tasks), timeout=2
+    )
+    assert backend._loads[selected_cast_renderer].confirmed is True
+
+
+@pytest.mark.asyncio
+async def test_superseded_cast_load_is_not_a_failure(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+    monkeypatch,
+):
+    """The first of two rapid skips is cancelled by the second: no 502, no
+    load_failed banner, and the newer load's state is left alone."""
+    from app.services.player.globals import last_stop_reason
+    from app.services.renderer.contracts import RendererLoadError
+
+    backend, _cast, _ = two_track_cast_queue
+
+    async def superseded(renderer_id, track, context):
+        raise RendererLoadError(renderer_id, "superseded", "LOAD_CANCELLED")
+
+    monkeypatch.setattr(backend, "play_track", superseded)
+    # The fixture tracks are not on disk in the test container.
+    import app.services.renderer.orchestrator as orchestrator_module
+
+    monkeypatch.setattr(orchestrator_module, "track_path_exists", lambda track: True)
+
+    skip = await auth_client.post("/api/player/index", json={"index": 1}, headers=HEADERS)
+
+    assert skip.status_code == 200, skip.text
+    assert selected_cast_renderer not in last_stop_reason
+    assert await db.fetchval(
+        "SELECT is_playing FROM renderer_state WHERE renderer_udn = $1", selected_cast_renderer
+    ) is True
+
+
+@pytest.mark.asyncio
+async def test_load_failure_for_a_track_no_longer_current_records_nothing(
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+):
+    from app.services.player.globals import last_stop_reason
+    from app.services.player.state import get_renderer_state_db, update_renderer_state_db
+    from app.services.renderer.contracts import RendererLoadError
+
+    orchestrator = clean_cast_player_globals
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    state["current_index"] = 1  # 902 started after the 901 load was issued
+    await update_renderer_state_db(db, selected_cast_renderer, state)
+
+    recorded = await orchestrator._record_load_failure(
+        selected_cast_renderer,
+        {"id": 901},
+        RendererLoadError(selected_cast_renderer, "load_rejected", "LOAD_FAILED"),
+        db=db,
+    )
+
+    assert recorded is False
+    assert selected_cast_renderer not in last_stop_reason
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    assert state["is_playing"] is True
+
+
+class _FailingUpnpManager:
+    """UPnP manager whose renderer refuses SetAVTransportURI."""
+
+    def __init__(self, exc):
+        self.exc = exc
+        self.renderers = {"uuid:refuses": {"friendly_name": "Amp"}}
+        self.dmr_devices = {}
+        self.local_ip = "127.0.0.1"
+        self.base_url = "http://127.0.0.1:8111"
+        self.renderer_base_url = "http://127.0.0.1:8112"
+        self.active_renderer = None
+        self.control_failures = []
+
+    async def set_renderer(self, udn):
+        self.active_renderer = udn
+
+    async def play_track(self, track_id, track_path, metadata, username=None):
+        raise self.exc
+
+    def note_control_failure(self, udn):
+        self.control_failures.append(udn)
+
+
+@pytest.fixture
+async def refusing_upnp_renderer(db, monkeypatch):
+    from async_upnp_client.exceptions import UpnpActionError
+
+    import app.api.player as player_api
+    from app.services.player.globals import last_stop_reason
+    from app.services.renderer.upnp_backend import UpnpRendererBackend
+
+    manager = _FailingUpnpManager(UpnpActionError(error_code=714, error_desc="Illegal MIME-type"))
+    monkeypatch.setitem(
+        player_api.renderer_orchestrator.registry.backends,
+        "upnp",
+        UpnpRendererBackend(manager=manager),
+    )
+    await db.execute(
+        """
+        INSERT INTO client_session (
+            client_id, active_renderer_udn, active_renderer_id, last_seen_at
+        )
+        VALUES ('phase2-client', 'uuid:refuses', 'upnp:uuid:refuses', NOW())
+        """
+    )
+    last_stop_reason.pop("uuid:refuses", None)
+    yield manager
+    last_stop_reason.pop("uuid:refuses", None)
+
+
+@pytest.mark.asyncio
+async def test_upnp_refused_load_rolls_back_like_cast(
+    auth_client: AsyncClient,
+    db,
+    phase2_cast_track,
+    refusing_upnp_renderer,
+):
+    from app.services.player.globals import last_stop_reason
+
+    play = await auth_client.post("/api/player/play", json={"track_id": 901}, headers=HEADERS)
+
+    assert play.status_code == 502, play.text
+    assert "could not play" in play.json()["detail"]
+    row = await db.fetchrow(
+        "SELECT is_playing, transport_state FROM renderer_state WHERE renderer_udn = $1",
+        "uuid:refuses",
+    )
+    assert row["is_playing"] is False
+    assert row["transport_state"] == "STOPPED"
+    assert last_stop_reason["uuid:refuses"]["reason"] == "load_failed"
+    assert refusing_upnp_renderer.control_failures == ["uuid:refuses"]
+
+
+@pytest.mark.asyncio
+async def test_upnp_unregistered_device_still_raises_value_error():
+    """ValueError (device not registered) is not turned into a load error:
+    stale-renderer healing keys on it."""
+    from app.services.renderer.upnp_backend import UpnpRendererBackend
+    from app.services.renderer.contracts import PlaybackContext
+
+    backend = UpnpRendererBackend(manager=_FailingUpnpManager(ValueError("DMR device not found")))
+    with pytest.raises(ValueError):
+        await backend.play_track(
+            "upnp:uuid:refuses",
+            {"id": 901, "path": "/music/x.flac"},
+            PlaybackContext(base_url="http://127.0.0.1:8111", user_id=None),
+        )

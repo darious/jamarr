@@ -53,11 +53,24 @@ class GaplessUpnp:
     precise point in the transition.
     """
 
-    def __init__(self, script, *, advertised=True, set_next_error=None, hooks=None):
+    def __init__(
+        self,
+        script,
+        *,
+        advertised=True,
+        set_next_error=None,
+        fail_after=0,
+        clear_ok=True,
+        hooks=None,
+    ):
         self.script = list(script)
         self.index = 0
         self.advertised = advertised
+        # set_next_error is raised once fail_after SetNext calls succeeded.
         self.set_next_error = set_next_error
+        self.fail_after = fail_after
+        # False: the renderer refuses an empty NextURI.
+        self.clear_ok = clear_ok
         self.hooks = dict(hooks or {})
         self.drained = asyncio.Event()
         self.renderers = {}
@@ -97,7 +110,7 @@ class GaplessUpnp:
         return staging_allowed(udn, self.advertised)
 
     async def set_next_track(self, udn, track_id, metadata):
-        if self.set_next_error is not None:
+        if self.set_next_error is not None and len(self.set_next_calls) >= self.fail_after:
             self.set_next_calls.append((track_id, None, metadata))
             raise self.set_next_error
         url = metadata["stream_url"]
@@ -106,7 +119,7 @@ class GaplessUpnp:
 
     async def clear_next_track(self, udn):
         self.clear_calls += 1
-        staging.cleared(udn)
+        staging.cleared(udn, ok=self.clear_ok)
 
     async def play_track(self, track_id, track_path, metadata):
         self.play_calls.append(track_id)
@@ -509,6 +522,118 @@ async def test_no_staging_without_a_reported_track_uri(db, monkeypatch, harness)
     assert upnp.set_next_calls == []
 
 
+async def test_fault_on_restage_clears_old_uri_and_still_recognises_it(
+    db, monkeypatch, harness
+):
+    """Re-staging after a queue edit faults, which switches staging off. The
+    device still holds the old staged URI: it is cleared anyway, and if the
+    renderer rolls into it regardless, the queue is put right instead of
+    silently falling a track behind."""
+    udn = "uuid:gapless-fault-restage"
+    _reset(udn)
+    last_track_start_time[udn] = time.time() - 60
+    await update_renderer_state_db(db, udn, _state())
+
+    upnp = GaplessUpnp(
+        [
+            (60, "PLAYING", CURRENT_URI),  # stage 901
+            (120, "PLAYING", CURRENT_URI),  # 902 moved up: re-stage faults
+            (178, "PLAYING", CURRENT_URI),
+            (1, "PLAYING", staged(0)),  # renderer plays the dropped 901
+            (2, "PLAYING", staged(0)),
+        ],
+        set_next_error=UpnpActionError(error_code=401, error_desc="Invalid Action"),
+        fail_after=1,
+        clear_ok=False,
+        hooks={1: lambda: _set_queue_ids(udn, [900, 902, 901])},
+    )
+    await _run(monkeypatch, udn, upnp)
+
+    assert upnp.staged_ids == [901, 902]
+    assert staging.is_disabled(udn)
+    assert upnp.clear_calls == 1  # issued although staging was just disabled
+    # 901 is no longer next: load the track that is (stubbed helper), once.
+    assert harness.advances == [udn]
+    assert staging.dropped.get(udn) is None
+
+
+async def test_unplayable_next_clears_and_refused_clear_is_still_recognised(
+    db, monkeypatch, harness
+):
+    udn = "uuid:gapless-missing-next"
+    _reset(udn)
+    last_track_start_time[udn] = time.time() - 60
+    await update_renderer_state_db(db, udn, _state())
+
+    def missing_902(track):
+        return track.get("id") != 902
+
+    async def move_missing_track_up():
+        monkeypatch.setattr(monitor_module, "track_path_exists", missing_902)
+        await _set_queue_ids(udn, [900, 902, 901])
+
+    upnp = GaplessUpnp(
+        [
+            (60, "PLAYING", CURRENT_URI),  # stage 901
+            (120, "PLAYING", CURRENT_URI),  # next is now 902, not on disk
+            (178, "PLAYING", CURRENT_URI),
+            (1, "PLAYING", staged(0)),  # renderer plays the dropped 901
+            (2, "PLAYING", staged(0)),
+        ],
+        clear_ok=False,
+        hooks={1: move_missing_track_up},
+    )
+    await _run(monkeypatch, udn, upnp)
+
+    assert upnp.staged_ids == [901]
+    assert upnp.clear_calls == 1
+    assert harness.advances == [udn]
+
+
+async def test_rolling_into_a_dropped_uri_that_is_still_next_advances(
+    db, monkeypatch, harness
+):
+    """Staging was switched off with a URI already on the device, and the
+    track behind it is still next: the transition is simply followed."""
+    udn = "uuid:gapless-dropped-next"
+    _reset(udn)
+    last_track_start_time[udn] = time.time() - 60
+    await update_renderer_state_db(db, udn, _state())
+    url = "http://10.0.0.1:8112/api/stream/901?token=dropped"
+    staging.record(udn, StagedTrack(1, 901, url, time.time()))
+    staging.disable(udn, "test")
+    assert staging.get(udn) is None
+    assert staging.dropped[udn].track_id == 901
+
+    upnp = GaplessUpnp([(1, "PLAYING", url), (2, "PLAYING", url)], clear_ok=False)
+    await _run(monkeypatch, udn, upnp)
+
+    state = await get_renderer_state_db(db, udn)
+    assert state["current_index"] == 1
+    assert harness.advances == []
+    assert upnp.play_calls == []
+    assert upnp.clear_calls == 1  # disabled, but the device is still told
+
+
+def test_staging_keeps_dropped_records_until_cleared_or_replaced():
+    udn = "uuid:dropped-bookkeeping"
+    staging.reset(udn)
+    first = StagedTrack(1, 7, "http://x/api/stream/7?token=a", time.time())
+    staging.record(udn, first)
+    staging.forget(udn)
+    assert staging.dropped[udn] is first
+    assert udn in staging.needs_clear
+    staging.cleared(udn, ok=False)  # refused: still recognisable
+    assert staging.dropped[udn] is first
+    assert udn not in staging.needs_clear  # but not retried every poll
+    staging.record(udn, StagedTrack(1, 8, "http://x/api/stream/8?token=b", time.time()))
+    assert udn not in staging.dropped  # SetNext replaced it on the device
+    staging.forget(udn)
+    staging.cleared(udn, ok=True)
+    assert udn not in staging.dropped
+    staging.reset(udn)
+
+
 # --- policy and helpers ------------------------------------------------------
 
 
@@ -655,6 +780,21 @@ async def test_clear_tolerates_renderers_rejecting_empty_uri():
     await control.clear_next_track(udn)
     assert staging.get(udn) is None
     assert not staging.is_disabled(udn)
+
+
+async def test_clear_is_sent_even_when_staging_was_disabled():
+    udn = "uuid:device-clear-disabled"
+    staging.reset(udn)
+    dmr = FakeDmr()
+    control = _control(udn, dmr)
+    staging.record(udn, StagedTrack(1, 7, "http://x/api/stream/7?token=t", time.time()))
+    staging.disable(udn, "SetNextAVTransportURI fault")
+
+    await control.clear_next_track(udn)
+
+    assert dmr.set_next_calls == [{"media_url": "", "meta_data": ""}]
+    assert udn not in staging.dropped
+    staging.reset(udn)
 
 
 def test_device_staging_allowed_uses_advert_and_override(monkeypatch):
