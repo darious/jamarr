@@ -847,6 +847,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upnp-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UPnP discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#renderer-stream-proxy" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -873,6 +884,17 @@
     <span class="md-ellipsis">
       
         Two Cast control paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#android-device-upnp-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android device-UPnP discovery
       
     </span>
   </a>
@@ -1852,6 +1874,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upnp-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UPnP discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#renderer-stream-proxy" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1878,6 +1911,17 @@
     <span class="md-ellipsis">
       
         Two Cast control paths
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#android-device-upnp-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android device-UPnP discovery
       
     </span>
   </a>
@@ -2038,6 +2082,59 @@ backend speaks in:</p>
   watchdog force-advances renderers stuck reporting <code>PLAYING</code> at position 0 for
   longer than the track duration plus a margin.</li>
 </ul>
+<h2 id="upnp-discovery">UPnP discovery<a class="headerlink" href="#upnp-discovery" title="Permanent link">&para;</a></h2>
+<p><code>app/services/upnp/discovery.py</code> keeps one record per description URL and
+feeds it from three sources:</p>
+<ul>
+<li><strong>Search bursts</strong> — every 30 s (60 s while the listener runs) an M-SEARCH for
+  both <code>urn:schemas-upnp-org:device:MediaRenderer:1</code> and
+  <code>urn:schemas-upnp-org:service:AVTransport:1</code>, sent 3× 500 ms apart inside one
+  bounded scan. Overlapping scans share the one in flight.</li>
+<li><strong>SSDP listener</strong> — a persistent <code>ssdp:alive</code> / <code>ssdp:update</code> /
+  <code>ssdp:byebye</code> listener. If port 1900 cannot be bound it logs a warning and
+  discovery carries on with polling search only.</li>
+<li><strong>Manual add / subnet sweep</strong> — unicast M-SEARCH to the host, then four
+  guessed description URLs. Manual add also takes a full <code>http(s)://</code>
+  description URL and returns the renderer actually registered. The sweep
+  is an explicit admin action (<code>POST /api/scan/subnet</code>, the Renderers page's
+  <em>Scan Subnet</em> button) — <code>GET /api/renderers?refresh=true</code> only searches and
+  re-reads descriptions. It covers the interface's real subnet (clipped to a
+  /22), 32 hosts at a time, short timeouts; cancel with <code>POST /api/scan/cancel</code>.</li>
+</ul>
+<p><strong>Embedded devices.</strong> Each description is fetched once and its device tree
+walked; every node with its own AVTransport service is registered under its
+own UDN, control URLs and <code>DmrDevice</code> (multi-zone amps, NAS/receiver roots).
+Nodes without AVTransport are never registered. A description with none at
+all is re-read on the cooldown steps (a booting TV can briefly serve a
+root-only description), or every scan if it belongs to a saved renderer.
+Earlier versions saved the <em>root</em> UDN of such trees; when exactly one embedded
+endpoint replaces it, its settings, sessions, queue state and icon move to
+the new UDN and the old row is deleted, otherwise it stays unavailable.
+Registration is committed per endpoint only after its DB save, so a failure or
+deadline never leaves a half-registered renderer.</p>
+<p><strong>Hydration vs liveness.</strong> Hydration (description + SCPDs, <code>GetProtocolInfo</code>,
+icon, DB save) happens for a new LOCATION, a changed <code>BOOTID.UPNP.ORG</code> /
+<code>CONFIGID.UPNP.ORG</code>, an explicit refresh, a device coming back after being
+unreachable, or a failed control call (a sticky flag, honoured by the next
+sighting or probe). Any other
+sighting only bumps <code>last_seen</code>. Hydrations of the same URL are deduplicated,
+run at most 4 at a time and each has a 20 s deadline. The per-location failure
+cooldown and BOOTID-based un-suspension still gate retries.</p>
+<p><strong>Availability.</strong> A device goes unavailable only after an <code>ssdp:byebye</code> or
+its <code>max-age</code> + 120 s grace has passed, <em>and</em> an HTTP probe of its description
+fails — one lost multicast reply never removes it. Unavailable devices drop
+out of <code>/api/renderers</code> and get <code>renderer.available = FALSE</code>, but their
+metadata and settings are kept; a fresh alive brings them back.
+<code>RendererOrchestrator._renderer_available()</code> asks the backend's
+<code>is_available()</code> (this tracked state) before falling back to list
+membership, so stale-session recovery acts on real departures.</p>
+<p><strong>Interface.</strong> <code>renderer.upnp_source_ip</code> (env <code>UPNP_SOURCE_IP</code>) pins the
+address discovery binds to and that stream/art URLs (incl. the stream proxy)
+use. Unset, the default-route address is used and re-checked each scan.</p>
+<p><strong>Diagnostics.</strong> <code>GET /api/player/upnp/diagnostics</code> (admin) returns the source
+and stream address, listener status, search targets, per-target reply counts
+of the last scan, description failures, cooldown/suspended locations,
+per-device last-seen/BOOTID/availability and recent availability transitions.</p>
 <h2 id="renderer-stream-proxy">Renderer stream proxy<a class="headerlink" href="#renderer-stream-proxy" title="Permanent link">&para;</a></h2>
 <p>UPnP renderers fetch stream and artwork URLs through a small in-process HTTP
 proxy (<code>app/services/renderer/stream_proxy.py</code>, default port <strong>8112</strong>, config
@@ -2098,6 +2195,24 @@ queue/progress/index through the normal local-client path, so history and
 scrobbling behave like Android device-UPnP. See
 <a href="../decisions/0004-cast-dual-control-path/">ADR-0004</a> and the
 <a href="../../clients/android/">Android client</a>.</p>
+<h2 id="android-device-upnp-discovery">Android device-UPnP discovery<a class="headerlink" href="#android-device-upnp-discovery" title="Permanent link">&para;</a></h2>
+<p>With "phone discovers renderers" on, the app runs its own jUPnP control point
+(<code>android/.../upnp/</code>). <code>DiscoveryLifecycle</code> owns start/stop and searching:</p>
+<ul>
+<li>Searches go out in short bursts only: after startup (0/1/3/10 s), when the
+  renderer picker opens, and after a network change. No background repeats;
+  jUPnP's registry tracks devices from their NOTIFY/max-age.</li>
+<li>jUPnP's <code>RouterImpl</code> binds to the interfaces present at <code>enable()</code> and never
+  re-scans (its <code>AndroidRouter</code> broadcast receiver is only wired into
+  <code>AndroidUpnpServiceImpl</code>, which the app does not use). So a debounced
+  <code>NetworkCallback</code> rebinds the router (disable + enable) when the IPv4 address
+  set changed or a network was lost, drops the old network's devices from the
+  registry, then searches again; a start that failed
+  for lack of a network is retried the same way.</li>
+<li>Each device in a root's tree with its own AVTransport is a separate renderer
+  under its own UDN, using only its own services, matched by service type
+  (any version), not serviceId (<code>RendererEndpoints.kt</code>).</li>
+</ul>
 <h2 id="deployment-notes">Deployment notes<a class="headerlink" href="#deployment-notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Docker needs <code>network_mode: "host"</code> for both UPnP SSDP and Cast mDNS. Host

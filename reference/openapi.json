@@ -1918,76 +1918,6 @@
         }
       }
     },
-    "/api/renderers": {
-      "get": {
-        "summary": "Get Renderers",
-        "operationId": "get_renderers_api_renderers_get",
-        "parameters": [
-          {
-            "name": "refresh",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Refresh"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "name": "x-jamarr-client-id",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Jamarr-Client-Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/player/renderer": {
       "post": {
         "summary": "Set Renderer",
@@ -2396,9 +2326,169 @@
         }
       }
     },
+    "/api/player/debug": {
+      "get": {
+        "summary": "Debug Info",
+        "operationId": "debug_info_api_player_debug_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/player/test_upnp": {
+      "get": {
+        "summary": "Test Upnp",
+        "operationId": "test_upnp_api_player_test_upnp_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/renderers": {
+      "get": {
+        "summary": "List renderers",
+        "description": "Renderers available to this client, local playback first.\n\n`refresh=true` runs an SSDP search burst and re-reads every renderer's\ndescription. It does not sweep the subnet; that is the admin-only\n`POST /api/scan/subnet`.",
+        "operationId": "get_renderers_api_renderers_get",
+        "parameters": [
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Refresh"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-jamarr-client-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jamarr-Client-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/player/add_manual": {
       "post": {
-        "summary": "Add Manual Renderer",
+        "summary": "Add a UPnP renderer by IP or description URL",
+        "description": "Add a renderer the network search missed.\n\n`ip` is either an IPv4 address (unicast SSDP search, then a few common\ndescription URLs) or a full `http(s)://` description URL. Responds with the\nrenderer actually registered; 404 if nothing playable was found.",
         "operationId": "add_manual_renderer_api_player_add_manual_post",
         "parameters": [
           {
@@ -2452,10 +2542,11 @@
         }
       }
     },
-    "/api/player/debug": {
-      "get": {
-        "summary": "Debug Info",
-        "operationId": "debug_info_api_player_debug_get",
+    "/api/scan/subnet": {
+      "post": {
+        "summary": "Sweep the local subnet for UPnP renderers",
+        "description": "Probe every host on the server's subnet for renderers search missed.\n\nRuns in the background; follow it with `GET /api/scan-status`.\n`started` is false when a sweep is already running.",
+        "operationId": "start_subnet_scan_api_scan_subnet_post",
         "parameters": [
           {
             "name": "authorization",
@@ -2496,10 +2587,56 @@
         }
       }
     },
-    "/api/player/test_upnp": {
+    "/api/scan/cancel": {
+      "post": {
+        "summary": "Cancel a running renderer subnet scan",
+        "description": "Stop the UPnP subnet sweep started by `POST /api/scan/subnet`.",
+        "operationId": "cancel_subnet_scan_api_scan_cancel_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/player/upnp/diagnostics": {
       "get": {
-        "summary": "Test Upnp",
-        "operationId": "test_upnp_api_player_test_upnp_get",
+        "summary": "UPnP discovery diagnostics",
+        "description": "Discovery state for troubleshooting renderers that do not show up.\n\nSource/stream address and interface, SSDP listener status, search targets,\nper-target reply counts of the last scan, description fetch failures,\ncooldown/suspended locations, per-device last-seen and availability, and\nrecent availability transitions.",
+        "operationId": "upnp_diagnostics_api_player_upnp_diagnostics_get",
         "parameters": [
           {
             "name": "authorization",

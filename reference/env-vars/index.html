@@ -2006,6 +2006,11 @@ too — or point readers at <code>.env.example</code> as the source of truth.</p
 <td><code>8112</code></td>
 <td>Port of the renderer stream proxy (UPnP renderers fetch streams/art through it; see <a href="../../architecture/renderers/#renderer-stream-proxy">Renderers</a>). Overrides <code>renderer.stream_proxy_port</code> in <code>config.yaml</code></td>
 </tr>
+<tr>
+<td><code>UPNP_SOURCE_IP</code></td>
+<td><em>(unset)</em></td>
+<td>LAN address UPnP discovery binds to (SSDP search + listener) and puts in renderer stream/art URLs. Unset = the default-route address. Overrides <code>renderer.upnp_source_ip</code> in <code>config.yaml</code>; see <a href="../../architecture/renderers/#upnp-discovery">Renderers</a></td>
+</tr>
 </tbody>
 </table>
 <h2 id="database">Database<a class="headerlink" href="#database" title="Permanent link">&para;</a></h2>
