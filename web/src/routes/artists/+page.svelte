@@ -55,11 +55,11 @@
   }
 
   function handleFilterClick(filter: string) {
-    goto(buildQuery(filter), { keepFocus: true });
+    goto(buildQuery(filter));
   }
 
   function toggleFavoriteFilter() {
-    goto(buildQuery(activeFilter, !showFavoriteArtists), { keepFocus: true });
+    goto(buildQuery(activeFilter, !showFavoriteArtists));
   }
 </script>
 

@@ -1,6 +1,9 @@
 {
-  "extends": "./.svelte-kit/tsconfig.json",
+  "extends": "$app/tsconfig",
   "compilerOptions": {
-    "skipLibCheck": true
-  }
+    "skipLibCheck": true,
+    "strict": false
+  },
+  "include": ["src", "test", "*"],
+  "exclude": ["src/service-worker"]
 }

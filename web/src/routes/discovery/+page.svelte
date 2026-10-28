@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { page } from "$app/stores";
-    import { goto, invalidateAll } from "$app/navigation";
+    import { page } from "$lib/stores/page";
+    import { goto, refreshAll } from "$app/navigation";
     import { fade } from "svelte/transition";
     import TrackCard from "$components/TrackCard.svelte";
     import IconButton from "$components/IconButton.svelte";
@@ -34,13 +34,13 @@
     ];
 
     async function changeDays(newDays: number) {
-        const url = new URL($page.url);
+        const url = new URL($page.url.href);
         url.searchParams.set("days", newDays.toString());
-        await goto(url, { keepFocus: true });
+        await goto(url, { reset: false });
     }
 
     async function refresh() {
-        await invalidateAll();
+        await refreshAll();
     }
 
     async function playAlbum(album: RecommendedAlbum) {
