@@ -1,6 +1,11 @@
 package com.jamarr.android.upnp
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.util.Log
 import com.jamarr.android.renderer.DeviceRendererController
@@ -24,12 +29,12 @@ import org.jupnp.controlpoint.ActionCallback
 import org.jupnp.model.action.ActionInvocation
 import org.jupnp.model.message.UpnpResponse
 import org.jupnp.model.message.header.UDADeviceTypeHeader
+import org.jupnp.model.message.header.UDAServiceTypeHeader
 import org.jupnp.model.meta.LocalDevice
 import org.jupnp.model.meta.RemoteDevice
-import org.jupnp.model.meta.RemoteService
 import org.jupnp.model.meta.Service as UpnpModelService
 import org.jupnp.model.types.UDADeviceType
-import org.jupnp.model.types.UDAServiceId
+import org.jupnp.model.types.UDAServiceType
 import org.jupnp.registry.DefaultRegistryListener
 import org.jupnp.registry.Registry
 import org.jupnp.support.avtransport.callback.GetPositionInfo
@@ -44,6 +49,8 @@ import org.jupnp.support.model.SeekMode
 import org.jupnp.support.model.TransportInfo
 import org.jupnp.support.model.TransportState
 import org.jupnp.support.renderingcontrol.callback.SetVolume
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -55,8 +62,7 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
     override val kind: String = "upnp"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var upnpService: UpnpService? = null
-    private var multicastLock: WifiManager.MulticastLock? = null
+    @Volatile private var upnpService: UpnpService? = null
     private var pollJob: Job? = null
 
     private val _renderers = MutableStateFlow<List<DeviceRendererInfo>>(emptyList())
@@ -65,105 +71,156 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
     private val _state = MutableStateFlow(DeviceRendererPlaybackState())
     override val state: StateFlow<DeviceRendererPlaybackState> = _state.asStateFlow()
 
-    private val devicesByUdn = mutableMapOf<String, RemoteDevice>()
+    private val endpoints = RendererEndpointIndex()
 
     private val mediaRendererType = UDADeviceType("MediaRenderer")
-    private val avTransportId = UDAServiceId("AVTransport")
-
-    private fun looksLikeRenderer(device: RemoteDevice): Boolean {
-        if (device.type.implementsVersion(mediaRendererType)) return true
-        if (device.findService(avTransportId) != null) return true
-        for (embedded in device.embeddedDevices.orEmpty()) {
-            if (embedded.findService(avTransportId) != null) return true
-        }
-        return false
-    }
+    private val avTransportType = UDAServiceType("AVTransport")
 
     private val registryListener = object : DefaultRegistryListener() {
         override fun remoteDeviceAdded(registry: Registry, device: RemoteDevice) {
-            if (looksLikeRenderer(device)) {
-                Log.i(TAG, "renderer added: ${device.details?.friendlyName} (${device.type})")
-                addDevice(device)
-            }
+            onRootDevice(device)
         }
         override fun remoteDeviceUpdated(registry: Registry, device: RemoteDevice) {
-            if (looksLikeRenderer(device)) addDevice(device)
+            onRootDevice(device)
         }
         override fun remoteDeviceRemoved(registry: Registry, device: RemoteDevice) {
-            removeDevice(device.identity.udn.identifierString)
+            removeEndpoints(endpoints.removeRoot(device.identity.udn.identifierString))
         }
         override fun localDeviceAdded(registry: Registry, device: LocalDevice) {}
         override fun localDeviceRemoved(registry: Registry, device: LocalDevice) {}
     }
 
-    override fun start() {
-        if (upnpService != null) return
-        try {
+    private val engine = object : DiscoveryEngine {
+        private var multicastLock: WifiManager.MulticastLock? = null
+
+        override fun open() {
             val wifi = appContext.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            multicastLock = wifi?.createMulticastLock("jamarr-upnp")?.apply {
-                setReferenceCounted(true)
+            val lock = wifi?.createMulticastLock("jamarr-upnp")?.apply {
+                setReferenceCounted(false)
                 acquire()
             }
-            val config = AndroidUpnpServiceConfiguration()
-            val service = UpnpServiceImpl(config)
-            service.startup()
-            service.registry.addListener(registryListener)
-            upnpService = service
-            Log.i(TAG, "UPnP service started")
-            // Initial searches; re-issue periodically to catch slow renderers.
-            scope.launch {
-                repeat(6) {
-                    search()
-                    delay(5_000)
-                }
+            var service: UpnpServiceImpl? = null
+            try {
+                service = UpnpServiceImpl(AndroidUpnpServiceConfiguration())
+                service.startup()
+                service.registry.addListener(registryListener)
+                multicastLock = lock
+                upnpService = service
+                Log.i(TAG, "UPnP service started")
+            } catch (e: Throwable) {
+                service?.let { teardown(it) }
+                lock?.let { runCatching { it.release() } }
+                throw e
             }
-        } catch (e: Throwable) {
-            Log.e(TAG, "start failed", e)
+        }
+
+        override fun close() {
+            val service = upnpService
+            upnpService = null
+            try {
+                service?.let { teardown(it) }
+            } finally {
+                multicastLock?.let { runCatching { it.release() } }
+                multicastLock = null
+                endpoints.clear()
+                publishRenderers()
+            }
+            Log.i(TAG, "UPnP service stopped")
+        }
+
+        override fun search() {
+            val cp = upnpService?.controlPoint ?: return
+            cp.search()
+            cp.search(UDADeviceTypeHeader(mediaRendererType))
+            cp.search(UDAServiceTypeHeader(avTransportType))
+        }
+
+        override fun rebind() {
+            val router = upnpService?.router ?: return
+            Log.i(TAG, "network changed; rebinding UPnP router")
+            router.disable()
+            router.enable()
+        }
+
+        override fun addressSignature(): String = lanAddressSignature()
+    }
+
+    private val networkWatcher = object : NetworkWatcher {
+        private var callback: ConnectivityManager.NetworkCallback? = null
+
+        override fun register(onChange: (lost: Boolean) -> Unit) {
+            if (callback != null) return
+            val cm = appContext.getSystemService(ConnectivityManager::class.java) ?: return
+            // Any network, VPNs and LANs without internet included: all of
+            // them change the interfaces jUPnP binds to.
+            val request = NetworkRequest.Builder()
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .build()
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) = onChange(false)
+                override fun onLost(network: Network) = onChange(true)
+                override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) =
+                    onChange(false)
+            }
+            cm.registerNetworkCallback(request, cb)
+            callback = cb
+        }
+
+        override fun unregister() {
+            val cb = callback ?: return
+            callback = null
+            appContext.getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb)
         }
     }
 
+    private val discovery = DiscoveryLifecycle(
+        engine = engine,
+        network = networkWatcher,
+        scope = scope,
+        onError = { msg, e -> Log.w(TAG, msg, e) },
+    )
+
+    /** Starts discovery; idempotent. Searches once in a short burst, then listens. */
+    override fun start() = discovery.start()
+
+    /** Stops discovery and releases the multicast lock, callbacks and sockets; idempotent. */
     override fun stop() {
-        pollJob?.cancel()
-        pollJob = null
-        try { upnpService?.shutdown() } catch (_: Throwable) {}
-        upnpService = null
-        multicastLock?.let { runCatching { it.release() } }
-        multicastLock = null
-        devicesByUdn.clear()
-        _renderers.value = emptyList()
+        stopPolling()
+        discovery.stop()
     }
 
-    override fun search() {
-        val cp = upnpService?.controlPoint ?: return
-        cp.search()
-        cp.search(UDADeviceTypeHeader(mediaRendererType))
+    /** A short burst of searches; a no-op while one is already in flight. */
+    override fun search() = discovery.searchBurst()
+
+    /** For the renderer picker: search now, since the user is looking. */
+    fun searchBurst() = discovery.searchBurst()
+
+    private fun onRootDevice(root: RemoteDevice) {
+        val gone = endpoints.update(root)
+        if (gone.isNotEmpty()) removeEndpoints(gone) else publishRenderers()
     }
 
-    private fun addDevice(device: RemoteDevice) {
-        val udn = device.identity.udn.identifierString
-        devicesByUdn[udn] = device
+    private fun removeEndpoints(udns: Set<String>) {
         publishRenderers()
-    }
-
-    private fun removeDevice(udn: String) {
-        devicesByUdn.remove(udn)
-        publishRenderers()
-        if (_state.value.activeRendererId == "upnp:$udn") {
+        val active = _state.value.activeRendererId?.removePrefix("upnp:") ?: return
+        if (active in udns) {
             stopPolling()
             _state.value = _state.value.copy(activeRendererId = null, isPlaying = false)
         }
     }
 
     private fun publishRenderers() {
-        val list = devicesByUdn.values.map { d ->
-            val udn = d.identity.udn.identifierString
+        val list = endpoints.all().map { e ->
+            val d = e.device
+            val root = d.root
             DeviceRendererInfo(
-                rendererId = "upnp:$udn",
+                rendererId = "upnp:${e.udn}",
                 kind = kind,
-                name = d.details?.friendlyName ?: d.displayString ?: "Renderer",
-                manufacturer = d.details?.manufacturerDetails?.manufacturer,
-                modelName = d.details?.modelDetails?.modelName,
-                ip = d.identity?.descriptorURL?.host,
+                name = d.details?.friendlyName ?: root.details?.friendlyName ?: d.displayString ?: "Renderer",
+                manufacturer = (d.details ?: root.details)?.manufacturerDetails?.manufacturer,
+                modelName = (d.details ?: root.details)?.modelDetails?.modelName,
+                ip = root.identity?.descriptorURL?.host,
             )
         }.sortedBy { it.name.lowercase() }
         if (list != _renderers.value) {
@@ -174,19 +231,17 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
 
     override fun selectRenderer(rendererId: String) {
         val udn = rendererId.removePrefix("upnp:")
-        if (devicesByUdn[udn] == null) return
+        if (endpoints[udn] == null) return
         _state.value = _state.value.copy(activeRendererId = "upnp:$udn")
         startPolling()
     }
 
-    private fun activeDevice(): RemoteDevice? =
-        _state.value.activeRendererId?.removePrefix("upnp:")?.let { devicesByUdn[it] }
+    private fun activeEndpoint(): RendererEndpoint? =
+        _state.value.activeRendererId?.removePrefix("upnp:")?.let { endpoints[it] }
 
-    private fun avtService(): UpnpModelService<*, *>? =
-        activeDevice()?.findService(UDAServiceId("AVTransport"))
+    private fun avtService(): UpnpModelService<*, *>? = activeEndpoint()?.service(AV_TRANSPORT_ID)
 
-    private fun rcService(): UpnpModelService<*, *>? =
-        activeDevice()?.findService(UDAServiceId("RenderingControl"))
+    private fun rcService(): UpnpModelService<*, *>? = activeEndpoint()?.service(RENDERING_CONTROL_ID)
 
     override suspend fun playQueue(tracks: List<QueuedTrack>, startIndex: Int) {
         if (tracks.isEmpty()) return
@@ -445,6 +500,29 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
                 })
             }
         }
+
+    private fun lanAddressSignature(): String = runCatching {
+        NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { nif -> nif.inetAddresses.toList().filterIsInstance<Inet4Address>().map { "${nif.name}/${it.hostAddress}" } }
+            .sorted()
+            .joinToString(",")
+    }.getOrDefault("")
+
+    /** Best-effort teardown, also for a service whose startup threw half way. */
+    private fun teardown(service: UpnpService) {
+        runCatching { service.registry?.removeListener(registryListener) }
+        // shutdown() is a no-op unless startup() completed, so release the
+        // parts a failed startup may already have created by hand.
+        val wasRunning = runCatching { service.controlPoint != null }.getOrDefault(false)
+        if (wasRunning) {
+            runCatching { service.shutdown() }
+        } else {
+            runCatching { service.registry?.shutdown() }
+            runCatching { service.router?.shutdown() }
+            runCatching { service.configuration?.shutdown() }
+        }
+    }
 
     private fun formatHms(seconds: Long): String {
         val s = seconds.coerceAtLeast(0)

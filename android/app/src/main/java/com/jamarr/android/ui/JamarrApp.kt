@@ -114,6 +114,11 @@ private fun JamarrRoot() {
         vm.refreshRenderers()
     }
 
+    // Opening the picker searches the LAN again; nothing searches in the background.
+    LaunchedEffect(vm.showRendererPicker) {
+        if (vm.showRendererPicker) vm.onRendererPickerOpened()
+    }
+
     // Restore saved tab once NavHost has attached its graph
     LaunchedEffect(currentRoute, vm.pendingSavedRoute) {
         val target = vm.pendingSavedRoute ?: return@LaunchedEffect
