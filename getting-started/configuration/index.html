@@ -1836,6 +1836,9 @@ explicitly only if detection fails or you need to override it:</p>
 <li>UPnP renderer stream-proxy port (<code>renderer.stream_proxy_port</code>, default 8112)</li>
 <li>UPnP discovery interface address (<code>renderer.upnp_source_ip</code>, default: the
   default-route address) — set it on multi-homed hosts or with a VPN up</li>
+<li>UPnP next-track staging overrides (<code>renderer.upnp_gapless</code>: <code>enabled</code>,
+  <code>disabled_udns</code>, <code>forced_udns</code>) — see
+  <a href="../../architecture/renderers/#upnp-next-track-staging">Renderers</a></li>
 </ul>
 <p>Edit it directly and restart the stack (or rely on hot-reload in
 <a href="../dev-mode/">Dev Mode</a>).</p>

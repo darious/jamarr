@@ -847,6 +847,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upnp-next-track-staging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UPnP next-track staging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#upnp-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1874,6 +1885,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#upnp-next-track-staging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UPnP next-track staging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#upnp-discovery" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2059,7 +2081,8 @@ backend speaks in:</p>
   <code>available</code>, group info.</li>
 <li><strong><code>RendererStatus</code></strong> — normalised <code>state</code> (<code>PLAYING</code>/<code>PAUSED</code>/<code>STOPPED</code>/
   <code>BUFFERING</code>/<code>IDLE</code>/<code>UNKNOWN</code>), <code>position_seconds</code>, <code>duration_seconds</code>,
-  <code>volume_percent</code>, <code>current_track_id</code>, <code>ended</code>.</li>
+  <code>volume_percent</code>, <code>current_track_id</code>, <code>current_media_url</code> (UPnP: the
+  renderer's <code>TrackURI</code>), <code>ended</code>.</li>
 <li><strong><code>PlaybackContext</code></strong> — <code>base_url</code>, <code>user_id</code>, <code>username</code>, <code>token_ttl_seconds</code>.</li>
 <li><strong><code>RendererBackend</code></strong> (Protocol) — the interface every backend implements;
   optional <strong><code>SupportsStatusEvents</code></strong> for callback-driven protocols.</li>
@@ -2073,15 +2096,100 @@ backend speaks in:</p>
 <li>Cast backend subscribes to <code>pychromecast</code> media-controller <strong>callbacks</strong>;
   callbacks are dispatched back onto the asyncio loop before mutating state.</li>
 <li>The orchestrator normalises status, updates progress/volume, detects
-  track-end (<code>ended=True</code>, or Cast <code>IDLE</code> after <code>PLAYING</code>), and advances the
-  queue exactly once. A short grace period after <code>play_track()</code> suppresses the
-  transient <code>IDLE</code> during Cast load so it doesn't false-advance.</li>
+  track-end (<code>ended=True</code>), and advances the queue exactly once.</li>
+<li>Cast <code>play_track()</code> waits (bounded, <code>load_timeout</code>, default 15 s) for the
+  receiver's LOAD reply. A <code>LOAD_FAILED</code>/<code>INVALID_REQUEST</code>-style reply, a lost
+  connection or a timeout raises <code>RendererLoadError</code>: player state drops to
+  stopped, <code>stopped_reason</code> becomes <code>load_failed</code>, and <code>/api/player/play</code> /
+  <code>/api/player/index</code> answer 502. Statuses arriving while the LOAD is pending
+  map to <code>TRANSITIONING</code> and are ignored. A LOAD replaced by a newer one
+  (rapid skips: <code>LOAD_CANCELLED</code>, or a timeout after the next LOAD went out)
+  is <code>superseded</code>, not a failure, and a timed-out LOAD is only stopped while
+  it is still the current one. A failure is only recorded if the track is
+  still current. UPnP <code>play_track()</code> raises the same error when
+  <code>SetAVTransportURI</code>/<code>Play</code> fails, so the same rollback applies.</li>
+<li>An end of track seen by <code>GET /api/player/state</code> polling moves the queue
+  inline but loads the next track in a background task, so the request never
+  waits on the device.</li>
+<li>Cast completion comes from <code>idleReason</code>, and only for the media Jamarr
+  loaded: <code>FINISHED</code> ends the track (once); <code>ERROR</code> halts with
+  <code>stopped_reason = renderer_error</code>; <code>CANCELLED</code>/<code>INTERRUPTED</code> (stopped on the
+  device, another controller took over) halt with <code>renderer_stopped</code>. None of
+  these advance, and Cast statuses set <code>completion_reported</code>, which turns off
+  the orchestrator's position-vs-duration end heuristic. Jamarr's own stop is
+  not reported as a device halt. For media Jamarr is not tracking (e.g. after
+  a server restart), an <code>IDLE</code> with no <code>idleReason</code>, or a <code>FINISHED</code> not seen
+  to follow <code>PLAYING</code>, leaves <code>completion_reported</code> off so the position
+  heuristic decides.</li>
 <li>The UPnP poll loop handles two quirky end-of-track signatures seen on real
   renderers: a quick <code>PLAYING → PAUSED_PLAYBACK → STOPPED</code> sequence counts as
   track-finished (the <code>PAUSED</code> poll alone must not swallow the advance), and a
   watchdog force-advances renderers stuck reporting <code>PLAYING</code> at position 0 for
   longer than the track duration plus a margin.</li>
+<li>On renderers with next-track staging (below) the poll loop also advances when
+  the renderer's <code>TrackURI</code> turns into the staged URI, without any <code>STOPPED</code>.</li>
 </ul>
+<h2 id="upnp-next-track-staging">UPnP next-track staging<a class="headerlink" href="#upnp-next-track-staging" title="Permanent link">&para;</a></h2>
+<p><code>SetNextAVTransportURI</code> hands a renderer the track after the current one, so
+it can fetch and buffer it and move on by itself. Whether the result is truly
+gapless depends on the renderer; this has not been measured on hardware yet.
+Code: <code>app/services/upnp/staging.py</code> (state, policy), <code>monitor.py</code>
+(<code>_sync_staged_next</code>, <code>_reconcile_staged_transition</code>), <code>device.py</code>
+(<code>set_next_track</code>, which shares DIDL/MIME building with <code>play_track</code>).</p>
+<p><strong>When.</strong> Each <code>PLAYING</code> poll, once the current track has played past
+<code>STAGE_AFTER_S</code> (10 s, so a flaky start settles first), the monitor makes the
+staged item match <code>queue[current_index + 1]</code>: stage it, re-stage it if the
+queue changed, or send an empty <code>NextURI</code> when there is no next item. The URL
+is built like a normal load (<code>build_stream_url</code>, so loudness-normalization
+claims ride in the token) and goes via the stream proxy. Its token TTL covers
+the rest of the current track plus twice the staged track's duration (floor
+1800 s, cap 24 h, <code>staged_stream_token_ttl_seconds</code>); the monitor re-stages
+before expiry, e.g. after a long pause. Nothing is staged when the renderer
+reports no <code>TrackURI</code>, since the transition could then not be followed.</p>
+<p><strong>Transitions.</strong> Every poll reads <code>TrackURI</code> from <code>GetPositionInfo</code>. When it
+matches the staged URI (exactly, or by its unique stream token) while
+<code>PLAYING</code>, <code>TRANSITIONING</code> or <code>PAUSED_PLAYBACK</code>, the monitor consumes the
+staged record and moves <code>current_index</code> on with a conditional <code>UPDATE … WHERE
+current_index = &lt;old&gt;</code> — so the queue and history advance exactly once and the
+already-started track is not reloaded. History then logs the new track at the
+usual threshold. If the renderer started a staged track that a queue edit has
+since dropped, the monitor loads the real next track (or stops at the end of
+the queue).</p>
+<p><strong>Consistency.</strong> Loading any track (<code>play_track</code>: play, skip, jump, new queue,
+start retry, STOPPED fallback) forgets the staged record, and the monitor
+re-stages once the new track is playing. Reorder, delete and append are
+reconciled on the next poll. Whenever a staged record is dropped while the
+device may still hold it (new load, unplayable next track, <code>SetNext</code> failure,
+staging switched off), the monitor sends an empty <code>NextURI</code> on the next
+<code>PLAYING</code> poll, even if staging was just disabled. If the renderer refuses
+that, the dropped URI is still remembered, so a renderer that rolls into it
+anyway is followed (or corrected) like any staged transition rather than
+leaving the queue a track behind. Stop clears the device's <code>NextURI</code>. A seek within
+the current track leaves the staged next as it is. There is no server-side
+shuffle or repeat to account for.</p>
+<p><strong>Fallback.</strong> The STOPPED-based path above stays in charge whenever nothing is
+staged. A <code>STOPPED</code> at track end while something is staged gets
+<code>STAGED_STOP_GRACE_S</code> (3 s) to turn into the staged track, after which the
+next track is loaded as usual.</p>
+<p><strong>Provisional support.</strong> Discovery's <code>supports_gapless</code> (the action and state
+variable exist) is only a starting point. Staging is switched off for a
+renderer, in memory until restart and with a warning in the log, when
+<code>SetNextAVTransportURI</code> returns a SOAP fault or other non-transient error,
+fails transiently 3 times in a row, or when the renderer twice accepts a
+staged URI but stops at track end instead of playing it. Rejection of the
+empty "clear" URI is ignored. <code>GET /api/player/upnp/diagnostics</code> lists
+switched-off renderers under <code>gapless_disabled</code> and what is staged under
+<code>gapless_staged</code>.</p>
+<p><strong>Override.</strong> <code>config.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">renderer</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">upnp_gapless</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">             </span><span class="c1"># false = never stage, on any renderer</span>
+<span class="w">    </span><span class="nt">disabled_udns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">uuid</span><span class="p p-Indicator">:</span><span class="nv">…</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># never stage on these</span>
+<span class="w">    </span><span class="nt">forced_udns</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">uuid</span><span class="p p-Indicator">:</span><span class="nv">…</span><span class="p p-Indicator">]</span><span class="w">     </span><span class="c1"># stage even when not advertised</span>
+</code></pre></div>
+<p>UDNs match case-insensitively, with or without <code>uuid:</code>. <code>disabled_udns</code> (and
+<code>enabled: false</code>) wins over everything; runtime faults still switch off a
+<code>forced_udns</code> renderer. No vendor-specific rules are built in.</p>
 <h2 id="upnp-discovery">UPnP discovery<a class="headerlink" href="#upnp-discovery" title="Permanent link">&para;</a></h2>
 <p><code>app/services/upnp/discovery.py</code> keeps one record per description URL and
 feeds it from three sources:</p>
@@ -2158,6 +2266,9 @@ token is too short for a long track. The orchestrator (<code>token_policy.py</co
 a longer, duration-aware TTL for <code>kind == "cast"</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="nb">min</span><span class="p">(</span><span class="n">CAST_STREAM_TOKEN_TTL_SECONDS</span><span class="p">,</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1800</span><span class="p">,</span> <span class="n">duration_seconds</span> <span class="o">*</span> <span class="mi">2</span><span class="p">))</span>   <span class="c1"># default cap 86400</span>
 </code></pre></div>
+<p>UPnP next tracks staged ahead of time get their own TTL (see
+<a href="#upnp-next-track-staging">next-track staging</a>); other UPnP loads keep the
+default.</p>
 <p>Tokens stay bound to <code>track_id</code>, so scope is narrow even with a long TTL. Full
 rationale and the trade-offs: <a href="../decisions/0003-cast-stream-token-policy/">ADR-0003</a>.</p>
 <h2 id="two-cast-control-paths">Two Cast control paths<a class="headerlink" href="#two-cast-control-paths" title="Permanent link">&para;</a></h2>
@@ -2218,7 +2329,8 @@ scrobbling behave like Android device-UPnP. See
 <li>Docker needs <code>network_mode: "host"</code> for both UPnP SSDP and Cast mDNS. Host
   networking also exposes the renderer stream proxy (default 8112) on the host.</li>
 <li>Cast playback does <strong>not</strong> transcode in v1; unsupported codecs/containers fail
-  on the receiver. The Default Media Receiver covers common formats.</li>
+  on the receiver (surfaced as <code>load_failed</code>). The Default Media Receiver covers
+  common formats.</li>
 <li>Device-direct Cast requires Google Play Services — de-Googled Android can still
   use server-driven Cast.</li>
 </ul>
