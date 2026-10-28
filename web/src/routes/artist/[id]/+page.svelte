@@ -10,11 +10,11 @@
     getPlaylist,
     setArtistFavorite,
   } from "$lib/api";
-  import { goto, invalidateAll } from "$app/navigation";
+  import { goto, refreshAll } from "$app/navigation";
   import IconButton from "$components/IconButton.svelte";
   import TrackCard from "$components/TrackCard.svelte";
   import { addToQueue, loadQueueFromServer, setQueue } from "$stores/player";
-  import { browser } from "$app/environment";
+  import { browser } from "$app/env";
   import { getColor } from "colorthief";
   import Tabs from "$lib/components/Tabs.svelte";
   import AddToPlaylistModal from "$components/AddToPlaylistModal.svelte";
@@ -501,7 +501,7 @@
         fetchSimilarArtists: true,
       });
       message = "Metadata updated. Reloading...";
-      await invalidateAll();
+      await refreshAll();
       message = "Metadata updated successfully!";
       setTimeout(() => {
         if (message === "Metadata updated successfully!") message = "";

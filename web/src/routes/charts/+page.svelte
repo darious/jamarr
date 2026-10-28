@@ -2,7 +2,7 @@
     import type { ChartAlbum } from "$api";
     import { getArtUrl } from "$api";
   import { refreshChart, triggerPearlarrDownload, fetchTracks } from "$api";
-  import { goto, invalidateAll } from "$app/navigation";
+  import { goto, refreshAll } from "$app/navigation";
   import { setQueue, addToQueue } from "$stores/player";
   import { currentUser } from "$stores/user";
   import IconButton from "$lib/components/IconButton.svelte";
@@ -24,7 +24,7 @@
     refreshing = true;
     try {
       await refreshChart();
-      await invalidateAll();
+      await refreshAll();
     } catch (e) {
       console.error(e);
     } finally {
@@ -425,5 +425,5 @@
 <ChartOverrideModal
   bind:visible={overrideModalVisible}
   entry={overrideEntry}
-  on:saved={() => invalidateAll()}
+  on:saved={() => refreshAll()}
 />

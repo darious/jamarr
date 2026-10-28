@@ -1,5 +1,5 @@
 import { writable, derived, type Writable, type Readable } from 'svelte/store';
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 export type AccentColor = 'pink' | 'cyan' | 'blue' | 'purple' | 'orange' | 'yellow';

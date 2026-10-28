@@ -1,6 +1,6 @@
 <script lang="ts">
   import { setQueue } from "$stores/player";
-  import { goto, invalidateAll } from "$app/navigation";
+  import { goto, refreshAll } from "$app/navigation";
   import { onMount } from "svelte";
   import { currentUser } from "$lib/stores/user";
   import IconButton from "$lib/components/IconButton.svelte";
@@ -1044,7 +1044,7 @@
 
       <div class="h-6 w-px bg-white/10 mx-2"></div>
 
-      <TabButton onClick={() => invalidateAll()} title="Refresh History">
+      <TabButton onClick={() => refreshAll()} title="Refresh History">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
@@ -1105,7 +1105,7 @@
             {getRangeLabel(data.range, data.dateFrom, data.dateTo)}
           </div>
         </div>
-        <button class="btn btn-outline btn-sm" on:click={() => invalidateAll()} title="Refresh History">
+        <button class="btn btn-outline btn-sm" on:click={() => refreshAll()} title="Refresh History">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"

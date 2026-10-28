@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { page } from "$app/stores";
+  import { page } from "$lib/stores/page";
 
   // Passive error boundary: a load failure used to render a blank page (no
   // boundary existed), which read as "the app is broken". Show a recoverable

@@ -24,7 +24,7 @@
     setUser,
   } from "$stores/user";
   import { initializeAuth, sessionExpired } from "$lib/stores/auth";
-  import { page } from "$app/stores";
+  import { page } from "$lib/stores/page";
   import { themeAccent, themeMode } from "$stores/theme";
   import {
     getRendererFallback,
