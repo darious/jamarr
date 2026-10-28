@@ -45,6 +45,8 @@ async def test_normal_user_blocked_from_admin_endpoints(client: AsyncClient, db)
         ("get", "/api/scheduler/jobs", {}),
         ("get", "/api/player/debug", {}),
         ("post", "/api/player/add_manual", {"json": {"ip": "127.0.0.1"}}),
+        ("post", "/api/scan/cancel", {}),
+        ("get", "/api/player/upnp/diagnostics", {}),
         ("get", "/api/player/test_upnp", {}),
         ("post", "/api/charts/refresh", {}),
     ]
@@ -57,8 +59,19 @@ async def test_normal_user_blocked_from_admin_endpoints(client: AsyncClient, db)
 
 @pytest.mark.asyncio
 async def test_normal_user_can_access_playback_and_renderer_endpoints(
-    client: AsyncClient, db
+    client: AsyncClient, db, monkeypatch
 ):
+    # ?refresh=true would otherwise search and sweep the runner's network.
+    from app.api import player as player_api
+
+    upnp_backend = player_api.renderer_orchestrator.registry.backends.get("upnp")
+    if upnp_backend is not None:
+        async def no_network(*_args, **_kwargs):
+            return []
+
+        monkeypatch.setattr(upnp_backend.manager, "discover", no_network)
+        monkeypatch.setattr(upnp_backend.manager, "scan_subnet", no_network)
+
     token = await _login_user(client, db, "normal_playback_allowed", False)
     headers = {
         "Authorization": f"Bearer {token}",

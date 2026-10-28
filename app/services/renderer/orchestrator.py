@@ -39,7 +39,12 @@ from app.services.player.state import (
     update_renderer_state_db,
 )
 from app.services.audio_streaming import build_stream_url
-from app.services.renderer.contracts import PlaybackContext, RendererStatus, is_local_renderer
+from app.services.renderer.contracts import (
+    PlaybackContext,
+    RendererDevice,
+    RendererStatus,
+    is_local_renderer,
+)
 from app.services.renderer.registry import RendererRegistry, get_renderer_registry
 from app.services.renderer.token_policy import stream_token_ttl_seconds
 
@@ -80,11 +85,25 @@ class RendererOrchestrator:
         return await self.registry.get_active(db, client_id)
 
     async def _renderer_available(self, renderer_id: str) -> bool:
-        """True if the device behind renderer_id is still discoverable."""
+        """True if the device behind renderer_id is still discoverable.
+
+        Backends that track liveness (UPnP: SSDP alive/byebye + probes) answer
+        via ``is_available``; list membership is the fallback, since a list
+        can hold a device long after it went away.
+        """
         try:
             backend = self.registry.get_backend(renderer_id)
         except ValueError:
             return False
+        checker = getattr(backend, "is_available", None)
+        if checker is not None:
+            try:
+                tracked = await checker(renderer_id)
+            except Exception:
+                logger.debug("Availability check failed for %s", renderer_id, exc_info=True)
+                return True
+            if tracked is not None:
+                return bool(tracked)
         try:
             devices = await backend.list_devices()
         except Exception:
@@ -164,11 +183,12 @@ class RendererOrchestrator:
         await self.registry.persist_all(db, devices)
         return [self.registry.local_renderer(client_id), *[d.as_api_dict() for d in devices]]
 
-    async def add_manual(self, address: str) -> bool:
+    async def add_manual(self, address: str) -> RendererDevice | None:
+        """Add a UPnP renderer by IP or description URL; the device, or None."""
         backend = self.registry.backends.get("upnp")
         if not backend:
-            return False
-        return await backend.add_manual(address) is not None
+            return None
+        return await backend.add_manual(address)
 
     @_heals_stale_renderer
     async def set_queue(

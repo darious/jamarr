@@ -15,13 +15,16 @@ from app.services.upnp.utils import (
     select_renderer_icon,
     fetch_device_icons
 )
-from app.services.upnp.discovery import UPnPDiscovery
+from app.services.upnp.discovery import SSDP_TARGET_MEDIA_RENDERER, UPnPDiscovery  # noqa: F401
 from app.services.upnp.device import UPnPDeviceControl
+from app.services.upnp.network import default_route_ip
+from app.services.upnp.tree import TreeKeepingUpnpFactory
+
+# Per-HTTP-request timeout for description/SCPD fetches and control calls.
+UPNP_HTTP_TIMEOUT_SECONDS = 5
 
 logger = logging.getLogger(__name__)
 
-# Search target for MediaRenderer devices
-SSDP_TARGET_MEDIA_RENDERER = "urn:schemas-upnp-org:device:MediaRenderer:1"
 
 class UPnPManager:
     """
@@ -42,7 +45,10 @@ class UPnPManager:
         self.renderers: Dict[str, Dict[str, Any]] = {}  # udn -> renderer info
         self.dmr_devices: Dict[str, DmrDevice] = {}  # udn -> DmrDevice instance
         self.active_renderer = None  # udn
-        self.local_ip = self._get_local_ip()
+        # Optional explicit interface address (config renderer.upnp_source_ip /
+        # env UPNP_SOURCE_IP): discovery binds to it and stream URLs use it.
+        self.source_ip: Optional[str] = self._configured_source_ip()
+        self.local_ip = self.source_ip or self._get_local_ip()
         self.base_url = f"http://{self.local_ip}:8111"
 
         # HTTP session for library
@@ -65,17 +71,35 @@ class UPnPManager:
             return f"http://{self.local_ip}:{proxy.port}"
         return self.base_url
 
+    @staticmethod
+    def _configured_source_ip() -> Optional[str]:
+        try:
+            from app.config import get_upnp_source_ip
+
+            return get_upnp_source_ip()
+        except Exception as e:
+            logger.debug(f"Could not read UPnP source IP config: {e}")
+            return None
+
     def _get_local_ip(self) -> str:
         """Get local IP address for media streaming URLs."""
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
+        return default_route_ip()
+
+    def refresh_local_ip(self) -> bool:
+        """Re-derive the default-route address (no-op when one is configured).
+
+        Returns True if it changed, so discovery can rebind.
+        """
+        if self.source_ip:
+            return False
+        ip = self._get_local_ip()
+        if ip == self.local_ip or ip == "127.0.0.1":
+            return False
+        self.log(f"Local address changed: {self.local_ip} -> {ip}")
+        logger.info(f"UPnP local address changed: {self.local_ip} -> {ip}")
+        self.local_ip = ip
+        self.base_url = f"http://{ip}:8111"
+        return True
 
     def log(self, msg: str):
         """Add message to debug log (limited to last 100 entries)."""
@@ -88,8 +112,10 @@ class UPnPManager:
         """Ensure HTTP session and requester are initialized."""
         if self._session is None:
             self._session = aiohttp.ClientSession()
-            self._requester = AiohttpSessionRequester(self._session, with_sleep=True)
-            self._factory = UpnpFactory(self._requester)
+            self._requester = AiohttpSessionRequester(
+                self._session, with_sleep=True, timeout=UPNP_HTTP_TIMEOUT_SECONDS
+            )
+            self._factory = TreeKeepingUpnpFactory(self._requester)
 
     # --- Delegate to Utils (Public API) ---
     async def _fetch_device_icons(self, location: str) -> List[Dict[str, Any]]:
@@ -161,12 +187,22 @@ class UPnPManager:
             self._factory = None
         self.log("Stopped background UPnP discovery")
 
-    async def discover(self, timeout=5):
-        await self.discovery.discover(timeout)
+    async def discover(self, timeout=5, refresh: bool = False) -> List[Dict[str, Any]]:
+        return await self.discovery.discover(timeout, refresh=refresh)
 
-    async def _add_renderer(self, location: str):
+    async def _add_renderer(self, location: str) -> Optional[List[Dict[str, Any]]]:
         # Exposed for testing/re-add but mainly internal
-        await self.discovery._add_renderer(location)
+        return await self.discovery._add_renderer(location)
+
+    async def _existing_mime_types(self, udn: str) -> Optional[str]:
+        """MIME types saved for udn, kept when a device stops answering GetProtocolInfo."""
+        from app.db import db_conn
+
+        async with db_conn() as db:
+            row = await db.fetchrow(
+                "SELECT supported_mime_types FROM renderer WHERE udn = $1", udn
+            )
+        return row["supported_mime_types"] if row and row["supported_mime_types"] else None
 
     async def load_persisted_renderers(self):
         await self.discovery.load_persisted_renderers()
@@ -237,12 +273,25 @@ class UPnPManager:
                 r.get("icon_height"),
             )
 
-    async def add_device_by_ip(self, ip: str):
-        await self.discovery.add_device_by_ip(ip)
+    async def add_device_by_ip(self, address: str) -> Optional[List[Dict[str, Any]]]:
+        """Add by IP or description URL; returns the registered renderers or None."""
+        return await self.discovery.add_device_by_ip(address)
 
     async def scan_subnet(self):
         await self.discovery.scan_subnet()
-    
+
+    def cancel_subnet_scan(self) -> bool:
+        return self.discovery.cancel_subnet_scan()
+
+    def is_available(self, udn: str) -> Optional[bool]:
+        return self.discovery.is_available(udn)
+
+    def note_control_failure(self, udn: str) -> None:
+        self.discovery.note_control_failure(udn)
+
+    def diagnostics(self) -> Dict[str, Any]:
+        return self.discovery.diagnostics()
+
     @property
     def is_scanning_subnet(self):
         return self.discovery.is_scanning_subnet
@@ -258,8 +307,8 @@ class UPnPManager:
     # --- Delegate to Device Control Service ---
 
     async def get_renderers(self) -> list:
-        # Simple local access
-        return list(self.renderers.values())
+        """Renderers currently available (known-but-unreachable ones are hidden)."""
+        return [r for r in self.renderers.values() if r.get("available", True)]
 
     async def set_renderer(self, udn: str):
         # Local state update
