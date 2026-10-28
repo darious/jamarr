@@ -28,6 +28,7 @@ import com.jamarr.android.cast.CastDeviceController
 import com.jamarr.android.renderer.DeviceRendererController
 import com.jamarr.android.renderer.DeviceRendererInfo
 import com.jamarr.android.renderer.QueuedTrack
+import com.jamarr.android.renderer.deviceQueueStreamUrls
 import com.jamarr.android.ui.nav.JamarrTab
 import com.jamarr.android.ui.nav.Routes
 import com.jamarr.android.ui.nav.route
@@ -484,8 +485,12 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             }
             val token = tokenHolder.get()
             val startIdx = startIndex.coerceIn(0, queue.lastIndex)
-            val rendererKind = activeDeviceController()?.kind
-            val tracks = queue.map { t ->
+            val controller = activeDeviceController()
+            val rendererKind = controller?.kind
+            val streamUrls = deviceQueueStreamUrls(queue, controller) { t ->
+                apiClient.streamUrl(serverUrl, token, t.id, rendererKind)
+            }
+            val tracks = queue.mapIndexed { i, t ->
                 QueuedTrack(
                     id = t.id,
                     title = t.title,
@@ -493,7 +498,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                     album = t.album ?: "Unknown Album",
                     mime = guessMime(t),
                     durationSeconds = t.durationSeconds ?: 0.0,
-                    streamUrl = apiClient.streamUrl(serverUrl, token, t.id, rendererKind),
+                    streamUrl = streamUrls[i],
                     artUrl = t.artSha1?.let { apiClient.artworkUrl(serverUrl, it, maxSize = 600) },
                 )
             }
@@ -503,7 +508,6 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             isPlaying = true
             playbackPosition = 0L
             playbackDuration = ((startTrack.durationSeconds ?: 0.0) * 1000).toLong()
-            val controller = activeDeviceController()
             controller?.playQueue(tracks, startIdx)
             // A renderer that refused the track keeps what it had, and so must
             // the UI rather than showing the new track as playing.

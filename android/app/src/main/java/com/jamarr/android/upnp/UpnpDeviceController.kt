@@ -86,6 +86,8 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
      */
     @Volatile var streamUrlResolver: (suspend (QueuedTrack) -> String)? = null
 
+    override val resolvesStreamUrls: Boolean get() = streamUrlResolver != null
+
     private val sequencer = UpnpTrackSequencer(resolveUri = ::resolveStreamUrl)
 
     /** Serialises the sequencer: loads, and each poll's reconcile + staging. */
@@ -469,7 +471,9 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "stream URL refresh failed for ${track.id}: ${e.message}")
-            track.streamUrl
+            // Queues are built without URLs when we resolve them; then there
+            // is nothing to fall back on, and the load (or staging) fails.
+            track.streamUrl.ifBlank { throw e }
         }
     }
 

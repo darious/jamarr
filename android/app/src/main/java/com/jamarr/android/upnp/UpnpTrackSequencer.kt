@@ -2,6 +2,9 @@ package com.jamarr.android.upnp
 
 import com.jamarr.android.renderer.QueuedTrack
 import kotlinx.coroutines.delay
+import java.io.ByteArrayOutputStream
+import java.net.URI
+import java.net.URISyntaxException
 import kotlin.coroutines.cancellation.CancellationException
 
 /** The AVTransport actions the sequencer drives: jUPnP in the app, a fake in tests. */
@@ -50,7 +53,11 @@ sealed interface PollOutcome {
  *   short-lived for UPnP.
  * - [observe] advances [currentIndex] exactly once when the renderer's
  *   TrackURI turns into the staged URI, without reloading anything, and
- *   falls back to the STOPPED-based advance when nothing took over.
+ *   falls back to the STOPPED-based advance when nothing took over. A
+ *   STOPPED within [postLoadGuardMs] of a load is start-up churn, not the
+ *   end of the track; with a track staged, a STOPPED gets [stagedStopGraceMs]
+ *   to turn into the staged URI first, as some renderers pass through
+ *   STOPPED on their way into it.
  * - Advertised SetNextAVTransportURI support is provisional: a failed SetNext
  *   or [maxMissedTransitions] staged tracks the renderer ignored turn staging
  *   off ([stagingDisabled]) for the rest of the session.
@@ -62,6 +69,10 @@ class UpnpTrackSequencer(
     private val stageLeadSeconds: Double = STAGE_LEAD_SECONDS,
     private val maxMissedTransitions: Int = MAX_MISSED_TRANSITIONS,
     private val settleMs: Long = SETTLE_MS,
+    private val postLoadGuardMs: Long = POST_LOAD_GUARD_MS,
+    private val stagedStopGraceMs: Long = STAGED_STOP_GRACE_MS,
+    /** Monotonic milliseconds; injectable for tests. */
+    private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     data class Staged(val index: Int, val trackId: Long, val uri: String)
 
@@ -87,6 +98,12 @@ class UpnpTrackSequencer(
     private var sawPlaying = false
     private var missedTransitions = 0
 
+    /** When the current track was loaded or rolled into; null when none is. */
+    private var trackStartedAtMs: Long? = null
+
+    /** First STOPPED poll while waiting for the renderer to take the staged track. */
+    private var stagedStopSinceMs: Long? = null
+
     /** A (new) renderer: forget everything about the previous one. */
     fun attach(supportsSetNext: Boolean) {
         reset()
@@ -109,17 +126,18 @@ class UpnpTrackSequencer(
         staged = null
         rendererMayHoldNext = false
         sawPlaying = false
+        trackStartedAtMs = null
+        stagedStopSinceMs = null
     }
 
     /**
      * Loads [index] of [newQueue] and plays it. The queue and index are
-     * adopted only once the renderer accepted the URI.
+     * adopted only once the renderer accepted the URI; until then the
+     * renderer still plays the old track with its staged next behind it, so
+     * a failed load leaves that bookkeeping untouched too.
      */
     suspend fun load(port: AvTransportPort, index: Int, newQueue: List<QueuedTrack> = queue): LoadResult {
         val track = newQueue.getOrNull(index) ?: return LoadResult.LoadFailed("No track at position $index")
-        // Whatever was staged belonged to the old position.
-        staged = null
-        sawPlaying = false
         val uri = try {
             resolveUri(track)
         } catch (e: CancellationException) {
@@ -137,6 +155,11 @@ class UpnpTrackSequencer(
         queue = newQueue
         currentIndex = index
         currentUri = uri
+        // Whatever was staged belonged to the old position.
+        staged = null
+        sawPlaying = false
+        trackStartedAtMs = nowMs()
+        stagedStopSinceMs = null
         // Renderers differ on whether SetAVTransportURI drops the next slot;
         // a stale one would play after this track, so clear it explicitly.
         if (rendererMayHoldNext) {
@@ -230,16 +253,29 @@ class UpnpTrackSequencer(
             rendererMayHoldNext = false
             missedTransitions = 0
             sawPlaying = transportState == PLAYING
+            trackStartedAtMs = nowMs()
+            stagedStopSinceMs = null
             return PollOutcome.Transitioned(s.index, needsPlay = transportState == STOPPED)
         }
         if (transportState == PLAYING) sawPlaying = true
+        if (transportState != STOPPED) stagedStopSinceMs = null
         if (transportState == STOPPED && sawPlaying && currentIndex >= 0) {
-            sawPlaying = false
-            if (s != null && !sameUri(s.uri, currentUri)) {
+            val now = nowMs()
+            // Start-up churn: some renderers report STOPPED between PLAYING
+            // polls while they open the stream. A track that really is this
+            // short still ends on the first STOPPED poll after the guard.
+            val startedAt = trackStartedAtMs
+            if (startedAt != null && now - startedAt < postLoadGuardMs) return PollOutcome.None
+            val awaitingStaged = s != null && !sameUri(s.uri, currentUri)
+            if (awaitingStaged) {
+                val since = stagedStopSinceMs ?: now.also { stagedStopSinceMs = it }
+                if (now - since < stagedStopGraceMs) return PollOutcome.None
                 // Staged, yet the renderer stopped on the old track. Its next
                 // slot may still hold the URI; the following load clears it.
                 if (++missedTransitions >= maxMissedTransitions) disableStaging()
             }
+            sawPlaying = false
+            stagedStopSinceMs = null
             staged = null
             val next = currentIndex + 1
             return PollOutcome.Ended(next.takeIf { it <= queue.lastIndex })
@@ -267,15 +303,85 @@ class UpnpTrackSequencer(
         const val STAGE_LEAD_SECONDS = 60.0
         const val MAX_MISSED_TRANSITIONS = 2
         const val SETTLE_MS = 300L
+
+        /** The old poll loop's 2s settle plus its 5s STOPPED guard, measured from the load. */
+        const val POST_LOAD_GUARD_MS = 7_000L
+
+        /** Matches the server monitor's STAGED_STOP_GRACE_S. */
+        const val STAGED_STOP_GRACE_MS = 3_000L
         private const val PLAYING = "PLAYING"
         private const val STOPPED = "STOPPED"
 
-        /** Renderers echo TrackURI back, sometimes still XML-escaped. */
+        /**
+         * True if a TrackURI the renderer echoed back is the URI we gave it.
+         * Renderers return it XML-escaped, percent-re-encoded or with the
+         * host rewritten. Every minted stream URL carries a unique `token`,
+         * so the same path with the same token is the same URI (as the
+         * server's `same_media_uri`, which also requires the path here).
+         */
         fun sameUri(a: String?, b: String?): Boolean {
             if (a.isNullOrBlank() || b.isNullOrBlank()) return false
-            return normalise(a) == normalise(b)
+            val x = unescapeXml(a.trim())
+            val y = unescapeXml(b.trim())
+            if (x == y) return true
+            val dx = percentDecode(x)
+            val dy = percentDecode(y)
+            if (dx != null && dx == dy) return true
+            val tx = streamToken(x) ?: return false
+            val px = decodedPath(x) ?: return false
+            return tx == streamToken(y) && px == decodedPath(y)
         }
 
-        private fun normalise(uri: String): String = uri.trim().replace("&amp;", "&")
+        private val XML_ENTITY = Regex("&(amp|lt|gt|quot|apos|#\\d+|#[xX][0-9a-fA-F]+);")
+
+        /** One pass, so `&amp;lt;` becomes `&lt;` and not `<`. */
+        private fun unescapeXml(s: String): String = XML_ENTITY.replace(s) { m ->
+            when (val e = m.groupValues[1]) {
+                "amp" -> "&"
+                "lt" -> "<"
+                "gt" -> ">"
+                "quot" -> "\""
+                "apos" -> "'"
+                else -> {
+                    val code = if (e[1] == 'x' || e[1] == 'X') e.substring(2).toIntOrNull(16) else e.substring(1).toIntOrNull()
+                    if (code != null && Character.isValidCodePoint(code)) String(Character.toChars(code)) else m.value
+                }
+            }
+        }
+
+        /** Decodes `%XX` escapes only (a `+` stays a `+`); null when malformed. */
+        private fun percentDecode(s: String): String? {
+            if ('%' !in s) return s
+            val out = ByteArrayOutputStream(s.length)
+            var i = 0
+            while (i < s.length) {
+                val c = s[i]
+                if (c == '%') {
+                    if (i + 2 >= s.length) return null
+                    val b = s.substring(i + 1, i + 3).toIntOrNull(16) ?: return null
+                    out.write(b)
+                    i += 3
+                } else {
+                    out.write(c.toString().toByteArray(Charsets.UTF_8))
+                    i++
+                }
+            }
+            return out.toString(Charsets.UTF_8.name())
+        }
+
+        private fun parse(uri: String): URI? = try {
+            URI(uri)
+        } catch (_: URISyntaxException) {
+            null
+        }
+
+        private fun decodedPath(uri: String): String? =
+            parse(uri)?.rawPath?.takeIf { it.isNotEmpty() }?.let(::percentDecode)
+
+        private fun streamToken(uri: String): String? {
+            val query = parse(uri)?.rawQuery ?: return null
+            val raw = query.split('&').firstOrNull { it.startsWith("token=") }?.removePrefix("token=")
+            return raw?.let(::percentDecode)?.takeIf { it.isNotEmpty() }
+        }
     }
 }

@@ -40,6 +40,12 @@ data class DeviceRendererPlaybackState(
 
 interface DeviceRendererController {
     val kind: String
+
+    /**
+     * The controller mints each track's stream URL itself when it loads it,
+     * so [playQueue] can take tracks with a blank [QueuedTrack.streamUrl].
+     */
+    val resolvesStreamUrls: Boolean get() = false
     val renderers: StateFlow<List<DeviceRendererInfo>>
     val state: StateFlow<DeviceRendererPlaybackState>
 
@@ -58,3 +64,15 @@ interface DeviceRendererController {
     suspend fun previous()
     suspend fun jumpTo(index: Int)
 }
+
+/**
+ * Stream URLs for a queue headed to [controller]: none when it mints its own
+ * at load time (each mint is a server round trip, so a long album would
+ * otherwise wait on one per track before anything plays), else one per track.
+ */
+suspend fun <T> deviceQueueStreamUrls(
+    tracks: List<T>,
+    controller: DeviceRendererController?,
+    mint: suspend (T) -> String,
+): List<String> =
+    if (controller?.resolvesStreamUrls == true) List(tracks.size) { "" } else tracks.map { mint(it) }
