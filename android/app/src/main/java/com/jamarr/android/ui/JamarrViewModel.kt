@@ -894,6 +894,11 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** The picker is open: the user is looking for a renderer, so search now. */
+    fun onRendererPickerOpened() {
+        if (useDeviceUpnp) upnpController.searchBurst()
+    }
+
     private fun loadCachedRenderers() {
         if (isOffline) return
         viewModelScope.launch {

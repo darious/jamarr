@@ -194,6 +194,23 @@ scrobbling behave like Android device-UPnP. See
 [ADR-0004](decisions/0004-cast-dual-control-path.md) and the
 [Android client](../clients/android.md).
 
+## Android device-UPnP discovery
+
+With "phone discovers renderers" on, the app runs its own jUPnP control point
+(`android/.../upnp/`). `DiscoveryLifecycle` owns start/stop and searching:
+
+- Searches go out in short bursts only: after startup (0/1/3/10 s), when the
+  renderer picker opens, and after a network change. No background repeats;
+  jUPnP's registry tracks devices from their NOTIFY/max-age.
+- jUPnP's `RouterImpl` binds to the interfaces present at `enable()` and never
+  re-scans (its `AndroidRouter` broadcast receiver is only wired into
+  `AndroidUpnpServiceImpl`, which the app does not use). So a debounced
+  `NetworkCallback` rebinds the router (disable + enable) when the IPv4 address
+  set changed or a network was lost, then searches again; a start that failed
+  for lack of a network is retried the same way.
+- Each device in a root's tree with its own AVTransport is a separate renderer
+  under its own UDN, using only its own services (`RendererEndpoints.kt`).
+
 ## Deployment notes
 
 - Docker needs `network_mode: "host"` for both UPnP SSDP and Cast mDNS. Host
