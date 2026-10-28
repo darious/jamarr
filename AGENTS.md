@@ -129,6 +129,10 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   to `web/package-lock.json` — revert that noise before committing.
 - New top-level route under `web/src/routes/` must also be added to
   `_SPA_ROUTE_PREFIXES` in `app/main.py`, or the backend 404s it.
+- SvelteKit 3: config lives in the `sveltekit({...})` call in `web/vite.config.ts`
+  (no `svelte.config.js`). `$app/stores` is gone — legacy components import
+  `page` from `$lib/stores/page` (a store over `$app/state`, which `$:` can't see).
+  `strict: false` in `web/tsconfig.json` is deliberate (TS 6 defaults it on).
 - `android/test.sh` probes for the SDK (`~/Android/Sdk`, then `/opt/android-sdk`) and
   for a JDK (`~/Android/jdk`, then the usual `/usr/lib/jvm` LTS paths) when
   `ANDROID_HOME`/`JAVA_HOME` are unset, so it runs bare; it caps gradle/kotlin heaps
@@ -137,7 +141,10 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   not on PATH. The check runs once at script start, so an emulator booted in parallel
   is missed. `RUN_ANDROID_INSTRUMENTATION=1` makes them mandatory: with no device
   attached it boots the headless AVD via `android/scripts/emulator.sh` and stops it
-  on exit.
+  on exit. **Any** attached device counts — including a TV paired over network adb.
+  Run `adb devices` first; never run on a non-emulator device without asking. To
+  target the emulator alongside one, boot it manually (`emulator.sh` refuses when a
+  device is attached) and run `ANDROID_SERIAL=emulator-5554 android/test.sh`.
 - Android toolchain (user-local, no root): JDK 21 (Temurin) at `~/Android/jdk`, SDK at
   `~/Android/Sdk`, installed via `cmdline-tools`. AGP 9 / Gradle 9 need JDK 17+.
   `compileSdk = 37` resolves to the `platforms;android-37.0` package, not
