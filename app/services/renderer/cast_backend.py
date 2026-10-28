@@ -6,6 +6,7 @@ import mimetypes
 import os
 import threading
 import time
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Awaitable, Callable
 
@@ -15,12 +16,35 @@ from app.services.renderer.contracts import (
     RendererBackend,
     RendererCapabilities,
     RendererDevice,
+    RendererLoadError,
     RendererStatus,
     make_renderer_id,
     split_renderer_id,
 )
 
 logger = logging.getLogger(__name__)
+
+# MediaStatus.idleReason values (Cast media protocol). Only FINISHED means the
+# track played to its end; the others are a stop, a replacement or a failure.
+IDLE_REASON_FINISHED = "FINISHED"
+IDLE_REASON_ERROR = "ERROR"
+
+
+@dataclass
+class _CastLoad:
+    """A LOAD this backend issued, and what has become of it.
+
+    Statuses are only attributed to Jamarr's playback when they refer to this
+    media, so another controller's session (or our own explicit stop) never
+    advances the queue or reports a device-side halt.
+    """
+
+    url: str
+    track_id: int
+    confirmed: bool = False
+    # Set once the media went idle, so repeated IDLE statuses for the same
+    # media (listener + polling, receiver re-broadcasts) act only once.
+    idle_reason: str | None = None
 
 
 class _CastStatusListener:
@@ -56,12 +80,14 @@ class CastRendererBackend(RendererBackend):
         known_hosts: list[str] | None = None,
         discovery_timeout: float = 5,
         launch_timeout: float = 10,
+        load_timeout: float = 15,
         browser_factory: Callable[["CastRendererBackend"], Any] | None = None,
         cast_factory: Callable[[Any], Any] | None = None,
     ) -> None:
         self.known_hosts = known_hosts if known_hosts is not None else self._known_hosts_from_env()
         self.discovery_timeout = discovery_timeout
         self.launch_timeout = launch_timeout
+        self.load_timeout = load_timeout
         self.browser_factory = browser_factory
         self.cast_factory = cast_factory
         self.browser: Any | None = None
@@ -71,6 +97,9 @@ class CastRendererBackend(RendererBackend):
         self._listeners: dict[str, list[_CastStatusListener]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._discovery_lock = asyncio.Lock()
+        self._loads: dict[str, _CastLoad] = {}
+        # Statuses arrive on pychromecast's socket thread as well as the loop.
+        self._loads_lock = threading.Lock()
 
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -143,6 +172,7 @@ class CastRendererBackend(RendererBackend):
         cast = self.casts.pop(uuid, None)
         self.devices.pop(uuid, None)
         self._listeners.pop(renderer_id, None)
+        self._forget_load(renderer_id)
         if cast and hasattr(cast, "disconnect"):
             await asyncio.to_thread(cast.disconnect, 1)
 
@@ -152,6 +182,13 @@ class CastRendererBackend(RendererBackend):
         track: dict[str, Any],
         context: PlaybackContext,
     ) -> RendererStatus:
+        """Load a track and wait for the receiver to accept it.
+
+        The LOAD response, not the request, is what confirms playback: a
+        receiver that cannot fetch or decode the media answers LOAD_FAILED.
+        Raises RendererLoadError on rejection, transport failure or timeout.
+        Statuses that arrive while the LOAD is pending report TRANSITIONING.
+        """
         cast = await self._get_ready_cast(renderer_id)
         await asyncio.to_thread(cast.start_app, self._media_receiver_app_id(), True, self.launch_timeout)
         media_url = self._stream_url(track, context)
@@ -165,17 +202,70 @@ class CastRendererBackend(RendererBackend):
             mime_type,
             media_url.split("?", 1)[0],
         )
-        await asyncio.to_thread(
-            cast.media_controller.play_media,
-            media_url,
-            mime_type,
-            title=track.get("title") or "Unknown Track",
-            thumb=thumb,
-            metadata=metadata,
-            stream_type=self._stream_type(),
-            callback_function=self._load_callback(renderer_id, int(track["id"])),
+        track_id = int(track["id"])
+        load = _CastLoad(url=media_url, track_id=track_id)
+        with self._loads_lock:
+            self._loads[renderer_id] = load
+        response: asyncio.Future[tuple[bool, dict[str, Any] | None]] = (
+            asyncio.get_running_loop().create_future()
         )
-        return RendererStatus(renderer_id=renderer_id, state="PLAYING", current_media_url=media_url)
+        try:
+            try:
+                await asyncio.to_thread(
+                    cast.media_controller.play_media,
+                    media_url,
+                    mime_type,
+                    title=track.get("title") or "Unknown Track",
+                    thumb=thumb,
+                    metadata=metadata,
+                    stream_type=self._stream_type(),
+                    callback_function=self._load_callback(renderer_id, track_id, response),
+                )
+            except Exception as exc:
+                raise RendererLoadError(
+                    renderer_id, "load_failed", str(exc) or type(exc).__name__
+                ) from exc
+            try:
+                success, data = await asyncio.wait_for(response, timeout=self.load_timeout)
+            except TimeoutError:
+                logger.warning(
+                    "Cast load timed out renderer=%s track_id=%s after %ss",
+                    renderer_id,
+                    track_id,
+                    self.load_timeout,
+                )
+                # The receiver may still start it later; stop it so the device
+                # does not play something the player state says has failed.
+                await asyncio.to_thread(self._safe_media_stop, cast, renderer_id)
+                raise RendererLoadError(
+                    renderer_id, "load_timeout", f"no response within {self.load_timeout:g}s"
+                ) from None
+            accepted, reason, detail, entry = self._classify_load_response(success, data)
+            if not accepted:
+                logger.warning(
+                    "Cast load rejected renderer=%s track_id=%s reason=%s detail=%s",
+                    renderer_id,
+                    track_id,
+                    reason,
+                    detail,
+                )
+                raise RendererLoadError(renderer_id, reason or "load_rejected", detail)
+        except BaseException:
+            self._forget_load(renderer_id, load)
+            raise
+        load.confirmed = True
+        logger.info("Cast load accepted renderer=%s track_id=%s", renderer_id, track_id)
+        state = self.normalize_player_state(entry.get("playerState"))
+        if state not in {"PLAYING", "PAUSED"}:
+            # Accepted, but the receiver has not reported playback yet; the
+            # status listener confirms it.
+            state = "TRANSITIONING"
+        return RendererStatus(
+            renderer_id=renderer_id,
+            state=state,
+            current_media_url=media_url,
+            completion_reported=True,
+        )
 
     async def pause(self, renderer_id: str) -> RendererStatus:
         cast = await self._get_ready_cast(renderer_id)
@@ -188,6 +278,9 @@ class CastRendererBackend(RendererBackend):
         return RendererStatus(renderer_id=renderer_id, state="PLAYING")
 
     async def stop_playback(self, renderer_id: str) -> RendererStatus:
+        # An explicit stop ends our load: the CANCELLED status it produces is
+        # not a device-side halt and must not be reported as one.
+        self._forget_load(renderer_id)
         cast = await self._get_ready_cast(renderer_id)
         try:
             await asyncio.to_thread(cast.media_controller.stop)
@@ -280,6 +373,8 @@ class CastRendererBackend(RendererBackend):
     ) -> RendererStatus:
         player_state = getattr(status, "player_state", None)
         state = self.normalize_player_state(player_state)
+        idle_reason = getattr(status, "idle_reason", None)
+        content_id = getattr(status, "content_id", None)
         current_time = getattr(status, "adjusted_current_time", None)
         if current_time is None:
             current_time = getattr(status, "current_time", 0) or 0
@@ -290,12 +385,36 @@ class CastRendererBackend(RendererBackend):
         volume_muted = self._status_attr(receiver_status, "volume_muted")
         if volume_muted is None:
             volume_muted = self._status_attr(status, "volume_muted")
-        ended = (
-            state == "IDLE"
-            and previous_state == "PLAYING"
-            and (started_at is None or time.time() - started_at > 3)
-        )
-        if state == "IDLE" and not ended and not trust_idle:
+        ended = False
+        stop_reason = None
+        with self._loads_lock:
+            load = self._loads.get(renderer_id)
+            if load is not None and not load.confirmed:
+                # LOAD still pending: whatever this says is about the previous
+                # media (often IDLE/INTERRUPTED as it is replaced) or the new
+                # one buffering. Neither may move player state.
+                state = "TRANSITIONING"
+            elif load is not None and self._is_load_media(load, content_id):
+                if state == "IDLE" and idle_reason and load.idle_reason is None:
+                    load.idle_reason = idle_reason
+                    if idle_reason == IDLE_REASON_FINISHED:
+                        ended = True
+                    elif idle_reason == IDLE_REASON_ERROR:
+                        stop_reason = "renderer_error"
+                    else:
+                        # CANCELLED / INTERRUPTED: stopped on the device or
+                        # taken over by another controller. Halt, don't advance.
+                        stop_reason = "renderer_stopped"
+            elif load is None:
+                # Media this process did not load (e.g. after a restart): only
+                # a FINISHED seen to follow PLAYING counts as completion.
+                ended = (
+                    state == "IDLE"
+                    and idle_reason == IDLE_REASON_FINISHED
+                    and previous_state == "PLAYING"
+                    and (started_at is None or time.time() - started_at > 3)
+                )
+        if state == "IDLE" and not ended and not stop_reason and not trust_idle:
             state = "UNKNOWN"
         return RendererStatus(
             renderer_id=renderer_id,
@@ -304,9 +423,24 @@ class CastRendererBackend(RendererBackend):
             duration_seconds=float(duration) if duration is not None else None,
             volume_percent=round(float(volume) * 100) if volume is not None else None,
             volume_muted=volume_muted,
-            current_media_url=getattr(status, "content_id", None),
+            current_media_url=content_id,
             ended=ended,
+            completion_reported=True,
+            stop_reason=stop_reason,
         )
+
+    def _forget_load(self, renderer_id: str, load: _CastLoad | None = None) -> None:
+        """Drop the tracked load (only ``load`` itself, when given)."""
+        with self._loads_lock:
+            current = self._loads.get(renderer_id)
+            if current is not None and (load is None or current is load):
+                del self._loads[renderer_id]
+
+    @staticmethod
+    def _is_load_media(load: _CastLoad, content_id: str | None) -> bool:
+        if not content_id:
+            return True
+        return content_id == load.url or content_id.split("?", 1)[0] == load.url.split("?", 1)[0]
 
     def receiver_status_for_renderer(self, renderer_id: str) -> Any | None:
         _, uuid = split_renderer_id(renderer_id)
@@ -376,6 +510,13 @@ class CastRendererBackend(RendererBackend):
                 )
             else:
                 self._safe_disconnect(cast)
+
+    @staticmethod
+    def _safe_media_stop(cast: Any, renderer_id: str) -> None:
+        try:
+            cast.media_controller.stop()
+        except Exception:
+            logger.debug("Cast media stop failed for %s", renderer_id, exc_info=True)
 
     @staticmethod
     def _safe_disconnect(cast: Any) -> None:
@@ -638,16 +779,72 @@ class CastRendererBackend(RendererBackend):
         return str(artists or "Unknown Artist")
 
     @staticmethod
-    def _load_callback(renderer_id: str, track_id: int) -> Callable[[bool, dict[str, Any] | None], None]:
-        def callback(success: bool, response: dict[str, Any] | None) -> None:
-            if success:
-                logger.info("Cast load accepted renderer=%s track_id=%s", renderer_id, track_id)
-            else:
-                logger.warning(
-                    "Cast load failed renderer=%s track_id=%s response=%s",
-                    renderer_id,
-                    track_id,
-                    response,
-                )
+    def _load_callback(
+        renderer_id: str,
+        track_id: int,
+        response: asyncio.Future[tuple[bool, dict[str, Any] | None]],
+    ) -> Callable[[bool, dict[str, Any] | None], None]:
+        """Hand the LOAD response (from pychromecast's socket thread) to play_track."""
+        loop = response.get_loop()
+
+        def resolve(success: bool, data: dict[str, Any] | None) -> None:
+            if not response.done():
+                response.set_result((success, data))
+
+        def callback(success: bool, data: dict[str, Any] | None) -> None:
+            logger.debug(
+                "Cast load response renderer=%s track_id=%s success=%s type=%s",
+                renderer_id,
+                track_id,
+                success,
+                (data or {}).get("type"),
+            )
+            try:
+                loop.call_soon_threadsafe(resolve, success, data)
+            except RuntimeError:
+                # Loop closed: nobody is waiting any more.
+                pass
 
         return callback
+
+    @staticmethod
+    def _classify_load_response(
+        success: bool,
+        data: dict[str, Any] | None,
+    ) -> tuple[bool, str | None, str | None, dict[str, Any]]:
+        """(accepted, reason, detail, media status entry) for a LOAD response.
+
+        pychromecast calls back with success=True for *any* reply carrying the
+        request id, so the reply type decides: MEDIA_STATUS is acceptance,
+        LOAD_FAILED / LOAD_CANCELLED / INVALID_REQUEST etc. are rejections.
+        success=False means the request never got an answer (socket error,
+        disconnect).
+        """
+        if not success:
+            return False, "load_failed", "receiver connection failed", {}
+        if not data:
+            return True, None, None, {}
+        msg_type = data.get("type")
+        if msg_type == "MEDIA_STATUS":
+            entries = data.get("status") or []
+            entry = entries[0] if entries and isinstance(entries[0], dict) else {}
+            if entry.get("playerState") == "IDLE" and entry.get("idleReason") == IDLE_REASON_ERROR:
+                return False, "load_rejected", "receiver reported a media error", entry
+            return True, None, None, entry
+        details = [str(msg_type or "unknown response")]
+        if data.get("reason"):
+            details.append(str(data["reason"]))
+        error_code = data.get("detailedErrorCode")
+        if error_code is not None:
+            name = CastRendererBackend._media_error_name(error_code)
+            details.append(f"{error_code} {name}".strip())
+        return False, "load_rejected", ": ".join(details), {}
+
+    @staticmethod
+    def _media_error_name(error_code: Any) -> str:
+        try:
+            from pychromecast.controllers.media import MEDIA_PLAYER_ERROR_CODES
+
+            return MEDIA_PLAYER_ERROR_CODES.get(error_code, "")
+        except Exception:
+            return ""

@@ -87,9 +87,20 @@ The orchestrator does not care whether a `RendererStatus` came from polling
 - Cast backend subscribes to `pychromecast` media-controller **callbacks**;
   callbacks are dispatched back onto the asyncio loop before mutating state.
 - The orchestrator normalises status, updates progress/volume, detects
-  track-end (`ended=True`, or Cast `IDLE` after `PLAYING`), and advances the
-  queue exactly once. A short grace period after `play_track()` suppresses the
-  transient `IDLE` during Cast load so it doesn't false-advance.
+  track-end (`ended=True`), and advances the queue exactly once.
+- Cast `play_track()` waits (bounded, `load_timeout`, default 15 s) for the
+  receiver's LOAD reply. A `LOAD_FAILED`/`INVALID_REQUEST`-style reply, a lost
+  connection or a timeout raises `RendererLoadError`: player state drops to
+  stopped, `stopped_reason` becomes `load_failed`, and `/api/player/play` /
+  `/api/player/index` answer 502. Statuses arriving while the LOAD is pending
+  map to `TRANSITIONING` and are ignored.
+- Cast completion comes from `idleReason`, and only for the media Jamarr
+  loaded: `FINISHED` ends the track (once); `ERROR` halts with
+  `stopped_reason = renderer_error`; `CANCELLED`/`INTERRUPTED` (stopped on the
+  device, another controller took over) halt with `renderer_stopped`. None of
+  these advance, and Cast statuses set `completion_reported`, which turns off
+  the orchestrator's position-vs-duration end heuristic. Jamarr's own stop is
+  not reported as a device halt.
 - The UPnP poll loop handles two quirky end-of-track signatures seen on real
   renderers: a quick `PLAYING → PAUSED_PLAYBACK → STOPPED` sequence counts as
   track-finished (the `PAUSED` poll alone must not swallow the advance), and a
@@ -300,7 +311,8 @@ With "phone discovers renderers" on, the app runs its own jUPnP control point
 - Docker needs `network_mode: "host"` for both UPnP SSDP and Cast mDNS. Host
   networking also exposes the renderer stream proxy (default 8112) on the host.
 - Cast playback does **not** transcode in v1; unsupported codecs/containers fail
-  on the receiver. The Default Media Receiver covers common formats.
+  on the receiver (surfaced as `load_failed`). The Default Media Receiver covers
+  common formats.
 - Device-direct Cast requires Google Play Services — de-Googled Android can still
   use server-driven Cast.
 

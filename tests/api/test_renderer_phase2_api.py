@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from unittest.mock import AsyncMock, patch
@@ -231,3 +232,189 @@ async def test_phase2_cast_progress_logs_history_and_scrobbles(
     assert mock_scrobble.call_args.kwargs["session_key"] == "test_session_key"
     assert mock_scrobble.call_args.kwargs["track_info"]["track"] == "Cast Song"
     assert monitor_starts == []
+
+
+# --- Truthful Cast loading and completion (issue #316) ---------------------
+
+HEADERS = {"X-Jamarr-Client-Id": "phase2-client"}
+
+
+@pytest.fixture
+def clean_cast_player_globals(selected_cast_renderer, monkeypatch):
+    import app.api.player as player_api
+    from app.services.player.globals import last_stop_reason
+
+    last_stop_reason.pop(selected_cast_renderer, None)
+    # The orchestrator is a process singleton; its end-of-track debounce must
+    # not leak in from another test.
+    monkeypatch.setattr(player_api.renderer_orchestrator, "_last_ended_at", {})
+    yield player_api.renderer_orchestrator
+    last_stop_reason.pop(selected_cast_renderer, None)
+
+
+@pytest.fixture
+async def two_track_cast_queue(db, auth_client, phase2_cast_track, fake_cast_backend, selected_cast_renderer):
+    """Track 901 playing on the Cast device, with 902 queued after it."""
+    from app.services.player.state import get_renderer_state_db, update_renderer_state_db
+
+    await db.execute(
+        """
+        INSERT INTO track (id, path, title, artist, album, duration_seconds)
+        VALUES (902, '/music/phase2-cast-2.flac', 'Next Song', 'Cast Artist', 'Cast Album', 200)
+        """
+    )
+    play = await auth_client.post("/api/player/play", json={"track_id": 901}, headers=HEADERS)
+    assert play.status_code == 200, play.text
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    state["queue"].append(
+        {"id": 902, "title": "Next Song", "artist": "Cast Artist", "album": "Cast Album", "duration_seconds": 200}
+    )
+    await update_renderer_state_db(db, selected_cast_renderer, state)
+    return fake_cast_backend
+
+
+def _play_media_calls(cast):
+    return [call for call in cast.media_controller.calls if call[0] == "play_media"]
+
+
+def _receiver_goes_idle(cast, idle_reason):
+    status = cast.media_controller.status
+    status.player_state = "IDLE"
+    status.idle_reason = idle_reason
+    status.adjusted_current_time = 239
+    # A snapshot: the fake mutates its live status when the next LOAD lands.
+    return SimpleNamespace(**vars(status))
+
+
+@pytest.mark.asyncio
+async def test_cast_rejected_load_surfaces_error_and_clears_playing(
+    auth_client: AsyncClient,
+    db,
+    phase2_cast_track,
+    selected_cast_renderer,
+    fake_cast_backend,
+    clean_cast_player_globals,
+):
+    from tests.unit.test_renderer_phase2_cast import LOAD_FAILED
+
+    _, cast, _ = fake_cast_backend
+    cast.media_controller.load_response = LOAD_FAILED
+
+    play = await auth_client.post("/api/player/play", json={"track_id": 901}, headers=HEADERS)
+
+    assert play.status_code == 502, play.text
+    assert "could not play" in play.json()["detail"]
+    row = await db.fetchrow(
+        "SELECT is_playing, transport_state FROM renderer_state WHERE renderer_udn = $1",
+        selected_cast_renderer,
+    )
+    assert row["is_playing"] is False
+    assert row["transport_state"] == "STOPPED"
+
+    # The receiver sits idle after refusing the media.
+    cast.media_controller.status.player_state = "IDLE"
+    state = await auth_client.get("/api/player/state", headers=HEADERS)
+    assert state.status_code == 200, state.text
+    assert state.json()["is_playing"] is False
+    assert state.json()["stopped_reason"] == "load_failed"
+
+
+@pytest.mark.asyncio
+async def test_cast_load_timeout_surfaces_error(
+    auth_client: AsyncClient,
+    db,
+    phase2_cast_track,
+    selected_cast_renderer,
+    fake_cast_backend,
+    clean_cast_player_globals,
+):
+    backend, cast, _ = fake_cast_backend
+    backend.load_timeout = 0.05
+    cast.media_controller.load_response = None
+
+    play = await auth_client.post("/api/player/play", json={"track_id": 901}, headers=HEADERS)
+
+    assert play.status_code == 502, play.text
+    assert "did not confirm" in play.json()["detail"]
+    assert await db.fetchval(
+        "SELECT is_playing FROM renderer_state WHERE renderer_udn = $1", selected_cast_renderer
+    ) is False
+
+
+@pytest.mark.asyncio
+async def test_cast_finished_advances_queue_once(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+):
+    from app.services.player.state import get_renderer_state_db
+
+    backend, cast, _ = two_track_cast_queue
+    orchestrator = clean_cast_player_globals
+    finished = _receiver_goes_idle(cast, "FINISHED")
+
+    status = backend.status_from_media_status(selected_cast_renderer, finished)
+    assert status.ended is True
+    await orchestrator.handle_status(selected_cast_renderer, status)
+
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    assert state["current_index"] == 1
+    assert state["is_playing"] is True
+    assert len(_play_media_calls(cast)) == 2
+    assert "/api/stream/902" in _play_media_calls(cast)[1][1][0]
+
+    # A repeated FINISHED for the old media (re-broadcast, poll) is ignored.
+    repeat = backend.status_from_media_status(
+        selected_cast_renderer, finished, previous_state="PLAYING", started_at=0
+    )
+    orchestrator._last_ended_at.clear()
+    await orchestrator.handle_status(selected_cast_renderer, repeat)
+
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    assert state["current_index"] == 1
+    assert len(_play_media_calls(cast)) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("idle_reason", "stopped_reason"),
+    [
+        ("CANCELLED", "renderer_stopped"),
+        ("INTERRUPTED", "renderer_stopped"),
+        ("ERROR", "renderer_error"),
+    ],
+)
+async def test_cast_non_finished_idle_halts_queue(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+    idle_reason,
+    stopped_reason,
+):
+    from app.services.player.state import get_renderer_state_db
+
+    backend, cast, _ = two_track_cast_queue
+    orchestrator = clean_cast_player_globals
+    idle = _receiver_goes_idle(cast, idle_reason)
+
+    status = backend.status_from_media_status(
+        selected_cast_renderer, idle, previous_state="PLAYING", started_at=0
+    )
+    await orchestrator.handle_status(selected_cast_renderer, status)
+
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    assert state["current_index"] == 0
+    assert state["is_playing"] is False
+    assert len(_play_media_calls(cast)) == 1
+
+    # Polling sees the same idle receiver: still no advance, reason kept.
+    polled = await auth_client.get("/api/player/state", headers=HEADERS)
+    assert polled.status_code == 200, polled.text
+    assert polled.json()["current_index"] == 0
+    assert polled.json()["is_playing"] is False
+    assert polled.json()["stopped_reason"] == stopped_reason
+    assert len(_play_media_calls(cast)) == 1

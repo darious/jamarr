@@ -606,7 +606,13 @@ async function playCurrentTrack() {
         const data = await res.json();
 
 
-        if (data.status === 'local_playback') {
+        if (!res.ok) {
+            // The renderer refused the track (or never confirmed it); the
+            // server has recorded why, so pull its state instead of claiming
+            // playback.
+            console.error('[playCurrentTrack] Play failed:', res.status, data?.detail);
+            await loadQueueFromServer();
+        } else if (data.status === 'local_playback') {
             // Dispatch event for PlayerBar to handle local playback
 
             window.dispatchEvent(new CustomEvent('jamarr:play-local', { detail: track }));

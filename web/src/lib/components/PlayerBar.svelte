@@ -1020,6 +1020,14 @@
     const img = e.currentTarget as HTMLImageElement;
     img.src = "/assets/logo.png";
   }
+
+  const STOPPED_MESSAGES: Record<string, string> = {
+    renderer_stopped: "Playback stopped on the device. Press play to resume.",
+    renderer_error: "The device reported an error playing this track.",
+    load_failed: "The device couldn't play this track.",
+  };
+
+  $: stoppedMessage = STOPPED_MESSAGES[$playerState.stopped_reason ?? ""] ?? null;
 </script>
 
 <div
@@ -1029,9 +1037,10 @@
     The queue can halt without the listener asking: the renderer drops out
     mid-track and the app stops rather than fight it. Say so, otherwise the bar
     simply goes quiet and reads as the app being broken. Position is preserved,
-    so pressing play resumes from where it stopped.
+    so pressing play resumes from where it stopped. A device that refuses a
+    track or reports a playback error is explained the same way.
   -->
-  {#if $playerState.stopped_reason === "renderer_stopped"}
+  {#if stoppedMessage}
     <div
       class="mx-auto mb-2 flex max-w-[1700px] items-center gap-2 rounded-lg border border-subtle bg-surface-3 px-3 py-1.5 text-xs text-muted"
       role="status"
@@ -1044,7 +1053,7 @@
           d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"
         ></path>
       </svg>
-      <span>Playback stopped on the device. Press play to resume.</span>
+      <span>{stoppedMessage}</span>
     </div>
   {/if}
   <div class="mx-auto flex max-w-[1700px] flex-col gap-3 md:hidden">

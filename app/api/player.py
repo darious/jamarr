@@ -50,6 +50,7 @@ from app.services.player.monitor import (
     _is_monitor_starting,
 )
 from app.services.renderer import get_renderer_orchestrator
+from app.services.renderer.contracts import RendererLoadError
 
 router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
 
@@ -76,6 +77,10 @@ def _translate_renderer_error(action: str, exc: Exception) -> HTTPException:
     renderer (stale session or removed backend) — return 409.
     Anything else is a transport/control failure on the device side — return 502.
     """
+    if isinstance(exc, RendererLoadError):
+        # The device answered, it just refused (or never confirmed) the track.
+        logger.warning("Renderer %s failed: %s", action, exc)
+        return HTTPException(status_code=502, detail=_load_error_detail(exc))
     logger.warning("Renderer %s failed: %s", action, exc, exc_info=True)
     if isinstance(exc, ValueError):
         return HTTPException(
@@ -83,6 +88,14 @@ def _translate_renderer_error(action: str, exc: Exception) -> HTTPException:
             detail="Active renderer is unavailable. Re-select a device.",
         )
     return HTTPException(status_code=502, detail=f"Renderer {action} failed")
+
+
+def _load_error_detail(exc: RendererLoadError) -> str:
+    if exc.reason == "load_timeout":
+        return "The device did not confirm playback in time."
+    if exc.detail:
+        return f"The device could not play this track ({exc.detail})."
+    return "The device could not play this track."
 
 
 @router.get("/api/client-ip")
@@ -683,13 +696,16 @@ async def play_track(
     track["mime"] = mime
     track["user_id"] = user_row["id"]
 
-    return await renderer_orchestrator.play_track(
-        db,
-        client_id,
-        track,
-        user_row["id"],
-        request,
-    )
+    try:
+        return await renderer_orchestrator.play_track(
+            db,
+            client_id,
+            track,
+            user_row["id"],
+            request,
+        )
+    except RendererLoadError as exc:
+        raise _translate_renderer_error("play", exc)
 
 
 @router.post(
