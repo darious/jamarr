@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import logging
 from typing import Any
 
@@ -33,28 +32,17 @@ class UpnpRendererBackend(RendererBackend):
     async def discover(self, refresh: bool = False) -> list[RendererDevice]:
         if refresh:
             # refresh=True re-hydrates cached devices, not just new ones.
-            if "refresh" in inspect.signature(self.manager.discover).parameters:
-                await self.manager.discover(refresh=True)
-            else:
-                await self.manager.discover()
+            await self.manager.discover(refresh=True)
         return await self.list_devices()
 
     async def add_manual(self, address: str) -> RendererDevice | None:
         """Add by IP or description URL; returns the device actually registered."""
         found = await self.manager.add_device_by_ip(address)
-        if not found:
-            return None
-        renderers = found if isinstance(found, list) else [found]
-        devices = [self._device_from_renderer(r) for r in renderers if isinstance(r, dict)]
-        return devices[0] if devices else None
+        return self._device_from_renderer(found[0]) if found else None
 
     async def list_devices(self) -> list[RendererDevice]:
-        renderers = await self.manager.get_renderers()
-        return [
-            self._device_from_renderer(renderer)
-            for renderer in renderers
-            if renderer.get("available", True)
-        ]
+        renderers = await self.manager.get_renderers()  # available ones only
+        return [self._device_from_renderer(renderer) for renderer in renderers]
 
     async def is_available(self, renderer_id: str) -> bool | None:
         """Tracked availability (SSDP liveness + probes); None if unknown here."""

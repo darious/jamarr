@@ -195,6 +195,29 @@ async def get_user_from_refresh_cookie(
     return user
 
 
+async def get_current_user_jwt_released(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+) -> asyncpg.Record:
+    """Bearer auth that hands its DB connection back before the handler runs.
+
+    For handlers that await slow work which takes connections of its own
+    (UPnP discovery saves renderers): with ``Depends(get_db)`` the auth
+    connection would stay checked out for the whole handler, and the nested
+    acquire is the pattern that deadlocks the pool.
+    """
+    async with db_conn() as db:
+        return await get_current_user_jwt(authorization, request, db)
+
+
+async def get_current_admin_user_jwt_released(
+    request: Request,
+    user: asyncpg.Record = Depends(get_current_user_jwt_released),
+) -> asyncpg.Record:
+    """Admin variant of :func:`get_current_user_jwt_released`."""
+    return require_admin_user(user, request)
+
+
 async def get_current_user_jwt_or_cookie(
     request: Request,
     authorization: Optional[str] = Header(None),

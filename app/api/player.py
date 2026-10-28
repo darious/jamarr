@@ -16,7 +16,9 @@ from app.audio_normalization import (
 from app.db import get_db
 from app.api.deps import (
     get_current_admin_user_jwt,
+    get_current_admin_user_jwt_released,
     get_current_user_jwt,
+    get_current_user_jwt_released,
 )
 from app.security import get_client_ip, is_production
 
@@ -50,6 +52,12 @@ from app.services.player.monitor import (
 from app.services.renderer import get_renderer_orchestrator
 
 router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
+
+# Renderer discovery routes await work that takes DB connections of its own
+# (renderer saves, availability writes). They authenticate with a dependency
+# that returns its connection first, so no request holds one connection while
+# acquiring another.
+discovery_router = APIRouter()
 logger = logging.getLogger(__name__)
 renderer_orchestrator = get_renderer_orchestrator()
 
@@ -574,23 +582,22 @@ async def get_scan_status(client_id: str = Depends(get_client_id)):
     }
 
 
-@router.get("/api/renderers")
+@discovery_router.get(
+    "/api/renderers",
+    dependencies=[Depends(get_current_user_jwt_released)],
+    summary="List renderers",
+)
 async def get_renderers(
     refresh: bool = False,
     client_id: str = Depends(get_client_id),
-    db: asyncpg.Connection = Depends(get_db),
 ):
-    renderers = await renderer_orchestrator.list_renderers(
-        db,
-        client_id,
-        refresh=refresh,
-    )
-    if refresh:
-        upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
-        manager = getattr(upnp_backend, "manager", None)
-        if manager:
-            asyncio.create_task(manager.scan_subnet())
-    return renderers
+    """Renderers available to this client, local playback first.
+
+    `refresh=true` runs an SSDP search burst and re-reads every renderer's
+    description. It does not sweep the subnet; that is the admin-only
+    `POST /api/scan/subnet`.
+    """
+    return await renderer_orchestrator.list_renderers(client_id, refresh=refresh)
 
 
 @router.post(
@@ -757,9 +764,9 @@ async def seek_track(
     return {"status": "local", "message": "Handle seek in browser"}
 
 
-@router.post(
+@discovery_router.post(
     "/api/player/add_manual",
-    dependencies=[Depends(get_current_admin_user_jwt)],
+    dependencies=[Depends(get_current_admin_user_jwt_released)],
     summary="Add a UPnP renderer by IP or description URL",
 )
 async def add_manual_renderer(data: dict):
@@ -778,13 +785,31 @@ async def add_manual_renderer(data: dict):
     return {"status": "found", "renderer": device.as_api_dict()}
 
 
-@router.post(
+@discovery_router.post(
+    "/api/scan/subnet",
+    dependencies=[Depends(get_current_admin_user_jwt_released)],
+    summary="Sweep the local subnet for UPnP renderers",
+)
+async def start_subnet_scan():
+    """Probe every host on the server's subnet for renderers search missed.
+
+    Runs in the background; follow it with `GET /api/scan-status`.
+    `started` is false when a sweep is already running.
+    """
+    upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
+    manager = getattr(upnp_backend, "manager", None)
+    if manager is None:
+        raise HTTPException(status_code=404, detail="UPnP backend not available")
+    return {"started": manager.start_subnet_scan()}
+
+
+@discovery_router.post(
     "/api/scan/cancel",
-    dependencies=[Depends(get_current_admin_user_jwt)],
+    dependencies=[Depends(get_current_admin_user_jwt_released)],
     summary="Cancel a running renderer subnet scan",
 )
 async def cancel_subnet_scan():
-    """Stop the UPnP subnet sweep started by `GET /api/renderers?refresh=true`."""
+    """Stop the UPnP subnet sweep started by `POST /api/scan/subnet`."""
     upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
     manager = getattr(upnp_backend, "manager", None)
     cancel = getattr(manager, "cancel_subnet_scan", None)
@@ -792,9 +817,9 @@ async def cancel_subnet_scan():
     return {"cancelled": cancelled}
 
 
-@router.get(
+@discovery_router.get(
     "/api/player/upnp/diagnostics",
-    dependencies=[Depends(get_current_admin_user_jwt)],
+    dependencies=[Depends(get_current_admin_user_jwt_released)],
     summary="UPnP discovery diagnostics",
 )
 async def upnp_diagnostics():

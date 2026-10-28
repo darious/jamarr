@@ -112,7 +112,9 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   connection while holding one (declare `Depends(get_db)` on the handler and
   FastAPI shares the auth dependency's), and never let a yield-dependency reach
   a long-lived response — dependency teardown waits for the response to finish,
-  so on SSE it waits forever. Health check: `/api/health` (unauthenticated,
+  so on SSE it waits forever. A handler that awaits work taking its own
+  connections (UPnP discovery) goes on a router authed with
+  `get_current_user_jwt_released` (see `player.discovery_router`). Health check: `/api/health` (unauthenticated,
   touches the DB); `/` is the static SPA and answers 200 even when the API is
   wedged, so it is useless for uptime monitoring.
 - UPnP needs host networking — discovery won't work in bridged containers.

@@ -175,12 +175,13 @@ class RendererOrchestrator:
 
     async def list_renderers(
         self,
-        db: asyncpg.Connection,
         client_id: str,
         refresh: bool = False,
     ) -> list[dict[str, Any]]:
+        """Discover (no connection held), then persist on a short-lived one."""
         devices = await self.registry.discover_all(refresh=refresh) if refresh else await self.registry.list_all()
-        await self.registry.persist_all(db, devices)
+        async with db_conn() as db:
+            await self.registry.persist_all(db, devices)
         return [self.registry.local_renderer(client_id), *[d.as_api_dict() for d in devices]]
 
     async def add_manual(self, address: str) -> RendererDevice | None:

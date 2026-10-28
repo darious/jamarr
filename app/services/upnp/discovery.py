@@ -190,8 +190,14 @@ class LocationRecord:
     available: bool = False
     hydrated: bool = False
     is_renderer: bool = True
-    stale: bool = False  # re-hydrate on next sighting
+    # Sticky: survives sightings and probes until a hydration succeeds. Set
+    # when the device was unreachable or a control call against it failed.
+    needs_rehydrate: bool = False
     byebye: bool = False
+    # "No AVTransport in the description" is soft: re-checked with backoff
+    # (a booting TV can briefly serve a root-only description).
+    not_renderer_strikes: int = 0
+    recheck_at: float = 0.0  # monotonic
 
 
 class UPnPDiscovery:
@@ -393,7 +399,10 @@ class UPnPDiscovery:
         if self._scan_lock.locked():
             async with self._scan_lock:
                 pass
-            return self.available_renderers()
+            # The scan we waited for may have been a cheap background one;
+            # an explicit refresh still has to re-hydrate.
+            if not refresh or self._last_scan.get("refresh"):
+                return self.available_renderers()
 
         async with self._scan_lock:
             await self.manager._ensure_session()
@@ -487,13 +496,21 @@ class UPnPDiscovery:
         if record is not None:
             record.ssdp_udns |= sighting.udns
             unchanged = not self._identity_changed(record, sighting)
-            if record.hydrated and unchanged and not refresh and not record.stale:
-                if not record.is_renderer:
-                    outcomes["not_renderer"] += 1
-                    return None
-                await self._touch(record, sighting)
-                outcomes["cached"] += 1
-                return self._infos(record)
+            if record.hydrated and unchanged and not refresh and not record.needs_rehydrate:
+                if record.recheck_at:
+                    # Last description had no AVTransport: re-check when due.
+                    if self._clock() < record.recheck_at:
+                        if not record.is_renderer:
+                            outcomes["not_renderer"] += 1
+                            return None
+                        await self._touch(record, sighting)  # saved renderer
+                        outcomes["cached"] += 1
+                        return self._infos(record)
+                    # due: fall through and fetch the description again
+                else:
+                    await self._touch(record, sighting)
+                    outcomes["cached"] += 1
+                    return self._infos(record)
 
         if not force and not self._should_attempt(location, sighting.bootid):
             outcomes["cooldown"] += 1
@@ -594,43 +611,141 @@ class UPnPDiscovery:
 
         endpoints = playable_endpoints(root)
         if not endpoints:
-            record.is_renderer = False
-            record.hydrated = True
-            record.stale = False
-            record.last_seen = self._clock()
-            record.last_seen_wall = time.time()
-            self.manager.log(f"{location} has no AVTransport service; not a renderer")
+            self._mark_not_renderer(record)
             return None
 
-        infos: list[dict] = []
-        registered: list[str] = []
+        # Stage every endpoint first (no shared state touched), so a failure or
+        # the deadline cannot leave a half-registered "available" renderer.
+        staged: list[tuple[dict, Any, Optional[dict]]] = []
         last_error: Optional[Exception] = None
         for node in endpoints:
             udn = node.udn
-            if not udn or udn in registered:
+            if not udn or any(info["udn"] == udn for info, _, _ in staged):
                 continue
             try:
-                infos.append(await self._register_endpoint(node, location))
+                staged.append(await self._stage_endpoint(node, location))
             except Exception as e:  # one bad endpoint must not hide its siblings
                 last_error = e
-                logger.debug(f"Could not register {udn} from {location}: {e}")
-                continue
-            registered.append(udn)
-            self._claim_udn(udn, location)
-        if not registered:
+                logger.debug(f"Could not prepare {udn} from {location}: {e}")
+        if not staged:
             raise last_error or RuntimeError(f"{location} has no endpoint with a UDN")
 
-        record.udns = registered
-        record.is_renderer = True
-        record.hydrated = True
-        record.stale = False
-        record.byebye = False
-        record.last_seen = self._clock()
-        record.last_seen_wall = time.time()
-        await self._set_available(record, True, "hydrated", persist=False)
+        previous_udns = list(record.udns)
+        registered: list[str] = []
+        infos: list[dict] = []
+        try:
+            for info, dmr, icon in staged:
+                udn = info["udn"]
+                try:
+                    await self.manager.save_renderer(info)
+                    if await self.manager._cache_renderer_icon(udn, icon):
+                        info["icon_url"] = f"/art/renderer/{udn}"
+                except Exception as e:
+                    last_error = e
+                    logger.debug(f"Could not save {udn} from {location}: {e}")
+                    continue
+                # Commit to memory in one synchronous step per endpoint.
+                self.manager.renderers[udn] = info
+                self.manager.dmr_devices[udn] = dmr
+                registered.append(udn)
+                infos.append(info)
+                self._claim_udn(udn, location)
+        finally:
+            # Runs on cancellation too: whatever was committed is tracked.
+            if registered:
+                self._commit_record(record, previous_udns, registered)
+        if not registered:
+            raise last_error or RuntimeError(f"{location}: no endpoint could be saved")
+
+        await self._retire_previous_udns(record, root, previous_udns, registered)
         for info in infos:
             self.manager.log(f"Added renderer: {info['friendly_name']} ({info['udn']})")
         return infos
+
+    def _mark_not_renderer(self, record: LocationRecord) -> None:
+        record.hydrated = True
+        record.needs_rehydrate = False
+        record.last_seen = self._clock()
+        record.last_seen_wall = time.time()
+        record.not_renderer_strikes += 1
+        if record.udns:
+            # A saved renderer (booting/standby TV serving a root-only
+            # description): stay a renderer and look again next scan.
+            record.recheck_at = self._clock() + POLL_INTERVAL_SECONDS
+            self.manager.log(f"{record.location} has no AVTransport right now; re-checking")
+            return
+        record.is_renderer = False
+        steps = _FAILURE_COOLDOWN_STEPS
+        record.recheck_at = self._clock() + steps[min(record.not_renderer_strikes, len(steps)) - 1]
+        self.manager.log(f"{record.location} has no AVTransport service; not a renderer")
+
+    def _commit_record(
+        self, record: LocationRecord, previous_udns: list[str], registered: list[str]
+    ) -> None:
+        """Synchronous: mark a (partially) hydrated record live and tracked."""
+        record.udns = registered + [
+            u for u in previous_udns if u not in registered and u in self.manager.renderers
+        ]
+        record.is_renderer = True
+        record.hydrated = True
+        record.needs_rehydrate = False
+        record.not_renderer_strikes = 0
+        record.recheck_at = 0.0
+        record.byebye = False
+        record.last_seen = self._clock()
+        record.last_seen_wall = time.time()
+        # It just answered: a queued liveness probe is moot.
+        probe = self._probe_tasks.get(record.location)
+        if probe is not None and probe is not asyncio.current_task() and not probe.done():
+            self._probe_tasks.pop(record.location, None)
+            probe.cancel()
+        # save_renderer already wrote available = TRUE, so no DB write here.
+        was_available = record.available
+        record.available = True
+        for udn in registered:
+            info = self.manager.renderers.get(udn)
+            if info is not None:
+                info["available"] = True
+            if not was_available or udn not in previous_udns:
+                self._log_transition(udn, True, "hydrated")
+
+    async def _retire_previous_udns(
+        self, record: LocationRecord, root, previous_udns: list[str], registered: list[str]
+    ) -> None:
+        """Deal with UDNs this description no longer offers as endpoints.
+
+        Older versions registered the *root* device even when only an embedded
+        child had the AVTransport. If that root is now gone from the endpoint
+        list and exactly one endpoint replaced it, its settings move over to
+        the new UDN; anything else is left known-but-unavailable.
+        """
+        dropped = [u for u in previous_udns if u not in registered]
+        if not dropped:
+            return
+        root_udn = getattr(root, "udn", None)
+        if root_udn in dropped and len(registered) == 1:
+            new_udn = registered[0]
+            try:
+                await self.manager.migrate_renderer_udn(root_udn, new_udn)
+            except Exception as e:
+                logger.warning(f"Could not move renderer settings {root_udn} -> {new_udn}: {e}")
+            else:
+                dropped.remove(root_udn)
+                if root_udn in record.udns:
+                    record.udns.remove(root_udn)
+                if self._udn_location.get(root_udn) == record.location:
+                    self._udn_location.pop(root_udn, None)
+                self.manager.log(f"Renderer {root_udn} is now {new_udn} (embedded endpoint)")
+        if not dropped:
+            return
+        for udn in dropped:
+            info = self.manager.renderers.get(udn)
+            if info is not None and info.get("available", True):
+                info["available"] = False
+                self._log_transition(udn, False, "no longer offered by its description")
+            if udn in record.udns:
+                record.udns.remove(udn)
+        await self._persist_availability(dropped, False)
 
     def _claim_udn(self, udn: str, location: str) -> None:
         """Move an endpoint UDN to ``location``, dropping it from any older record."""
@@ -641,7 +756,8 @@ class UPnPDiscovery:
                 if not other.udns:
                     self._locations.pop(other.location, None)
 
-    async def _register_endpoint(self, node, location: str) -> dict:
+    async def _stage_endpoint(self, node, location: str) -> tuple[dict, Any, Optional[dict]]:
+        """Build one endpoint's info and DmrDevice without registering it."""
         udn = node.udn
         ip = urlparse(location).hostname
         info: dict[str, Any] = {
@@ -669,10 +785,7 @@ class UPnPDiscovery:
         info["supports_events"] = True
         info["supports_gapless"] = dmr.has_next_transport_uri
 
-        self.manager.renderers[udn] = info
-        self.manager.dmr_devices[udn] = dmr
-
-        supported_mimes = await self.manager.get_supported_protocols(udn)
+        supported_mimes = await self.manager.get_supported_protocols(udn, dmr)
         if supported_mimes:
             info["supported_mime_types"] = ",".join(sorted(supported_mimes))
         else:
@@ -685,11 +798,7 @@ class UPnPDiscovery:
             info["icon_width"] = icon.get("width")
             info["icon_height"] = icon.get("height")
             info["original_icon_url"] = info["icon_url"]
-
-        await self.manager.save_renderer(info)
-        if await self.manager._cache_renderer_icon(udn, icon):
-            info["icon_url"] = f"/art/renderer/{udn}"
-        return info
+        return info, dmr, icon
 
     async def _add_renderer(
         self, location: str, bootid: Optional[str] = None, configid: Optional[str] = None
@@ -706,7 +815,7 @@ class UPnPDiscovery:
         record.available = available
         if not available:
             # Whatever we cached may be wrong once it comes back.
-            record.stale = True
+            record.needs_rehydrate = True
         for udn in record.udns:
             info = self.manager.renderers.get(udn)
             if info is not None:
@@ -714,18 +823,21 @@ class UPnPDiscovery:
         if not changed:
             return
         for udn in record.udns:
-            name = (self.manager.renderers.get(udn) or {}).get("friendly_name") or udn
-            self._transitions.append(
-                {"udn": udn, "name": name, "available": available, "reason": reason, "at": time.time()}
-            )
-            message = f"Renderer {name} ({udn}) {'available' if available else 'unavailable'}: {reason}"
-            self.manager.log(message)
-            if available:
-                logger.info(message)
-            else:
-                logger.warning(message)
+            self._log_transition(udn, available, reason)
         if persist and record.udns:
             await self._persist_availability(list(record.udns), available)
+
+    def _log_transition(self, udn: str, available: bool, reason: str) -> None:
+        name = (self.manager.renderers.get(udn) or {}).get("friendly_name") or udn
+        self._transitions.append(
+            {"udn": udn, "name": name, "available": available, "reason": reason, "at": time.time()}
+        )
+        message = f"Renderer {name} ({udn}) {'available' if available else 'unavailable'}: {reason}"
+        self.manager.log(message)
+        if available:
+            logger.info(message)
+        else:
+            logger.warning(message)
 
     async def _persist_availability(self, udns: list[str], available: bool) -> None:
         try:
@@ -761,7 +873,6 @@ class UPnPDiscovery:
         self,
         location: str,
         delay: float = 0.0,
-        rehydrate: bool = False,
         reason: Optional[str] = None,
     ) -> None:
         existing = self._probe_tasks.get(location)
@@ -771,7 +882,7 @@ class UPnPDiscovery:
         async def run() -> None:
             if delay:
                 await asyncio.sleep(delay)
-            await self._probe_record(location, rehydrate=rehydrate, reason=reason)
+            await self._probe_record(location, reason=reason)
 
         task = asyncio.create_task(run())
         self._probe_tasks[location] = task
@@ -782,15 +893,16 @@ class UPnPDiscovery:
 
         task.add_done_callback(_done)
 
-    async def _probe_record(
-        self, location: str, rehydrate: bool = False, reason: Optional[str] = None
-    ) -> None:
+    async def _probe_record(self, location: str, reason: Optional[str] = None) -> None:
         record = self._locations.get(location)
         if record is None:
             return
         reason = reason or ("byebye" if record.byebye else "lifetime expired")
         if await self._probe_impl(location, PROBE_TIMEOUT_SECONDS):
-            if rehydrate:
+            if record.needs_rehydrate:
+                # Detach first: the hydration's commit cancels queued probes.
+                if self._probe_tasks.get(location) is asyncio.current_task():
+                    self._probe_tasks.pop(location, None)
                 await self.hydrate(location)
             else:
                 await self._touch(record)
@@ -808,10 +920,17 @@ class UPnPDiscovery:
             return False
 
     def note_control_failure(self, udn: str) -> None:
-        """A control call failed: probe now; re-hydrate if it still answers."""
+        """A control call failed: re-hydrate on the next sighting or probe.
+
+        The flag is sticky, so it survives a sighting cancelling the probe or
+        a byebye probe already being queued.
+        """
         location = self._udn_location.get(udn)
-        if location and location in self._locations:
-            self._schedule_probe(location, rehydrate=True, reason="control call failed")
+        record = self._locations.get(location) if location else None
+        if record is None:
+            return
+        record.needs_rehydrate = True
+        self._schedule_probe(location, reason="control call failed")
 
     def is_available(self, udn: str) -> Optional[bool]:
         """Tracked availability, or None if this UDN is unknown."""
@@ -821,7 +940,7 @@ class UPnPDiscovery:
         return bool(info.get("available", True))
 
     def available_renderers(self) -> list[dict]:
-        return [r for r in self.manager.renderers.values() if r.get("available", True)]
+        return self.manager.available_renderers()
 
     # ----------------------------------------------------------- persistence
 
@@ -849,7 +968,7 @@ class UPnPDiscovery:
             self.manager.renderers[r["udn"]] = r
             record = self._locations.setdefault(location, LocationRecord(location=location))
             record.udns.append(r["udn"])
-            record.stale = True
+            record.needs_rehydrate = True
             self._udn_location.setdefault(r["udn"], location)
             if location not in locations:
                 locations.append(location)
@@ -998,8 +1117,19 @@ class UPnPDiscovery:
 
     async def scan_subnet(self):
         """Sweep the local subnet for renderers. Cancel with cancel_subnet_scan()."""
-        if self.is_scanning_subnet:
+        task = self.start_subnet_scan()
+        if task is None:
             return
+        try:
+            await asyncio.wait({task})
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+
+    def start_subnet_scan(self) -> Optional[asyncio.Task]:
+        """Start a sweep in the background; None if one is already running."""
+        if self.is_scanning_subnet:
+            return None
         self.is_scanning_subnet = True
         self.scan_progress = 0
         self.scan_msg = "Scanning local subnet..."
@@ -1014,11 +1144,7 @@ class UPnPDiscovery:
                 self.scan_progress = 100
 
         task.add_done_callback(_finished)
-        try:
-            await asyncio.wait({task})
-        except asyncio.CancelledError:
-            task.cancel()
-            raise
+        return task
 
     def cancel_subnet_scan(self) -> bool:
         task = self._subnet_task

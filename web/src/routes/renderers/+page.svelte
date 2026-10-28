@@ -2,6 +2,7 @@
     import { onDestroy, onMount } from "svelte";
     import { fetchWithAuth, triggerScan } from "$lib/api";
     import TabButton from "$lib/components/TabButton.svelte";
+    import { currentUser } from "$stores/user";
     import {
         getRendererFallback,
         getRendererIcon,
@@ -73,10 +74,22 @@
         }
     }
 
-    async function startScan() {
-        // Trigger scan
+    // SSDP search + re-read of every renderer's description (any user).
+    function refreshDiscovery() {
         fetchRenderers(true);
-        // Start polling
+    }
+
+    // Probe every host on the server's subnet (admin only, slow).
+    async function startSubnetScan() {
+        try {
+            const res = await fetchWithAuth("/api/scan/subnet", {
+                method: "POST",
+            });
+            if (!res.ok) throw new Error("Failed to start subnet scan");
+        } catch (e) {
+            error = e.message;
+            return;
+        }
         isScanning = true;
         scanProgress = 0;
         scanLogs = [];
@@ -115,13 +128,24 @@
 <div class="container mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
     <div class="mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
         <h1 class="text-2xl font-bold sm:text-3xl">Network Renderers</h1>
-        <TabButton onClick={startScan} disabled={loading || isScanning}>
-            {#if loading || isScanning}
-                Scanning...
-            {:else}
-                Refresh Discovery
+        <div class="flex flex-wrap gap-2">
+            <TabButton onClick={refreshDiscovery} disabled={loading}>
+                {#if loading}
+                    Searching...
+                {:else}
+                    Refresh Discovery
+                {/if}
+            </TabButton>
+            {#if $currentUser?.is_admin}
+                <TabButton onClick={startSubnetScan} disabled={isScanning}>
+                    {#if isScanning}
+                        Scanning subnet...
+                    {:else}
+                        Scan Subnet
+                    {/if}
+                </TabButton>
             {/if}
-        </TabButton>
+        </div>
     </div>
 
     {#if isScanning || scanStatus}

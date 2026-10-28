@@ -110,19 +110,28 @@ feeds it from three sources:
 - **Manual add / subnet sweep** — unicast M-SEARCH to the host, then four
   guessed description URLs. Manual add also takes a full `http(s)://`
   description URL and returns the renderer actually registered. The sweep
-  (`GET /api/renderers?refresh=true`) covers the interface's real subnet
-  (clipped to a /22), 32 hosts at a time, short timeouts; cancel with
-  `POST /api/scan/cancel`.
+  is an explicit admin action (`POST /api/scan/subnet`, the Renderers page's
+  *Scan Subnet* button) — `GET /api/renderers?refresh=true` only searches and
+  re-reads descriptions. It covers the interface's real subnet (clipped to a
+  /22), 32 hosts at a time, short timeouts; cancel with `POST /api/scan/cancel`.
 
 **Embedded devices.** Each description is fetched once and its device tree
 walked; every node with its own AVTransport service is registered under its
 own UDN, control URLs and `DmrDevice` (multi-zone amps, NAS/receiver roots).
-Nodes without AVTransport are never registered.
+Nodes without AVTransport are never registered. A description with none at
+all is re-read on the cooldown steps (a booting TV can briefly serve a
+root-only description), or every scan if it belongs to a saved renderer.
+Earlier versions saved the *root* UDN of such trees; when exactly one embedded
+endpoint replaces it, its settings, sessions, queue state and icon move to
+the new UDN and the old row is deleted, otherwise it stays unavailable.
+Registration is committed per endpoint only after its DB save, so a failure or
+deadline never leaves a half-registered renderer.
 
 **Hydration vs liveness.** Hydration (description + SCPDs, `GetProtocolInfo`,
 icon, DB save) happens for a new LOCATION, a changed `BOOTID.UPNP.ORG` /
 `CONFIGID.UPNP.ORG`, an explicit refresh, a device coming back after being
-unreachable, or a failed control call whose probe still answers. Any other
+unreachable, or a failed control call (a sticky flag, honoured by the next
+sighting or probe). Any other
 sighting only bumps `last_seen`. Hydrations of the same URL are deduplicated,
 run at most 4 at a time and each has a 20 s deadline. The per-location failure
 cooldown and BOOTID-based un-suspension still gate retries.

@@ -280,6 +280,10 @@ class UPnPManager:
     async def scan_subnet(self):
         await self.discovery.scan_subnet()
 
+    def start_subnet_scan(self) -> bool:
+        """Start a background subnet sweep; False if one is already running."""
+        return self.discovery.start_subnet_scan() is not None
+
     def cancel_subnet_scan(self) -> bool:
         return self.discovery.cancel_subnet_scan()
 
@@ -306,9 +310,12 @@ class UPnPManager:
 
     # --- Delegate to Device Control Service ---
 
-    async def get_renderers(self) -> list:
-        """Renderers currently available (known-but-unreachable ones are hidden)."""
+    def available_renderers(self) -> list:
+        """The one availability filter: known-but-unreachable renderers are hidden."""
         return [r for r in self.renderers.values() if r.get("available", True)]
+
+    async def get_renderers(self) -> list:
+        return self.available_renderers()
 
     async def set_renderer(self, udn: str):
         # Local state update
@@ -318,8 +325,84 @@ class UPnPManager:
         else:
             raise ValueError(f"Renderer {udn} not found")
 
-    async def get_supported_protocols(self, udn: str) -> set:
-        return await self.control.get_supported_protocols(udn)
+    async def get_supported_protocols(self, udn: str, dmr: Optional[DmrDevice] = None) -> set:
+        """GetProtocolInfo for udn; pass ``dmr`` for a device not registered yet."""
+        return await self.control.get_supported_protocols(udn, dmr)
+
+    async def migrate_renderer_udn(self, old_udn: str, new_udn: str) -> None:
+        """Repoint everything saved under old_udn to new_udn, then drop old_udn.
+
+        For installs that registered a root device whose AVTransport actually
+        lives on an embedded child: the child (new_udn) is already saved; carry
+        the user's settings, active sessions, queue state and icon mapping over.
+        """
+        from app.db import db_conn
+
+        old_id, new_id = f"upnp:{old_udn}", f"upnp:{new_udn}"
+        async with db_conn() as db:
+            async with db.transaction():
+                await db.execute(
+                    """
+                    UPDATE renderer AS new
+                    SET enabled_by_default = old.enabled_by_default,
+                        renderer_metadata = COALESCE(new.renderer_metadata, '{}'::jsonb)
+                                            || COALESCE(old.renderer_metadata, '{}'::jsonb)
+                    FROM renderer AS old
+                    WHERE new.udn = $2 AND old.udn = $1
+                    """,
+                    old_udn,
+                    new_udn,
+                )
+                await db.execute(
+                    """
+                    UPDATE client_session
+                    SET active_renderer_udn = CASE
+                            WHEN active_renderer_udn IN ($1, $3) THEN $2
+                            ELSE active_renderer_udn END,
+                        active_renderer_id = CASE
+                            WHEN active_renderer_id IN ($1, $3) THEN $4
+                            ELSE active_renderer_id END
+                    WHERE active_renderer_udn IN ($1, $3) OR active_renderer_id IN ($1, $3)
+                    """,
+                    old_udn,
+                    new_udn,
+                    old_id,
+                    new_id,
+                )
+                # Queue/position: keep the new key's row if one already exists.
+                await db.execute(
+                    """
+                    UPDATE renderer_state SET renderer_udn = $2
+                    WHERE renderer_udn = $1
+                      AND NOT EXISTS (SELECT 1 FROM renderer_state WHERE renderer_udn = $2)
+                    """,
+                    old_udn,
+                    new_udn,
+                )
+                await db.execute("DELETE FROM renderer_state WHERE renderer_udn = $1", old_udn)
+                await db.execute(
+                    """
+                    UPDATE image_map SET entity_id = $2
+                    WHERE entity_type = 'renderer' AND entity_id = $1
+                      AND NOT EXISTS (
+                          SELECT 1 FROM image_map
+                          WHERE entity_type = 'renderer' AND entity_id = $2
+                      )
+                    """,
+                    old_udn,
+                    new_udn,
+                )
+                await db.execute(
+                    "DELETE FROM image_map WHERE entity_type = 'renderer' AND entity_id = $1",
+                    old_udn,
+                )
+                await db.execute("DELETE FROM renderer WHERE udn = $1", old_udn)
+
+        self.renderers.pop(old_udn, None)
+        self.dmr_devices.pop(old_udn, None)
+        if self.active_renderer == old_udn:
+            self.active_renderer = new_udn
+        logger.info(f"Moved renderer settings from {old_udn} to {new_udn}")
 
     async def play_track(self, track_id: int, track_path: str, metadata: Dict[str, Any], username: str = None):
         return await self.control.play_track(track_id, track_path, metadata, username)

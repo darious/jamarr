@@ -23,11 +23,11 @@ class UPnPDeviceControl:
     def __init__(self, manager):
         self.manager = manager
 
-    async def get_supported_protocols(self, udn: str) -> Set[str]:
+    async def get_supported_protocols(self, udn: str, dmr=None) -> Set[str]:
         """
         Query device's supported MIME types via GetProtocolInfo.
         """
-        dmr = self.manager.dmr_devices.get(udn)
+        dmr = dmr or self.manager.dmr_devices.get(udn)
         if not dmr:
             return set()
 
