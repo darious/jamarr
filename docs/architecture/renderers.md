@@ -215,10 +215,12 @@ With "phone discovers renderers" on, the app runs its own jUPnP control point
   re-scans (its `AndroidRouter` broadcast receiver is only wired into
   `AndroidUpnpServiceImpl`, which the app does not use). So a debounced
   `NetworkCallback` rebinds the router (disable + enable) when the IPv4 address
-  set changed or a network was lost, then searches again; a start that failed
+  set changed or a network was lost, drops the old network's devices from the
+  registry, then searches again; a start that failed
   for lack of a network is retried the same way.
 - Each device in a root's tree with its own AVTransport is a separate renderer
-  under its own UDN, using only its own services (`RendererEndpoints.kt`).
+  under its own UDN, using only its own services, matched by service type
+  (any version), not serviceId (`RendererEndpoints.kt`).
 
 ## Deployment notes
 

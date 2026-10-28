@@ -4,6 +4,8 @@ import org.jupnp.model.meta.DeviceDetails
 import org.jupnp.model.meta.RemoteDevice
 import org.jupnp.model.meta.RemoteDeviceIdentity
 import org.jupnp.model.meta.RemoteService
+import org.jupnp.model.types.ServiceId
+import org.jupnp.model.types.ServiceType
 import org.jupnp.model.types.UDADeviceType
 import org.jupnp.model.types.UDAServiceId
 import org.jupnp.model.types.UDAServiceType
@@ -19,9 +21,14 @@ import java.net.URL
 
 class RendererEndpointsTest {
 
-    private fun service(type: String, path: String) = RemoteService(
-        UDAServiceType(type),
-        UDAServiceId(type),
+    private fun service(
+        type: String,
+        path: String,
+        serviceType: ServiceType = UDAServiceType(type),
+        serviceId: ServiceId = UDAServiceId(type),
+    ) = RemoteService(
+        serviceType,
+        serviceId,
         URI("/$path/desc.xml"),
         URI("/$path/control"),
         URI("/$path/event"),
@@ -71,15 +78,15 @@ class RendererEndpointsTest {
         assertTrue(endpoints.values.all { it.rootUdn == "root-1" })
         assertEquals(
             URI("/a/avt/control"),
-            endpoints.getValue("zone-a").service(AV_TRANSPORT_ID)!!.controlURI,
+            endpoints.getValue("zone-a").service(AV_TRANSPORT)!!.controlURI,
         )
         assertEquals(
             URI("/b/avt/control"),
-            endpoints.getValue("zone-b").service(AV_TRANSPORT_ID)!!.controlURI,
+            endpoints.getValue("zone-b").service(AV_TRANSPORT)!!.controlURI,
         )
         assertEquals(
             URI("/b/rc/control"),
-            endpoints.getValue("zone-b").service(RENDERING_CONTROL_ID)!!.controlURI,
+            endpoints.getValue("zone-b").service(RENDERING_CONTROL)!!.controlURI,
         )
     }
 
@@ -100,8 +107,8 @@ class RendererEndpointsTest {
         val byUdn = rendererEndpoints(root).associateBy { it.udn }
 
         assertEquals(setOf("root-1", "emb"), byUdn.keys)
-        assertNull("no RenderingControl of its own", byUdn.getValue("emb").service(RENDERING_CONTROL_ID))
-        assertEquals(URI("/r/avt/control"), byUdn.getValue("root-1").service(AV_TRANSPORT_ID)!!.controlURI)
+        assertNull("no RenderingControl of its own", byUdn.getValue("emb").service(RENDERING_CONTROL))
+        assertEquals(URI("/r/avt/control"), byUdn.getValue("root-1").service(AV_TRANSPORT)!!.controlURI)
     }
 
     @Test
@@ -130,5 +137,39 @@ class RendererEndpointsTest {
 
         assertEquals(setOf("zone-a"), index.removeRoot("root-1"))
         assertEquals(listOf("other"), index.all().map { it.udn })
+    }
+
+    @Test
+    fun matchesOnServiceTypeWhateverTheServiceId() {
+        // Real devices ship ids like "AVTransport1" or vendor namespaces.
+        val avt = service("AVTransport", "v/avt", serviceId = ServiceId("schemas-vendor-com", "AVTransport1"))
+        val rc = service("RenderingControl", "v/rc", serviceId = UDAServiceId("RenderingControl0"))
+        val root = device("root-1", "MediaRenderer", listOf(avt, rc))
+
+        val endpoint = rendererEndpoints(root).single()
+
+        assertSame(avt, endpoint.service(AV_TRANSPORT))
+        assertSame(rc, endpoint.service(RENDERING_CONTROL))
+    }
+
+    @Test
+    fun matchesAnyServiceTypeVersion() {
+        val avt = service("AVTransport", "v2/avt", serviceType = UDAServiceType("AVTransport", 2))
+        val root = device("root-1", "MediaRenderer", listOf(avt))
+
+        assertSame(avt, rendererEndpoints(root).single().service(AV_TRANSPORT))
+    }
+
+    @Test
+    fun serviceIdIsAFallbackForAMangledType() {
+        val avt = service(
+            "AVTransport",
+            "m/avt",
+            serviceType = ServiceType("schemas-vendor-com", "Transport"),
+            serviceId = UDAServiceId("AVTransport"),
+        )
+        val root = device("root-1", "MediaRenderer", listOf(avt))
+
+        assertSame(avt, rendererEndpoints(root).single().service(AV_TRANSPORT))
     }
 }

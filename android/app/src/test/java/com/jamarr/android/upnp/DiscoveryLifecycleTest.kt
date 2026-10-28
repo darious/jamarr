@@ -19,6 +19,8 @@ class DiscoveryLifecycleTest {
         var closes = 0
         var searches = 0
         var rebinds = 0
+        var forgets = 0
+        val events = mutableListOf<String>()
         var failOpen = false
         var signature = "wlan0/192.168.0.10"
         val isOpen get() = opens - closes > 0
@@ -37,10 +39,17 @@ class DiscoveryLifecycleTest {
         override fun search() {
             check(isOpen) { "search while closed" }
             searches++
+            events += "search"
         }
 
         override fun rebind() {
             rebinds++
+            events += "rebind"
+        }
+
+        override fun forgetDevices() {
+            forgets++
+            events += "forget"
         }
 
         override fun addressSignature(): String = signature
@@ -237,7 +246,29 @@ class DiscoveryLifecycleTest {
         network.onChange!!(false)
         settle()
         assertEquals(0, engine.rebinds)
+        assertEquals("devices kept when nothing changed", 0, engine.forgets)
         assertEquals(before, engine.searches)
+    }
+
+    @Test
+    fun recoveryForgetsOldDevicesBeforeSearching() = runTest {
+        val engine = FakeEngine()
+        val network = FakeNetwork()
+        val discovery = lifecycle(engine, network)
+        discovery.start()
+        settle()
+        engine.events.clear()
+
+        engine.signature = "wlan0/192.168.1.20"
+        network.onChange!!(false)
+        settle()
+        assertEquals(listOf("rebind", "forget", "search", "search", "search"), engine.events)
+
+        engine.events.clear()
+        network.onChange!!(true)
+        settle()
+        assertEquals("a lost network forgets too", listOf("rebind", "forget"), engine.events.take(2))
+        assertEquals(2, engine.forgets)
     }
 
     @Test
