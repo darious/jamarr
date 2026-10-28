@@ -28,6 +28,8 @@ Non-secret application config that ships in the repo. Typical contents:
 - Logging level / format
 - Scanner concurrency
 - UPnP renderer stream-proxy port (`renderer.stream_proxy_port`, default 8112)
+- UPnP discovery interface address (`renderer.upnp_source_ip`, default: the
+  default-route address) — set it on multi-homed hosts or with a VPN up
 
 Edit it directly and restart the stack (or rely on hot-reload in
 [Dev Mode](dev-mode.md)).

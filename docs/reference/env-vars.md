@@ -22,6 +22,7 @@ Non-secret app config (MusicBrainz URL, logging, concurrency) lives in
 | `HOST_IP` | `127.0.0.1` | Docker host LAN IP — used for UPnP + stream URL generation. Auto-detected by `dev.sh`/`deploy.sh` |
 | `HOST_PORT` | `8111` | Port Jamarr listens on |
 | `RENDERER_PROXY_PORT` | `8112` | Port of the renderer stream proxy (UPnP renderers fetch streams/art through it; see [Renderers](../architecture/renderers.md#renderer-stream-proxy)). Overrides `renderer.stream_proxy_port` in `config.yaml` |
+| `UPNP_SOURCE_IP` | *(unset)* | LAN address UPnP discovery binds to (SSDP search + listener) and puts in renderer stream/art URLs. Unset = the default-route address. Overrides `renderer.upnp_source_ip` in `config.yaml`; see [Renderers](../architecture/renderers.md#upnp-discovery) |
 
 ## Database
 
