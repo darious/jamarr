@@ -418,3 +418,33 @@ async def test_cast_non_finished_idle_halts_queue(
     assert polled.json()["is_playing"] is False
     assert polled.json()["stopped_reason"] == stopped_reason
     assert len(_play_media_calls(cast)) == 1
+
+
+@pytest.mark.asyncio
+async def test_cast_resume_after_halt_reloads_and_seeks(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+):
+    backend, cast, _ = two_track_cast_queue
+    orchestrator = clean_cast_player_globals
+    await db.execute(
+        "UPDATE renderer_state SET position_seconds = 120 WHERE renderer_udn = $1",
+        selected_cast_renderer,
+    )
+    idle = _receiver_goes_idle(cast, "CANCELLED")
+    status = backend.status_from_media_status(
+        selected_cast_renderer, idle, previous_state="PLAYING", started_at=0
+    )
+    await orchestrator.handle_status(selected_cast_renderer, status)
+
+    resumed = await auth_client.post("/api/player/resume", headers=HEADERS)
+
+    assert resumed.status_code == 200, resumed.text
+    # The halted session has nothing to play(); the track is loaded again.
+    assert ("play", (), {}) not in cast.media_controller.calls
+    assert len(_play_media_calls(cast)) == 2
+    assert "/api/stream/901" in _play_media_calls(cast)[1][1][0]
+    assert ("seek", (120,), {}) in cast.media_controller.calls

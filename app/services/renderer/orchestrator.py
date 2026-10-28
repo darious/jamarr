@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import Any
 
 import asyncpg
@@ -270,7 +271,7 @@ class RendererOrchestrator:
         await update_renderer_state_db(db, state_key, state)
         reset_history_tracker(state_key)
         await self._cancel_monitor(state_key)
-        await self._play_remote(renderer_id, state_key, track, user_id, request)
+        await self._play_remote(renderer_id, state_key, track, user_id, request, db=db)
         return {"status": "streaming_started", "renderer": state_key}
 
     @_heals_stale_renderer
@@ -293,6 +294,19 @@ class RendererOrchestrator:
         await update_renderer_state_db(db, state_key, state)
         if not is_local_renderer(renderer_id):
             backend = self.registry.get_backend(renderer_id)
+            halted = last_stop_reason.get(state_key)
+            track = self._current_track(state)
+            if halted and track and hasattr(backend, "register_status_listener"):
+                # A Cast halt (cancel, error, refused load) ends the media
+                # session, so play() has nothing to resume: reload the track
+                # and pick up where it stopped.
+                await self._play_remote(
+                    renderer_id, state_key, track, track.get("user_id"), None, db=db
+                )
+                position = halted.get("position_seconds") or 0
+                if halted.get("reason") != "load_failed" and position > 1:
+                    await backend.seek(renderer_id, position)
+                return
             await backend.resume(renderer_id)
             if hasattr(backend, "register_status_listener"):
                 self._register_status_listener(backend, renderer_id, state_key)
@@ -374,7 +388,9 @@ class RendererOrchestrator:
                 await update_renderer_state_db(db, state_key, state)
                 await self._cancel_monitor(state_key)
                 track = state["queue"][state["current_index"]]
-                await self._play_remote(renderer_id, state_key, track, track.get("user_id"), request)
+                await self._play_remote(
+                    renderer_id, state_key, track, track.get("user_id"), request, db=db
+                )
         return state, state_key
 
     async def _play_remote_background(
@@ -410,17 +426,23 @@ class RendererOrchestrator:
         track: dict[str, Any],
         user_id: int | None,
         request: Request | None,
+        db: asyncpg.Connection | None = None,
     ) -> None:
+        """Load a track on a remote renderer.
+
+        Handlers pass their own connection: the load can wait seconds for the
+        device, and taking a second pooled connection meanwhile starves the pool.
+        """
         _mark_monitor_starting(state_key)
         try:
             renderer_kind = renderer_id.split(":", 1)[0] if ":" in renderer_id else None
             stream = None
-            async with db_conn() as db:
-                state = await get_renderer_state_db(db, state_key)
+            async with self._conn(db) as conn:
+                state = await get_renderer_state_db(conn, state_key)
                 stream = await build_stream_url(
-                    db,
+                    conn,
                     track_id=int(track["id"]),
-                    base_url=self._base_url(request),
+                    base_url=self._stream_base_url(renderer_kind, request),
                     user_id=user_id or track.get("user_id"),
                     duration_seconds=track.get("duration_seconds"),
                     renderer_kind=renderer_kind,
@@ -444,7 +466,7 @@ class RendererOrchestrator:
             try:
                 await backend.play_track(renderer_id, track, context)
             except RendererLoadError as exc:
-                await self._record_load_failure(state_key, track, exc)
+                await self._record_load_failure(state_key, track, exc, db=db)
                 raise
             if hasattr(backend, "register_status_listener"):
                 self._register_status_listener(backend, renderer_id, state_key)
@@ -462,6 +484,7 @@ class RendererOrchestrator:
         state_key: str,
         track: dict[str, Any],
         exc: RendererLoadError,
+        db: asyncpg.Connection | None = None,
     ) -> None:
         """Undo the optimistic is_playing=True for a track the device refused.
 
@@ -477,8 +500,8 @@ class RendererOrchestrator:
             "position_seconds": 0,
             "at": time.time(),
         }
-        async with db_conn() as db:
-            state = await get_renderer_state_db(db, state_key)
+        async with self._conn(db) as conn:
+            state = await get_renderer_state_db(conn, state_key)
             current = self._current_track(state)
             if current is not None and current.get("id") != track.get("id"):
                 # Something else was started meanwhile; leave its state alone.
@@ -486,7 +509,7 @@ class RendererOrchestrator:
             state["is_playing"] = False
             state["transport_state"] = "STOPPED"
             state["position_seconds"] = 0
-            await update_playback_progress_db(db, state_key, state)
+            await update_playback_progress_db(conn, state_key, state)
 
     async def _cancel_monitor(self, state_key: str, remove: bool = False) -> None:
         if state_key in playback_monitors:
@@ -576,6 +599,20 @@ class RendererOrchestrator:
                 state["queue"][idx] = candidate
                 return idx
         return None
+
+    @staticmethod
+    def _conn(db: asyncpg.Connection | None):
+        return nullcontext(db) if db is not None else db_conn()
+
+    def _stream_base_url(self, renderer_kind: str | None, request: Request | None) -> str:
+        # UPnP renderers must fetch via the header-recasing proxy (see
+        # stream_proxy.py); everything else can use the API port.
+        if renderer_kind == "upnp":
+            manager = getattr(self.registry.backends.get("upnp"), "manager", None)
+            proxy_url = getattr(manager, "renderer_base_url", None)
+            if isinstance(proxy_url, str) and proxy_url:
+                return proxy_url
+        return self._base_url(request)
 
     def _base_url(self, request: Request | None) -> str:
         upnp_backend = self.registry.backends.get("upnp")
@@ -722,7 +759,9 @@ class RendererOrchestrator:
         track = queue[next_index]
         renderer_id = self.registry.state_key_to_renderer_id(state_key)
         try:
-            await self._play_remote(renderer_id, state_key, track, track.get("user_id"), None)
+            await self._play_remote(
+                renderer_id, state_key, track, track.get("user_id"), None, db=db
+            )
         except RendererLoadError:
             # Recorded (stopped + load_failed) by _play_remote; halt here
             # rather than skipping through the queue on a failing device.
