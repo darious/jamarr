@@ -59,6 +59,7 @@ class Harness:
         self.saved: list[dict] = []
         self.persisted: list[tuple[list[str], bool]] = []
         self.protocol_queries: list[str] = []
+        self.migrations: list[tuple[str, str]] = []
 
         manager = UPnPManager()
         manager.source_ip = None
@@ -76,7 +77,7 @@ class Harness:
         async def existing_mimes(_udn):
             return None
 
-        async def protocols(udn):
+        async def protocols(udn, dmr=None):
             self.protocol_queries.append(udn)
             return {"audio/flac"}
 
@@ -85,6 +86,13 @@ class Harness:
         manager._cache_renderer_icon = cache_icon
         manager._existing_mime_types = existing_mimes
         manager.get_supported_protocols = protocols
+
+        async def migrate(old_udn, new_udn):
+            self.migrations.append((old_udn, new_udn))
+            manager.renderers.pop(old_udn, None)
+            manager.dmr_devices.pop(old_udn, None)
+
+        manager.migrate_renderer_udn = migrate
         self.manager = manager
 
         disc = manager.discovery
@@ -815,3 +823,219 @@ def test_source_ip_config_drives_stream_address(monkeypatch):
     monkeypatch.delenv("UPNP_SOURCE_IP")
     manager = UPnPManager()
     assert manager.discovery._source_addr() is None
+
+
+# --------------------------------------------------------------- review fixes
+
+
+@pytest.mark.asyncio
+async def test_not_a_renderer_is_rechecked_with_backoff(h):
+    """A root-only description (booting TV) is re-read later, not ignored forever."""
+    h.serve(LOC_A, device_xml(UDN_A, "Booting TV", services=(CONNECTION_MANAGER,)))
+    h.ssdp.multicast_replies = [search_reply(LOC_A, UDN_A)]
+    await h.discovery.discover(timeout=0)
+
+    h.clock.advance(discovery_module._FAILURE_COOLDOWN_STEPS[0] - 1)
+    await h.discovery.discover(timeout=0)
+    assert h.fetches(LOC_A) == 1  # still backing off
+
+    h.serve(LOC_A, device_xml(UDN_A, "Booting TV"))  # finished booting
+    h.clock.advance(2)
+    found = await h.discovery.discover(timeout=0)
+    assert h.fetches(LOC_A) == 2
+    assert [r["udn"] for r in found] == [UDN_A]
+
+
+@pytest.mark.asyncio
+async def test_not_a_renderer_backoff_escalates(h):
+    h.serve(LOC_A, device_xml(UDN_A, "Odd", services=(CONNECTION_MANAGER,)))
+    h.ssdp.multicast_replies = [search_reply(LOC_A, UDN_A)]
+    await h.discovery.discover(timeout=0)
+    h.clock.advance(discovery_module._FAILURE_COOLDOWN_STEPS[0] + 1)
+    await h.discovery.discover(timeout=0)
+    assert h.fetches(LOC_A) == 2
+    h.clock.advance(discovery_module._FAILURE_COOLDOWN_STEPS[0] + 1)
+    await h.discovery.discover(timeout=0)
+    assert h.fetches(LOC_A) == 2  # second step is longer
+
+
+@pytest.mark.asyncio
+async def test_saved_renderer_serving_root_only_description_is_rechecked_every_scan(h):
+    h.serve(LOC_A, device_xml(UDN_A, "TV"))
+    h.ssdp.multicast_replies = [search_reply(LOC_A, UDN_A, bootid="1")]
+    await h.discovery.discover(timeout=0)
+
+    # Reboots into a root-only description for a while.
+    h.serve(LOC_A, device_xml(UDN_A, "TV", services=(CONNECTION_MANAGER,)))
+    h.ssdp.multicast_replies = [search_reply(LOC_A, UDN_A, bootid="2")]
+    await h.discovery.discover(timeout=0)
+    assert h.fetches(LOC_A) == 2
+    assert h.discovery._locations[LOC_A].is_renderer  # still a known renderer
+    assert h.manager.renderers[UDN_A]["friendly_name"] == "TV"
+
+    h.serve(LOC_A, device_xml(UDN_A, "TV"))
+    h.clock.advance(discovery_module.POLL_INTERVAL_SECONDS + 1)
+    await h.discovery.discover(timeout=0)
+    assert h.fetches(LOC_A) == 3
+    assert h.discovery._locations[LOC_A].recheck_at == 0.0
+    assert h.available_udns() == {UDN_A}
+
+
+@pytest.mark.asyncio
+async def test_failed_save_leaves_no_half_registered_renderer(h):
+    h.serve(LOC_A, device_xml(UDN_A, "Kitchen"))
+
+    async def failing_save(_info):
+        raise RuntimeError("db down")
+
+    h.manager.save_renderer = failing_save
+
+    assert await h.discovery.hydrate(LOC_A) is None
+    assert UDN_A not in h.manager.renderers
+    assert UDN_A not in h.manager.dmr_devices
+    assert h.available_udns() == set()
+
+
+@pytest.mark.asyncio
+async def test_deadline_mid_registration_commits_only_finished_endpoints(h, monkeypatch):
+    monkeypatch.setattr(discovery_module, "HYDRATE_DEADLINE_SECONDS", 0.2)
+    zone1 = device_xml("uuid:zone-1", "Zone 1")
+    zone2 = device_xml("uuid:zone-2", "Zone 2")
+    h.serve(LOC_A, device_xml(UDN_A, "Amp", device_type=BASIC_DEVICE, services=(), children=(zone1, zone2)))
+
+    async def save(info):
+        if info["udn"] == "uuid:zone-2":
+            await asyncio.sleep(5)
+        h.saved.append(info)
+
+    h.manager.save_renderer = save
+
+    assert await h.discovery.hydrate(LOC_A) is None  # deadline hit
+
+    assert "uuid:zone-2" not in h.manager.renderers
+    assert h.manager.renderers["uuid:zone-1"]["available"] is True
+    record = h.discovery._locations[LOC_A]
+    assert record.udns == ["uuid:zone-1"] and record.available  # tracked, so probed later
+
+
+@pytest.mark.asyncio
+async def test_root_udn_settings_move_to_single_embedded_endpoint(h):
+    """Old installs saved the root UDN; now the embedded child is the endpoint."""
+    h.manager.renderers[UDN_A] = {"udn": UDN_A, "friendly_name": "Receiver", "available": False}
+    record = discovery_module.LocationRecord(location=LOC_A, udns=[UDN_A], needs_rehydrate=True)
+    h.discovery._locations[LOC_A] = record
+    child = device_xml(UDN_B, "Receiver Zone")
+    h.serve(LOC_A, device_xml(UDN_A, "Receiver", device_type=BASIC_DEVICE, services=(), children=(child,)))
+
+    found = await h.discovery.hydrate(LOC_A)
+
+    assert [r["udn"] for r in found] == [UDN_B]
+    assert h.migrations == [(UDN_A, UDN_B)]
+    assert UDN_A not in h.manager.renderers
+    assert h.discovery._locations[LOC_A].udns == [UDN_B]
+
+
+@pytest.mark.asyncio
+async def test_root_udn_left_unavailable_when_endpoints_are_ambiguous(h):
+    h.manager.renderers[UDN_A] = {"udn": UDN_A, "friendly_name": "Amp", "available": True}
+    h.discovery._locations[LOC_A] = discovery_module.LocationRecord(
+        location=LOC_A, udns=[UDN_A], available=True, hydrated=True, needs_rehydrate=True
+    )
+    zone1 = device_xml("uuid:zone-1", "Zone 1")
+    zone2 = device_xml("uuid:zone-2", "Zone 2")
+    h.serve(LOC_A, device_xml(UDN_A, "Amp", device_type=BASIC_DEVICE, services=(), children=(zone1, zone2)))
+
+    await h.discovery.hydrate(LOC_A)
+
+    assert h.migrations == []
+    assert h.manager.renderers[UDN_A]["available"] is False  # kept, hidden
+    assert ([UDN_A], False) in h.persisted
+    assert h.available_udns() == {"uuid:zone-1", "uuid:zone-2"}
+
+
+@pytest.mark.asyncio
+async def test_control_failure_rehydrate_survives_a_sighting(h):
+    """A sighting cancels the pending probe, but the re-hydrate still happens."""
+    h.serve(LOC_A, device_xml(UDN_A, "Kitchen"))
+    h.ssdp.multicast_replies = [search_reply(LOC_A, UDN_A)]
+    await h.discovery.discover(timeout=0)
+
+    h.discovery.note_control_failure(UDN_A)
+    await h.discovery._on_advertisement(advertisement(LOC_A, UDN_A))  # before the probe ran
+
+    assert h.discovery.hydration_count == 2
+    assert not h.discovery._locations[LOC_A].needs_rehydrate
+
+
+@pytest.mark.asyncio
+async def test_control_failure_rehydrate_survives_pending_byebye_probe(h, monkeypatch):
+    monkeypatch.setattr(discovery_module, "BYEBYE_PROBE_DELAY_SECONDS", 0.05)
+    h.serve(LOC_A, device_xml(UDN_A, "Kitchen"))
+    h.ssdp.multicast_replies = [search_reply(LOC_A, UDN_A)]
+    await h.discovery.discover(timeout=0)
+    h.probe_results[LOC_A] = True
+
+    await h.discovery._on_byebye(advertisement(LOC_A, UDN_A, nts="ssdp:byebye"))
+    h.discovery.note_control_failure(UDN_A)  # probe already queued: early return
+    await asyncio.gather(*h.discovery._probe_tasks.values())
+
+    assert h.discovery.hydration_count == 2
+    assert h.available_udns() == {UDN_A}
+
+
+@pytest.mark.asyncio
+async def test_refresh_waiting_on_background_scan_still_rehydrates(h):
+    h.serve(LOC_A, device_xml(UDN_A, "Kitchen"))
+    h.ssdp.multicast_replies = [search_reply(LOC_A, UDN_A)]
+    await h.discovery.discover(timeout=0)
+    assert h.discovery.hydration_count == 1
+
+    h.ssdp.delay = 0.05
+    background = asyncio.create_task(h.discovery.discover(timeout=0))
+    await asyncio.sleep(0.01)
+    await h.discovery.discover(timeout=0, refresh=True)
+    await background
+
+    assert h.ssdp.multicast_calls == 3  # initial, background, then the refresh
+    assert h.discovery.hydration_count == 2
+
+
+@pytest.mark.asyncio
+async def test_non_refresh_waiting_on_scan_does_not_rescan(h):
+    h.ssdp.delay = 0.05
+    await asyncio.gather(
+        h.discovery.discover(timeout=0, refresh=True), h.discovery.discover(timeout=0)
+    )
+    assert h.ssdp.multicast_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_backend_refresh_does_not_sweep_subnet(h):
+    calls = []
+
+    async def sweep():
+        calls.append("sweep")
+
+    h.manager.scan_subnet = sweep
+    backend = UpnpRendererBackend(h.manager)
+    await backend.discover(refresh=True)
+    assert calls == []
+    assert h.ssdp.multicast_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_start_subnet_scan_is_single_flight(h, monkeypatch):
+    monkeypatch.setattr(
+        discovery_module,
+        "scan_network",
+        lambda ip: (ipaddress.ip_network("192.0.2.0/30"), False),
+    )
+
+    async def probe_host(host, *, manual):
+        await asyncio.sleep(0.05)
+
+    h.discovery._probe_host = probe_host
+    assert h.manager.start_subnet_scan() is True
+    assert h.manager.start_subnet_scan() is False
+    await h.discovery._subnet_task
+    assert not h.manager.is_scanning_subnet

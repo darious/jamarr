@@ -9,6 +9,11 @@ from app.services.renderer.contracts import RendererDevice
 class FakeManager:
     def __init__(self) -> None:
         self.cancelled = False
+        self.sweeps = 0
+
+    def start_subnet_scan(self) -> bool:
+        self.sweeps += 1
+        return True
 
     def cancel_subnet_scan(self) -> bool:
         self.cancelled = True
@@ -40,6 +45,19 @@ class FakeUpnpBackend:
 
     async def list_devices(self):
         return []
+
+    async def discover(self, refresh: bool = False):
+        # Discovery saves renderers on connections of its own; the request
+        # must not be holding one while it runs.
+        self.held_during_discover = _connections_in_use()
+        return []
+
+
+def _connections_in_use() -> int:
+    from app.db import get_pool
+
+    pool = get_pool()
+    return pool.get_size() - pool.get_idle_size()
 
 
 @pytest.fixture
@@ -92,3 +110,74 @@ async def test_cancel_scan_and_diagnostics(auth_client: AsyncClient, fake_upnp):
     response = await auth_client.get("/api/player/upnp/diagnostics")
     assert response.status_code == 200
     assert response.json()["listener"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_refresh_holds_no_connection_and_does_not_sweep(
+    auth_client: AsyncClient, fake_upnp, monkeypatch
+):
+    import app.api.player as player_api
+
+    monkeypatch.setattr(player_api.renderer_orchestrator.registry, "backends", {"upnp": fake_upnp})
+    baseline = _connections_in_use()  # e.g. the test's own db fixture
+
+    response = await auth_client.get(
+        "/api/renderers?refresh=true", headers={"X-Jamarr-Client-Id": "c1"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["renderer_id"] == "local:c1"
+    assert fake_upnp.held_during_discover == baseline
+    assert fake_upnp.manager.sweeps == 0
+
+
+@pytest.mark.asyncio
+async def test_subnet_sweep_is_an_explicit_admin_action(auth_client: AsyncClient, fake_upnp):
+    response = await auth_client.post("/api/scan/subnet")
+    assert response.status_code == 200
+    assert response.json() == {"started": True}
+    assert fake_upnp.manager.sweeps == 1
+
+
+@pytest.mark.asyncio
+async def test_migrate_renderer_udn_repoints_saved_settings(db):
+    """Root-UDN rows from older installs move to the embedded endpoint's UDN."""
+    from app.upnp import UPnPManager
+
+    old, new = "uuid:root-0001", "uuid:zone-0001"
+    for udn, enabled in ((old, False), (new, True)):
+        await db.execute(
+            """
+            INSERT INTO renderer (udn, kind, native_id, renderer_id, friendly_name, enabled_by_default)
+            VALUES ($1, 'upnp', $1, 'upnp:' || $1, 'Amp', $2)
+            """,
+            udn,
+            enabled,
+        )
+    await db.execute(
+        """
+        INSERT INTO client_session (client_id, active_renderer_udn, active_renderer_id, last_seen_at)
+        VALUES ('migrate-client', $1, 'upnp:' || $1, NOW())
+        """,
+        old,
+    )
+    await db.execute(
+        "INSERT INTO renderer_state (renderer_udn, queue, current_index) VALUES ($1, '[1]', 0)",
+        old,
+    )
+
+    manager = UPnPManager()
+    manager.renderers[old] = {"udn": old}
+    manager.active_renderer = old
+    await manager.migrate_renderer_udn(old, new)
+
+    assert await db.fetchval("SELECT count(*) FROM renderer WHERE udn = $1", old) == 0
+    assert await db.fetchval("SELECT enabled_by_default FROM renderer WHERE udn = $1", new) is False
+    session = await db.fetchrow(
+        "SELECT active_renderer_udn, active_renderer_id FROM client_session WHERE client_id = 'migrate-client'"
+    )
+    assert tuple(session) == (new, f"upnp:{new}")
+    assert await db.fetchval("SELECT queue FROM renderer_state WHERE renderer_udn = $1", new) == "[1]"
+    assert await db.fetchval("SELECT count(*) FROM renderer_state WHERE renderer_udn = $1", old) == 0
+    assert old not in manager.renderers
+    assert manager.active_renderer == new

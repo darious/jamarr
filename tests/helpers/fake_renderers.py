@@ -35,8 +35,8 @@ class FakeUpnpManager:
         self.scan_progress = 0
         self.debug_log: list[str] = []
 
-    async def discover(self) -> None:
-        self.commands.append(FakeRendererCommand("discover"))
+    async def discover(self, refresh: bool = False) -> None:
+        self.commands.append(FakeRendererCommand("discover", kwargs={"refresh": refresh}))
 
     async def scan_subnet(self) -> None:
         self.commands.append(FakeRendererCommand("scan_subnet"))
