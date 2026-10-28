@@ -115,3 +115,19 @@ def get_audio_analysis_settings():
 
 def get_user_agent():
     return "Jamarr/0.1 ( internal )"
+
+
+def get_upnp_source_ip():
+    """Optional IPv4 address UPnP discovery binds to and advertises in stream URLs.
+
+    Env ``UPNP_SOURCE_IP`` wins over ``renderer.upnp_source_ip`` in
+    config.yaml. ``None`` (the default) keeps the default-route address.
+    """
+    value = os.environ.get("UPNP_SOURCE_IP")
+    if not value:
+        try:
+            value = (load_config().get("renderer") or {}).get("upnp_source_ip")
+        except (FileNotFoundError, AttributeError):
+            value = None
+    value = str(value).strip() if value else ""
+    return value or None

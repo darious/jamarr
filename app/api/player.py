@@ -760,16 +760,57 @@ async def seek_track(
 @router.post(
     "/api/player/add_manual",
     dependencies=[Depends(get_current_admin_user_jwt)],
+    summary="Add a UPnP renderer by IP or description URL",
 )
 async def add_manual_renderer(data: dict):
-    ip = data.get("ip")
-    if not ip:
+    """Add a renderer the network search missed.
+
+    `ip` is either an IPv4 address (unicast SSDP search, then a few common
+    description URLs) or a full `http(s)://` description URL. Responds with the
+    renderer actually registered; 404 if nothing playable was found.
+    """
+    address = (data.get("ip") or data.get("url") or "").strip()
+    if not address:
         raise HTTPException(status_code=400, detail="Missing ip")
-    found = await renderer_orchestrator.add_manual(ip)
-    if found:
-        return {"status": "found"}
-    else:
-        raise HTTPException(status_code=404, detail="Device not found at IP")
+    device = await renderer_orchestrator.add_manual(address)
+    if device is None:
+        raise HTTPException(status_code=404, detail="No UPnP renderer found at that address")
+    return {"status": "found", "renderer": device.as_api_dict()}
+
+
+@router.post(
+    "/api/scan/cancel",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+    summary="Cancel a running renderer subnet scan",
+)
+async def cancel_subnet_scan():
+    """Stop the UPnP subnet sweep started by `GET /api/renderers?refresh=true`."""
+    upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
+    manager = getattr(upnp_backend, "manager", None)
+    cancel = getattr(manager, "cancel_subnet_scan", None)
+    cancelled = bool(cancel()) if cancel else False
+    return {"cancelled": cancelled}
+
+
+@router.get(
+    "/api/player/upnp/diagnostics",
+    dependencies=[Depends(get_current_admin_user_jwt)],
+    summary="UPnP discovery diagnostics",
+)
+async def upnp_diagnostics():
+    """Discovery state for troubleshooting renderers that do not show up.
+
+    Source/stream address and interface, SSDP listener status, search targets,
+    per-target reply counts of the last scan, description fetch failures,
+    cooldown/suspended locations, per-device last-seen and availability, and
+    recent availability transitions.
+    """
+    upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
+    manager = getattr(upnp_backend, "manager", None)
+    diagnostics = getattr(manager, "diagnostics", None)
+    if diagnostics is None:
+        raise HTTPException(status_code=404, detail="UPnP backend not available")
+    return diagnostics()
 
 
 if not is_production():

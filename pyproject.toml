@@ -30,6 +30,7 @@ dependencies = [
     "slowapi",
     "pychromecast>=14.0.0",
     "zeroconf>=0.130.0",
+    "ifaddr",
 ]
 
 

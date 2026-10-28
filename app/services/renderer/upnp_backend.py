@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+import logging
 from typing import Any
 
 from app.services.renderer.contracts import (
@@ -12,6 +14,8 @@ from app.services.renderer.contracts import (
     split_renderer_id,
 )
 from app.upnp import UPnPManager
+
+logger = logging.getLogger(__name__)
 
 
 class UpnpRendererBackend(RendererBackend):
@@ -28,21 +32,49 @@ class UpnpRendererBackend(RendererBackend):
 
     async def discover(self, refresh: bool = False) -> list[RendererDevice]:
         if refresh:
-            await self.manager.discover()
+            # refresh=True re-hydrates cached devices, not just new ones.
+            if "refresh" in inspect.signature(self.manager.discover).parameters:
+                await self.manager.discover(refresh=True)
+            else:
+                await self.manager.discover()
         return await self.list_devices()
 
     async def add_manual(self, address: str) -> RendererDevice | None:
+        """Add by IP or description URL; returns the device actually registered."""
         found = await self.manager.add_device_by_ip(address)
         if not found:
             return None
-        for device in await self.list_devices():
-            if device.ip == address:
-                return device
-        return None
+        renderers = found if isinstance(found, list) else [found]
+        devices = [self._device_from_renderer(r) for r in renderers if isinstance(r, dict)]
+        return devices[0] if devices else None
 
     async def list_devices(self) -> list[RendererDevice]:
         renderers = await self.manager.get_renderers()
-        return [self._device_from_renderer(renderer) for renderer in renderers]
+        return [
+            self._device_from_renderer(renderer)
+            for renderer in renderers
+            if renderer.get("available", True)
+        ]
+
+    async def is_available(self, renderer_id: str) -> bool | None:
+        """Tracked availability (SSDP liveness + probes); None if unknown here."""
+        checker = getattr(self.manager, "is_available", None)
+        if checker is None:
+            return None
+        _, udn = split_renderer_id(renderer_id)
+        return checker(udn)
+
+    def _note_control_failure(self, renderer_id: str, exc: Exception) -> None:
+        # ValueError means "not registered", not "device did not answer".
+        if isinstance(exc, ValueError):
+            return
+        hook = getattr(self.manager, "note_control_failure", None)
+        if hook is None:
+            return
+        try:
+            hook(split_renderer_id(renderer_id)[1])
+        except Exception:
+            logger.debug("note_control_failure failed for %s", renderer_id, exc_info=True)
 
     async def unload_device(self, renderer_id: str) -> None:
         _, udn = split_renderer_id(renderer_id)
@@ -63,12 +95,16 @@ class UpnpRendererBackend(RendererBackend):
             metadata["stream_url"] = context.stream_url
         if context.stream_mime_type:
             metadata["mime"] = context.stream_mime_type
-        await self.manager.play_track(
-            int(track["id"]),
-            track.get("path"),
-            metadata,
-            username=context.username,
-        )
+        try:
+            await self.manager.play_track(
+                int(track["id"]),
+                track.get("path"),
+                metadata,
+                username=context.username,
+            )
+        except Exception as exc:
+            self._note_control_failure(renderer_id, exc)
+            raise
         return RendererStatus(renderer_id=renderer_id, state="PLAYING")
 
     async def pause(self, renderer_id: str) -> RendererStatus:
@@ -131,6 +167,7 @@ class UpnpRendererBackend(RendererBackend):
             kind=self.kind,
             native_id=udn,
             udn=udn,
+            available=bool(renderer.get("available", True)),
             name=renderer.get("name")
             or renderer.get("friendly_name")
             or renderer.get("model_name")
