@@ -119,6 +119,13 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 - UPnP renderers fetch streams/art via a header-recasing proxy on port 8112
   (`app/services/renderer/stream_proxy.py`), not uvicorn directly — uvicorn
   lowercases response headers and some renderers parse them case-sensitively.
+- UPnP discovery (`app/services/upnp/discovery.py`) separates liveness (SSDP
+  alive/byebye + HTTP probe) from hydration (description/DMR/DB save, only on new
+  LOCATION / BOOTID / CONFIGID / refresh). Gone devices are hidden and get
+  `available = FALSE` but keep their metadata. Debug via
+  `GET /api/player/upnp/diagnostics`. Bind address: `renderer.upnp_source_ip` /
+  `UPNP_SOURCE_IP`. Tests use the in-memory fakes in `tests/helpers/upnp_fakes.py`,
+  never real SSDP.
 - `HOST_IP` auto-derived in `dev.sh`/`deploy.sh` via route lookup; override by exporting it.
 - Frontend dev caches (`web/.svelte-kit`, `web/.vite`) are cleared on `dev.sh` start.
 - `test-web.sh`/`lint.sh` run in containers as root and leave root-owned artifacts in

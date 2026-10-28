@@ -95,6 +95,56 @@ The orchestrator does not care whether a `RendererStatus` came from polling
   watchdog force-advances renderers stuck reporting `PLAYING` at position 0 for
   longer than the track duration plus a margin.
 
+## UPnP discovery
+
+`app/services/upnp/discovery.py` keeps one record per description URL and
+feeds it from three sources:
+
+- **Search bursts** — every 30 s (60 s while the listener runs) an M-SEARCH for
+  both `urn:schemas-upnp-org:device:MediaRenderer:1` and
+  `urn:schemas-upnp-org:service:AVTransport:1`, sent 3× 500 ms apart inside one
+  bounded scan. Overlapping scans share the one in flight.
+- **SSDP listener** — a persistent `ssdp:alive` / `ssdp:update` /
+  `ssdp:byebye` listener. If port 1900 cannot be bound it logs a warning and
+  discovery carries on with polling search only.
+- **Manual add / subnet sweep** — unicast M-SEARCH to the host, then four
+  guessed description URLs. Manual add also takes a full `http(s)://`
+  description URL and returns the renderer actually registered. The sweep
+  (`GET /api/renderers?refresh=true`) covers the interface's real subnet
+  (clipped to a /22), 32 hosts at a time, short timeouts; cancel with
+  `POST /api/scan/cancel`.
+
+**Embedded devices.** Each description is fetched once and its device tree
+walked; every node with its own AVTransport service is registered under its
+own UDN, control URLs and `DmrDevice` (multi-zone amps, NAS/receiver roots).
+Nodes without AVTransport are never registered.
+
+**Hydration vs liveness.** Hydration (description + SCPDs, `GetProtocolInfo`,
+icon, DB save) happens for a new LOCATION, a changed `BOOTID.UPNP.ORG` /
+`CONFIGID.UPNP.ORG`, an explicit refresh, a device coming back after being
+unreachable, or a failed control call whose probe still answers. Any other
+sighting only bumps `last_seen`. Hydrations of the same URL are deduplicated,
+run at most 4 at a time and each has a 20 s deadline. The per-location failure
+cooldown and BOOTID-based un-suspension still gate retries.
+
+**Availability.** A device goes unavailable only after an `ssdp:byebye` or
+its `max-age` + 120 s grace has passed, *and* an HTTP probe of its description
+fails — one lost multicast reply never removes it. Unavailable devices drop
+out of `/api/renderers` and get `renderer.available = FALSE`, but their
+metadata and settings are kept; a fresh alive brings them back.
+`RendererOrchestrator._renderer_available()` asks the backend's
+`is_available()` (this tracked state) before falling back to list
+membership, so stale-session recovery acts on real departures.
+
+**Interface.** `renderer.upnp_source_ip` (env `UPNP_SOURCE_IP`) pins the
+address discovery binds to and that stream/art URLs (incl. the stream proxy)
+use. Unset, the default-route address is used and re-checked each scan.
+
+**Diagnostics.** `GET /api/player/upnp/diagnostics` (admin) returns the source
+and stream address, listener status, search targets, per-target reply counts
+of the last scan, description failures, cooldown/suspended locations,
+per-device last-seen/BOOTID/availability and recent availability transitions.
+
 ## Renderer stream proxy
 
 UPnP renderers fetch stream and artwork URLs through a small in-process HTTP
