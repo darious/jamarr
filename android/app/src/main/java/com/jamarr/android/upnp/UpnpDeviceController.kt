@@ -21,12 +21,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.jupnp.UpnpService
 import org.jupnp.UpnpServiceImpl
 import org.jupnp.android.AndroidUpnpServiceConfiguration
 import org.jupnp.controlpoint.ActionCallback
 import org.jupnp.model.action.ActionInvocation
+import org.jupnp.model.meta.Action
 import org.jupnp.model.message.UpnpResponse
 import org.jupnp.model.message.header.UDADeviceTypeHeader
 import org.jupnp.model.message.header.UDAServiceTypeHeader
@@ -35,6 +38,7 @@ import org.jupnp.model.meta.RemoteDevice
 import org.jupnp.model.meta.Service as UpnpModelService
 import org.jupnp.model.types.UDADeviceType
 import org.jupnp.model.types.UDAServiceType
+import org.jupnp.model.types.UnsignedIntegerFourBytes
 import org.jupnp.registry.DefaultRegistryListener
 import org.jupnp.registry.Registry
 import org.jupnp.support.avtransport.callback.GetPositionInfo
@@ -51,12 +55,14 @@ import org.jupnp.support.model.TransportState
 import org.jupnp.support.renderingcontrol.callback.SetVolume
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 private const val TAG = "UpnpDeviceController"
+private const val SET_NEXT_AV_TRANSPORT_URI = "SetNextAVTransportURI"
 
 class UpnpDeviceController(private val appContext: Context) : DeviceRendererController {
     override val kind: String = "upnp"
@@ -72,6 +78,21 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
     override val state: StateFlow<DeviceRendererPlaybackState> = _state.asStateFlow()
 
     private val endpoints = RendererEndpointIndex()
+
+    /**
+     * Mints a fresh stream URL for a track at load/staging time. UPnP stream
+     * tokens are short-lived, so the URLs resolved when the queue was built
+     * may have expired by the time a later track plays. Null: use those.
+     */
+    @Volatile var streamUrlResolver: (suspend (QueuedTrack) -> String)? = null
+
+    private val sequencer = UpnpTrackSequencer(resolveUri = ::resolveStreamUrl)
+
+    /** Serialises the sequencer: loads, and each poll's reconcile + staging. */
+    private val opLock = Mutex()
+
+    /** Renderers whose SetNextAVTransportURI let us down this session. */
+    private val setNextDisabled = mutableSetOf<String>()
 
     private val mediaRendererType = UDADeviceType("MediaRenderer")
     private val avTransportType = UDAServiceType("AVTransport")
@@ -215,6 +236,7 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
         val active = _state.value.activeRendererId?.removePrefix("upnp:") ?: return
         if (active in udns) {
             stopPolling()
+            sequencer.attach(supportsSetNext = false)
             _state.value = _state.value.copy(activeRendererId = null, isPlaying = false)
         }
     }
@@ -240,7 +262,11 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
 
     override fun selectRenderer(rendererId: String) {
         val udn = rendererId.removePrefix("upnp:")
-        if (endpoints[udn] == null) return
+        val endpoint = endpoints[udn] ?: return
+        if (_state.value.activeRendererId != "upnp:$udn") {
+            val advertised = endpoint.service(AV_TRANSPORT)?.getAction(SET_NEXT_AV_TRANSPORT_URI) != null
+            sequencer.attach(supportsSetNext = advertised && udn !in setNextDisabled)
+        }
         _state.value = _state.value.copy(activeRendererId = "upnp:$udn")
         startPolling()
     }
@@ -254,30 +280,55 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
 
     override suspend fun playQueue(tracks: List<QueuedTrack>, startIndex: Int) {
         if (tracks.isEmpty()) return
-        val idx = startIndex.coerceIn(0, tracks.lastIndex)
-        _state.value = _state.value.copy(
-            queue = tracks,
-            currentIndex = idx,
-            positionSeconds = 0.0,
-            durationSeconds = tracks[idx].durationSeconds,
-            isPlaying = true,
-            transportState = "TRANSITIONING",
-        )
-        playTrackAt(idx)
+        playTrackAt(startIndex.coerceIn(0, tracks.lastIndex), tracks)
     }
 
-    private suspend fun playTrackAt(index: Int) {
-        val track = _state.value.queue.getOrNull(index) ?: return
+    /**
+     * Loads [index] of [queue] and plays it. State moves to the new track
+     * only once the renderer accepted its URI; on a failed load it keeps
+     * reporting what the renderer still has, plus an error in `status`.
+     */
+    private suspend fun playTrackAt(index: Int, queue: List<QueuedTrack> = _state.value.queue) {
+        val track = queue.getOrNull(index) ?: return
         val service = avtService() ?: run {
             Log.w(TAG, "No AVTransport service on active renderer")
+            _state.value = _state.value.copy(status = "Renderer unavailable.")
             return
         }
-        val didl = DidlLite.build(track)
-        runCatching { setAvTransportUri(service, track.streamUrl, didl) }
-            .onFailure { Log.w(TAG, "SetAVTransportURI failed: ${it.message}") }
-        delay(300)
-        runCatching { play(service) }
-            .onFailure { Log.w(TAG, "Play failed: ${it.message}") }
+        stopPolling()
+        val before = _state.value
+        val result = opLock.withLock { sequencer.load(JupnpAvTransport(service), index, queue) }
+        _state.value = when (result) {
+            LoadResult.Playing -> _state.value.copy(
+                queue = sequencer.queue,
+                currentIndex = sequencer.currentIndex,
+                positionSeconds = 0.0,
+                durationSeconds = track.durationSeconds,
+                isPlaying = true,
+                transportState = "TRANSITIONING",
+                status = null,
+            )
+            is LoadResult.PlayFailed -> {
+                Log.w(TAG, "Play failed: ${result.message}")
+                _state.value.copy(
+                    queue = sequencer.queue,
+                    currentIndex = sequencer.currentIndex,
+                    positionSeconds = 0.0,
+                    durationSeconds = track.durationSeconds,
+                    isPlaying = false,
+                    transportState = "STOPPED",
+                    status = "Renderer would not play “${track.title}”: ${result.message}",
+                )
+            }
+            is LoadResult.LoadFailed -> {
+                Log.w(TAG, "SetAVTransportURI failed: ${result.message}")
+                before.copy(
+                    queue = sequencer.queue,
+                    currentIndex = sequencer.currentIndex,
+                    status = "Renderer could not load “${track.title}”: ${result.message}",
+                )
+            }
+        }
         startPolling()
     }
 
@@ -297,6 +348,7 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
         val service = avtService()
         if (service != null) runCatching { stopInternal(service) }
         stopPolling()
+        opLock.withLock { sequencer.stop(service?.let { JupnpAvTransport(it) }) }
         _state.value = _state.value.copy(
             queue = emptyList(),
             currentIndex = -1,
@@ -325,8 +377,6 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
         if (s.queue.isEmpty()) return
         val nextIdx = (s.currentIndex + 1).coerceAtMost(s.queue.lastIndex)
         if (nextIdx == s.currentIndex) return
-        _state.value = s.copy(currentIndex = nextIdx, positionSeconds = 0.0,
-            durationSeconds = s.queue[nextIdx].durationSeconds)
         playTrackAt(nextIdx)
     }
 
@@ -335,25 +385,19 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
         if (s.queue.isEmpty()) return
         val prevIdx = (s.currentIndex - 1).coerceAtLeast(0)
         if (prevIdx == s.currentIndex) return
-        _state.value = s.copy(currentIndex = prevIdx, positionSeconds = 0.0,
-            durationSeconds = s.queue[prevIdx].durationSeconds)
         playTrackAt(prevIdx)
     }
 
     override suspend fun jumpTo(index: Int) {
         val s = _state.value
         if (s.queue.isEmpty()) return
-        val target = index.coerceIn(0, s.queue.lastIndex)
-        _state.value = s.copy(currentIndex = target, positionSeconds = 0.0,
-            durationSeconds = s.queue.getOrNull(target)?.durationSeconds ?: 0.0)
-        playTrackAt(target)
+        playTrackAt(index.coerceIn(0, s.queue.lastIndex))
     }
 
     private fun startPolling() {
         stopPolling()
         pollJob = scope.launch {
             delay(2000) // Renderer settle.
-            var trackStartTime = System.currentTimeMillis()
             while (true) {
                 val service = avtService() ?: break
                 val pos = runCatching { getPositionInfo(service) }.getOrNull()
@@ -361,42 +405,80 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
                 val transportState = xport?.currentTransportState
                 val rel = pos?.trackElapsedSeconds?.toDouble() ?: 0.0
                 val dur = pos?.trackDurationSeconds?.toDouble() ?: 0.0
-
-                val current = _state.value
                 val isPlaying = transportState == TransportState.PLAYING ||
                     transportState == TransportState.TRANSITIONING
                 val stateName = transportState?.value ?: "STOPPED"
 
+                val outcome = opLock.withLock {
+                    val o = sequencer.observe(pos?.trackURI, transportState?.value)
+                    if (o == PollOutcome.None && transportState == TransportState.PLAYING) {
+                        sequencer.syncNext(JupnpAvTransport(service), rel, dur)
+                    }
+                    if (sequencer.stagingDisabled) noteSetNextDisabled()
+                    o
+                }
+
+                val current = _state.value
+                val transitioned = outcome is PollOutcome.Transitioned
                 _state.value = current.copy(
+                    currentIndex = if (transitioned) sequencer.currentIndex else current.currentIndex,
                     positionSeconds = if (rel > 0 || isPlaying) rel else current.positionSeconds,
-                    durationSeconds = if (dur > 0) dur else current.durationSeconds,
+                    durationSeconds = when {
+                        dur > 0 -> dur
+                        outcome is PollOutcome.Transitioned -> sequencer.queue[outcome.index].durationSeconds
+                        else -> current.durationSeconds
+                    },
                     isPlaying = isPlaying,
                     transportState = stateName,
                 )
 
-                val now = System.currentTimeMillis()
-                if (transportState == TransportState.STOPPED &&
-                    now - trackStartTime > 5_000 &&
-                    current.queue.isNotEmpty() &&
-                    current.currentIndex >= 0
-                ) {
-                    val nextIdx = current.currentIndex + 1
-                    if (nextIdx <= current.queue.lastIndex) {
-                        trackStartTime = now
-                        _state.value = current.copy(
-                            currentIndex = nextIdx,
-                            positionSeconds = 0.0,
-                            durationSeconds = current.queue[nextIdx].durationSeconds,
-                        )
-                        playTrackAt(nextIdx)
-                    } else {
-                        _state.value = current.copy(isPlaying = false)
+                when (outcome) {
+                    is PollOutcome.Transitioned -> {
+                        Log.i(TAG, "renderer moved onto staged track ${outcome.index}")
+                        if (outcome.needsPlay) runCatching { play(service) }
                     }
+                    is PollOutcome.Ended -> {
+                        val next = outcome.nextIndex
+                        if (next != null) {
+                            // Load outside this job: playTrackAt stops polling.
+                            scope.launch { playTrackAt(next) }
+                            break
+                        }
+                        _state.value = _state.value.copy(isPlaying = false)
+                    }
+                    PollOutcome.None -> {}
                 }
 
                 delay(1000)
             }
         }
+    }
+
+    private fun noteSetNextDisabled() {
+        val udn = _state.value.activeRendererId?.removePrefix("upnp:") ?: return
+        if (setNextDisabled.add(udn)) {
+            Log.w(TAG, "SetNextAVTransportURI unreliable on $udn; staging off for this session")
+        }
+    }
+
+    private suspend fun resolveStreamUrl(track: QueuedTrack): String {
+        val resolver = streamUrlResolver ?: return track.streamUrl
+        return try {
+            resolver(track)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "stream URL refresh failed for ${track.id}: ${e.message}")
+            track.streamUrl
+        }
+    }
+
+    private inner class JupnpAvTransport(private val service: UpnpModelService<*, *>) : AvTransportPort {
+        override suspend fun setUri(uri: String, metadata: String) = setAvTransportUri(service, uri, metadata)
+
+        override suspend fun setNextUri(uri: String, metadata: String) = setNextAvTransportUri(service, uri, metadata)
+
+        override suspend fun play() = play(service)
     }
 
     private fun stopPolling() {
@@ -418,6 +500,27 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
                     override fun success(invocation: ActionInvocation<*>?) { cont.resume(Unit) }
                     override fun failure(invocation: ActionInvocation<*>?, op: UpnpResponse?, defaultMsg: String?) {
                         cont.resumeWithException(RuntimeException(defaultMsg ?: "SetAVTransportURI failed"))
+                    }
+                })
+            }
+        }
+
+    /** jUPnP ships no callback for this one, so the invocation is built by hand. */
+    private suspend fun setNextAvTransportUri(service: UpnpModelService<*, *>, uri: String, didl: String): Unit =
+        withContext(Dispatchers.IO) {
+            @Suppress("UNCHECKED_CAST")
+            val action = service.getAction(SET_NEXT_AV_TRANSPORT_URI) as? Action<UpnpModelService<*, *>>
+                ?: throw IllegalStateException("$SET_NEXT_AV_TRANSPORT_URI not supported")
+            val invocation = ActionInvocation(action).apply {
+                setInput("InstanceID", UnsignedIntegerFourBytes(0))
+                setInput("NextURI", uri)
+                setInput("NextURIMetaData", didl)
+            }
+            suspendCoroutine { cont: Continuation<Unit> ->
+                execute(object : ActionCallback(invocation) {
+                    override fun success(invocation: ActionInvocation<*>?) { cont.resume(Unit) }
+                    override fun failure(invocation: ActionInvocation<*>?, op: UpnpResponse?, defaultMsg: String?) {
+                        cont.resumeWithException(RuntimeException(defaultMsg ?: "$SET_NEXT_AV_TRANSPORT_URI failed"))
                     }
                 })
             }
