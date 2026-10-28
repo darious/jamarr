@@ -142,6 +142,15 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
             router.enable()
         }
 
+        override fun forgetDevices() {
+            // The registry fires remoteDeviceRemoved per device; clear our
+            // side as well so nothing from the old network survives.
+            runCatching { upnpService?.registry?.removeAllRemoteDevices() }
+            val udns = endpoints.all().map { it.udn }.toSet()
+            endpoints.clear()
+            removeEndpoints(udns)
+        }
+
         override fun addressSignature(): String = lanAddressSignature()
     }
 
@@ -239,9 +248,9 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
     private fun activeEndpoint(): RendererEndpoint? =
         _state.value.activeRendererId?.removePrefix("upnp:")?.let { endpoints[it] }
 
-    private fun avtService(): UpnpModelService<*, *>? = activeEndpoint()?.service(AV_TRANSPORT_ID)
+    private fun avtService(): UpnpModelService<*, *>? = activeEndpoint()?.service(AV_TRANSPORT)
 
-    private fun rcService(): UpnpModelService<*, *>? = activeEndpoint()?.service(RENDERING_CONTROL_ID)
+    private fun rcService(): UpnpModelService<*, *>? = activeEndpoint()?.service(RENDERING_CONTROL)
 
     override suspend fun playQueue(tracks: List<QueuedTrack>, startIndex: Int) {
         if (tracks.isEmpty()) return

@@ -21,6 +21,9 @@ interface DiscoveryEngine {
     /** Re-reads the network interfaces and rebinds the sockets to them. */
     fun rebind()
 
+    /** Drops every known remote device; they belonged to the old network. */
+    fun forgetDevices()
+
     /** The addresses the stack would bind to now; a change means a rebind is due. */
     fun addressSignature(): String
 }
@@ -43,7 +46,8 @@ interface NetworkWatcher {
  *   NOTIFY announcements.
  * - jUPnP binds to the interfaces present when its router is enabled and
  *   never looks again, so a network change (debounced) rebinds it when the
- *   address set changed or a network was lost, then searches again. A start
+ *   address set changed or a network was lost, forgets the old network's
+ *   devices, then searches again. A start
  *   that failed (no network yet) is retried on the next change.
  */
 class DiscoveryLifecycle(
@@ -156,6 +160,13 @@ class DiscoveryLifecycle(
                 return
             }
             boundSignature = signature
+            // Otherwise renderers from the old network linger until their
+            // max-age runs out; anything still reachable answers the burst.
+            try {
+                engine.forgetDevices()
+            } catch (e: Throwable) {
+                onError("forgetting devices failed", e)
+            }
             searchJob?.cancel()
             launchSearchesLocked(burstSearchOffsetsMs)
         }

@@ -2,11 +2,10 @@ package com.jamarr.android.upnp
 
 import org.jupnp.model.meta.RemoteDevice
 import org.jupnp.model.meta.RemoteService
-import org.jupnp.model.types.ServiceId
-import org.jupnp.model.types.UDAServiceId
 
-internal val AV_TRANSPORT_ID = UDAServiceId("AVTransport")
-internal val RENDERING_CONTROL_ID = UDAServiceId("RenderingControl")
+/** Service type names, matched in any namespace and at any version. */
+internal const val AV_TRANSPORT = "AVTransport"
+internal const val RENDERING_CONTROL = "RenderingControl"
 
 /**
  * One playable renderer: a device in a root's tree that carries its own
@@ -19,7 +18,7 @@ data class RendererEndpoint(
     val device: RemoteDevice,
 ) {
     /** The endpoint's own service, never one from a sibling or child device. */
-    fun service(id: ServiceId): RemoteService? = ownService(device, id)
+    fun service(type: String): RemoteService? = ownService(device, type)
 }
 
 /**
@@ -32,7 +31,7 @@ fun rendererEndpoints(root: RemoteDevice): List<RendererEndpoint> {
     val rootUdn = root.identity.udn.identifierString
     val out = mutableListOf<RendererEndpoint>()
     fun walk(device: RemoteDevice) {
-        if (ownService(device, AV_TRANSPORT_ID) != null) {
+        if (ownService(device, AV_TRANSPORT) != null) {
             out += RendererEndpoint(device.identity.udn.identifierString, rootUdn, device)
         }
         device.embeddedDevices.orEmpty().forEach(::walk)
@@ -41,8 +40,17 @@ fun rendererEndpoints(root: RemoteDevice): List<RendererEndpoint> {
     return out.distinctBy { it.udn }
 }
 
-internal fun ownService(device: RemoteDevice, id: ServiceId): RemoteService? =
-    device.services.orEmpty().firstOrNull { it.serviceId == id }
+/**
+ * The device's own service of type [type] (embedded devices not searched).
+ * Matched on the service *type*, as the server does: serviceIds are often
+ * non-standard (`AVTransport1`, vendor ids). The serviceId is only a fallback
+ * for the odd device with a mangled type.
+ */
+internal fun ownService(device: RemoteDevice, type: String): RemoteService? {
+    val services = device.services.orEmpty()
+    return services.firstOrNull { it.serviceType?.type == type }
+        ?: services.firstOrNull { it.serviceId?.id == type }
+}
 
 /**
  * Endpoints by UDN, updated per root device as the registry reports it.
