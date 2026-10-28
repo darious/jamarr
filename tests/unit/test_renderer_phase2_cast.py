@@ -668,3 +668,92 @@ def test_orchestrator_position_heuristic_defers_to_reported_completion():
 
     assert RendererOrchestrator._detect_track_ended(state, cancelled_near_end, 178) is False
     assert RendererOrchestrator._detect_track_ended(state, legacy, 178) is True
+
+
+async def _wait_for_pending_load(cast):
+    for _ in range(200):
+        if cast.media_controller.pending_load_callback:
+            return cast.media_controller.pending_load_callback
+        await asyncio.sleep(0.01)
+    raise AssertionError("LOAD was never issued")
+
+
+TRACK_B = {**TRACK, "id": 905, "title": "Song B"}
+CONTEXT_B = PlaybackContext(
+    base_url="http://127.0.0.1:8111",
+    user_id=42,
+    stream_url="http://127.0.0.1:8111/api/stream/905?token=b",
+)
+
+
+@pytest.mark.asyncio
+async def test_cast_load_timeout_does_not_stop_a_newer_load():
+    backend, cast = await loaded_backend(load_timeout=0.3)
+    cast.media_controller.load_response = None  # the first LOAD never answers
+    first = asyncio.create_task(backend.play_track(RENDERER_ID, TRACK, CONTEXT))
+    await _wait_for_pending_load(cast)
+
+    cast.media_controller.load_response = LOAD_ACCEPTED
+    await backend.play_track(RENDERER_ID, TRACK_B, CONTEXT_B)
+
+    with pytest.raises(RendererLoadError) as excinfo:
+        await first
+    assert excinfo.value.reason == "superseded"
+    assert ("stop", (), {}) not in cast.media_controller.calls
+    assert backend._loads[RENDERER_ID].track_id == 905
+    assert backend._loads[RENDERER_ID].confirmed is True
+
+
+@pytest.mark.asyncio
+async def test_cast_load_cancelled_by_a_newer_load_is_superseded():
+    """Rapid skips: our own second LOAD cancels the first, which is no failure."""
+    backend, cast = await loaded_backend()
+    cast.media_controller.load_response = None
+    first = asyncio.create_task(backend.play_track(RENDERER_ID, TRACK, CONTEXT))
+    first_callback = await _wait_for_pending_load(cast)
+
+    cast.media_controller.load_response = LOAD_ACCEPTED
+    await backend.play_track(RENDERER_ID, TRACK_B, CONTEXT_B)
+    first_callback(True, {"type": "LOAD_CANCELLED", "itemId": 1})
+
+    with pytest.raises(RendererLoadError) as excinfo:
+        await first
+    assert excinfo.value.reason == "superseded"
+    assert backend._loads[RENDERER_ID].track_id == 905
+
+
+def test_cast_untracked_idle_without_reason_defers_to_position():
+    """After a restart nothing is tracked; an IDLE without idleReason (or a
+    FINISHED as the first status seen) is not conclusive, so the position
+    heuristic stays in charge rather than the queue silently stalling."""
+    from app.services.renderer.orchestrator import RendererOrchestrator
+
+    backend = CastRendererBackend()
+    near_end = {"queue": [{"id": 1, "duration_seconds": 180}], "current_index": 0, "position_seconds": 178}
+    mid_track = {**near_end, "position_seconds": 60}
+    for reason, kwargs in (
+        (None, {"previous_state": "PLAYING", "started_at": 0}),
+        (None, {"trust_idle": True}),
+        ("FINISHED", {"trust_idle": True}),  # first status, no PLAYING seen
+    ):
+        mapped = backend.status_from_media_status(
+            RENDERER_ID, idle_status(reason, position=0), **kwargs
+        )
+        assert mapped.ended is False, reason
+        assert mapped.completion_reported is False, reason
+        assert RendererOrchestrator._detect_track_ended(near_end, mapped, 178) is True
+        assert RendererOrchestrator._detect_track_ended(mid_track, mapped, 60) is False
+
+    for reason in ("CANCELLED", "INTERRUPTED", "ERROR"):
+        mapped = backend.status_from_media_status(
+            RENDERER_ID, idle_status(reason, position=0), trust_idle=True
+        )
+        assert mapped.completion_reported is True, reason
+        assert RendererOrchestrator._detect_track_ended(near_end, mapped, 178) is False
+
+    # FINISHED after PLAYING still ends it outright, as before.
+    finished = backend.status_from_media_status(
+        RENDERER_ID, idle_status("FINISHED"), previous_state="PLAYING", started_at=0
+    )
+    assert finished.ended is True
+    assert finished.completion_reported is True

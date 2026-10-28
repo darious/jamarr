@@ -93,14 +93,25 @@ The orchestrator does not care whether a `RendererStatus` came from polling
   connection or a timeout raises `RendererLoadError`: player state drops to
   stopped, `stopped_reason` becomes `load_failed`, and `/api/player/play` /
   `/api/player/index` answer 502. Statuses arriving while the LOAD is pending
-  map to `TRANSITIONING` and are ignored.
+  map to `TRANSITIONING` and are ignored. A LOAD replaced by a newer one
+  (rapid skips: `LOAD_CANCELLED`, or a timeout after the next LOAD went out)
+  is `superseded`, not a failure, and a timed-out LOAD is only stopped while
+  it is still the current one. A failure is only recorded if the track is
+  still current. UPnP `play_track()` raises the same error when
+  `SetAVTransportURI`/`Play` fails, so the same rollback applies.
+- An end of track seen by `GET /api/player/state` polling moves the queue
+  inline but loads the next track in a background task, so the request never
+  waits on the device.
 - Cast completion comes from `idleReason`, and only for the media Jamarr
   loaded: `FINISHED` ends the track (once); `ERROR` halts with
   `stopped_reason = renderer_error`; `CANCELLED`/`INTERRUPTED` (stopped on the
   device, another controller took over) halt with `renderer_stopped`. None of
   these advance, and Cast statuses set `completion_reported`, which turns off
   the orchestrator's position-vs-duration end heuristic. Jamarr's own stop is
-  not reported as a device halt.
+  not reported as a device halt. For media Jamarr is not tracking (e.g. after
+  a server restart), an `IDLE` with no `idleReason`, or a `FINISHED` not seen
+  to follow `PLAYING`, leaves `completion_reported` off so the position
+  heuristic decides.
 - The UPnP poll loop handles two quirky end-of-track signatures seen on real
   renderers: a quick `PLAYING → PAUSED_PLAYBACK → STOPPED` sequence counts as
   track-finished (the `PAUSED` poll alone must not swallow the advance), and a
@@ -142,7 +153,13 @@ the queue).
 **Consistency.** Loading any track (`play_track`: play, skip, jump, new queue,
 start retry, STOPPED fallback) forgets the staged record, and the monitor
 re-stages once the new track is playing. Reorder, delete and append are
-reconciled on the next poll. Stop clears the device's `NextURI`. A seek within
+reconciled on the next poll. Whenever a staged record is dropped while the
+device may still hold it (new load, unplayable next track, `SetNext` failure,
+staging switched off), the monitor sends an empty `NextURI` on the next
+`PLAYING` poll, even if staging was just disabled. If the renderer refuses
+that, the dropped URI is still remembered, so a renderer that rolls into it
+anyway is followed (or corrected) like any staged transition rather than
+leaving the queue a track behind. Stop clears the device's `NextURI`. A seek within
 the current track leaves the staged next as it is. There is no server-side
 shuffle or repeat to account for.
 

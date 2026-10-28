@@ -753,12 +753,14 @@ async def test_control_failure_triggers_probe_and_rehydrate(h):
 
     h.manager.play_track = failing_play
     backend = UpnpRendererBackend(h.manager)
-    from app.services.renderer.contracts import PlaybackContext
+    from app.services.renderer.contracts import PlaybackContext, RendererLoadError
 
-    with pytest.raises(ConnectionError):
+    # Surfaced as a load failure (player state rolls back), cause kept.
+    with pytest.raises(RendererLoadError) as excinfo:
         await backend.play_track(
             f"upnp:{UDN_A}", {"id": 1}, PlaybackContext(base_url="http://x", user_id=None)
         )
+    assert isinstance(excinfo.value.__cause__, ConnectionError)
     await asyncio.gather(*h.discovery._probe_tasks.values())
 
     assert h.probes == [LOC_A]

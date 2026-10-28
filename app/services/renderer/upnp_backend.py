@@ -3,11 +3,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from async_upnp_client.exceptions import UpnpError
+
 from app.services.renderer.contracts import (
     PlaybackContext,
     RendererBackend,
     RendererCapabilities,
     RendererDevice,
+    RendererLoadError,
     RendererStatus,
     make_renderer_id,
     split_renderer_id,
@@ -92,6 +95,14 @@ class UpnpRendererBackend(RendererBackend):
             )
         except Exception as exc:
             self._note_control_failure(renderer_id, exc)
+            if isinstance(exc, (UpnpError, OSError)):
+                # SetAVTransportURI / Play refused or unanswered: the same
+                # load failure as a Cast LOAD_FAILED, so the orchestrator
+                # rolls back is_playing and reports it. ValueError (device not
+                # registered) is left alone: stale-renderer healing needs it.
+                raise RendererLoadError(
+                    renderer_id, "load_failed", str(exc) or type(exc).__name__
+                ) from exc
             raise
         return RendererStatus(renderer_id=renderer_id, state="PLAYING")
 

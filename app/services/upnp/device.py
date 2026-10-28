@@ -301,18 +301,22 @@ class UPnPDeviceControl:
         if not staging.get(udn) and udn not in staging.needs_clear:
             return
         dmr = self.manager.dmr_devices.get(udn)
+        ok = False
         try:
-            if dmr and not staging.is_disabled(udn):
+            # Also when staging has just been disabled: the device may still
+            # hold the URI and would otherwise roll into it.
+            if dmr:
                 await dmr.async_set_next_transport_uri(
                     media_url="", media_title="", meta_data=""
                 )
+                ok = True
                 logger.info(f"[Gapless] Cleared staged next track on {udn}")
         except Exception as exc:
             # Plenty of renderers reject an empty NextURI; nothing to fall
             # back to, and it does not mean staging itself is broken.
             logger.debug(f"Clearing next URI on {udn} failed: {exc}")
         finally:
-            staging.cleared(udn)
+            staging.cleared(udn, ok=ok)
 
     def current_track_uri(self, udn: str) -> Optional[str]:
         """TrackURI from the last GetPositionInfo answered by udn."""
