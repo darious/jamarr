@@ -6,7 +6,7 @@ from uuid import UUID
 import pytest
 
 from app.services.renderer.cast_backend import CastRendererBackend
-from app.services.renderer.contracts import PlaybackContext
+from app.services.renderer.contracts import PlaybackContext, RendererLoadError, RendererStatus
 
 
 class FakeHostBrowser:
@@ -44,6 +44,13 @@ def make_backend(cast: "FakeCast") -> tuple[CastRendererBackend, FakeBrowser]:
     return backend, browser
 
 
+LOAD_ACCEPTED = (
+    True,
+    {"type": "MEDIA_STATUS", "status": [{"mediaSessionId": 1, "playerState": "BUFFERING"}]},
+)
+LOAD_FAILED = (True, {"type": "LOAD_FAILED", "detailedErrorCode": 104, "itemId": 1})
+
+
 class FakeMediaController:
     def __init__(self) -> None:
         self.calls = []
@@ -55,10 +62,26 @@ class FakeMediaController:
             volume_level=0.4,
             volume_muted=False,
             content_id="http://media",
+            idle_reason=None,
         )
+        self.load_response = LOAD_ACCEPTED
+        self.pending_load_callback = None
 
     def play_media(self, *args, **kwargs) -> None:
+        """Answers the LOAD like a receiver would: ``load_response`` is the
+        (success, data) pair pychromecast hands the callback, or None for a
+        receiver that never answers (the callback is kept for later)."""
         self.calls.append(("play_media", args, kwargs))
+        callback = kwargs.get("callback_function")
+        self.pending_load_callback = callback
+        if self.load_response is None or callback is None:
+            return
+        success, data = self.load_response
+        if success and (data or {}).get("type") == "MEDIA_STATUS":
+            self.status.content_id = args[0]
+            self.status.player_state = "BUFFERING"
+            self.status.idle_reason = None
+        callback(success, data)
 
     def pause(self) -> None:
         self.calls.append(("pause", (), {}))
@@ -305,6 +328,7 @@ def test_phase2_cast_status_mapping_and_end_detection():
     renderer_id = "cast:11111111-1111-1111-1111-111111111111"
     status = SimpleNamespace(
         player_state="IDLE",
+        idle_reason="FINISHED",
         adjusted_current_time=180,
         duration=180,
         volume_level=0.5,
@@ -387,9 +411,260 @@ async def test_phase2_cast_status_listener_dispatches_to_async_callback():
     listener = cast.media_controller.listeners[0]
     listener.last_state = "PLAYING"
     listener.started_at = 0
-    listener.new_media_status(SimpleNamespace(player_state="IDLE", current_time=99, duration=99))
+    listener.new_media_status(
+        SimpleNamespace(player_state="IDLE", idle_reason="FINISHED", current_time=99, duration=99)
+    )
     await asyncio.sleep(0)
     await asyncio.sleep(0)
 
     assert received
     assert received[0].ended is True
+
+
+# --- LOAD confirmation and idleReason handling (issue #316) ----------------
+
+RENDERER_ID = "cast:11111111-1111-1111-1111-111111111111"
+TRACK = {
+    "id": 904,
+    "path": "/music/song.flac",
+    "title": "Song",
+    "mime": "audio/flac",
+    "duration_seconds": 180,
+}
+STREAM_URL = "http://127.0.0.1:8111/api/stream/904?token=t"
+CONTEXT = PlaybackContext(base_url="http://127.0.0.1:8111", user_id=42, stream_url=STREAM_URL)
+
+
+def idle_status(idle_reason, content_id=STREAM_URL, position=170):
+    return SimpleNamespace(
+        player_state="IDLE",
+        idle_reason=idle_reason,
+        adjusted_current_time=position,
+        duration=180,
+        content_id=content_id,
+    )
+
+
+async def loaded_backend(**kwargs):
+    cast = FakeCast()
+    backend, _browser = make_backend(cast)
+    for key, value in kwargs.items():
+        setattr(backend, key, value)
+    await backend.discover(refresh=True)
+    return backend, cast
+
+
+@pytest.mark.asyncio
+async def test_cast_play_waits_for_accepted_load():
+    backend, cast = await loaded_backend()
+
+    status = await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    # The LOAD reply reports BUFFERING, which maps to PLAYING throughout.
+    assert status.state == "PLAYING"
+    assert status.current_media_url == STREAM_URL
+    assert backend._loads[RENDERER_ID].confirmed is True
+
+
+@pytest.mark.asyncio
+async def test_cast_accepted_load_without_player_state_is_transitioning():
+    backend, cast = await loaded_backend()
+    cast.media_controller.load_response = (True, {"type": "MEDIA_STATUS", "status": []})
+
+    status = await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    assert status.state == "TRANSITIONING"
+
+
+@pytest.mark.asyncio
+async def test_cast_rejected_load_raises_and_forgets_load():
+    backend, cast = await loaded_backend()
+    cast.media_controller.load_response = LOAD_FAILED
+
+    with pytest.raises(RendererLoadError) as excinfo:
+        await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    assert excinfo.value.reason == "load_rejected"
+    assert "LOAD_FAILED" in excinfo.value.detail
+    assert "104" in excinfo.value.detail
+    assert RENDERER_ID not in backend._loads
+
+
+@pytest.mark.asyncio
+async def test_cast_load_media_error_status_is_a_rejection():
+    backend, cast = await loaded_backend()
+    cast.media_controller.load_response = (
+        True,
+        {"type": "MEDIA_STATUS", "status": [{"playerState": "IDLE", "idleReason": "ERROR"}]},
+    )
+
+    with pytest.raises(RendererLoadError) as excinfo:
+        await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    assert excinfo.value.reason == "load_rejected"
+
+
+@pytest.mark.asyncio
+async def test_cast_load_without_answer_from_connection_is_a_failure():
+    backend, cast = await loaded_backend()
+    cast.media_controller.load_response = (False, None)
+
+    with pytest.raises(RendererLoadError) as excinfo:
+        await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    assert excinfo.value.reason == "load_failed"
+
+
+@pytest.mark.asyncio
+async def test_cast_play_media_exception_is_a_load_failure():
+    backend, cast = await loaded_backend()
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("socket gone")
+
+    cast.media_controller.play_media = boom
+
+    with pytest.raises(RendererLoadError) as excinfo:
+        await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    assert excinfo.value.reason == "load_failed"
+    assert "socket gone" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_cast_load_timeout_raises_and_stops_media():
+    backend, cast = await loaded_backend(load_timeout=0.05)
+    cast.media_controller.load_response = None  # receiver never answers
+
+    with pytest.raises(RendererLoadError) as excinfo:
+        await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    assert excinfo.value.reason == "load_timeout"
+    assert ("stop", (), {}) in cast.media_controller.calls
+    assert RENDERER_ID not in backend._loads
+    # A late answer after the timeout is harmless.
+    cast.media_controller.pending_load_callback(*LOAD_ACCEPTED)
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_cast_statuses_during_pending_load_are_transitioning():
+    backend, cast = await loaded_backend()
+    cast.media_controller.load_response = None
+    play = asyncio.create_task(backend.play_track(RENDERER_ID, TRACK, CONTEXT))
+    for _ in range(200):
+        if cast.media_controller.pending_load_callback:
+            break
+        await asyncio.sleep(0.01)
+
+    # The previous media is replaced: IDLE/INTERRUPTED (and even FINISHED)
+    # for it must neither advance nor halt anything.
+    for reason in ("INTERRUPTED", "FINISHED"):
+        mapped = backend.status_from_media_status(
+            RENDERER_ID,
+            idle_status(reason, content_id="http://old"),
+            previous_state="PLAYING",
+            started_at=0,
+        )
+        assert mapped.state == "TRANSITIONING"
+        assert mapped.ended is False
+        assert mapped.stop_reason is None
+
+    cast.media_controller.pending_load_callback(*LOAD_ACCEPTED)
+    status = await play
+    assert status.state == "PLAYING"
+    assert backend._loads[RENDERER_ID].confirmed is True
+
+
+@pytest.mark.asyncio
+async def test_cast_finished_advances_exactly_once():
+    backend, _cast = await loaded_backend()
+    await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    first = backend.status_from_media_status(RENDERER_ID, idle_status("FINISHED"))
+    # Listener re-broadcasts and /api/player/state polls see it again.
+    again = backend.status_from_media_status(
+        RENDERER_ID, idle_status("FINISHED"), previous_state="PLAYING", started_at=0
+    )
+    polled = backend.status_from_media_status(RENDERER_ID, idle_status("FINISHED"), trust_idle=True)
+
+    assert first.ended is True
+    assert first.state == "IDLE"
+    assert first.stop_reason is None
+    assert again.ended is False
+    assert polled.ended is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("idle_reason", "stop_reason"),
+    [
+        ("CANCELLED", "renderer_stopped"),
+        ("INTERRUPTED", "renderer_stopped"),
+        ("ERROR", "renderer_error"),
+    ],
+)
+async def test_cast_non_finished_idle_halts_without_advancing(idle_reason, stop_reason):
+    backend, _cast = await loaded_backend()
+    await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    mapped = backend.status_from_media_status(
+        RENDERER_ID, idle_status(idle_reason), previous_state="PLAYING", started_at=0
+    )
+
+    assert mapped.ended is False
+    assert mapped.state == "IDLE"
+    assert mapped.stop_reason == stop_reason
+    assert mapped.completion_reported is True
+
+
+@pytest.mark.asyncio
+async def test_cast_explicit_stop_is_not_a_device_halt():
+    backend, _cast = await loaded_backend()
+    await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+    await backend.stop_playback(RENDERER_ID)
+
+    mapped = backend.status_from_media_status(
+        RENDERER_ID, idle_status("CANCELLED"), previous_state="PLAYING", started_at=0
+    )
+
+    assert mapped.ended is False
+    assert mapped.stop_reason is None
+
+
+@pytest.mark.asyncio
+async def test_cast_other_controllers_media_is_not_ours():
+    backend, _cast = await loaded_backend()
+    await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    mapped = backend.status_from_media_status(
+        RENDERER_ID,
+        idle_status("FINISHED", content_id="https://elsewhere/video.mp4"),
+        previous_state="PLAYING",
+        started_at=0,
+    )
+
+    assert mapped.ended is False
+    assert mapped.stop_reason is None
+
+
+def test_cast_untracked_idle_without_finished_does_not_end():
+    backend = CastRendererBackend()
+    for reason in (None, "CANCELLED", "INTERRUPTED", "ERROR"):
+        mapped = backend.status_from_media_status(
+            RENDERER_ID, idle_status(reason), previous_state="PLAYING", started_at=0
+        )
+        assert mapped.ended is False, reason
+
+
+def test_orchestrator_position_heuristic_defers_to_reported_completion():
+    from app.services.renderer.orchestrator import RendererOrchestrator
+
+    state = {"queue": [{"id": 1, "duration_seconds": 180}], "current_index": 0, "position_seconds": 178}
+    cancelled_near_end = RendererStatus(
+        renderer_id=RENDERER_ID, state="IDLE", position_seconds=0, completion_reported=True
+    )
+    legacy = RendererStatus(renderer_id=RENDERER_ID, state="IDLE", position_seconds=0)
+
+    assert RendererOrchestrator._detect_track_ended(state, cancelled_near_end, 178) is False
+    assert RendererOrchestrator._detect_track_ended(state, legacy, 178) is True

@@ -103,6 +103,24 @@ class RendererStatus:
     active_source: str | None = None
     available: bool = True
     ended: bool = False
+    # The backend reports completion itself (``ended``), so position-based
+    # end-of-track heuristics must not second-guess it: a renderer that went
+    # idle because it was cancelled near the end has not finished the track.
+    completion_reported: bool = False
+    # Why playback halted without the listener asking (``last_stop_reason``),
+    # e.g. "renderer_error" or "renderer_stopped".
+    stop_reason: str | None = None
+
+
+class RendererLoadError(RuntimeError):
+    """The renderer rejected, or never confirmed, loading a track."""
+
+    def __init__(self, renderer_id: str, reason: str, detail: str | None = None) -> None:
+        self.renderer_id = renderer_id
+        self.reason = reason
+        self.detail = detail
+        message = f"Renderer {renderer_id} did not load the track: {reason}"
+        super().__init__(f"{message} ({detail})" if detail else message)
 
 
 @dataclass

@@ -15,6 +15,7 @@ from fastapi import HTTPException, Request
 from app.db import db_conn
 from app.services.player.globals import (
     last_playing_position,
+    last_stop_reason,
     last_track_start_time,
     monitor_start_times,
     playback_monitors,
@@ -42,6 +43,7 @@ from app.services.audio_streaming import build_stream_url
 from app.services.renderer.contracts import (
     PlaybackContext,
     RendererDevice,
+    RendererLoadError,
     RendererStatus,
     is_local_renderer,
 )
@@ -387,6 +389,10 @@ class RendererOrchestrator:
         try:
             await self._cancel_monitor(state_key)
             await self._play_remote(renderer_id, state_key, track, user_id, request)
+        except RendererLoadError:
+            # Already recorded in player state by _play_remote; nobody awaits
+            # this task, so don't leave an unobserved exception behind.
+            pass
         except ValueError as exc:
             # Nobody is awaiting this task, so a vanished device would otherwise
             # leave the session pinned to it with only an unobserved traceback.
@@ -433,7 +439,13 @@ class RendererOrchestrator:
                 stream_claims=stream.claims,
             )
             backend = self.registry.get_backend(renderer_id)
-            await backend.play_track(renderer_id, track, context)
+            # A new track supersedes whatever halted the last one.
+            last_stop_reason.pop(state_key, None)
+            try:
+                await backend.play_track(renderer_id, track, context)
+            except RendererLoadError as exc:
+                await self._record_load_failure(state_key, track, exc)
+                raise
             if hasattr(backend, "register_status_listener"):
                 self._register_status_listener(backend, renderer_id, state_key)
             else:
@@ -444,6 +456,37 @@ class RendererOrchestrator:
                 start_retries.pop(state_key, None)
         finally:
             _clear_monitor_starting(state_key)
+
+    async def _record_load_failure(
+        self,
+        state_key: str,
+        track: dict[str, Any],
+        exc: RendererLoadError,
+    ) -> None:
+        """Undo the optimistic is_playing=True for a track the device refused.
+
+        Callers mark the new track as playing before the load is confirmed; a
+        rejected or timed-out load must not leave that standing, or the UI
+        reports playback that is not happening.
+        """
+        logger.warning("Playback of track %s failed on %s: %s", track.get("id"), state_key, exc)
+        last_stop_reason[state_key] = {
+            "reason": "load_failed",
+            "detail": exc.detail or exc.reason,
+            "track_id": track.get("id"),
+            "position_seconds": 0,
+            "at": time.time(),
+        }
+        async with db_conn() as db:
+            state = await get_renderer_state_db(db, state_key)
+            current = self._current_track(state)
+            if current is not None and current.get("id") != track.get("id"):
+                # Something else was started meanwhile; leave its state alone.
+                return
+            state["is_playing"] = False
+            state["transport_state"] = "STOPPED"
+            state["position_seconds"] = 0
+            await update_playback_progress_db(db, state_key, state)
 
     async def _cancel_monitor(self, state_key: str, remove: bool = False) -> None:
         if state_key in playback_monitors:
@@ -586,9 +629,21 @@ class RendererOrchestrator:
         state: dict[str, Any],
         status: RendererStatus,
     ) -> dict[str, Any]:
+        if status.state == "TRANSITIONING" and status.completion_reported:
+            # The backend is mid-load and confirms the outcome itself; statuses
+            # from this window describe the media being replaced.
+            return state
         has_volume_update = status.volume_percent is not None or status.volume_muted is not None
         if status.state == "UNKNOWN" and not status.current_media_url and not has_volume_update:
             return state
+        if status.stop_reason:
+            last_stop_reason[state_key] = {
+                "reason": status.stop_reason,
+                "position_seconds": state.get("position_seconds") or 0,
+                "at": time.time(),
+            }
+        elif status.state == "PLAYING" and status.completion_reported:
+            last_stop_reason.pop(state_key, None)
         prev_position = state.get("position_seconds") or 0
         if status.position_seconds is not None:
             state["position_seconds"] = status.position_seconds
@@ -620,8 +675,12 @@ class RendererOrchestrator:
 
         Uses the larger of previous and current position because some
         devices reset position to 0 on idle.  Only triggers when the
-        device is not actively playing or paused.
+        device is not actively playing or paused.  Skipped for backends that
+        report completion explicitly (Cast's idleReason): there, an idle near
+        the end may be a cancel or an error, which must not advance the queue.
         """
+        if status.completion_reported:
+            return False
         if status.state in ("PLAYING", "PAUSED"):
             return False
         queue = state.get("queue") or []
@@ -662,7 +721,12 @@ class RendererOrchestrator:
         await update_renderer_state_db(db, state_key, state)
         track = queue[next_index]
         renderer_id = self.registry.state_key_to_renderer_id(state_key)
-        await self._play_remote(renderer_id, state_key, track, track.get("user_id"), None)
+        try:
+            await self._play_remote(renderer_id, state_key, track, track.get("user_id"), None)
+        except RendererLoadError:
+            # Recorded (stopped + load_failed) by _play_remote; halt here
+            # rather than skipping through the queue on a failing device.
+            pass
 
     @staticmethod
     def _current_track(state: dict[str, Any]) -> dict[str, Any] | None:
