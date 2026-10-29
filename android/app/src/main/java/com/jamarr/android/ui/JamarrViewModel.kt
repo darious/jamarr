@@ -147,6 +147,23 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         upnpController.streamUrlResolver = { t ->
             apiClient.streamUrl(serverUrl, tokenHolder.get(), t.id, upnpController.kind)
         }
+        // A Cast queue rebuilt from the receiver (app restart, another phone)
+        // names tracks by id; the server fills in what the items lack.
+        castController.serverUrlProvider = { serverUrl }
+        castController.trackResolver = { ids ->
+            apiClient.tracksByIds(serverUrl, ids).map { t ->
+                QueuedTrack(
+                    id = t.id,
+                    title = t.title,
+                    artist = t.artist ?: "Unknown Artist",
+                    album = t.album ?: "Unknown Album",
+                    mime = guessMime(t),
+                    durationSeconds = t.durationSeconds ?: 0.0,
+                    streamUrl = "",
+                    artUrl = t.artSha1?.let { apiClient.artworkUrl(serverUrl, it, maxSize = 600) },
+                )
+            }
+        }
         viewModelScope.launch {
             cookieJar.prime()
             clientId = settingsStore.getClientId()
@@ -259,7 +276,18 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             castController.state.collectLatest { st ->
-                if (isDeviceCast) applyDevicePlaybackState(st)
+                if (isDeviceCast) {
+                    applyDevicePlaybackState(st)
+                    reportDeviceQueueIfChanged(st)
+                }
+            }
+        }
+
+        // The app came back to a Cast session still playing its queue
+        // (process restart, reconnect): follow it instead of playing locally.
+        viewModelScope.launch {
+            castController.resumedRendererId.collectLatest { rendererId ->
+                if (rendererId != null && useDeviceUpnp && !isRemoteMode) adoptResumedCastSession(rendererId)
             }
         }
 
@@ -356,6 +384,49 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             activeRendererUdn.startsWith("cast:") -> castController
             else -> null
         }
+
+    // Track ids of the device queue last reported to the server, which logs
+    // history against it from this client's index/progress reports.
+    private var reportedDeviceQueueIds: List<Long> = emptyList()
+
+    /**
+     * A device queue that changed without this app asking (rebuilt from the
+     * receiver, or edited by another controller) goes to the server too, so
+     * history follows the right tracks.
+     */
+    private fun reportDeviceQueueIfChanged(st: com.jamarr.android.renderer.DeviceRendererPlaybackState) {
+        val ids = st.queue.map { it.id }
+        if (ids.isEmpty() || ids == reportedDeviceQueueIds || clientId.isBlank()) return
+        reportedDeviceQueueIds = ids
+        val tracks = st.queue.map { qt ->
+            SearchTrack(
+                id = qt.id,
+                title = qt.title,
+                artist = qt.artist,
+                album = qt.album,
+                durationSeconds = qt.durationSeconds,
+            )
+        }
+        val index = st.currentIndex.coerceIn(0, tracks.lastIndex)
+        viewModelScope.launch {
+            runCatching { apiClient.reportQueue(serverUrl, clientId, tracks, index) }
+        }
+    }
+
+    private fun adoptResumedCastSession(rendererId: String) {
+        activeRendererUdn = rendererId
+        activeRendererSource = RendererSource.DEVICE
+        applyDevicePlaybackState(castController.state.value)
+        reportDeviceQueueIfChanged(castController.state.value)
+        viewModelScope.launch {
+            runCatching { apiClient.setRenderer(serverUrl, clientId, "local:$clientId") }
+        }
+    }
+
+    /** Leave a device Cast session (it keeps playing) when switching elsewhere. */
+    private fun leaveDeviceCastFor(target: String) {
+        if (isDeviceCast && target != activeRendererUdn) castController.disconnect()
+    }
 
     private fun applyDevicePlaybackState(st: com.jamarr.android.renderer.DeviceRendererPlaybackState) {
         playbackPosition = (st.positionSeconds * 1000).toLong()
@@ -482,6 +553,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             // logging picks up our progress reports.
             if (clientId.isNotBlank()) {
                 runCatching { apiClient.reportQueue(serverUrl, clientId, queue, startIndex) }
+                reportedDeviceQueueIds = queue.map { it.id }
             }
             val token = tokenHolder.get()
             val startIdx = startIndex.coerceIn(0, queue.lastIndex)
@@ -933,6 +1005,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         when (source) {
             RendererSource.DEVICE -> {
                 val rendererId = if (udn.contains(":")) udn else "upnp:$udn"
+                leaveDeviceCastFor(rendererId)
                 val controller = when {
                     rendererId.startsWith("cast:") -> castController
                     rendererId.startsWith("upnp:") -> upnpController
@@ -953,6 +1026,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                 viewModelScope.launch {
                     runCatching { apiClient.setRenderer(serverUrl, clientId, udn) }
                         .onSuccess {
+                            leaveDeviceCastFor(udn)
                             activeRendererUdn = udn
                             activeRendererSource = RendererSource.SERVER
                             remoteVolume = 0
@@ -966,6 +1040,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectLocalRenderer() {
+        leaveDeviceCastFor("local:$clientId")
         activeRendererUdn = "local:$clientId"
         activeRendererSource = RendererSource.SERVER
         showRendererPicker = false
