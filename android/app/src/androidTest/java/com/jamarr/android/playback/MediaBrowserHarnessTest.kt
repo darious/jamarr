@@ -1,7 +1,10 @@
 package com.jamarr.android.playback
 
 import android.content.ComponentName
+import android.os.Bundle
 import androidx.media3.session.MediaBrowser
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -124,6 +127,32 @@ class MediaBrowserHarnessTest {
             outcome.resultCode == 0 ||
                 outcome.resultCode == androidx.media3.session.SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED,
         )
+    }
+
+    @Test
+    fun shuffleAndRepeatAreOfferedAsButtonsAndToggleThroughCustomCommands() {
+        val connected = connect()
+        val before = readOnMain { connected.shuffleModeEnabled }
+
+        // The connection carries the button preferences and authorises the
+        // commands behind them; a controller media3 did not accept would get
+        // ERROR_NOT_SUPPORTED here.
+        val prefs = readOnMain { connected.mediaButtonPreferences }
+        assertTrue(prefs.any { it.sessionCommand?.customAction == MediaButtonPolicy.CMD_TOGGLE_SHUFFLE })
+        assertTrue(prefs.any { it.sessionCommand?.customAction == MediaButtonPolicy.CMD_CYCLE_REPEAT })
+
+        val result = onMain {
+            connected.sendCustomCommand(SessionCommand(MediaButtonPolicy.CMD_TOGGLE_SHUFFLE, Bundle.EMPTY), Bundle.EMPTY)
+        }
+        assertEquals(SessionResult.RESULT_SUCCESS, result.resultCode)
+        assertEquals(!before, readOnMain { connected.shuffleModeEnabled })
+
+        // Put it back so the device is left as found.
+        onMain { connected.sendCustomCommand(SessionCommand(MediaButtonPolicy.CMD_TOGGLE_SHUFFLE, Bundle.EMPTY), Bundle.EMPTY) }
+        assertEquals(before, readOnMain { connected.shuffleModeEnabled })
+
+        val unknown = onMain { connected.sendCustomCommand(SessionCommand("com.jamarr.android.NOPE", Bundle.EMPTY), Bundle.EMPTY) }
+        assertTrue(unknown.resultCode != SessionResult.RESULT_SUCCESS)
     }
 
     companion object {

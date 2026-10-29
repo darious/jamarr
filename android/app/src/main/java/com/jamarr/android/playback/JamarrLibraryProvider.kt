@@ -193,7 +193,14 @@ class JamarrLibraryProvider(
      * Legacy browsers (Android Auto) read these as the `BrowserRoot` extras.
      */
     fun rootParams(): LibraryParams = LibraryParams.Builder()
-        .setExtras(Bundle().apply { putBoolean(SEARCH_SUPPORTED_KEY, true) })
+        .setExtras(
+            Bundle().apply {
+                putBoolean(SEARCH_SUPPORTED_KEY, true)
+                putBoolean(BrowseTree.CONTENT_STYLE_SUPPORTED, true)
+                putInt(BrowseTree.CONTENT_STYLE_BROWSABLE_HINT, BrowseTree.browsableChildStyle(BrowseTree.ID_ROOT))
+                putInt(BrowseTree.CONTENT_STYLE_PLAYABLE_HINT, BrowseTree.playableChildStyle(BrowseTree.ID_ROOT))
+            },
+        )
         .build()
 
     suspend fun itemResult(mediaId: String): LibraryResult<MediaItem> {
@@ -256,6 +263,19 @@ class JamarrLibraryProvider(
         }
     }
 
+    /** A favourite was added or removed: the favourites folders must not serve the cached list. */
+    fun onFavouritesChanged() {
+        scope.launch(Dispatchers.Main) {
+            cache.invalidate("favourite-artists")
+            cache.invalidate("favourite-releases")
+            val current = session ?: return@launch
+            for (id in listOf(BrowseTree.ID_FAV_ARTISTS, BrowseTree.ID_FAV_RELEASES)) {
+                runCatching { current.notifyChildrenChanged(id, Int.MAX_VALUE, null) }
+                    .onFailure { Log.w(TAG, "notifyChildrenChanged($id) failed", it) }
+            }
+        }
+    }
+
     /** Re-publishes the Downloads folder after a download is added, finished or removed. */
     fun onDownloadsChanged() {
         scope.launch(Dispatchers.Main) {
@@ -289,6 +309,8 @@ class JamarrLibraryProvider(
         val group: String? = null,
         val trackId: Long? = null,
         val durationMs: Long? = null,
+        /** The album a track belongs to, when known, for the session's favourite button. */
+        val albumMbid: String? = null,
     )
 
     private suspend fun rowsFor(parentId: String, creds: Credentials): List<Row> = when (parentId) {
@@ -817,6 +839,10 @@ class JamarrLibraryProvider(
         artSha1 = track.artSha1,
         trackId = track.id,
         durationMs = track.durationSeconds.toMillis(),
+        // Inside an album folder the folder's id is the authoritative one;
+        // elsewhere the track's own release id, when the server sent it.
+        albumMbid = parentId?.takeIf { it.startsWith(BrowseTree.PREFIX_ALBUM) }?.removePrefix(BrowseTree.PREFIX_ALBUM)
+            ?: track.mbReleaseId?.takeIf { it.isNotBlank() },
     )
 
     private fun trackCountLabel(count: Int): String? = when {
@@ -1202,8 +1228,14 @@ class JamarrLibraryProvider(
     }
 
     private fun extrasFor(row: Row, forBrowse: Boolean): Bundle? {
-        val group = row.group?.takeIf { forBrowse && it.isNotBlank() } ?: return null
-        return Bundle().apply { putString(GROUP_TITLE_KEY, group) }
+        val extras = Bundle()
+        row.group?.takeIf { forBrowse && it.isNotBlank() }?.let { extras.putString(GROUP_TITLE_KEY, it) }
+        if (forBrowse && row.browsable) {
+            extras.putInt(BrowseTree.CONTENT_STYLE_BROWSABLE_HINT, BrowseTree.browsableChildStyle(row.mediaId))
+            extras.putInt(BrowseTree.CONTENT_STYLE_PLAYABLE_HINT, BrowseTree.playableChildStyle(row.mediaId))
+        }
+        row.albumMbid?.let { extras.putString(MediaButtonPolicy.EXTRA_ALBUM_MBID, it) }
+        return extras.takeIf { !it.isEmpty }
     }
 
     /**
