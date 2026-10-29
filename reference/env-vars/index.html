@@ -2276,6 +2276,10 @@ too — or point readers at <code>.env.example</code> as the source of truth.</p
 <td><code>DEV_DB_DATA_PATH</code> / <code>DEV_CACHE_PATH</code></td>
 <td>Dev overrides used by <code>docker-compose.dev.yml</code></td>
 </tr>
+<tr>
+<td><code>ART_RESIZE_WORKERS</code></td>
+<td>Artwork resizes decoded at once (default <code>2</code>, min <code>1</code>). Overrides <code>artwork.resize_workers</code> in <code>config.yaml</code>; see <a href="../../architecture/artwork/#resize-cache">Artwork</a></td>
+</tr>
 </tbody>
 </table>
 <h2 id="music-volume-nfs">Music volume (NFS)<a class="headerlink" href="#music-volume-nfs" title="Permanent link">&para;</a></h2>
