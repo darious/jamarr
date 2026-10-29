@@ -235,9 +235,21 @@ class JamarrPlaybackService : MediaLibraryService() {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
+        // Music attributes + ExoPlayer-managed audio focus: calls, navigation
+        // prompts and other media pause or duck this player, and a transient
+        // loss resumes on regain unless the user paused in the meantime (a
+        // pause clears playWhenReady, which regain does not touch). Becoming
+        // noisy (headphones or a Bluetooth sink dropping) pauses rather than
+        // carrying on through the speaker. The wake mode keeps CPU and Wi-Fi
+        // up only while playing; ExoPlayer releases both on pause/stop/release.
+        // None of this touches remote renderers: UPnP and Cast queues are
+        // driven by their own controllers, not by this ExoPlayer instance.
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
+            .setAudioAttributes(PlayerAudioConfig.MUSIC, /* handleAudioFocus= */ PlayerAudioConfig.HANDLE_AUDIO_FOCUS)
+            .setHandleAudioBecomingNoisy(PlayerAudioConfig.HANDLE_BECOMING_NOISY)
+            .setWakeMode(PlayerAudioConfig.WAKE_MODE)
             .build()
 
         player.addListener(object : Player.Listener {
