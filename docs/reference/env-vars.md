@@ -23,6 +23,8 @@ Non-secret app config (MusicBrainz URL, logging, concurrency) lives in
 | `HOST_PORT` | `8111` | Port Jamarr listens on |
 | `RENDERER_PROXY_PORT` | `8112` | Port of the renderer stream proxy (UPnP renderers fetch streams/art through it; see [Renderers](../architecture/renderers.md#renderer-stream-proxy)). Overrides `renderer.stream_proxy_port` in `config.yaml` |
 | `UPNP_SOURCE_IP` | *(unset)* | LAN address UPnP discovery binds to (SSDP search + listener) and puts in renderer stream/art URLs. Unset = the default-route address. Overrides `renderer.upnp_source_ip` in `config.yaml`; see [Renderers](../architecture/renderers.md#upnp-discovery) |
+| `UPNP_EVENT_PORT` | `8113` | TCP port of the UPnP event (NOTIFY) callback server, bound on the UPnP source address; `0` = OS-assigned. Overrides `renderer.upnp_event_port` in `config.yaml`; see [Renderers](../architecture/renderers.md#upnp-events-and-watchdog-polling) |
+| `UPNP_EVENTS` | `true` | `false` turns UPnP event subscriptions off (monitor polls every second). Overrides `renderer.upnp_events` in `config.yaml` |
 
 ## Database
 

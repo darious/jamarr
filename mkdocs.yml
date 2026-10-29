@@ -87,6 +87,12 @@ nav:
           - architecture/decisions/0003-cast-stream-token-policy.md
           - architecture/decisions/0004-cast-dual-control-path.md
           - architecture/decisions/0005-scanner-two-phase.md
+          - architecture/decisions/0006-renderer-capability-contract.md
+          - architecture/decisions/0007-airplay-raop.md
+          - architecture/decisions/0008-fire-tv-matter-casting.md
+          - architecture/decisions/0009-dlna-server-and-bridge-roles.md
+          - architecture/decisions/0010-continuous-stream-mode.md
+          - architecture/decisions/0011-openhome-linn.md
           - Template: architecture/decisions/template.md
   - Reference:
       - API: reference/api.md

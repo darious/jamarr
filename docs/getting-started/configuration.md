@@ -33,6 +33,19 @@ Non-secret application config that ships in the repo. Typical contents:
 - UPnP next-track staging overrides (`renderer.upnp_gapless`: `enabled`,
   `disabled_udns`, `forced_udns`) — see
   [Renderers](../architecture/renderers.md#upnp-next-track-staging)
+- UPnP event subscriptions (`renderer.upnp_events`, default `true`;
+  `renderer.upnp_event_port`, default 8113, the NOTIFY callback port bound on
+  the UPnP source address) — see
+  [Renderers](../architecture/renderers.md#upnp-events-and-watchdog-polling)
+- Per-renderer audio output constraints (`renderer.audio_constraints`, keyed by
+  renderer id (`upnp:`/`cast:` prefix optional) / UPnP UDN / Cast UUID:
+  `max_sample_rate_hz`, `max_bit_depth`,
+  `max_channels`, `flac_max_block_size`, `prefer_wav`, `allow_lossy`,
+  `quality`, `supported_mime_types`, `supported_codecs`) — see
+  [Renderers](../architecture/renderers.md#audio-output-planning)
+- Server Cast receiver queue / preload (`renderer.cast_queue`: `enabled`,
+  `enabled_uuids`, `disabled_uuids`, `preload_seconds`; off by default) — see
+  [Renderers](../architecture/renderers.md#cast-receiver-queue-preload)
 
 Edit it directly and restart the stack (or rely on hot-reload in
 [Dev Mode](dev-mode.md)).
