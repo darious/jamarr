@@ -24,6 +24,8 @@ import com.jamarr.android.download.db.DownloadGroupEntity
 import com.jamarr.android.download.db.DownloadedTrackEntity
 import com.jamarr.android.download.groupDownloadStatus
 import com.jamarr.android.playback.JamarrPlaybackController
+import com.jamarr.android.playback.DiagnosticEntry
+import com.jamarr.android.playback.PlaybackDetails
 import com.jamarr.android.playback.PlaybackErrorState
 import com.jamarr.android.playback.PlaybackTelemetry
 import com.jamarr.android.playback.ResolvedTrack
@@ -96,6 +98,15 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     /** The local player's last terminal error, until it plays again. */
     var playbackError by mutableStateOf<PlaybackErrorState?>(null)
         private set
+
+    /** Source / decoder / output facts for the local track; see [PlaybackDetailsSheet]. */
+    var playbackDetails by mutableStateOf(PlaybackDetails())
+        private set
+    var playbackDiagnostics by mutableStateOf<List<DiagnosticEntry>>(emptyList())
+        private set
+    var showPlaybackDetails by mutableStateOf(false)
+
+    fun diagnosticsText(): String = PlaybackTelemetry.diagnostics.exportText()
 
     // Download state, mirrored from the process-wide engine so every screen
     // sees the same progress without each one subscribing to Media3 directly.
@@ -228,6 +239,9 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             app.connectivity.state.collectLatest { onlineState = it }
         }
+
+        viewModelScope.launch { PlaybackTelemetry.details.collectLatest { playbackDetails = it } }
+        viewModelScope.launch { PlaybackTelemetry.diagnostics.entries.collectLatest { playbackDiagnostics = it } }
 
         // Local playback errors: the banner says what happened and whether the
         // service is still trying; Now Playing offers Retry once it is not.

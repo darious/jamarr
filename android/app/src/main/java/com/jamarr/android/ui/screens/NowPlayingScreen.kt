@@ -99,6 +99,7 @@ fun NowPlayingSheet(
     onVolumeChange: (Int) -> Unit = {},
     playbackError: PlaybackErrorState? = null,
     onRetry: () -> Unit = {},
+    onQualityClick: (() -> Unit)? = null,
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -163,6 +164,7 @@ fun NowPlayingSheet(
                             QualityInfo(
                                 originalQualityLabel = originalQualityLabel,
                                 playbackQualityLabel = playbackQualityLabel,
+                                onClick = onQualityClick,
                             )
                             PlaybackErrorRow(error = playbackError, onRetry = onRetry)
                             Spacer(Modifier.height(28.dp))
@@ -215,6 +217,7 @@ fun NowPlayingSheet(
                     QualityInfo(
                         originalQualityLabel = originalQualityLabel,
                         playbackQualityLabel = playbackQualityLabel,
+                        onClick = onQualityClick,
                     )
                     PlaybackErrorRow(error = playbackError, onRetry = onRetry)
                     Spacer(Modifier.height(8.dp))
@@ -476,19 +479,24 @@ private fun TrackInfo(
     }
 }
 
+/** The quality badge; tapping it (local playback only) opens the details sheet. */
 @Composable
 private fun QualityInfo(
     originalQualityLabel: String,
     playbackQualityLabel: String,
+    onClick: (() -> Unit)? = null,
 ) {
     Spacer(Modifier.height(6.dp))
     Text(
-        text = "$originalQualityLabel -> $playbackQualityLabel",
+        text = "$originalQualityLabel -> $playbackQualityLabel" + if (onClick != null) "  ⓘ" else "",
         style = JamarrType.CaptionSmall,
         color = JamarrColors.Muted,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.fillMaxWidth(),
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     )
 }
 

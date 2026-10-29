@@ -53,6 +53,7 @@ import com.jamarr.android.ui.screens.HomeScreen
 import com.jamarr.android.ui.screens.LoginScreen
 import com.jamarr.android.ui.screens.NowPlayingSheet
 import com.jamarr.android.ui.screens.OfflinePlaceholder
+import com.jamarr.android.ui.screens.PlaybackDetailsSheet
 import com.jamarr.android.ui.screens.PlaylistDetailScreen
 import com.jamarr.android.ui.screens.PlaylistsScreen
 import com.jamarr.android.ui.screens.SettingsScreen
@@ -569,7 +570,17 @@ private fun JamarrRoot() {
                     onVolumeChange = { vm.changeRemoteVolume(it) },
                     playbackError = if (vm.isRemoteMode) null else vm.playbackError,
                     onRetry = { vm.retryPlayback() },
+                    // The details describe this phone's pipeline; a renderer's is its own.
+                    onQualityClick = if (vm.isRemoteMode) null else ({ vm.showPlaybackDetails = true }),
                 )
+                if (vm.showPlaybackDetails) {
+                    PlaybackDetailsSheet(
+                        details = vm.playbackDetails,
+                        diagnostics = vm.playbackDiagnostics,
+                        diagnosticsText = { vm.diagnosticsText() },
+                        onDismiss = { vm.showPlaybackDetails = false },
+                    )
+                }
             }
 
             // Status banner (visible after login)
