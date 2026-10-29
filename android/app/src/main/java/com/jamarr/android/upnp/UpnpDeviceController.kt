@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +25,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jupnp.UpnpService
 import org.jupnp.UpnpServiceImpl
 import org.jupnp.android.AndroidUpnpServiceConfiguration
 import org.jupnp.controlpoint.ActionCallback
+import org.jupnp.controlpoint.ControlPoint
+import org.jupnp.controlpoint.SubscriptionCallback
+import org.jupnp.model.gena.CancelReason
+import org.jupnp.model.gena.GENASubscription
 import org.jupnp.model.action.ActionInvocation
 import org.jupnp.model.meta.Action
 import org.jupnp.model.message.UpnpResponse
@@ -63,6 +69,10 @@ import kotlin.coroutines.suspendCoroutine
 
 private const val TAG = "UpnpDeviceController"
 private const val SET_NEXT_AV_TRANSPORT_URI = "SetNextAVTransportURI"
+/** Requested GENA subscription lifetime; jUPnP renews it before expiry. */
+private const val EVENT_SUBSCRIPTION_SECONDS = 1800
+/** Retry delays after a failed/ended subscription (ms), last one repeats. */
+private val EVENT_RETRY_MS = longArrayOf(5_000, 15_000, 30_000, 60_000, 120_000)
 
 class UpnpDeviceController(private val appContext: Context) : DeviceRendererController {
     override val kind: String = "upnp"
@@ -95,6 +105,18 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
 
     /** Renderers whose SetNextAVTransportURI let us down this session. */
     private val setNextDisabled = mutableSetOf<String>()
+
+    /**
+     * AVTransport/RenderingControl events for the active renderer. While they
+     * are healthy the poll loop polls every [UpnpEventTracker.EVENT_POLL_INTERVAL_MS]
+     * as a watchdog and wakes on each transport event; otherwise every second.
+     */
+    private val events = UpnpEventTracker()
+    private val eventWake = Channel<Unit>(Channel.CONFLATED)
+    private val subLock = Any()
+    private val subscriptions = mutableMapOf<String, SubscriptionCallback>()
+    private val subscribedServices = mutableMapOf<String, UpnpModelService<*, *>>()
+    private val subscriptionRetryAt = mutableMapOf<String, Long>()
 
     private val mediaRendererType = UDADeviceType("MediaRenderer")
     private val avTransportType = UDAServiceType("AVTransport")
@@ -219,6 +241,7 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
     /** Stops discovery and releases the multicast lock, callbacks and sockets; idempotent. */
     override fun stop() {
         stopPolling()
+        unsubscribeEvents()
         discovery.stop()
     }
 
@@ -238,6 +261,7 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
         val active = _state.value.activeRendererId?.removePrefix("upnp:") ?: return
         if (active in udns) {
             stopPolling()
+            unsubscribeEvents()
             sequencer.attach(supportsSetNext = false)
             _state.value = _state.value.copy(activeRendererId = null, isPlaying = false)
         }
@@ -266,6 +290,7 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
         val udn = rendererId.removePrefix("upnp:")
         val endpoint = endpoints[udn] ?: return
         if (_state.value.activeRendererId != "upnp:$udn") {
+            unsubscribeEvents()
             val advertised = endpoint.service(AV_TRANSPORT)?.getAction(SET_NEXT_AV_TRANSPORT_URI) != null
             sequencer.attach(supportsSetNext = advertised && udn !in setNextDisabled)
         }
@@ -350,6 +375,7 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
         val service = avtService()
         if (service != null) runCatching { stopInternal(service) }
         stopPolling()
+        unsubscribeEvents()
         opLock.withLock { sequencer.stop(service?.let { JupnpAvTransport(it) }) }
         _state.value = _state.value.copy(
             queue = emptyList(),
@@ -400,8 +426,27 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
         stopPolling()
         pollJob = scope.launch {
             delay(2000) // Renderer settle.
+            var lastPollAt = 0L
+            var lastPolledPosition = 0.0
+            var seenGeneration = -1
             while (true) {
                 val service = avtService() ?: break
+                ensureSubscribed()
+                val now = System.currentTimeMillis()
+                if (events.avt.healthy && events.generation == seenGeneration &&
+                    now - lastPollAt < events.pollIntervalMs()
+                ) {
+                    // Between watchdog polls: extrapolate position while playing.
+                    val s = _state.value
+                    if (s.isPlaying && lastPollAt > 0) {
+                        val pos = lastPolledPosition + (now - lastPollAt) / 1000.0
+                        _state.value = s.copy(
+                            positionSeconds = if (s.durationSeconds > 0) pos.coerceAtMost(s.durationSeconds) else pos,
+                        )
+                    }
+                    withTimeoutOrNull(1000) { eventWake.receive() }
+                    continue
+                }
                 val pos = runCatching { getPositionInfo(service) }.getOrNull()
                 val xport = runCatching { getTransportInfo(service) }.getOrNull()
                 val transportState = xport?.currentTransportState
@@ -410,6 +455,12 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
                 val isPlaying = transportState == TransportState.PLAYING ||
                     transportState == TransportState.TRANSITIONING
                 val stateName = transportState?.value ?: "STOPPED"
+                // Polled values win; repeated disagreement with events marks
+                // them unreliable (back to 1 s polling, re-subscribe).
+                events.notePoll(transportState?.value, pos?.trackURI)
+                seenGeneration = events.generation
+                lastPollAt = now
+                lastPolledPosition = rel
 
                 val outcome = opLock.withLock {
                     val o = sequencer.observe(pos?.trackURI, transportState?.value)
@@ -451,7 +502,11 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
                     PollOutcome.None -> {}
                 }
 
-                delay(1000)
+                if (events.avt.healthy) {
+                    withTimeoutOrNull(1000) { eventWake.receive() }
+                } else {
+                    delay(1000)
+                }
             }
         }
     }
@@ -488,6 +543,126 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
     private fun stopPolling() {
         pollJob?.cancel()
         pollJob = null
+    }
+
+    // --- Events (GENA): AVTransport + RenderingControl LastChange ---
+
+    /**
+     * Subscribes the active renderer's services if needed: first time, after
+     * the device was re-announced as a new object (rebirth), after a lost or
+     * unreliable subscription (with backoff). jUPnP renews live ones itself.
+     */
+    private fun ensureSubscribed() {
+        val endpoint = activeEndpoint() ?: return
+        val cp = upnpService?.controlPoint ?: return
+        val now = System.currentTimeMillis()
+        for (type in listOf(AV_TRANSPORT, RENDERING_CONTROL)) {
+            val service = endpoint.service(type) ?: continue
+            var stale: SubscriptionCallback? = null
+            val wanted = synchronized(subLock) {
+                val current = subscriptions[type]
+                val unreliable = type == AV_TRANSPORT && events.avt.unreliable
+                when {
+                    current != null && subscribedServices[type] === service && !unreliable -> false
+                    current == null && now < (subscriptionRetryAt[type] ?: 0L) -> false
+                    else -> {
+                        stale = current
+                        subscriptions.remove(type)
+                        subscribedServices.remove(type)
+                        true
+                    }
+                }
+            }
+            if (!wanted) continue
+            stale?.let {
+                events.onLost(type, "re-subscribing", failure = false)
+                runCatching { it.end() }
+            }
+            subscribe(cp, type, service)
+        }
+    }
+
+    private fun subscribe(cp: ControlPoint, type: String, service: UpnpModelService<*, *>) {
+        val maxVolume = runCatching {
+            service.getStateVariable("Volume")?.typeDetails?.allowedValueRange?.maximum?.toInt()
+        }.getOrNull() ?: 100
+        val callback = object : SubscriptionCallback(service, EVENT_SUBSCRIPTION_SECONDS) {
+            private fun isCurrent() = synchronized(subLock) { subscriptions[type] === this }
+
+            override fun established(subscription: GENASubscription<*>?) {
+                if (!isCurrent()) return
+                Log.i(TAG, "subscribed to $type events (${subscription?.subscriptionId})")
+                events.onEstablished(type)
+                synchronized(subLock) { subscriptionRetryAt.remove(type) }
+            }
+
+            override fun failed(
+                subscription: GENASubscription<*>?,
+                responseStatus: UpnpResponse?,
+                exception: Exception?,
+                defaultMsg: String?,
+            ) {
+                if (!isCurrent()) return
+                Log.w(TAG, "$type subscription failed: $defaultMsg")
+                dropSubscription(type, this, defaultMsg ?: "subscription failed", failure = true)
+            }
+
+            override fun ended(subscription: GENASubscription<*>?, reason: CancelReason?, responseStatus: UpnpResponse?) {
+                if (!isCurrent()) return
+                Log.i(TAG, "$type subscription ended: ${reason ?: "unsubscribed"}")
+                dropSubscription(type, this, reason?.name ?: "ended", failure = reason != null)
+            }
+
+            override fun eventReceived(subscription: GENASubscription<*>?) {
+                if (!isCurrent()) return
+                val xml = subscription?.currentValues?.get("LastChange")?.value?.toString()
+                val changed = events.onEvent(type, LastChangeParser.parse(xml), maxVolume)
+                if (type == RENDERING_CONTROL) {
+                    // A volume change made on the device (remote, another app).
+                    events.volumePercent?.let { v ->
+                        if (v != _state.value.volumePercent) _state.value = _state.value.copy(volumePercent = v)
+                    }
+                }
+                if (changed) eventWake.trySend(Unit)
+            }
+
+            override fun eventsMissed(subscription: GENASubscription<*>?, numberOfMissedEvents: Int) {
+                Log.w(TAG, "$type: $numberOfMissedEvents event(s) missed")
+                eventWake.trySend(Unit)
+            }
+        }
+        synchronized(subLock) {
+            subscriptions[type] = callback
+            subscribedServices[type] = service
+        }
+        runCatching { cp.execute(callback) }.onFailure {
+            dropSubscription(type, callback, it.message ?: "execute failed", failure = true)
+        }
+    }
+
+    private fun dropSubscription(type: String, callback: SubscriptionCallback, reason: String, failure: Boolean) {
+        synchronized(subLock) {
+            if (subscriptions[type] !== callback) return
+            subscriptions.remove(type)
+            subscribedServices.remove(type)
+        }
+        events.onLost(type, reason, failure)
+        val failures = if (type == RENDERING_CONTROL) events.rc.failures else events.avt.failures
+        val backoff = EVENT_RETRY_MS[(failures - 1).coerceIn(0, EVENT_RETRY_MS.lastIndex)]
+        synchronized(subLock) { subscriptionRetryAt[type] = System.currentTimeMillis() + backoff }
+    }
+
+    /** Ends every subscription (renderer switched or stopped, discovery stopped). */
+    private fun unsubscribeEvents() {
+        val callbacks = synchronized(subLock) {
+            val all = subscriptions.values.toList()
+            subscriptions.clear()
+            subscribedServices.clear()
+            subscriptionRetryAt.clear()
+            all
+        }
+        callbacks.forEach { runCatching { it.end() } }
+        events.clear()
     }
 
     // --- Action invocations (callback → coroutine adapters) ---

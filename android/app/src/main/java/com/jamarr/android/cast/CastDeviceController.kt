@@ -1,23 +1,21 @@
 package com.jamarr.android.cast
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
 import androidx.mediarouter.media.MediaRouteSelector
 import androidx.mediarouter.media.MediaRouter
 import com.google.android.gms.cast.CastMediaControlIntent
-import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
-import com.google.android.gms.cast.MediaMetadata
 import com.google.android.gms.cast.MediaQueueData
 import com.google.android.gms.cast.MediaQueueItem
 import com.google.android.gms.cast.MediaStatus
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
+import com.google.android.gms.cast.framework.media.MediaQueue
+import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
-import com.google.android.gms.common.images.WebImage
 import com.jamarr.android.renderer.DeviceRendererController
 import com.jamarr.android.renderer.DeviceRendererInfo
 import com.jamarr.android.renderer.DeviceRendererPlaybackState
@@ -28,9 +26,17 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val TAG = "CastDeviceController"
+
+// How long a load/jump of ours may take before receiver statuses that still
+// describe the old queue are believed again.
+private const val LOAD_EXPECTATION_MS = 15_000L
+
+// Queue items fetched per status update while rebuilding a long queue.
+private const val FETCH_BATCH = 20
 
 class CastDeviceController(private val appContext: Context) : DeviceRendererController {
     override val kind: String = "cast"
@@ -42,11 +48,42 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
     private val _state = MutableStateFlow(DeviceRendererPlaybackState())
     override val state: StateFlow<DeviceRendererPlaybackState> = _state.asStateFlow()
 
+    /**
+     * Set when a Cast session that was already running Jamarr's queue was
+     * found and adopted without the user picking the device (app restart,
+     * reconnect): the app should switch to it rather than play locally.
+     */
+    private val _resumedRendererId = MutableStateFlow<String?>(null)
+    val resumedRendererId: StateFlow<String?> = _resumedRendererId.asStateFlow()
+
+    /** The Jamarr server's URL, stamped on items so other servers' queues are left alone. */
+    var serverUrlProvider: () -> String? = { null }
+    private val serverUrl: String? get() = serverUrlProvider()?.takeIf { it.isNotBlank() }
+
+    /** Looks up tracks the receiver names by id but carries no details for. */
+    var trackResolver: (suspend (List<Long>) -> List<QueuedTrack>)? = null
+
     private var castContext: CastContext? = null
     private var mediaRouter: MediaRouter? = null
     private var currentSession: CastSession? = null
+    private var attachedQueue: MediaQueue? = null
     private var started = false
     private var ignoreRemoteVolumeUntilMs = 0L
+
+    // Passive: an existing session was attached (restart, resume); its media
+    // is inspected and adopted, never replaced. Explicit: the user picked the
+    // device, so the next play may replace what it is doing.
+    private var explicitRendererId: String? = null
+    private var passiveAttach = false
+    private var leaving = false
+    private var expectation: LoadExpectation? = null
+    private var lastNotOurs: ReceiverOwnership? = null
+
+    // Receiver queue items seen so far, by itemId: MediaQueue only caches a
+    // window, so a long queue is rebuilt from what was fetched over time.
+    private val itemCache = mutableMapOf<Int, ReceiverItem>()
+    private val resolvedTracks = mutableMapOf<Long, QueuedTrack>()
+    private val resolving = mutableSetOf<Long>()
 
     private val selector = MediaRouteSelector.Builder()
         .addControlCategory(
@@ -71,8 +108,12 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
     }
 
     private val sessionListener = object : SessionManagerListener<CastSession> {
-        override fun onSessionStarted(session: CastSession, sessionId: String) = attachSession(session)
-        override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) = attachSession(session)
+        override fun onSessionStarted(session: CastSession, sessionId: String) =
+            attachSession(session, passive = explicitRendererId == null)
+
+        override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) =
+            attachSession(session, passive = explicitRendererId == null)
+
         override fun onSessionStarting(session: CastSession) = Unit
         override fun onSessionStartFailed(session: CastSession, error: Int) = setStatus("Cast session failed: $error")
         override fun onSessionEnding(session: CastSession) = Unit
@@ -82,7 +123,7 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
         override fun onSessionSuspended(session: CastSession, reason: Int) = setStatus("Cast session suspended")
     }
 
-    private val remoteCallback = object : com.google.android.gms.cast.framework.media.RemoteMediaClient.Callback() {
+    private val remoteCallback = object : RemoteMediaClient.Callback() {
         override fun onStatusUpdated() {
             updateFromRemote()
         }
@@ -92,9 +133,19 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
         }
     }
 
-    private val progressListener = com.google.android.gms.cast.framework.media.RemoteMediaClient.ProgressListener {
-        progressMs,
-        durationMs ->
+    private val queueCallback = object : MediaQueue.Callback() {
+        override fun mediaQueueChanged() = updateFromRemote()
+        override fun itemsReloaded() {
+            itemCache.clear()
+            updateFromRemote()
+        }
+
+        override fun itemsInsertedInRange(insertIndex: Int, insertCount: Int) = updateFromRemote()
+        override fun itemsUpdatedAtIndexes(indexes: IntArray) = updateFromRemote()
+        override fun itemsRemovedAtIndexes(indexes: IntArray) = updateFromRemote()
+    }
+
+    private val progressListener = RemoteMediaClient.ProgressListener { progressMs, durationMs ->
         val current = _state.value
         _state.value = current.copy(
             positionSeconds = progressMs.coerceAtLeast(0L) / 1000.0,
@@ -118,7 +169,8 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
                 publishRoutes(router.routes)
             }
             castContext?.sessionManager?.addSessionManagerListener(sessionListener, CastSession::class.java)
-            castContext?.sessionManager?.currentCastSession?.let { attachSession(it) }
+            // A session that outlived the app process: inspect it, don't replace it.
+            castContext?.sessionManager?.currentCastSession?.let { attachSession(it, passive = true) }
         }.onFailure {
             Log.w(TAG, "Cast start failed", it)
             setStatus("Cast unavailable: ${it.message}")
@@ -128,13 +180,13 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
     override fun stop() {
         mediaRouter?.removeCallback(routeCallback)
         castContext?.sessionManager?.removeSessionManagerListener(sessionListener, CastSession::class.java)
-        currentSession?.remoteMediaClient?.unregisterCallback(remoteCallback)
-        currentSession?.remoteMediaClient?.removeProgressListener(progressListener)
+        unregisterRemote()
         mediaRouter = null
         currentSession = null
         started = false
         _renderers.value = emptyList()
         _state.value = DeviceRendererPlaybackState()
+        _resumedRendererId.value = null
     }
 
     override fun search() {
@@ -144,7 +196,13 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
     override fun selectRenderer(rendererId: String) {
         val nativeId = rendererId.removePrefix("cast:")
         val route = mediaRouter?.routes?.firstOrNull { routeRendererId(it) == "cast:$nativeId" } ?: return
+        explicitRendererId = "cast:$nativeId"
         _state.value = _state.value.copy(activeRendererId = "cast:$nativeId", status = null)
+        if (currentSession != null && mediaRouter?.selectedRoute?.let(this::routeRendererId) == "cast:$nativeId") {
+            // Already connected (e.g. adopted on startup): just look again.
+            updateFromRemote()
+            return
+        }
         runCatching {
             mediaRouter?.selectRoute(route)
         }.onFailure {
@@ -153,9 +211,32 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
         }
     }
 
+    /**
+     * Leave the receiver without stopping it: whatever plays there carries
+     * on, and the session can be resumed later. Distinct from [stopPlayback],
+     * the user's explicit Stop.
+     */
+    override fun disconnect() {
+        if (currentSession == null) return
+        leaving = true
+        unregisterRemote()
+        currentSession = null
+        explicitRendererId = null
+        expectation = null
+        _resumedRendererId.value = null
+        _state.value = DeviceRendererPlaybackState()
+        runCatching { castContext?.sessionManager?.endCurrentSession(false) }
+            .onFailure { Log.w(TAG, "Cast leave failed", it) }
+    }
+
     override suspend fun playQueue(tracks: List<QueuedTrack>, startIndex: Int) {
         if (tracks.isEmpty()) return
         val idx = startIndex.coerceIn(0, tracks.lastIndex)
+        val plan = withContext(Dispatchers.Main.immediate) {
+            currentSession?.remoteMediaClient?.let { client ->
+                CastQueueReconciler.planPlay(tracks.map { it.id }, idx, receiverQueue(client))
+            }
+        }
         _state.value = _state.value.copy(
             queue = tracks,
             currentIndex = idx,
@@ -165,7 +246,17 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
             transportState = "BUFFERING",
             status = null,
         )
-        loadQueue(idx)
+        lastNotOurs = null
+        when (plan) {
+            is PlayPlan.JumpTo -> jumpToItem(plan.itemId, idx)
+            is PlayPlan.Load -> {
+                if (plan.replacing == ReceiverOwnership.FOREIGN || plan.replacing == ReceiverOwnership.JAMARR_SERVER) {
+                    Log.i(TAG, "Replacing ${plan.replacing} media on the receiver at the user's request")
+                }
+                loadQueue(idx)
+            }
+            null -> loadQueue(idx)
+        }
     }
 
     override suspend fun pause() {
@@ -179,6 +270,8 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
     }
 
     override suspend fun stopPlayback() {
+        // The user's Stop: stop the receiver's media (not just leave it).
+        expectation = null
         withRemote { stop() }
         _state.value = _state.value.copy(
             queue = emptyList(),
@@ -227,6 +320,11 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
         val s = _state.value
         if (s.queue.isEmpty()) return
         val target = index.coerceIn(0, s.queue.lastIndex)
+        val plan = withContext(Dispatchers.Main.immediate) {
+            currentSession?.remoteMediaClient?.let { client ->
+                CastQueueReconciler.planPlay(s.queue.map { it.id }, target, receiverQueue(client))
+            }
+        }
         _state.value = s.copy(
             currentIndex = target,
             positionSeconds = 0.0,
@@ -234,16 +332,23 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
             isPlaying = true,
             transportState = "BUFFERING",
         )
-        loadQueue(target)
+        if (plan is PlayPlan.JumpTo) jumpToItem(plan.itemId, target) else loadQueue(target)
     }
 
-    private fun attachSession(session: CastSession) {
-        currentSession?.remoteMediaClient?.unregisterCallback(remoteCallback)
-        currentSession?.remoteMediaClient?.removeProgressListener(progressListener)
+    private fun attachSession(session: CastSession, passive: Boolean) {
+        unregisterRemote()
         currentSession = session
-        session.remoteMediaClient?.registerCallback(remoteCallback)
-        session.remoteMediaClient?.addProgressListener(progressListener, 1000L)
+        leaving = false
+        passiveAttach = passive
+        lastNotOurs = null
+        itemCache.clear()
+        val client = session.remoteMediaClient
+        client?.registerCallback(remoteCallback)
+        client?.addProgressListener(progressListener, 1000L)
+        attachedQueue = client?.mediaQueue?.also { it.registerCallback(queueCallback) }
+        val rendererId = explicitRendererId ?: selectedRouteRendererId()
         _state.value = _state.value.copy(
+            activeRendererId = rendererId ?: _state.value.activeRendererId,
             volumePercent = currentRouteVolumePercent() ?: sessionVolumePercent(session),
             status = null,
         )
@@ -251,28 +356,106 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
     }
 
     private fun detachSession(error: Int) {
-        currentSession?.remoteMediaClient?.unregisterCallback(remoteCallback)
-        currentSession?.remoteMediaClient?.removeProgressListener(progressListener)
+        unregisterRemote()
         currentSession = null
+        expectation = null
+        passiveAttach = false
+        _resumedRendererId.value = null
+        if (leaving) {
+            leaving = false
+            return
+        }
         _state.value = _state.value.copy(isPlaying = false, transportState = "STOPPED")
         if (error != 0) setStatus("Cast session ended: $error")
+    }
+
+    private fun unregisterRemote() {
+        currentSession?.remoteMediaClient?.unregisterCallback(remoteCallback)
+        currentSession?.remoteMediaClient?.removeProgressListener(progressListener)
+        attachedQueue?.unregisterCallback(queueCallback)
+        attachedQueue = null
     }
 
     private suspend fun loadQueue(startIndex: Int) {
         withRemote {
             val state = _state.value
-            val items = state.queue.map { MediaQueueItem.Builder(mediaInfo(it)).build() }
+            val items = state.queue.map { MediaQueueItem.Builder(CastMediaItems.mediaInfo(it, serverUrl)).build() }
             val queueData = MediaQueueData.Builder()
                 .setItems(items)
                 .setStartIndex(startIndex)
                 .setRepeatMode(MediaStatus.REPEAT_MODE_REPEAT_OFF)
                 .build()
             val request = MediaLoadRequestData.Builder()
-                .setMediaInfo(mediaInfo(state.queue[startIndex]))
+                .setMediaInfo(CastMediaItems.mediaInfo(state.queue[startIndex], serverUrl))
                 .setQueueData(queueData)
                 .setAutoplay(true)
                 .build()
+            expect(state.queue, startIndex)
+            itemCache.clear()
             load(request)
+        }
+    }
+
+    private suspend fun jumpToItem(itemId: Int, index: Int) {
+        withRemote {
+            expect(_state.value.queue, index)
+            queueJumpToItem(itemId, 0L, null)
+        }
+    }
+
+    private fun expect(queue: List<QueuedTrack>, index: Int) {
+        val current = queue.getOrNull(index) ?: return
+        expectation = LoadExpectation(
+            trackIds = queue.map { it.id },
+            currentTrackId = current.id,
+            untilMs = System.currentTimeMillis() + LOAD_EXPECTATION_MS,
+        )
+    }
+
+    /** The receiver's queue as Jamarr tracks, fetching unseen items as needed. */
+    private fun receiverQueue(client: RemoteMediaClient): ReceiverQueue {
+        val status = client.mediaStatus
+        val queue = client.mediaQueue
+        val itemIds = queue.itemIds.toList()
+        status?.queueItems?.forEach { item ->
+            CastMediaItems.receiverItem(item.itemId, item.media)?.let { itemCache[item.itemId] = it }
+        }
+        itemIds.forEachIndexed { index, id ->
+            if (id !in itemCache) {
+                queue.getItemAtIndex(index, false)?.let { item ->
+                    CastMediaItems.receiverItem(item.itemId, item.media)?.let { itemCache[id] = it }
+                }
+            }
+        }
+        if (itemIds.isNotEmpty()) itemCache.keys.retainAll(itemIds.toSet())
+        val currentItemId = status?.currentItemId?.takeIf { it != MediaQueueItem.INVALID_ITEM_ID }
+        val snapshot = ReceiverSnapshot(
+            itemIds = itemIds,
+            items = itemCache.toMap(),
+            currentItemId = currentItemId,
+            currentMedia = CastMediaItems.receiverItem(currentItemId ?: 0, status?.mediaInfo),
+        )
+        val rebuilt = CastQueueReconciler.reconstruct(snapshot, _state.value.queue, serverUrl, resolvedTracks)
+        // Ask for the items not seen yet; the queue callback brings them.
+        rebuilt.missingItemIds.take(FETCH_BATCH).forEach { id ->
+            val index = queue.indexOfItemWithId(id)
+            if (index >= 0) queue.getItemAtIndex(index, true)
+        }
+        resolveMetadata(rebuilt.needsMetadata)
+        return rebuilt
+    }
+
+    private fun resolveMetadata(trackIds: List<Long>) {
+        val resolver = trackResolver ?: return
+        val wanted = trackIds.filter { it !in resolvedTracks && it !in resolving }
+        if (wanted.isEmpty()) return
+        resolving += wanted
+        scope.launch {
+            runCatching { resolver(wanted) }
+                .onSuccess { tracks -> tracks.forEach { resolvedTracks[it.id] = it } }
+                .onFailure { Log.w(TAG, "Track lookup failed", it) }
+            resolving -= wanted.toSet()
+            updateFromRemote()
         }
     }
 
@@ -281,9 +464,46 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
         val client = session.remoteMediaClient ?: return
         val mediaStatus = client.mediaStatus
         val playerState = mediaStatus?.playerState
-        val activeIndex = mediaStatus?.queueItems?.indexOfFirst { it.itemId == mediaStatus.currentItemId }
-            ?.takeIf { it >= 0 }
-            ?: _state.value.currentIndex
+        val receiver = receiverQueue(client)
+        val now = System.currentTimeMillis()
+        expectation?.let { if (now >= it.untilMs) expectation = null }
+        val before = _state.value
+        when (val sync = CastQueueReconciler.sync(receiver, before.queue, before.currentIndex, expectation, now)) {
+            is QueueSync.NotOurs -> {
+                if (lastNotOurs != sync.ownership) {
+                    lastNotOurs = sync.ownership
+                    _state.value = before.copy(
+                        isPlaying = false,
+                        transportState = "STOPPED",
+                        status = if (sync.ownership == ReceiverOwnership.JAMARR_SERVER) {
+                            "The Jamarr server is playing on this device"
+                        } else {
+                            "Another app is playing on this device"
+                        },
+                    )
+                }
+                passiveAttach = false
+                return
+            }
+            is QueueSync.Adopt -> {
+                if (sync.expectationMet) expectation = null
+                lastNotOurs = null
+                _state.value = before.copy(
+                    queue = sync.tracks,
+                    currentIndex = sync.currentIndex,
+                    durationSeconds = sync.tracks.getOrNull(sync.currentIndex)?.durationSeconds
+                        ?: before.durationSeconds,
+                )
+                if (sync.queueChanged) {
+                    Log.i(TAG, "Adopted the receiver's queue (${sync.tracks.size} tracks)")
+                }
+                if (passiveAttach) {
+                    passiveAttach = false
+                    _resumedRendererId.value = _state.value.activeRendererId
+                }
+            }
+            QueueSync.Keep -> Unit
+        }
         val transport = when (playerState) {
             MediaStatus.PLAYER_STATE_PLAYING, MediaStatus.PLAYER_STATE_BUFFERING -> "PLAYING"
             MediaStatus.PLAYER_STATE_PAUSED -> "PAUSED"
@@ -291,6 +511,11 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
             else -> _state.value.transportState
         }
         val current = _state.value
+        if (expectation != null) {
+            // Our load is still landing; the status is about the old media.
+            return
+        }
+        val activeIndex = current.currentIndex
         val idleFinished = playerState == MediaStatus.PLAYER_STATE_IDLE &&
             mediaStatus?.idleReason == MediaStatus.IDLE_REASON_FINISHED
         if (idleFinished && activeIndex >= current.queue.lastIndex) {
@@ -327,7 +552,12 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
         return mediaRouter?.routes?.firstOrNull { routeRendererId(it) == active }
     }
 
-    private suspend fun <T> withRemote(block: com.google.android.gms.cast.framework.media.RemoteMediaClient.() -> T?): T? =
+    private fun selectedRouteRendererId(): String? =
+        mediaRouter?.selectedRoute
+            ?.takeIf { it.matchesSelector(selector) && !it.isDefault }
+            ?.let(this::routeRendererId)
+
+    private suspend fun <T> withRemote(block: RemoteMediaClient.() -> T?): T? =
         withContext(Dispatchers.Main.immediate) {
             val client = currentSession?.remoteMediaClient ?: run {
                 setStatus("No active Cast session")
@@ -352,20 +582,6 @@ class CastDeviceController(private val appContext: Context) : DeviceRendererCont
             .distinctBy { it.rendererId }
             .sortedBy { it.name.lowercase() }
         _renderers.value = list
-    }
-
-    private fun mediaInfo(track: QueuedTrack): MediaInfo {
-        val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
-            putString(MediaMetadata.KEY_TITLE, track.title)
-            putString(MediaMetadata.KEY_ARTIST, track.artist)
-            putString(MediaMetadata.KEY_ALBUM_TITLE, track.album)
-            track.artUrl?.let { addImage(WebImage(Uri.parse(it))) }
-        }
-        return MediaInfo.Builder(track.streamUrl)
-            .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
-            .setContentType(track.mime)
-            .setMetadata(metadata)
-            .build()
     }
 
     private fun routeRendererId(route: MediaRouter.RouteInfo): String =

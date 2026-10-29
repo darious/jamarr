@@ -213,6 +213,22 @@ class JamarrApiClient(
         execute(request)
     }
 
+    /** Tracks by id (any order), e.g. to rebuild a Cast queue from the ids a receiver reports. */
+    suspend fun tracksByIds(
+        serverUrl: String,
+        ids: List<Long>,
+    ): List<SearchTrack> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptyList()
+        val url = apiUrl(serverUrl, "/api/tracks").toHttpUrl().newBuilder()
+            .addQueryParameter("ids", ids.joinToString(","))
+            .build()
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+        execute(request)
+    }
+
     suspend fun albumDetail(
         serverUrl: String,
         accessToken: String,

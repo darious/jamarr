@@ -63,6 +63,13 @@ interface DeviceRendererController {
     suspend fun next()
     suspend fun previous()
     suspend fun jumpTo(index: Int)
+
+    /**
+     * Leave the renderer without stopping what it plays (switching to another
+     * output). Unlike [stopPlayback], the user's Stop, playback carries on
+     * there. A no-op for renderers without a session to leave.
+     */
+    fun disconnect() = Unit
 }
 
 /**
