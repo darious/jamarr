@@ -10,7 +10,13 @@
     playFromQueue,
     toggleNowPlaying,
     reorderQueue,
+    rendererControls,
   } from "$stores/player";
+  import {
+    PLAY_BUTTON_LABELS,
+    SEEK_DISABLED_LABEL,
+    playButtonAction,
+  } from "$lib/renderer-utils";
   import VolumeControl from "$components/VolumeControl.svelte";
   import { getArtUrl } from "$lib/api";
   import TrackCard from "$components/TrackCard.svelte";
@@ -36,6 +42,10 @@
 
   // Sync progress from store
   $: progress = $playerState.position_seconds || 0;
+
+  // Some renderers can't pause (capabilities.can_pause) or seek (can_seek).
+  $: canSeek = $rendererControls.canSeek;
+  $: playAction = playButtonAction($playerState.is_playing, $rendererControls);
 
   onDestroy(() => {
     if (typeof document !== "undefined") {
@@ -67,6 +77,7 @@
   };
 
   function handleSeek(e: MouseEvent & { currentTarget: HTMLDivElement }) {
+    if (!canSeek) return;
     if (!$playerState.queue.length && !$playerState.renderer) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -406,9 +417,10 @@
               <!-- Progress -->
               <div class="space-y-2 w-full">
                 <div
-                  class="relative h-4 w-full flex items-center cursor-pointer group/slider"
+                  class="relative h-4 w-full flex items-center group/slider {canSeek ? 'cursor-pointer' : 'cursor-default'}"
                   on:click={handleSeek}
                   on:keydown={(e) => {
+                    if (!canSeek) return;
                     if (e.key === "ArrowRight")
                       seek(Math.min(duration, progress + 5));
                     if (e.key === "ArrowLeft") seek(Math.max(0, progress - 5));
@@ -417,7 +429,9 @@
                   aria-valuenow={progress}
                   aria-valuemin={0}
                   aria-valuemax={duration || 100}
-                  tabindex="0"
+                  aria-disabled={!canSeek}
+                  title={canSeek ? undefined : SEEK_DISABLED_LABEL}
+                  tabindex={canSeek ? 0 : -1}
                 >
                   <!-- Background Track -->
                   <div
@@ -431,7 +445,7 @@
                   </div>
                   <!-- Thumb -->
                   <div
-                    class="absolute h-3 w-3 bg-white rounded-full shadow-lg opacity-0 group-hover/slider:opacity-100 transition-opacity pointer-events-none"
+                    class="absolute h-3 w-3 bg-white rounded-full shadow-lg opacity-0 transition-opacity pointer-events-none {canSeek ? 'group-hover/slider:opacity-100' : ''}"
                     style="left: {(progress / (duration || 1)) * 100}%"
                   ></div>
                 </div>
@@ -456,10 +470,18 @@
                 </button>
                 <button
                   class="btn btn-primary"
+                  aria-label={PLAY_BUTTON_LABELS[playAction]}
+                  title={PLAY_BUTTON_LABELS[playAction]}
                   on:click={() =>
                     $playerState.is_playing ? pause() : resume()}
                 >
-                  {#if $playerState.is_playing}
+                  {#if playAction === "stop"}
+                    <svg
+                      class="h-10 w-10"
+                      fill="currentColor"
+                      viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg
+                    >
+                  {:else if playAction === "pause"}
                     <svg
                       class="h-10 w-10"
                       fill="currentColor"

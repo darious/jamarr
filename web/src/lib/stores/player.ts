@@ -1,7 +1,15 @@
-import { writable, get } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import type { Track } from '$api';
 import { fetchWithAuth } from '$lib/api';
-import { rendererMatchesActive, rendererSelectionId } from '$lib/renderer-utils';
+import {
+    activeRendererControls,
+    findActiveRenderer,
+    rendererCanMute,
+    rendererMatchesActive,
+    rendererSelectionId,
+    type RendererCapabilitiesLike,
+    type RendererControls,
+} from '$lib/renderer-utils';
 
 export interface Renderer {
     udn: string;
@@ -15,6 +23,7 @@ export interface Renderer {
     icon_mime?: string;
     icon_width?: number;
     icon_height?: number;
+    capabilities?: RendererCapabilitiesLike | null;
 }
 
 export interface PlayerState {
@@ -27,6 +36,9 @@ export interface PlayerState {
     is_playing: boolean;
     position_seconds: number;
     volume: number | null;
+    // Mute as the renderer reports it (UPnP events, Cast receiver status);
+    // null/undefined when unknown.
+    muted?: boolean | null;
     transport_state?: string;
     // Set by the server when the queue halted on its own rather than because
     // the listener stopped it — a renderer dropping out mid-track. Without it
@@ -36,6 +48,19 @@ export interface PlayerState {
     stream_quality?: string;
     stream_quality_label?: string;
     original_quality_label?: string;
+    // Server-side audio output plan for the current track on a remote
+    // renderer: what is sent and why (transcode reason, resulting quality).
+    output_plan?: OutputPlan | null;
+}
+
+export interface OutputPlan {
+    action: 'original' | 'remux' | 'decode' | 'lossy';
+    format: string;
+    mime_type: string;
+    reason: string;
+    source_label: string;
+    quality_label: string;
+    lossless: boolean;
 }
 
 export const playerState = writable<PlayerState>({
@@ -48,6 +73,19 @@ export const playerState = writable<PlayerState>({
     volume: null,
     repeatMode: 'off'
 });
+
+// Transport controls the active renderer supports (capabilities.can_pause /
+// can_seek). Defaults to everything enabled when capabilities are unknown.
+export const rendererControls = derived<typeof playerState, RendererControls>(
+    playerState,
+    ($s) => activeRendererControls($s.renderers, $s.renderer),
+);
+
+// The active renderer takes mute commands (capabilities.can_mute).
+export const canMute = derived<typeof playerState, boolean>(
+    playerState,
+    ($s) => rendererCanMute(findActiveRenderer($s.renderers, $s.renderer)),
+);
 
 // UI: Now Playing overlay visibility
 export const nowPlayingVisible = writable<boolean>(false);
@@ -181,6 +219,7 @@ export async function setRenderer(rendererIdOrUdn: string) {
                 renderer: active,
                 renderer_id: data.renderer_id || active,
                 volume: isRemote ? null : s.volume,
+                muted: null,
             }));
             await loadQueueFromServer();
         }
@@ -238,7 +277,9 @@ export async function loadQueueFromServer() {
                 // If server returns null (no history), keep existing volume (e.g. locally restored)
                 // If server returns value, use it.
                 volume: (data.volume !== null && data.volume !== undefined) ? data.volume : s.volume,
-                stopped_reason: data.stopped_reason ?? null
+                muted: data.muted ?? null,
+                stopped_reason: data.stopped_reason ?? null,
+                output_plan: data.output_plan ?? null
             }));
 
         } else {
@@ -680,6 +721,29 @@ export function setVolume(percent: number) {
     scheduleVolume();
 }
 
+/** Mute/unmute the active remote renderer. The store flips optimistically
+ *  and reverts if the server refuses (400: the renderer can't mute). */
+export async function setMuted(muted: boolean): Promise<boolean> {
+    const previous = get(playerState).muted ?? null;
+    playerState.update((s) => ({ ...s, muted }));
+    try {
+        const res = await fetchWithAuth('/api/player/mute', {
+            method: 'POST',
+            headers: getHeaders(),
+            body: JSON.stringify({ muted }),
+        });
+        if (!res.ok) throw new Error(`mute failed: ${res.status}`);
+        const data = await res.json();
+        const confirmed = typeof data?.muted === 'boolean' ? data.muted : muted;
+        playerState.update((s) => ({ ...s, muted: confirmed }));
+        return true;
+    } catch (e) {
+        console.error('Failed to set mute', e);
+        playerState.update((s) => ({ ...s, muted: previous }));
+        return false;
+    }
+}
+
 export function toggleNowPlaying() {
     nowPlayingVisible.update(v => !v);
 }
@@ -730,6 +794,8 @@ export async function resume() {
 
 export async function seek(seconds: number) {
     const s = get(playerState);
+    // The renderer would ignore it; don't move the progress bar either.
+    if (!activeRendererControls(s.renderers, s.renderer).canSeek) return;
     if (s.renderer.startsWith('local')) {
 
         window.dispatchEvent(new CustomEvent('jamarr:seek', { detail: { position: seconds } }));

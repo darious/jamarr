@@ -6,6 +6,7 @@
     import {
         getRendererFallback,
         getRendererIcon,
+        rendererControls,
         rendererKind,
         rendererKindLabel,
     } from "$lib/renderer-utils";
@@ -335,6 +336,22 @@
                                     </svg>
                                     Gapless
                                 </span>
+                            {/if}
+                        </div>
+                    {/if}
+
+                    {@const controls = rendererControls(r)}
+                    {#if !controls.canPause || !controls.canSeek}
+                        <div class="mb-4 flex flex-wrap gap-2 text-xs">
+                            {#if !controls.canPause}
+                                <span class="rounded-full bg-surface-3 px-3 py-1 font-medium text-muted"
+                                    >No pause</span
+                                >
+                            {/if}
+                            {#if !controls.canSeek}
+                                <span class="rounded-full bg-surface-3 px-3 py-1 font-medium text-muted"
+                                    >No seek</span
+                                >
                             {/if}
                         </div>
                     {/if}
