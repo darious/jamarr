@@ -34,4 +34,13 @@ object PlaybackTelemetry {
     fun setError(state: PlaybackErrorState?) {
         _errorState.value = state
     }
+
+    private val _details = MutableStateFlow(PlaybackDetails())
+
+    /** Source / decoder / output details for the current local track (#333). */
+    val details: StateFlow<PlaybackDetails> = _details.asStateFlow()
+
+    fun updateDetails(transform: (PlaybackDetails) -> PlaybackDetails) {
+        _details.value = transform(_details.value).copy(updatedAtMs = System.currentTimeMillis())
+    }
 }

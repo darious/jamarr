@@ -2,6 +2,8 @@ package com.jamarr.android.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
@@ -10,6 +12,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -21,8 +24,11 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
@@ -80,6 +86,7 @@ class JamarrPlaybackService : MediaLibraryService() {
     private val streamingPrefs = AtomicReference(StreamingQualityPrefs())
     private val reloadingQueue = AtomicBoolean(false)
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var audioDeviceCallback: AudioDeviceCallback? = null
 
     // Terminal errors: classified, retried within a budget, then surfaced.
     private val errorPolicy = PlaybackErrorPolicy()
@@ -317,13 +324,84 @@ class JamarrPlaybackService : MediaLibraryService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) notePlaying(player)
+                if (isPlaying) {
+                    notePlaying(player)
+                    // The stream URL (and with it the server's labels) may
+                    // only have been resolved after the transition fired.
+                    applyStreamLabels(player.currentMediaItem)
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 handlePlayerError(player, error)
             }
         })
+
+        // Decoder and output facts for the playback-details view (#333). These
+        // are app-owned analytics hooks: nothing here can block playback, and
+        // no credential ever enters the record.
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioInputFormatChanged(
+                eventTime: AnalyticsListener.EventTime,
+                format: Format,
+                decoderReuseEvaluation: DecoderReuseEvaluation?,
+            ) {
+                PlaybackTelemetry.updateDetails {
+                    it.copy(
+                        streamMimeType = format.sampleMimeType,
+                        streamCodecs = format.codecs,
+                        streamSampleRateHz = format.sampleRate.takeIf { r -> r != Format.NO_VALUE },
+                        streamChannels = format.channelCount.takeIf { c -> c != Format.NO_VALUE },
+                        streamPcmEncoding = format.pcmEncoding.takeIf { e -> e != Format.NO_VALUE },
+                        streamBitrate = (format.averageBitrate.takeIf { b -> b != Format.NO_VALUE }
+                            ?: format.bitrate.takeIf { b -> b != Format.NO_VALUE }),
+                    )
+                }
+            }
+
+            override fun onAudioDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long,
+            ) {
+                PlaybackTelemetry.updateDetails { it.copy(decoderName = decoderName) }
+            }
+
+            override fun onAudioTrackInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                audioTrackConfig: AudioSink.AudioTrackConfig,
+            ) {
+                PlaybackTelemetry.updateDetails {
+                    it.copy(
+                        sinkEncoding = audioTrackConfig.encoding,
+                        sinkSampleRateHz = audioTrackConfig.sampleRate,
+                        sinkChannelCount = Integer.bitCount(audioTrackConfig.channelConfig),
+                        sinkOffload = audioTrackConfig.offload,
+                        sinkTunneling = audioTrackConfig.tunneling,
+                        sinkBufferBytes = audioTrackConfig.bufferSize,
+                        mixerSampleRateHz = mixerSampleRate(),
+                    )
+                }
+            }
+
+            override fun onAudioUnderrun(
+                eventTime: AnalyticsListener.EventTime,
+                bufferSize: Int,
+                bufferSizeMs: Long,
+                elapsedSinceLastFeedMs: Long,
+            ) {
+                PlaybackTelemetry.updateDetails { it.copy(underruns = it.underruns + 1) }
+            }
+        })
+
+        // The route can change under a playing track (headphones in, Bluetooth
+        // off); the callback keeps the details view honest without polling.
+        audioDeviceCallback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) = refreshRoute()
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) = refreshRoute()
+        }.also { runCatching { audioManager?.registerAudioDeviceCallback(it, null) } }
+        refreshRoute()
 
         serviceScope.launch(Dispatchers.Main) {
             settingsLoaded.await()
@@ -611,7 +689,47 @@ class JamarrPlaybackService : MediaLibraryService() {
         currentStreamQuality.set(known?.quality ?: quality)
         currentStreamQualityLabel.set(known?.qualityLabel ?: qualityLabel(quality))
         currentOriginalQualityLabel.set(known?.originalQualityLabel ?: qualityLabel(quality))
+
+        // A new track: the source layer is known now, the decoder and output
+        // layers arrive from the analytics hooks as the pipeline builds them.
+        val downloaded = trackId > 0L && mediaCache.downloadedQuality(trackId, activeQuality.get()) != null
+        val source = streamResolver.source(trackId, quality)
+        PlaybackTelemetry.updateDetails { previous ->
+            // Same track (labels arrived after the transition, e.g. once a
+            // retry resolved it): keep the decoder/output layers already
+            // collected. A new track starts those layers afresh.
+            val base = if (previous.trackId != null && previous.trackId == trackId) {
+                previous
+            } else {
+                PlaybackDetails(
+                    mixerSampleRateHz = previous.mixerSampleRateHz ?: mixerSampleRate(),
+                    route = previous.route,
+                    routeExact = previous.routeExact,
+                )
+            }
+            base.copy(
+                trackId = trackId.takeIf { it > 0L },
+                source = when {
+                    downloaded -> "download"
+                    trackId > 0L && mediaCache.isFullyCached(trackId, quality) -> "read-ahead"
+                    else -> "network"
+                },
+                originalLabel = known?.originalQualityLabel,
+                deliveredLabel = known?.qualityLabel ?: if (downloaded) qualityLabel(quality) else null,
+                deliveredQuality = quality,
+                sourceSampleRateHz = source?.sampleRateHz,
+                sourceBitDepth = source?.bitDepth,
+            )
+        }
     }
+
+    private fun refreshRoute() {
+        val route = AudioRoutes.describe(audioManager)
+        PlaybackTelemetry.updateDetails { it.copy(route = route?.label, routeExact = route?.exact ?: false) }
+    }
+
+    private fun mixerSampleRate(): Int? =
+        audioManager?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull()?.takeIf { it > 0 }
 
     private fun recordBufferingEvent(player: ExoPlayer) {
         // Buffering on a fully cached track is a disk/decoder stall, not a slow
@@ -685,10 +803,13 @@ class JamarrPlaybackService : MediaLibraryService() {
         serviceScope.launch(Dispatchers.Main) {
             val player = librarySession?.player ?: return@launch
             val active = activeQuality.get()
-            val next = StreamingQualityPolicy.applyCapNow(active, currentCap())
+            val cap = currentCap()
+            val next = StreamingQualityPolicy.applyCapNow(active, cap)
             if (next == active) return@launch
             val trackId = player.currentMediaItem?.mediaId?.let(::extractTrackId) ?: 0L
             val onDevice = trackId > 0L && mediaCache.isFullyCached(trackId, active)
+            Log.i(TAG, "streaming cap $cap (metered=${connectivityManager.isActiveNetworkMetered}): $active -> $next" +
+                if (onDevice) ", current track on device, applies from the next" else ", reloading")
             if (player.mediaItemCount == 0 || onDevice || player.playbackState == Player.STATE_IDLE) {
                 // Nothing streaming right now: no reload, just a new ceiling
                 // for the next open (and for read-ahead, restarted below).
@@ -889,6 +1010,7 @@ class JamarrPlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         recoveryJob?.cancel()
         networkCallback?.let { runCatching { connectivityManager.unregisterNetworkCallback(it) } }
+        audioDeviceCallback?.let { runCatching { audioManager?.unregisterAudioDeviceCallback(it) } }
         prefetcher.cancel()
         // The caches deliberately outlive the service: they are process-scoped
         // singletons on JamarrApplication and SimpleCache cannot be reopened on
