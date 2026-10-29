@@ -3,6 +3,9 @@ package com.jamarr.android.download
 import coil3.intercept.Interceptor
 import coil3.request.ImageResult
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Cover art for downloaded music, one file per artwork hash.
@@ -17,17 +20,35 @@ class OfflineArtworkStore(private val dir: File) {
     /** The stored file, or null when this artwork is not on disk. */
     fun existing(artSha1: String): File? = file(artSha1).takeIf { it.isFile && it.length() > 0 }
 
+    private val inflight = ConcurrentHashMap<String, Mutex>()
+
     /**
-     * Fetches [artSha1] unless it is already stored. Writes through a temp file
-     * so a fetch that dies half-way never leaves a truncated image to be served.
+     * Fetches [artSha1] unless it is already stored. Concurrent calls for one
+     * hash (two syncs sharing an album) wait for the first and fetch nothing.
+     * The bytes go through a uniquely named temp file and an atomic rename, so
+     * a fetch that dies half-way never leaves a truncated image to be served and
+     * two writers can never interleave in one file.
      */
     suspend fun ensure(artSha1: String, fetch: suspend (String) -> ByteArray?) {
         if (existing(artSha1) != null) return
-        val bytes = fetch(artSha1)?.takeIf { it.isNotEmpty() } ?: return
-        dir.mkdirs()
-        val tmp = File(dir, "$artSha1.tmp")
-        tmp.writeBytes(bytes)
-        if (!tmp.renameTo(file(artSha1))) tmp.delete()
+        val lock = inflight.getOrPut(artSha1) { Mutex() }
+        try {
+            lock.withLock {
+                if (existing(artSha1) != null) return
+                val bytes = fetch(artSha1)?.takeIf { it.isNotEmpty() } ?: return
+                dir.mkdirs()
+                val tmp = File.createTempFile("$artSha1.", ".tmp", dir)
+                try {
+                    tmp.writeBytes(bytes)
+                    if (!tmp.renameTo(file(artSha1))) tmp.delete()
+                } catch (e: Exception) {
+                    tmp.delete()
+                    throw e
+                }
+            }
+        } finally {
+            inflight.remove(artSha1, lock)
+        }
     }
 
     /** Bytes of art on disk. */

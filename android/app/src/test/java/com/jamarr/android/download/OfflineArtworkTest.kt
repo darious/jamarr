@@ -1,6 +1,9 @@
 package com.jamarr.android.download
 
 import java.nio.file.Files
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -29,6 +32,26 @@ class OfflineArtworkTest {
 
         assertEquals(1, fetches)
         assertArrayEquals(byteArrayOf(1, 2, 3), store.existing("aa")!!.readBytes())
+    }
+
+    @Test
+    fun `concurrent calls for one hash fetch once and leave no temp file`() = runTest {
+        var fetches = 0
+        val release = CompletableDeferred<Unit>()
+        val fetch: suspend (String) -> ByteArray? = { fetches++; release.await(); byteArrayOf(9) }
+
+        val a = launch { store.ensure("aa", fetch) }
+        val b = launch { store.ensure("aa", fetch) }
+        val other = launch { store.ensure("bb") { byteArrayOf(1) } }
+        runCurrent()
+        assertEquals(1, fetches)
+        assertNotNull(store.existing("bb")) // a different hash is not held up
+        release.complete(Unit)
+        a.join(); b.join(); other.join()
+
+        assertEquals(1, fetches)
+        assertArrayEquals(byteArrayOf(9), store.existing("aa")!!.readBytes())
+        assertEquals(listOf("aa.img", "bb.img"), dir.list()!!.sorted())
     }
 
     @Test
