@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.playback.PlaybackErrorState
 import com.jamarr.android.playback.ResolvedTrack
 import com.jamarr.android.ui.components.AlbumArt
 import com.jamarr.android.ui.components.CastIcon
@@ -96,6 +97,8 @@ fun NowPlayingSheet(
     onRendererClick: () -> Unit = {},
     volume: Int = 0,
     onVolumeChange: (Int) -> Unit = {},
+    playbackError: PlaybackErrorState? = null,
+    onRetry: () -> Unit = {},
 ) {
     AnimatedVisibility(
         visible = visible,
@@ -161,6 +164,7 @@ fun NowPlayingSheet(
                                 originalQualityLabel = originalQualityLabel,
                                 playbackQualityLabel = playbackQualityLabel,
                             )
+                            PlaybackErrorRow(error = playbackError, onRetry = onRetry)
                             Spacer(Modifier.height(28.dp))
                             ScrubBar(
                                 progressMs = progressMs,
@@ -208,11 +212,11 @@ fun NowPlayingSheet(
                         )
                     }
 
-                    // Progress bar
                     QualityInfo(
                         originalQualityLabel = originalQualityLabel,
                         playbackQualityLabel = playbackQualityLabel,
                     )
+                    PlaybackErrorRow(error = playbackError, onRetry = onRetry)
                     Spacer(Modifier.height(8.dp))
 
                     // Progress bar
@@ -486,6 +490,42 @@ private fun QualityInfo(
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+/**
+ * What stopped playback and, once the service has given up retrying, a way to
+ * try again by hand. Nothing is shown while playback is healthy.
+ */
+@Composable
+private fun PlaybackErrorRow(error: PlaybackErrorState?, onRetry: () -> Unit) {
+    if (error == null) return
+    Spacer(Modifier.height(6.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = if (error.recovering) "${error.summary} — retrying…" else error.summary,
+            style = JamarrType.CaptionSmall,
+            color = JamarrColors.Primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (error.canRetry) {
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "Retry",
+                style = JamarrType.Caption,
+                color = Color.White,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(JamarrColors.Primary)
+                    .clickable(onClick = onRetry)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+    }
 }
 
 @Composable
