@@ -6,6 +6,7 @@ import androidx.media3.session.SessionError
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.JamarrApiClient
+import com.jamarr.android.data.LibraryChange
 import com.jamarr.android.download.db.DownloadGroupEntity
 import com.jamarr.android.download.db.DownloadGroupKind
 import com.jamarr.android.download.db.DownloadRecordState
@@ -420,6 +421,49 @@ class JamarrLibraryProviderInstrumentedTest {
         val items = provider().childrenResult(BrowseTree.albumId("album-1"), 0, Int.MAX_VALUE).items()
 
         assertEquals(emptyList<MediaItem>(), items)
+    }
+
+    // ----- targeted invalidation (#330) ----------------------------------
+
+    @Test
+    fun aLibraryChangeDropsTheCacheBeforeTheFolderIsAskedAgain() = runTest {
+        val p = provider()
+        assertEquals(listOf("Mezzanine"), titles(p.childrenResult(BrowseTree.ID_FAV_RELEASES, 0, Int.MAX_VALUE).items()))
+        p.childrenResult(BrowseTree.ID_PLAYLISTS, 0, Int.MAX_VALUE)
+        routes["/api/favorites/releases"] = """
+            [{"album_mbid":"album-2","title":"Dummy","artist_name":"Portishead","art_sha1":"$SHA_B"}]
+        """.trimIndent()
+
+        // Without a change the 45 s cache still serves the old list.
+        assertEquals(listOf("Mezzanine"), titles(p.childrenResult(BrowseTree.ID_FAV_RELEASES, 0, Int.MAX_VALUE).items()))
+
+        p.applyLibraryChangeNow(LibraryChange.FavouriteReleases)
+
+        assertEquals(listOf("Dummy"), titles(p.childrenResult(BrowseTree.ID_FAV_RELEASES, 0, Int.MAX_VALUE).items()))
+        assertEquals(2, hitsFor("/api/favorites/releases"))
+        // An unrelated folder was not refetched.
+        p.childrenResult(BrowseTree.ID_PLAYLISTS, 0, Int.MAX_VALUE)
+        assertEquals(1, hitsFor("/api/playlists"))
+    }
+
+    @Test
+    fun aBurstOfChangesIsAppliedOnceAfterTheWindow() = runTest {
+        val url = server.url("/").toString().trimEnd('/')
+        val p = JamarrLibraryProvider(
+            apiClient = JamarrApiClient(TokenHolder("t")),
+            credentials = { JamarrLibraryProvider.Credentials(url, "t") },
+            scope = scope,
+            batchWindowMs = 50L,
+        )
+        p.childrenResult(BrowseTree.ID_FAV_ARTISTS, 0, Int.MAX_VALUE)
+        p.onLibraryChange(LibraryChange.FavouriteArtists)
+        p.onLibraryChange(LibraryChange.FavouriteArtists)
+        // Still served from cache until the window closes.
+        p.childrenResult(BrowseTree.ID_FAV_ARTISTS, 0, Int.MAX_VALUE)
+        assertEquals(1, hitsFor("/api/favorites/artists"))
+        Thread.sleep(400)
+        p.childrenResult(BrowseTree.ID_FAV_ARTISTS, 0, Int.MAX_VALUE)
+        assertEquals(2, hitsFor("/api/favorites/artists"))
     }
 
     // ----- content style hints and album ids (#329) ----------------------

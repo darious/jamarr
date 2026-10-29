@@ -11,6 +11,7 @@ import com.jamarr.android.JamarrApplication
 import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.data.HomeContent
 import com.jamarr.android.data.JamarrApiClient
+import com.jamarr.android.data.LibraryChange
 import com.jamarr.android.data.PlayerStateResponse
 import com.jamarr.android.data.Renderer
 import com.jamarr.android.data.SearchResponse
@@ -300,6 +301,9 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                     if (st.currentIndex >= 0 && st.currentIndex != lastIndex) {
                         lastIndex = st.currentIndex
                         runCatching { apiClient.reportIndex(serverUrl, clientId, st.currentIndex) }
+                        // The server logs the previous track's play off these
+                        // reports; the car's recent folders can refresh.
+                        if (lastIndex >= 0) announceLibraryChange(LibraryChange.History)
                     }
                     val now = System.currentTimeMillis()
                     if (st.isPlaying && now - lastReport >= 5000) {
@@ -552,6 +556,8 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             val dur = ((currentTrack.track.durationSeconds ?: 0.0) * 1000).toLong()
             if (dur > 0) playbackDuration = dur
             if (currentTrack.track.id != nowPlayingTrack?.id) {
+                // A server-driven renderer moved on: the server has logged a play.
+                if (nowPlayingTrack != null) announceLibraryChange(LibraryChange.History)
                 nowPlayingTrack = currentTrack.track
                 nowPlayingArtworkUrl = currentTrack.artworkUrl
             }
@@ -562,6 +568,9 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
             playbackPosition = 0L
         }
     }
+
+    /** Fans a change made on the phone out to the playback service's browse tree (#330). */
+    fun announceLibraryChange(change: LibraryChange) = app.libraryChanges.emit(change)
 
     fun refreshHome() {
         val token = tokenHolder.get()

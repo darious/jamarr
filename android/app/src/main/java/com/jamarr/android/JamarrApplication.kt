@@ -9,6 +9,7 @@ import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.ConnectivityMonitor
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrCookieJar
+import com.jamarr.android.data.LibraryChanges
 import com.jamarr.android.download.JamarrDownloads
 import com.jamarr.android.download.OfflineArtworkInterceptor
 import com.jamarr.android.download.OfflineArtworkStore
@@ -34,6 +35,9 @@ class JamarrApplication : Application(), SingletonImageLoader.Factory {
 
     /** Cover art for downloads, served to Coil ahead of the network. */
     val artworkStore: OfflineArtworkStore by lazy { OfflineArtworkStore(File(filesDir, "art")) }
+
+    /** Library changes made on this phone, for the car's subscribed folders; see `LibraryChanges`. */
+    val libraryChanges: LibraryChanges by lazy { LibraryChanges() }
 
     /** Plays made offline, held until the server can take them. */
     val offlinePlays: OfflinePlays by lazy { OfflinePlays(this) }

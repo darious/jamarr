@@ -2,6 +2,7 @@ package com.jamarr.android.history
 
 import android.content.Context
 import android.util.Log
+import com.jamarr.android.data.LibraryChange
 import com.jamarr.android.JamarrApplication
 import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.data.JamarrApiClient
@@ -87,6 +88,8 @@ class OfflinePlays(context: Context) {
                 ?: return@withLock
             Log.i(TAG, "Uploaded offline plays: $result")
             dao.delete(batch.map { it.id })
+            // Those plays are history now; subscribed car folders can refresh.
+            app.libraryChanges.emit(LibraryChange.History)
         }
     }
 

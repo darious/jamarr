@@ -45,6 +45,7 @@ import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrApiException
+import com.jamarr.android.data.LibraryChange
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.download.RoomDownloadedLibrary
 import com.jamarr.android.download.db.DownloadRecordState
@@ -160,6 +161,11 @@ class JamarrPlaybackService : MediaLibraryService() {
             scope = serviceScope,
             downloads = RoomDownloadedLibrary(app.downloads, app.artworkStore),
         )
+        // Favourite toggles and plays made anywhere in this process reach the
+        // car's subscribed folders through the shared channel (#330). The
+        // collector lives in serviceScope, so it ends with the session.
+        serviceScope.launch { app.libraryChanges.events.collect { libraryProvider.onLibraryChange(it) } }
+
         // Only a new group or a newly finished (or removed) track changes what
         // the car's Downloads folder lists; progress ticks do not.
         serviceScope.launch {
@@ -430,6 +436,9 @@ class JamarrPlaybackService : MediaLibraryService() {
             var wasPlaying = false
             var nextReportAttemptMs = 0L
             val playTracker = PlayThresholdTracker()
+            // Same threshold rule, always "offline": fires for every play that
+            // will land in history, so the car's Recently Played can refresh.
+            val historyTracker = PlayThresholdTracker()
             while (true) {
                 val url = serverUrl.get()
                 val token = tokenHolder.get()
@@ -450,12 +459,18 @@ class JamarrPlaybackService : MediaLibraryService() {
                 val online = !app.connectivity.state.value.isOffline
                 // Online the server logs plays from the progress reports below;
                 // offline the app has to write them down itself.
+                val tickTrackId = player.currentMediaItem?.mediaId?.let(::extractTrackId)?.takeIf { it > 0 }
+                val tickDuration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
                 playTracker.onTick(
-                    currentTrackId = player.currentMediaItem?.mediaId?.let(::extractTrackId)?.takeIf { it > 0 },
+                    currentTrackId = tickTrackId,
                     isPlaying = playing,
-                    durationMs = player.duration.takeIf { it != C.TIME_UNSET && it > 0 },
+                    durationMs = tickDuration,
                     offline = !online,
                 )?.let(app.offlinePlays::record)
+                if (online) {
+                    historyTracker.onTick(tickTrackId, playing, tickDuration, offline = true)
+                        ?.let { app.libraryChanges.emit(LibraryChange.History) }
+                }
                 if (online && url.isNotBlank() && id.isNotBlank() && token.isNotBlank() && !authFailed.get()) {
                     val qKey = queueKey(player)
                     val canReport = System.currentTimeMillis() >= nextReportAttemptMs
@@ -951,7 +966,7 @@ class JamarrPlaybackService : MediaLibraryService() {
                     result.fold(
                         onSuccess = {
                             // Browsers subscribed to the favourites folders learn of it too.
-                            libraryProvider.onFavouritesChanged()
+                            (applicationContext as JamarrApplication).libraryChanges.emit(LibraryChange.FavouriteReleases)
                             updateMediaButtons()
                             SessionResult(SessionResult.RESULT_SUCCESS)
                         },
