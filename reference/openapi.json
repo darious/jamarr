@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FastAPI",
-    "version": "v1.11.0"
+    "version": "v1.12.0"
   },
   "paths": {
     "/art/test": {
@@ -800,6 +800,15 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Ids"
+            }
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
@@ -1104,6 +1113,7 @@
     "/api/stream/{track_id}": {
       "head": {
         "summary": "Stream Track",
+        "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.",
         "operationId": "stream_track_api_stream__track_id__head",
         "parameters": [
           {
@@ -1161,6 +1171,22 @@
                 }
               ],
               "title": "Normalize"
+            }
+          },
+          {
+            "name": "mime",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mime"
             }
           }
         ],
@@ -1187,6 +1213,7 @@
       },
       "get": {
         "summary": "Stream Track",
+        "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.",
         "operationId": "stream_track_api_stream__track_id__head",
         "parameters": [
           {
@@ -1244,6 +1271,22 @@
                 }
               ],
               "title": "Normalize"
+            }
+          },
+          {
+            "name": "mime",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mime"
             }
           }
         ],
@@ -2254,6 +2297,79 @@
         }
       }
     },
+    "/api/player/mute": {
+      "post": {
+        "summary": "Mute or unmute the active renderer",
+        "description": "Body: ``{\"muted\": bool}``. 400 when the renderer can't mute\n(``capabilities.can_mute`` is false), 409 for the browser player.",
+        "operationId": "set_mute_api_player_mute_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-jamarr-client-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Jamarr-Client-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Data"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/player/seek": {
       "post": {
         "summary": "Seek Track",
@@ -2635,7 +2751,7 @@
     "/api/player/upnp/diagnostics": {
       "get": {
         "summary": "UPnP discovery diagnostics",
-        "description": "Discovery state for troubleshooting renderers that do not show up.\n\nSource/stream address and interface, SSDP listener status, search targets,\nper-target reply counts of the last scan, description fetch failures,\ncooldown/suspended locations, per-device last-seen and availability, and\nrecent availability transitions.",
+        "description": "Discovery state for troubleshooting renderers that do not show up.\n\nSource/stream address and interface, SSDP listener status, search targets,\nper-target reply counts of the last scan, description fetch failures,\ncooldown/suspended locations, per-device last-seen and availability, and\nrecent availability transitions. ``events`` covers UPnP event\nsubscriptions: the NOTIFY callback server (address, port, errors) and, per\nrenderer, whether events proved usable and each service's (AVTransport,\nRenderingControl) subscription health: subscribed, SID, expiry/renewal,\nevent count, last event time, failures and unreliability.",
         "operationId": "upnp_diagnostics_api_player_upnp_diagnostics_get",
         "parameters": [
           {
@@ -6816,6 +6932,17 @@
             ],
             "title": "Volume"
           },
+          "muted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Muted"
+          },
           "stopped_reason": {
             "anyOf": [
               {
@@ -6826,6 +6953,18 @@
               }
             ],
             "title": "Stopped Reason"
+          },
+          "output_plan": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Plan"
           }
         },
         "type": "object",

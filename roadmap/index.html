@@ -840,6 +840,18 @@
       
         
       
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1021,6 +1033,174 @@
     
   
     ADR-0005: Two-phase library scan (scan, then enrich)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/decisions/0006-renderer-capability-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0006: Optional renderer capabilities (queue ownership, staging, pairing, output)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/decisions/0007-airplay-raop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0007: AirPlay/RAOP via pyatv — evaluated, not built
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/decisions/0008-fire-tv-matter-casting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0008: Fire TV: no Fling; Matter Casting not viable for a server today
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/decisions/0009-dlna-server-and-bridge-roles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0009: DLNA server and renderer-bridge roles: arbitration first, then scope
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/decisions/0010-continuous-stream-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0010: Continuous-stream mode for seamless album playback on Cast
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/decisions/0011-openhome-linn/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0011: Native OpenHome/Linn backend — evaluated, not built
   
 
     
@@ -1651,6 +1831,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#playback-improvements-316" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Playback improvements (#316)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#android-android-auto" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1756,6 +1947,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#playback-improvements-316" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Playback improvements (#316)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#android-android-auto" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1826,13 +2028,89 @@ trade-offs we've chosen to live with for now. This is intent, not a commitment.<
   the receiver. A transcode path would widen format support.</li>
 <li><strong>Future backend shapes</strong> — the renderer contract is designed to allow, but
   does not yet implement:<ul>
-<li>AirPlay backend</li>
 <li>server-local audio backend (host soundcard as <code>local_audio:&lt;id&gt;</code>)</li>
 <li>universal/logical renderers (one physical device exposing DLNA + Cast)</li>
 <li>sync groups (grouped renderers with leader selection)</li>
 </ul>
 </li>
 </ul>
+<h2 id="playback-improvements-316">Playback improvements (#316)<a class="headerlink" href="#playback-improvements-316" title="Permanent link">&para;</a></h2>
+<p>Where each item of #316 stands. "Unverified" means it is implemented and
+tested with fakes only, with no hardware measurement.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Android UPnP: stop on failed <code>SetAVTransportURI</code></td>
+<td>Done (PR #347)</td>
+</tr>
+<tr>
+<td>Cast LOAD rejection/timeouts surfaced to player state</td>
+<td>Done (PR #347)</td>
+</tr>
+<tr>
+<td>Cast advances only on <code>FINISHED</code></td>
+<td>Done (PR #347)</td>
+</tr>
+<tr>
+<td>UPnP <code>SetNextAVTransportURI</code> staging + <code>TrackURI</code> reconciliation, provisional support, per-renderer override</td>
+<td>Done (PR #347). Real-hardware gapless playback is unverified.</td>
+</tr>
+<tr>
+<td>Full <code>GetProtocolInfo</code> entries + metadata negotiation/retries</td>
+<td>Done. Complete Sink entries kept, MIME alias families, bounded fault-specific load retries. Unverified on hardware.</td>
+</tr>
+<tr>
+<td>UPnP GENA events with watchdog polling</td>
+<td>Done (server and Android). Capabilities report <code>supports_events</code> only through a healthy subscription (<a href="../architecture/decisions/0006-renderer-capability-contract/">ADR-0006</a>). Unverified on hardware.</td>
+</tr>
+<tr>
+<td>Renderer-aware audio output planning</td>
+<td>Done (<code>app/services/playback_plan.py</code>, per-device <code>renderer.audio_constraints</code>). Device limits are exposed as <code>capabilities.output</code>. Unverified on hardware.</td>
+</tr>
+<tr>
+<td>Cast session/queue restore, receiver-driven volume, server receiver queues/preload</td>
+<td>Done. Receiver queue/preload is opt-in (<code>renderer.cast_queue</code>); transition silence unmeasured.</td>
+</tr>
+<tr>
+<td>Continuous PCM/audio stream mode</td>
+<td>Evaluated: opt-in only, and only if measured Cast queue transitions still gap (<a href="../architecture/decisions/0010-continuous-stream-mode/">ADR-0010</a>)</td>
+</tr>
+<tr>
+<td>Native OpenHome/Linn backend</td>
+<td>Evaluated, not built: no OpenHome device available to test against; design recorded (<a href="../architecture/decisions/0011-openhome-linn/">ADR-0011</a>)</td>
+</tr>
+<tr>
+<td>AirPlay/RAOP</td>
+<td>Evaluated on two real receivers, not built: pyatv 0.18 could not stream to one, needs <code>srptools&lt;2</code>, and overrides receiver volume (<a href="../architecture/decisions/0007-airplay-raop/">ADR-0007</a>)</td>
+</tr>
+<tr>
+<td>Fire TV</td>
+<td>Not built: no Fling; a server-side Matter Casting client is not viable today (<a href="../architecture/decisions/0008-fire-tv-matter-casting/">ADR-0008</a>)</td>
+</tr>
+<tr>
+<td>DLNA Media Server / UPnP-OpenHome bridge facade</td>
+<td>Designed, not built: queue ownership + arbitration model, Media Server first (<a href="../architecture/decisions/0009-dlna-server-and-bridge-roles/">ADR-0009</a>)</td>
+</tr>
+<tr>
+<td>Android Cast without Play Services</td>
+<td>Recorded as a separate feature. The server keeps <code>pychromecast</code>.</td>
+</tr>
+<tr>
+<td>Common contracts (queue ownership/editing, staging, pairing, output constraints)</td>
+<td>Done (<a href="../architecture/decisions/0006-renderer-capability-contract/">ADR-0006</a>). The web hides pause/seek/mute a renderer lacks.</td>
+</tr>
+<tr>
+<td>Hardware validation</td>
+<td>Partly done. Checked on a Naim Uniti Atom, a Sony XR-65X90J and a Sonos Play:3 without audio: protocolInfo negotiation (all three get the original FLAC), GENA subscribe/renew/unsubscribe, volume read-back (the TV events a wrong volume; fixed by reading it back). <strong>Open:</strong> gapless silence, transitions/history, Cast advance and resume, conversion and seeking on real devices.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="android-android-auto">Android / Android Auto<a class="headerlink" href="#android-android-auto" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Voice/text search in Android Auto (<code>onSearch</code>) — intentional v1 omission;

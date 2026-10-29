@@ -925,6 +925,18 @@
       
         
       
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
     
     
     
@@ -1106,6 +1118,174 @@
     
   
     ADR-0005: Two-phase library scan (scan, then enrich)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0006-renderer-capability-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0006: Optional renderer capabilities (queue ownership, staging, pairing, output)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0007-airplay-raop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0007: AirPlay/RAOP via pyatv — evaluated, not built
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0008-fire-tv-matter-casting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0008: Fire TV: no Fling; Matter Casting not viable for a server today
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0009-dlna-server-and-bridge-roles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0009: DLNA server and renderer-bridge roles: arbitration first, then scope
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0010-continuous-stream-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0010: Continuous-stream mode for seamless album playback on Cast
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/decisions/0011-openhome-linn/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0011: Native OpenHome/Linn backend — evaluated, not built
   
 
     
@@ -1839,6 +2019,19 @@ explicitly only if detection fails or you need to override it:</p>
 <li>UPnP next-track staging overrides (<code>renderer.upnp_gapless</code>: <code>enabled</code>,
   <code>disabled_udns</code>, <code>forced_udns</code>) — see
   <a href="../../architecture/renderers/#upnp-next-track-staging">Renderers</a></li>
+<li>UPnP event subscriptions (<code>renderer.upnp_events</code>, default <code>true</code>;
+  <code>renderer.upnp_event_port</code>, default 8113, the NOTIFY callback port bound on
+  the UPnP source address) — see
+  <a href="../../architecture/renderers/#upnp-events-and-watchdog-polling">Renderers</a></li>
+<li>Per-renderer audio output constraints (<code>renderer.audio_constraints</code>, keyed by
+  renderer id (<code>upnp:</code>/<code>cast:</code> prefix optional) / UPnP UDN / Cast UUID:
+  <code>max_sample_rate_hz</code>, <code>max_bit_depth</code>,
+  <code>max_channels</code>, <code>flac_max_block_size</code>, <code>prefer_wav</code>, <code>allow_lossy</code>,
+  <code>quality</code>, <code>supported_mime_types</code>, <code>supported_codecs</code>) — see
+  <a href="../../architecture/renderers/#audio-output-planning">Renderers</a></li>
+<li>Server Cast receiver queue / preload (<code>renderer.cast_queue</code>: <code>enabled</code>,
+  <code>enabled_uuids</code>, <code>disabled_uuids</code>, <code>preload_seconds</code>; off by default) — see
+  <a href="../../architecture/renderers/#cast-receiver-queue-preload">Renderers</a></li>
 </ul>
 <p>Edit it directly and restart the stack (or rely on hot-reload in
 <a href="../dev-mode/">Dev Mode</a>).</p>
