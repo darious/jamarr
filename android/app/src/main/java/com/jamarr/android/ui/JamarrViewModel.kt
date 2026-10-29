@@ -16,6 +16,7 @@ import com.jamarr.android.data.Renderer
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.data.OnlineState
+import com.jamarr.android.download.DownloadHold
 import com.jamarr.android.download.DownloadProgress
 import com.jamarr.android.download.GroupDownloadRequest
 import com.jamarr.android.download.GroupDownloadStatus
@@ -106,6 +107,10 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Track ids per group, in group order. */
     var downloadGroupTracks by mutableStateOf<Map<String, List<Long>>>(emptyMap())
+        private set
+
+    /** Why queued downloads are parked (low storage, waiting for Wi-Fi), or null. */
+    var downloadHold by mutableStateOf<DownloadHold?>(null)
         private set
 
     // Settings (phase 5): mirrored from SettingsStore so the screen is plain state.
@@ -199,6 +204,10 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             app.downloads.observeTracks().collectLatest { downloadedTracks = it }
+        }
+
+        viewModelScope.launch {
+            app.downloads.hold.collectLatest { downloadHold = it }
         }
 
         viewModelScope.launch {
@@ -715,6 +724,22 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                     app.downloads.downloadTrack(track)
                 }
             }.onFailure { status = it.message ?: "Download failed." }
+        }
+    }
+
+    /** Queues a failed download again. */
+    fun retryDownload(trackId: Long) {
+        viewModelScope.launch {
+            runCatching { app.downloads.retryTrack(trackId) }
+                .onFailure { status = it.message ?: "Could not retry download." }
+        }
+    }
+
+    /** Retries every failed track in [groupId], or everywhere when null. */
+    fun retryFailedDownloads(groupId: String? = null) {
+        viewModelScope.launch {
+            runCatching { app.downloads.retryFailed(groupId) }
+                .onFailure { status = it.message ?: "Could not retry downloads." }
         }
     }
 

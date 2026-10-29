@@ -193,6 +193,9 @@ private fun JamarrRoot() {
                         artworkUrl = artworkUrl,
                         contentPadding = contentPadding,
                         onSettingsClick = { navController.navigate(Routes.SETTINGS) },
+                        hold = vm.downloadHold,
+                        onRetryTrack = { trackId -> vm.retryDownload(trackId) },
+                        onRetryAllFailed = { vm.retryFailedDownloads() },
                     )
                         return@composable
                     }
@@ -290,6 +293,9 @@ private fun JamarrRoot() {
                         artworkUrl = artworkUrl,
                         contentPadding = contentPadding,
                         onSettingsClick = { navController.navigate(Routes.SETTINGS) },
+                        hold = vm.downloadHold,
+                        onRetryTrack = { trackId -> vm.retryDownload(trackId) },
+                        onRetryAllFailed = { vm.retryFailedDownloads() },
                     )
                 }
 
@@ -312,6 +318,7 @@ private fun JamarrRoot() {
                             navController.popBackStack()
                         },
                         contentPadding = contentPadding,
+                        onRetryFailed = { vm.retryFailedDownloads(groupId) },
                     )
                 }
 

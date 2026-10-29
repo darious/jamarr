@@ -11,8 +11,11 @@ data class DownloadProgress(
     val state: DownloadRecordState,
     /** 0..100, or null while the total size is still unknown. */
     val percent: Float?,
+    /** Why it failed, while [state] is FAILED. */
+    val failureReason: DownloadFailureReason? = null,
 ) {
     val isComplete: Boolean get() = state == DownloadRecordState.COMPLETED
+    val isFailed: Boolean get() = state == DownloadRecordState.FAILED
 }
 
 @OptIn(markerClass = [UnstableApi::class])

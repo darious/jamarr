@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jamarr.android.data.OnlineState
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.download.DownloadHold
 import com.jamarr.android.download.DownloadProgress
 import com.jamarr.android.download.GroupDownloadStatus
 import com.jamarr.android.download.db.DownloadGroupEntity
@@ -83,6 +84,9 @@ fun DownloadsScreen(
     artworkUrl: (String?, Int) -> String?,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     onSettingsClick: (() -> Unit)? = null,
+    hold: DownloadHold? = null,
+    onRetryTrack: (Long) -> Unit = {},
+    onRetryAllFailed: () -> Unit = {},
 ) {
     var tab by rememberSaveable { mutableStateOf(DownloadsTab.Tracks) }
     val onDisk = tracks.filter { it.state == DownloadRecordState.COMPLETED }
@@ -130,6 +134,15 @@ fun DownloadsScreen(
             OfflineBanner(onlineState = onlineState, onGoOnline = onGoOnline)
             Spacer(Modifier.height(12.dp))
         }
+        if (hold != null) {
+            HoldBanner(hold = hold, onSettingsClick = onSettingsClick)
+            Spacer(Modifier.height(12.dp))
+        }
+        val failedCount = downloadStates.values.count { it.isFailed && it.failureReason?.retryable != false }
+        if (failedCount > 0) {
+            FailedBanner(count = failedCount, onRetryAll = onRetryAllFailed)
+            Spacer(Modifier.height(12.dp))
+        }
 
         Row(
             modifier = Modifier
@@ -155,6 +168,7 @@ fun DownloadsScreen(
                 nowPlayingTrackId = nowPlayingTrackId,
                 onTrackClick = onTrackClick,
                 onRemoveTrack = onRemoveTrack,
+                onRetryTrack = onRetryTrack,
                 contentPadding = contentPadding,
             )
         } else {
@@ -184,6 +198,7 @@ private fun TracksTab(
     nowPlayingTrackId: Long?,
     onTrackClick: (SearchTrack, List<SearchTrack>) -> Unit,
     onRemoveTrack: (Long) -> Unit,
+    onRetryTrack: (Long) -> Unit,
     contentPadding: PaddingValues,
 ) {
     if (tracks.isEmpty()) {
@@ -193,19 +208,111 @@ private fun TracksTab(
     val queue = tracks.map { it.toSearchTrack() }
     LazyColumn(contentPadding = contentPadding) {
         items(tracks, key = { it.trackId }) { entity ->
+            val state = downloadStates[entity.trackId]
             TrackRow(
                 number = null,
                 title = entity.title,
                 subtitle = listOfNotNull(entity.artist, entity.album)
                     .takeIf { it.isNotEmpty() }
                     ?.joinToString(" • "),
-                duration = formatDuration(entity.durationSeconds),
+                // A failed row says why in the duration slot, where the group
+                // screen already puts "queued"/"failed".
+                duration = downloadStatusLabel(state, entity.state) ?: formatDuration(entity.durationSeconds),
                 active = entity.trackId == nowPlayingTrackId,
                 onClick = { onTrackClick(entity.toSearchTrack(), queue) },
-                downloadState = downloadStates[entity.trackId],
-                onDownloadClick = { onRemoveTrack(entity.trackId) },
+                downloadState = state,
+                // The trailing control retries a failed download and removes a
+                // finished one, which is what its icon shows in each state.
+                onDownloadClick = {
+                    if (state?.isFailed == true) onRetryTrack(entity.trackId) else onRemoveTrack(entity.trackId)
+                },
             )
         }
+    }
+}
+
+/**
+ * The text a row shows instead of its duration while a download is not on
+ * disk: progress, "waiting", or "failed · reason". Null once complete.
+ */
+internal fun downloadStatusLabel(state: DownloadProgress?, recorded: DownloadRecordState): String? =
+    when (state?.state ?: recorded) {
+        DownloadRecordState.COMPLETED -> null
+        DownloadRecordState.DOWNLOADING -> state?.percent?.let { "${it.toInt()}%" } ?: "…"
+        DownloadRecordState.FAILED -> listOfNotNull("failed", state?.failureReason?.label).joinToString(" · ")
+        DownloadRecordState.QUEUED -> "queued"
+    }
+
+/** The queue is parked: say why, and what lifts it. */
+@Composable
+internal fun HoldBanner(hold: DownloadHold, onSettingsClick: (() -> Unit)?) {
+    val (title, detail) = when (hold) {
+        is DownloadHold.LowStorage -> "Downloads paused: storage is low" to
+            "${formatBytes(hold.freeBytes)} free; downloads resume once more than " +
+            "${formatBytes(hold.reserveBytes + 100L * 1024 * 1024)} is free. Nothing has been deleted."
+        is DownloadHold.WaitingForNetwork ->
+            (if (hold.wifiOnly) "Waiting for Wi-Fi" else "Waiting for network") to
+                (if (hold.wifiOnly) "Downloads are set to Wi-Fi only." else "Downloads resume when the network is back.")
+        DownloadHold.WaitingForSystemStorage -> "Waiting for free space" to
+            "Android reports storage as low. Downloads resume once space is freed."
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = JamarrDims.ScreenPadding)
+            .clip(JamarrShapes.Card)
+            .background(JamarrColors.Card)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = JamarrType.CardTitle, color = JamarrColors.Text)
+            Text(text = detail, style = JamarrType.CaptionSmall, color = JamarrColors.Muted)
+        }
+        if (hold is DownloadHold.WaitingForNetwork && hold.wifiOnly && onSettingsClick != null) {
+            Text(
+                text = "Settings",
+                style = JamarrType.Caption,
+                color = JamarrColors.Primary,
+                modifier = Modifier
+                    .clickable(onClick = onSettingsClick)
+                    .padding(8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FailedBanner(count: Int, onRetryAll: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = JamarrDims.ScreenPadding)
+            .clip(JamarrShapes.Card)
+            .background(JamarrColors.Card)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "$count ${plural(count, "download")} failed",
+                style = JamarrType.CardTitle,
+                color = JamarrColors.Text,
+            )
+            Text(
+                text = "Each row says why. Tap its mark to retry one.",
+                style = JamarrType.CaptionSmall,
+                color = JamarrColors.Muted,
+            )
+        }
+        Text(
+            text = "Retry all",
+            style = JamarrType.Caption,
+            color = JamarrColors.Primary,
+            modifier = Modifier
+                .clickable(onClick = onRetryAll)
+                .padding(8.dp),
+        )
     }
 }
 

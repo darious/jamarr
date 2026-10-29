@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -67,6 +68,7 @@ fun DownloadGroupScreen(
     onPlayTracks: (List<SearchTrack>, Int) -> Unit,
     onRemove: () -> Unit,
     contentPadding: PaddingValues,
+    onRetryFailed: () -> Unit = {},
 ) {
     val tracks by tracksFlow.collectAsState(initial = emptyList())
     var confirmRemove by remember { mutableStateOf(false) }
@@ -103,6 +105,34 @@ fun DownloadGroupScreen(
                     modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding, vertical = 16.dp),
                 )
             }
+            if (status?.hasFailures == true) {
+                item {
+                    val reasons = tracks.mapNotNull { downloadStates[it.trackId]?.failureReason }.distinct()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = JamarrDims.ScreenPadding, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = reasons.joinToString(" · ") { it.advice }.ifBlank { "Some tracks failed." },
+                            style = JamarrType.CaptionSmall,
+                            color = JamarrColors.Muted,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (reasons.any { it.retryable }) {
+                            Text(
+                                text = "Retry failed",
+                                style = JamarrType.Caption,
+                                color = JamarrColors.Primary,
+                                modifier = Modifier
+                                    .clickable(onClick = onRetryFailed)
+                                    .padding(8.dp),
+                            )
+                        }
+                    }
+                }
+            }
             itemsIndexed(tracks, key = { _, it -> it.trackId }) { index, entity ->
                 val state = downloadStates[entity.trackId]
                 TrackRow(
@@ -113,12 +143,7 @@ fun DownloadGroupScreen(
                         ?.joinToString(" • "),
                     // Mid-download a row says how far along it is; the duration
                     // only matters once the track can actually be played.
-                    duration = when (state?.state ?: entity.state) {
-                        DownloadRecordState.COMPLETED -> formatDuration(entity.durationSeconds)
-                        DownloadRecordState.DOWNLOADING -> state?.percent?.let { "${it.toInt()}%" } ?: "…"
-                        DownloadRecordState.FAILED -> "failed"
-                        DownloadRecordState.QUEUED -> "queued"
-                    },
+                    duration = downloadStatusLabel(state, entity.state) ?: formatDuration(entity.durationSeconds),
                     active = entity.trackId == nowPlayingTrackId,
                     onClick = { onPlayTracks(queue, index) },
                 )
