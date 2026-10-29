@@ -11,6 +11,7 @@ import android.util.Log
 import com.jamarr.android.renderer.DeviceRendererController
 import com.jamarr.android.renderer.DeviceRendererInfo
 import com.jamarr.android.renderer.DeviceRendererPlaybackState
+import com.jamarr.android.renderer.LiveTransport
 import com.jamarr.android.renderer.QueuedTrack
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +74,8 @@ private const val SET_NEXT_AV_TRANSPORT_URI = "SetNextAVTransportURI"
 private const val EVENT_SUBSCRIPTION_SECONDS = 1800
 /** Retry delays after a failed/ended subscription (ms), last one repeats. */
 private val EVENT_RETRY_MS = longArrayOf(5_000, 15_000, 30_000, 60_000, 120_000)
+/** Bound on each action of a resume probe; a dead renderer must not stall the app's start. */
+private const val PROBE_TIMEOUT_MS = 4_000L
 
 class UpnpDeviceController(private val appContext: Context) : DeviceRendererController {
     override val kind: String = "upnp"
@@ -308,6 +311,62 @@ class UpnpDeviceController(private val appContext: Context) : DeviceRendererCont
     override suspend fun playQueue(tracks: List<QueuedTrack>, startIndex: Int) {
         if (tracks.isEmpty()) return
         playTrackAt(startIndex.coerceIn(0, tracks.lastIndex), tracks)
+    }
+
+    /**
+     * What [rendererId] is doing right now, without touching it: one
+     * GetTransportInfo + GetPositionInfo, bounded. Null when the renderer is
+     * not (yet) discovered; [LiveTransport.Unreachable] when it is known but
+     * does not answer (#320).
+     */
+    suspend fun probe(rendererId: String): LiveTransport? {
+        val endpoint = endpoints[rendererId.removePrefix("upnp:")] ?: return null
+        val service = endpoint.service(AV_TRANSPORT) ?: return LiveTransport.Unreachable
+        val xport = withTimeoutOrNull(PROBE_TIMEOUT_MS) { runCatching { getTransportInfo(service) }.getOrNull() }
+        val pos = withTimeoutOrNull(PROBE_TIMEOUT_MS) { runCatching { getPositionInfo(service) }.getOrNull() }
+        if (xport == null && pos == null) return LiveTransport.Unreachable
+        return LiveTransport.Known(
+            trackUri = pos?.trackURI,
+            transportState = xport?.currentTransportState?.value,
+            positionSeconds = pos?.trackElapsedSeconds?.toDouble() ?: 0.0,
+        )
+    }
+
+    /**
+     * Resumes *control* of a queue the renderer is already playing: the queue
+     * and index are adopted, polling and events start, and nothing is sent to
+     * the renderer. Used after a process restart once the user agreed (#320).
+     */
+    suspend fun adoptQueue(
+        rendererId: String,
+        tracks: List<QueuedTrack>,
+        index: Int,
+        liveUri: String?,
+        positionSeconds: Double,
+        playing: Boolean,
+    ) {
+        if (tracks.isEmpty()) return
+        val safeIndex = index.coerceIn(0, tracks.lastIndex)
+        stopPolling()
+        val udn = rendererId.removePrefix("upnp:")
+        val endpoint = endpoints[udn]
+        if (_state.value.activeRendererId != "upnp:$udn") {
+            unsubscribeEvents()
+            val advertised = endpoint?.service(AV_TRANSPORT)?.getAction(SET_NEXT_AV_TRANSPORT_URI) != null
+            sequencer.attach(supportsSetNext = advertised && udn !in setNextDisabled)
+        }
+        opLock.withLock { sequencer.adopt(tracks, safeIndex, liveUri, playing) }
+        _state.value = _state.value.copy(
+            activeRendererId = "upnp:$udn",
+            queue = tracks,
+            currentIndex = safeIndex,
+            positionSeconds = positionSeconds,
+            durationSeconds = tracks[safeIndex].durationSeconds,
+            isPlaying = playing,
+            transportState = if (playing) "PLAYING" else "PAUSED_PLAYBACK",
+            status = null,
+        )
+        startPolling()
     }
 
     /**

@@ -178,6 +178,24 @@ class UpnpTrackSequencer(
     }
 
     /**
+     * Takes over a queue the renderer is already playing (process restart):
+     * nothing is sent to the renderer. [liveUri] is what it reports as its
+     * current track, so a later transition is recognised; the next slot is
+     * assumed occupied, so the next load clears it rather than trusting it.
+     */
+    fun adopt(newQueue: List<QueuedTrack>, index: Int, liveUri: String?, playing: Boolean) {
+        queue = newQueue
+        currentIndex = index.coerceIn(0, (newQueue.size - 1).coerceAtLeast(0))
+        currentUri = liveUri
+        staged = null
+        rendererMayHoldNext = true
+        sawPlaying = playing
+        trackStartedAtMs = nowMs()
+        stagedStopSinceMs = null
+        missedTransitions = 0
+    }
+
+    /**
      * Replaces the queue around the loaded track (an in-place edit). A staged
      * item that is no longer next is dropped; [syncNext] re-stages or clears.
      */
