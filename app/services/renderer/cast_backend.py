@@ -176,6 +176,8 @@ class CastRendererBackend(RendererBackend):
         self._loads: dict[str, _CastLoad] = {}
         self._staged: dict[str, _CastStaged] = {}
         self._receiver_listeners: dict[str, list[_CastReceiverListener]] = {}
+        # Jamarr mutes Cast by volume (see mute): the level to restore.
+        self._levels_before_mute: dict[str, float] = {}
         self._finish_rechecks: dict[str, Any] = {}
         # Statuses arrive on pychromecast's socket thread as well as the loop.
         self._loads_lock = threading.Lock()
@@ -406,8 +408,27 @@ class CastRendererBackend(RendererBackend):
         return RendererStatus(renderer_id=renderer_id, state="UNKNOWN", volume_percent=bounded)
 
     async def mute(self, renderer_id: str, muted: bool) -> RendererStatus:
+        """Mute as volume, not the receiver's mute flag.
+
+        A Sony TV unmuted through the flag comes back at its own pre-mute
+        level (0 -> 10 at a Jamarr volume of 0) and overrides any volume sent
+        while it settles. So mute remembers the level and sets 0, and unmute
+        puts that level back. Only a mute made on the device itself (the flag)
+        is cleared with the flag.
+        """
         cast = await self._get_ready_cast(renderer_id)
-        await asyncio.to_thread(cast.set_volume_muted, muted)
+        status = getattr(cast, "status", None)
+        level = getattr(status, "volume_level", None)
+        if muted:
+            if level:
+                self._levels_before_mute[renderer_id] = float(level)
+            await asyncio.to_thread(cast.set_volume, 0.0)
+        else:
+            if getattr(status, "volume_muted", False):
+                await asyncio.to_thread(cast.set_volume_muted, False)
+            restore = self._levels_before_mute.pop(renderer_id, None)
+            if restore is not None:
+                await asyncio.to_thread(cast.set_volume, restore)
         return RendererStatus(renderer_id=renderer_id, state="UNKNOWN", volume_muted=muted)
 
     async def get_status(self, renderer_id: str) -> RendererStatus:
@@ -481,6 +502,19 @@ class CastRendererBackend(RendererBackend):
         self._receiver_listeners.setdefault(renderer_id, []).append(listener)
         return listener
 
+    def _muted_by_volume(self, renderer_id: str, volume: Any, muted: Any) -> tuple[Any, Any]:
+        """Report a Jamarr mute (volume 0) as muted at the remembered level.
+
+        A level raised on the device itself ends that mute.
+        """
+        level = self._levels_before_mute.get(renderer_id)
+        if level is None:
+            return volume, muted
+        if volume is not None and float(volume) > 0.005:
+            self._levels_before_mute.pop(renderer_id, None)
+            return volume, muted
+        return level, True
+
     def status_from_receiver_status(self, renderer_id: str, status: Any) -> RendererStatus | None:
         """A volume-only RendererStatus from a receiver CastStatus, or None.
 
@@ -491,6 +525,7 @@ class CastRendererBackend(RendererBackend):
         muted = self._status_attr(status, "volume_muted")
         if volume is None and muted is None:
             return None
+        volume, muted = self._muted_by_volume(renderer_id, volume, muted)
         return RendererStatus(
             renderer_id=renderer_id,
             state="UNKNOWN",
@@ -800,6 +835,7 @@ class CastRendererBackend(RendererBackend):
         volume_muted = self._status_attr(receiver_status, "volume_muted")
         if volume_muted is None:
             volume_muted = self._status_attr(status, "volume_muted")
+        volume, volume_muted = self._muted_by_volume(renderer_id, volume, volume_muted)
         ended = False
         stop_reason = None
         completion_reported = True
