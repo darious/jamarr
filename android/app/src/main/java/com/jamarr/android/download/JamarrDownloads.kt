@@ -202,6 +202,27 @@ class JamarrDownloads(context: Context) {
 
     suspend fun removeTrack(trackId: Long) = removeGroup(DownloadGroupIds.track(trackId))
 
+    /**
+     * Throws a download's bytes away and fetches them again: playback found
+     * the copy on disk unreadable. The row and its groups are kept, so the
+     * track stays in the Downloads lists while it is re-fetched.
+     */
+    suspend fun redownload(trackId: Long) {
+        val row = database.downloadDao().track(trackId) ?: return
+        DownloadService.sendRemoveDownload(
+            appContext,
+            JamarrDownloadService::class.java,
+            StreamCacheKeys.trackKey(trackId, row.quality),
+            /* foreground= */ false,
+        )
+        database.downloadDao().updateState(trackId, DownloadRecordState.QUEUED, 0L)
+        _states.update { it + (trackId to DownloadProgress(trackId, DownloadRecordState.QUEUED, null)) }
+        enqueue(
+            SearchTrack(id = trackId, title = row.title, artist = row.artist, album = row.album, artSha1 = row.artSha1),
+            row.quality,
+        )
+    }
+
     /** Drops a group and deletes the cached bytes of tracks nothing else holds. */
     suspend fun removeGroup(groupId: String) {
         deleteBytes(database.downloadDao().removeGroup(groupId))

@@ -215,6 +215,17 @@ class JamarrPlaybackController(context: Context) {
         controller?.seekTo(index, 0L)
     }
 
+    /**
+     * After a terminal error the player sits in `STATE_IDLE` with its queue
+     * intact; preparing it again resumes from where it failed.
+     */
+    fun retryAfterError() {
+        controller?.run {
+            prepare()
+            play()
+        }
+    }
+
     fun release() {
         controller?.release()
         controller = null

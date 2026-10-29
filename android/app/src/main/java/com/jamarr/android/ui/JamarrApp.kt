@@ -558,6 +558,8 @@ private fun JamarrRoot() {
                     onRendererClick = { vm.showRendererPicker = true },
                     volume = vm.remoteVolume,
                     onVolumeChange = { vm.changeRemoteVolume(it) },
+                    playbackError = if (vm.isRemoteMode) null else vm.playbackError,
+                    onRetry = { vm.retryPlayback() },
                 )
             }
 

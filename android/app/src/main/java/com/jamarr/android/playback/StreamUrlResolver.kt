@@ -129,6 +129,15 @@ class StreamUrlResolver(
 
     fun isFresh(trackId: Long, quality: String): Boolean = fresh(trackId, quality) != null
 
+    /**
+     * Forgets every cached URL for [trackId], at any quality, so the next open
+     * mints a new token. Called when the server rejected the current one.
+     * Labels are kept: they describe the track, not the token.
+     */
+    fun invalidate(trackId: Long) {
+        urlCache.keys.removeAll { it.startsWith("$trackId:") }
+    }
+
     private fun fresh(trackId: Long, quality: String): Resolved? =
         urlCache[key(trackId, quality)]?.takeIf { it.expiresAtMs > System.currentTimeMillis() }
 

@@ -69,6 +69,11 @@ class JamarrMediaCache(context: Context) {
     /** Applies a new read-ahead cap, evicting at once if the cache is now over it. */
     fun setPrefetchMaxBytes(maxBytes: Long) = prefetchEvictor.setMaxBytes(prefetchCache, maxBytes)
 
+    /** Deletes one track's read-ahead bytes at [quality]: the copy on disk could not be read. */
+    fun removeReadAhead(trackId: Long, quality: String?) {
+        runCatching { prefetchCache.removeResource(StreamCacheKeys.trackKey(trackId, quality)) }
+    }
+
     /** Drops every read-ahead byte. Downloads are untouched. */
     fun clearPrefetch() {
         // SimpleCache's methods synchronise on the instance; holding the same

@@ -2,6 +2,7 @@ package com.jamarr.android.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.util.Log
@@ -9,23 +10,28 @@ import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionError
 import com.google.common.util.concurrent.ListenableFuture
 import com.jamarr.android.JamarrApplication
 import com.jamarr.android.MainActivity
 import com.jamarr.android.auth.SettingsStore
 import com.jamarr.android.auth.TokenHolder
 import com.jamarr.android.data.JamarrApiClient
+import com.jamarr.android.data.JamarrApiException
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.download.RoomDownloadedLibrary
 import com.jamarr.android.download.db.DownloadRecordState
@@ -36,6 +42,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -46,6 +53,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 @OptIn(markerClass = [UnstableApi::class])
 class JamarrPlaybackService : MediaLibraryService() {
@@ -64,6 +72,11 @@ class JamarrPlaybackService : MediaLibraryService() {
     private val activeQuality = AtomicReference("original")
     private val adaptiveQualityPolicy = AdaptiveStreamQualityPolicy()
     private val downgradeInFlight = AtomicBoolean(false)
+
+    // Terminal errors: classified, retried within a budget, then surfaced.
+    private val errorPolicy = PlaybackErrorPolicy()
+    private var recoveryJob: Job? = null
+    private var audioManager: AudioManager? = null
 
     // Settings are read off the main thread, so everything that needs a server
     // URL or token waits on this instead of blocking service creation. The car
@@ -89,6 +102,7 @@ class JamarrPlaybackService : MediaLibraryService() {
         val cookieJar = app.cookieJar
         settingsStore = SettingsStore(applicationContext)
         connectivityManager = getSystemService(ConnectivityManager::class.java)
+        audioManager = getSystemService(AudioManager::class.java)
 
         val authFailed = AtomicBoolean(false)
 
@@ -269,6 +283,14 @@ class JamarrPlaybackService : MediaLibraryService() {
 
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 schedulePrefetch(player)
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) notePlaying(player)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                handlePlayerError(player, error)
             }
         })
 
@@ -604,11 +626,192 @@ class JamarrPlaybackService : MediaLibraryService() {
         }
     }
 
+    // ----- terminal error recovery (#326) --------------------------------
+
+    /** Playback is healthy: forgive the track's retry budget and clear any banner. */
+    private fun notePlaying(player: Player) {
+        val trackId = player.currentMediaItem?.mediaId?.let(::extractTrackId) ?: 0L
+        if (trackId > 0L) errorPolicy.notePlaying(trackId)
+        if (PlaybackTelemetry.errorState.value != null) {
+            PlaybackTelemetry.diagnostics.record(
+                diagnosticEntry(trackId, kind = null, errorCode = null, httpStatus = null, message = null, stage = "recovered"),
+            )
+            PlaybackTelemetry.setError(null)
+        }
+    }
+
+    /**
+     * Media3 stops the player on any `PlaybackException` and leaves the queue
+     * in place. The policy decides whether a retry can change anything; the
+     * player is only touched again from the main thread after the delay, and
+     * never in a loop: each failure consumes budget.
+     */
+    private fun handlePlayerError(player: ExoPlayer, error: PlaybackException) {
+        recoveryJob?.cancel()
+        val trackId = player.currentMediaItem?.mediaId?.let(::extractTrackId) ?: 0L
+        val quality = activeQuality.get()
+        val downloadedAt = if (trackId > 0L) mediaCache.downloadedQuality(trackId, quality) else null
+        val readAhead = downloadedAt == null && trackId > 0L && mediaCache.isFullyCached(trackId, quality)
+        val context = PlaybackErrorPolicy.Context(
+            trackId = trackId,
+            httpStatus = httpStatusOf(error),
+            cacheInvolved = downloadedAt != null || readAhead || causedByCache(error),
+            hasNext = player.hasNextMediaItem(),
+            canDowngrade = StreamQualityLadder.canDowngrade(quality, streamResolver.source(trackId, quality)),
+        )
+        val kind = errorPolicy.classify(error.errorCode, context)
+        val action = errorPolicy.decide(kind, context, System.currentTimeMillis())
+        val wasPlaying = player.playWhenReady
+        val title = player.currentMediaItem?.mediaMetadata?.title?.toString()
+
+        val stage = when (action) {
+            is RecoveryAction.Retry -> buildString {
+                append("retry ").append(action.attempt).append('/').append(PlaybackErrorPolicy.MAX_ATTEMPTS_PER_TRACK)
+                append(" in ").append(action.delayMs / 1000).append('s')
+                if (action.refreshCredentials) append(" +fresh-token")
+                if (action.purgeCache) append(" +purge-cache")
+                if (action.downgradeQuality) append(" +downgrade")
+            }
+            RecoveryAction.SkipTrack -> "skipped"
+            RecoveryAction.GiveUp -> "gave up"
+        }
+        Log.w(TAG, "Player error on track $trackId: ${error.errorCodeName} -> $kind, $stage", error)
+        PlaybackTelemetry.diagnostics.record(
+            diagnosticEntry(
+                trackId,
+                kind = kind,
+                errorCode = error.errorCodeName,
+                httpStatus = context.httpStatus,
+                message = error.message ?: error.cause?.message,
+                stage = stage,
+                source = when {
+                    downloadedAt != null -> "download"
+                    readAhead -> "read-ahead"
+                    else -> "network"
+                },
+            ),
+        )
+        PlaybackTelemetry.setError(
+            PlaybackErrorState(
+                kind = kind,
+                summary = PlaybackErrorPolicy.describe(kind),
+                trackTitle = title,
+                recovering = action is RecoveryAction.Retry,
+                atMs = System.currentTimeMillis(),
+            ),
+        )
+
+        when (action) {
+            is RecoveryAction.Retry -> recoveryJob = serviceScope.launch(Dispatchers.Main) {
+                delay(action.delayMs)
+                if (action.refreshCredentials && trackId > 0L) streamResolver.invalidate(trackId)
+                if (action.purgeCache && trackId > 0L) {
+                    withContext(Dispatchers.IO) {
+                        mediaCache.removeReadAhead(trackId, quality)
+                        if (downloadedAt != null) {
+                            runCatching { (applicationContext as JamarrApplication).downloads.redownload(trackId) }
+                                .onFailure { Log.w(TAG, "redownload($trackId) failed", it) }
+                        }
+                    }
+                }
+                if (action.downgradeQuality) {
+                    val next = StreamQualityLadder.nextLower(quality, streamResolver.source(trackId, quality))
+                    prefetcher.cancel()
+                    activeQuality.set(next)
+                    currentStreamQuality.set(next)
+                    currentStreamQualityLabel.set(qualityLabel(next))
+                }
+                // Re-preparing after an error resumes the current item at the
+                // position it failed; the queue is untouched.
+                player.prepare()
+                if (wasPlaying) player.play()
+            }
+
+            RecoveryAction.SkipTrack -> {
+                if (player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem()
+                    player.prepare()
+                    if (wasPlaying) player.play()
+                }
+            }
+
+            RecoveryAction.GiveUp -> {
+                // Car and notification surfaces show a session error with a
+                // readable reason rather than media3's generic one.
+                val text = listOfNotNull(PlaybackErrorPolicy.describe(kind), title?.let { "“$it”" }).joinToString(": ")
+                runCatching { librarySession?.sendError(SessionError(sessionErrorCode(kind), text)) }
+                    .onFailure { Log.w(TAG, "sendError failed", it) }
+            }
+        }
+    }
+
+    private fun diagnosticEntry(
+        trackId: Long,
+        kind: PlaybackFailureKind?,
+        errorCode: String?,
+        httpStatus: Int?,
+        message: String?,
+        stage: String,
+        source: String = "network",
+    ): DiagnosticEntry {
+        val app = applicationContext as JamarrApplication
+        return DiagnosticEntry(
+            atMs = System.currentTimeMillis(),
+            trackId = trackId,
+            quality = activeQuality.get(),
+            source = source,
+            kind = kind,
+            errorCode = errorCode,
+            httpStatus = httpStatus,
+            message = message,
+            network = when {
+                app.connectivity.state.value.isOffline -> "offline"
+                connectivityManager.isActiveNetworkMetered -> "metered"
+                else -> "unmetered"
+            },
+            outputRoute = AudioRoutes.describe(audioManager)?.label,
+            stage = stage,
+        )
+    }
+
+    private fun sessionErrorCode(kind: PlaybackFailureKind): Int = when (kind) {
+        PlaybackFailureKind.AUTH -> SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED
+        PlaybackFailureKind.NOT_FOUND -> SessionError.ERROR_BAD_VALUE
+        PlaybackFailureKind.UNSUPPORTED -> SessionError.ERROR_NOT_SUPPORTED
+        PlaybackFailureKind.NETWORK, PlaybackFailureKind.SERVER, PlaybackFailureKind.CACHE -> SessionError.ERROR_IO
+        else -> SessionError.ERROR_UNKNOWN
+    }
+
+    /** The HTTP status behind a data-source failure, from media3's exception or our resolver's. */
+    private fun httpStatusOf(error: Throwable): Int? {
+        var cause: Throwable? = error
+        var hops = 0
+        while (cause != null && hops++ < 8) {
+            when (cause) {
+                is HttpDataSource.InvalidResponseCodeException -> return cause.responseCode
+                is JamarrApiException -> return cause.statusCode
+            }
+            cause = cause.cause
+        }
+        return null
+    }
+
+    private fun causedByCache(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        var hops = 0
+        while (cause != null && hops++ < 8) {
+            if (cause is Cache.CacheException) return true
+            cause = cause.cause
+        }
+        return false
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
         return librarySession
     }
 
     override fun onDestroy() {
+        recoveryJob?.cancel()
         prefetcher.cancel()
         // The caches deliberately outlive the service: they are process-scoped
         // singletons on JamarrApplication and SimpleCache cannot be reopened on

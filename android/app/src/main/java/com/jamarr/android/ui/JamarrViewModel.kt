@@ -23,6 +23,8 @@ import com.jamarr.android.download.db.DownloadGroupEntity
 import com.jamarr.android.download.db.DownloadedTrackEntity
 import com.jamarr.android.download.groupDownloadStatus
 import com.jamarr.android.playback.JamarrPlaybackController
+import com.jamarr.android.playback.PlaybackErrorState
+import com.jamarr.android.playback.PlaybackTelemetry
 import com.jamarr.android.playback.ResolvedTrack
 import com.jamarr.android.cast.CastDeviceController
 import com.jamarr.android.renderer.DeviceRendererController
@@ -88,6 +90,10 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     var repeatMode by mutableStateOf(0)
     var showNowPlaying by mutableStateOf(false)
     var clientId by mutableStateOf("")
+
+    /** The local player's last terminal error, until it plays again. */
+    var playbackError by mutableStateOf<PlaybackErrorState?>(null)
+        private set
 
     // Download state, mirrored from the process-wide engine so every screen
     // sees the same progress without each one subscribing to Media3 directly.
@@ -209,6 +215,22 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             app.connectivity.state.collectLatest { onlineState = it }
+        }
+
+        // Local playback errors: the banner says what happened and whether the
+        // service is still trying; Now Playing offers Retry once it is not.
+        viewModelScope.launch {
+            PlaybackTelemetry.errorState.collectLatest { error ->
+                playbackError = error
+                if (error != null && !isRemoteMode) {
+                    val what = error.trackTitle?.let { " (“$it”)" }.orEmpty()
+                    status = if (error.recovering) {
+                        "${error.summary}$what — retrying…"
+                    } else {
+                        "${error.summary}$what"
+                    }
+                }
+            }
         }
 
         viewModelScope.launch { settingsStore.observeDownloadQuality().collectLatest { downloadQuality = it } }
@@ -868,6 +890,12 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         isPlaying = false
         playbackPosition = 0L
         showNowPlaying = false
+    }
+
+    /** Re-prepare the local player after it gave up; the queue and position are still there. */
+    fun retryPlayback() {
+        if (isRemoteMode) return
+        playbackController.retryAfterError()
     }
 
     fun togglePlayPause() {
