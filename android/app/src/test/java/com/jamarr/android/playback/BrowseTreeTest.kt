@@ -157,4 +157,17 @@ class BrowseTreeTest {
         assertNull(BrowseTree.searchQueryOf("album:x"))
         assertNull(BrowseTree.searchQueryOf("search:"))
     }
+
+    @Test
+    fun `album-like folders hint a grid, track folders a list`() {
+        listOf(BrowseTree.ID_FAV_RELEASES, BrowseTree.ID_FAV_ARTISTS, BrowseTree.ID_CHARTS, BrowseTree.ID_PLAYLISTS,
+            BrowseTree.artistId("x")).forEach {
+            assertEquals(it, BrowseTree.CONTENT_STYLE_GRID, BrowseTree.browsableChildStyle(it))
+        }
+        listOf(BrowseTree.ID_ROOT, BrowseTree.ID_FAVOURITES, BrowseTree.albumId("x"), BrowseTree.playlistId(1),
+            BrowseTree.ID_DOWNLOADS, BrowseTree.searchId("q")).forEach {
+            assertEquals(it, BrowseTree.CONTENT_STYLE_LIST, BrowseTree.browsableChildStyle(it))
+        }
+        assertEquals(BrowseTree.CONTENT_STYLE_LIST, BrowseTree.playableChildStyle(BrowseTree.albumId("x")))
+    }
 }

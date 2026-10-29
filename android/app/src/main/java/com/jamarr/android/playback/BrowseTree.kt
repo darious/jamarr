@@ -193,6 +193,33 @@ object BrowseTree {
             null
         }
 
+    // ----- content style hints (#329) ------------------------------------
+    //
+    // developer.android.com/training/cars/media#apply_content_style. The host
+    // owns the final layout; these are hints about what a folder's children
+    // look like: album- and artist-like children with cover art read better as
+    // a grid, track lists as a list.
+
+    const val CONTENT_STYLE_SUPPORTED = "android.media.browse.CONTENT_STYLE_SUPPORTED"
+    const val CONTENT_STYLE_BROWSABLE_HINT = "android.media.browse.CONTENT_STYLE_BROWSABLE_HINT"
+    const val CONTENT_STYLE_PLAYABLE_HINT = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
+    const val CONTENT_STYLE_LIST = 1
+    const val CONTENT_STYLE_GRID = 2
+
+    /** How the *browsable* children of [mediaId] should render. */
+    fun browsableChildStyle(mediaId: String): Int = when {
+        mediaId == ID_FAV_ARTISTS || mediaId == ID_RECENT_ARTISTS || mediaId == ID_HISTORY_ARTISTS -> CONTENT_STYLE_GRID
+        mediaId == ID_FAV_RELEASES || mediaId == ID_RECENT_ALBUMS || mediaId == ID_CHARTS ||
+            mediaId == ID_ADDED || mediaId == ID_HISTORY_ALBUMS || mediaId == ID_PLAYLISTS -> CONTENT_STYLE_GRID
+        // An artist's discography is albums; its Singles / Most Scrobbled
+        // folders sit among them with composite covers.
+        mediaId.startsWith(PREFIX_ARTIST) -> CONTENT_STYLE_GRID
+        else -> CONTENT_STYLE_LIST
+    }
+
+    /** How the *playable* children of [mediaId] should render: tracks are always a list. */
+    fun playableChildStyle(mediaId: String): Int = CONTENT_STYLE_LIST
+
     /**
      * Applies the browser's page window.
      *

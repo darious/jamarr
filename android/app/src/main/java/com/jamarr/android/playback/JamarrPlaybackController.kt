@@ -3,6 +3,7 @@ package com.jamarr.android.playback
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.C
@@ -141,6 +142,12 @@ class JamarrPlaybackController(context: Context) {
             .setArtist(searchTrack.artist)
             .setAlbumTitle(searchTrack.album)
             .setArtworkUri(artworkUrl?.let(Uri::parse))
+            .apply {
+                // Lets the session's favourite button act on this track's album.
+                searchTrack.mbReleaseId?.takeIf { it.isNotBlank() }?.let { mbid ->
+                    setExtras(Bundle().apply { putString(MediaButtonPolicy.EXTRA_ALBUM_MBID, mbid) })
+                }
+            }
             .build()
 
         return MediaItem.Builder()

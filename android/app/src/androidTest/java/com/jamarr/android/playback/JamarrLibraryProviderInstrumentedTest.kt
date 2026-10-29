@@ -422,6 +422,40 @@ class JamarrLibraryProviderInstrumentedTest {
         assertEquals(emptyList<MediaItem>(), items)
     }
 
+    // ----- content style hints and album ids (#329) ----------------------
+
+    @Test
+    fun rootDeclaresContentStyleSupport() = runTest {
+        val extras = provider().rootResult().params?.extras
+        assertEquals(true, extras?.getBoolean(BrowseTree.CONTENT_STYLE_SUPPORTED))
+        assertEquals(BrowseTree.CONTENT_STYLE_LIST, extras?.getInt(BrowseTree.CONTENT_STYLE_BROWSABLE_HINT))
+        assertEquals(BrowseTree.CONTENT_STYLE_LIST, extras?.getInt(BrowseTree.CONTENT_STYLE_PLAYABLE_HINT))
+    }
+
+    @Test
+    fun albumLikeFoldersHintAGridAndTrackFoldersAList() = runTest {
+        val p = provider()
+        val favourites = p.childrenResult(BrowseTree.ID_FAVOURITES, 0, Int.MAX_VALUE).items()
+        val releases = favourites.first { it.mediaId == BrowseTree.ID_FAV_RELEASES }
+        assertEquals(BrowseTree.CONTENT_STYLE_GRID, releases.mediaMetadata.extras?.getInt(BrowseTree.CONTENT_STYLE_BROWSABLE_HINT))
+
+        val album = p.childrenResult(BrowseTree.ID_FAV_RELEASES, 0, Int.MAX_VALUE).items().single()
+        assertEquals(BrowseTree.CONTENT_STYLE_LIST, album.mediaMetadata.extras?.getInt(BrowseTree.CONTENT_STYLE_PLAYABLE_HINT))
+        // Group titles still travel alongside the hints.
+        val artist = p.childrenResult(BrowseTree.artistId("artist-1"), 0, Int.MAX_VALUE).items()
+        assertTrue(artist.all { it.mediaMetadata.extras?.getString("android.media.browse.CONTENT_STYLE_GROUP_TITLE_HINT") != null })
+    }
+
+    @Test
+    fun trackRowsCarryTheirAlbumIdForTheFavouriteButton() = runTest {
+        val p = provider()
+        val tracks = p.childrenResult(BrowseTree.albumId("album-1"), 0, Int.MAX_VALUE).items().drop(1)
+        assertTrue(tracks.all { it.mediaMetadata.extras?.getString(MediaButtonPolicy.EXTRA_ALBUM_MBID) == "album-1" })
+        // Queue items keep it too, so the playing item knows its album.
+        val queued = p.expandForPlayback(listOf(tracks[1])).items
+        assertTrue(queued.all { it.mediaMetadata.extras?.getString(MediaButtonPolicy.EXTRA_ALBUM_MBID) == "album-1" })
+    }
+
     // ----- search (#324) -------------------------------------------------
 
     private fun group(item: MediaItem) = item.mediaMetadata.extras?.getString("android.media.browse.CONTENT_STYLE_GROUP_TITLE_HINT")

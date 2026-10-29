@@ -2,6 +2,7 @@ package com.jamarr.android.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Bundle
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -30,9 +31,13 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionCommands
 import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.ListenableFuture
 import com.jamarr.android.JamarrApplication
 import com.jamarr.android.MainActivity
@@ -88,6 +93,11 @@ class JamarrPlaybackService : MediaLibraryService() {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var audioDeviceCallback: AudioDeviceCallback? = null
 
+    // Session buttons (#329): shuffle, repeat and favourite-album, rebuilt on
+    // every state change so the car shows confirmed state, never a guess.
+    private lateinit var favourites: AlbumFavourites
+    private var favouriteLookup: Job? = null
+
     // Terminal errors: classified, retried within a budget, then surfaced.
     private val errorPolicy = PlaybackErrorPolicy()
     private var recoveryJob: Job? = null
@@ -135,6 +145,8 @@ class JamarrPlaybackService : MediaLibraryService() {
                 authFailed.set(true)
             },
         )
+
+        favourites = AlbumFavourites(apiClient, credentials = { serverUrl.get() to tokenHolder.get() })
 
         // Built before anything can reach it: the coroutines below run as soon
         // as they are launched, and a lateinit read from one of them would race
@@ -304,7 +316,12 @@ class JamarrPlaybackService : MediaLibraryService() {
                 }
             }
 
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = updateMediaButtons()
+
+            override fun onRepeatModeChanged(repeatMode: Int) = updateMediaButtons()
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                updateMediaButtons()
                 // A new queue starts at the cap for the network it starts on;
                 // our own reloads (downgrade, cap change) keep their quality.
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && !reloadingQueue.get()) {
@@ -511,6 +528,7 @@ class JamarrPlaybackService : MediaLibraryService() {
 
         librarySession = MediaLibrarySession.Builder(this, player, sessionCallback())
             .setSessionActivity(sessionIntent)
+            .setMediaButtonPreferences(commandButtons(player))
             .build()
         libraryProvider.session = librarySession
     }
@@ -605,8 +623,20 @@ class JamarrPlaybackService : MediaLibraryService() {
                     Log.w(TAG, "Rejected media session connection from ${controller.packageName}")
                     return MediaSession.ConnectionResult.reject()
                 }
-                return MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
+                // Custom commands are only reachable by controllers accepted
+                // here; the buttons go with them so the host can render them.
+                return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                    .setAvailableSessionCommands(sessionCommands())
+                    .setMediaButtonPreferences(commandButtons(session.player))
+                    .build()
             }
+
+            override fun onCustomCommand(
+                session: MediaSession,
+                controller: MediaSession.ControllerInfo,
+                customCommand: SessionCommand,
+                args: Bundle,
+            ): ListenableFuture<SessionResult> = handleCustomCommand(session, customCommand)
 
             /**
              * Restores the last queue when the car (or a media button) asks to
@@ -839,6 +869,111 @@ class JamarrPlaybackService : MediaLibraryService() {
         }
     }
 
+    // ----- session buttons and custom commands (#329) ---------------------
+
+    private fun sessionCommands(): SessionCommands =
+        MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+            .apply { MediaButtonPolicy.COMMANDS.forEach { add(SessionCommand(it, Bundle.EMPTY)) } }
+            .build()
+
+    private fun currentAlbumMbid(player: Player): String? =
+        player.currentMediaItem?.mediaMetadata?.extras?.getString(MediaButtonPolicy.EXTRA_ALBUM_MBID)
+            ?.takeIf { it.isNotBlank() }
+
+    /** Must run on the application thread: reads player state. */
+    private fun commandButtons(player: Player): List<CommandButton> {
+        val albumMbid = currentAlbumMbid(player)
+        val state = MediaButtonPolicy.State(
+            shuffle = player.shuffleModeEnabled,
+            repeatMode = player.repeatMode,
+            favouriteAlbum = albumMbid?.let { favourites.cached(it) },
+            albumKnown = albumMbid != null,
+            online = !(applicationContext as JamarrApplication).connectivity.state.value.isOffline &&
+                tokenHolder.get().isNotBlank(),
+        )
+        return MediaButtonPolicy.buttons(state).map { spec ->
+            CommandButton.Builder(spec.icon)
+                .setSessionCommand(SessionCommand(spec.command, Bundle.EMPTY))
+                .setDisplayName(spec.label)
+                .setEnabled(spec.enabled)
+                .setSlots(CommandButton.SLOT_OVERFLOW)
+                .build()
+        }
+    }
+
+    /**
+     * Re-publishes the buttons from confirmed state. When the current album's
+     * favourite state is not cached it is looked up once, and the buttons are
+     * published again when the answer arrives.
+     */
+    private fun updateMediaButtons() {
+        serviceScope.launch(Dispatchers.Main) {
+            val session = librarySession ?: return@launch
+            runCatching { session.setMediaButtonPreferences(commandButtons(session.player)) }
+                .onFailure { Log.w(TAG, "setMediaButtonPreferences failed", it) }
+            val albumMbid = currentAlbumMbid(session.player) ?: return@launch
+            if (favourites.cached(albumMbid) != null) return@launch
+            favouriteLookup?.cancel()
+            favouriteLookup = serviceScope.launch {
+                if (serverUrl.get().isBlank() || tokenHolder.get().isBlank()) return@launch
+                runCatching { favourites.isFavourite(albumMbid) }
+                    .onSuccess {
+                        withContext(Dispatchers.Main) {
+                            // Still the same album? A fast skip may have moved on.
+                            if (currentAlbumMbid(session.player) == albumMbid) {
+                                runCatching { session.setMediaButtonPreferences(commandButtons(session.player)) }
+                            }
+                        }
+                    }
+                    .onFailure { Log.d(TAG, "favourite lookup failed: ${it.message}") }
+            }
+        }
+    }
+
+    private fun handleCustomCommand(session: MediaSession, command: SessionCommand): ListenableFuture<SessionResult> =
+        serviceScope.future(Dispatchers.Main) {
+            val player = session.player
+            when (command.customAction) {
+                MediaButtonPolicy.CMD_TOGGLE_SHUFFLE -> {
+                    player.shuffleModeEnabled = !player.shuffleModeEnabled
+                    SessionResult(SessionResult.RESULT_SUCCESS)
+                }
+
+                MediaButtonPolicy.CMD_CYCLE_REPEAT -> {
+                    player.repeatMode = MediaButtonPolicy.nextRepeatMode(player.repeatMode)
+                    SessionResult(SessionResult.RESULT_SUCCESS)
+                }
+
+                MediaButtonPolicy.CMD_TOGGLE_FAVOURITE_ALBUM -> {
+                    val albumMbid = currentAlbumMbid(player)
+                        ?: return@future SessionResult(SessionError.ERROR_BAD_VALUE)
+                    val result = withContext(Dispatchers.IO) { runCatching { favourites.toggle(albumMbid) } }
+                    result.fold(
+                        onSuccess = {
+                            // Browsers subscribed to the favourites folders learn of it too.
+                            libraryProvider.onFavouritesChanged()
+                            updateMediaButtons()
+                            SessionResult(SessionResult.RESULT_SUCCESS)
+                        },
+                        onFailure = { e ->
+                            Log.w(TAG, "favourite toggle failed", e)
+                            // The buttons keep showing the confirmed state.
+                            updateMediaButtons()
+                            SessionResult(
+                                if (e is JamarrApiException && (e.statusCode == 401 || e.statusCode == 403)) {
+                                    SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED
+                                } else {
+                                    SessionError.ERROR_IO
+                                },
+                            )
+                        },
+                    )
+                }
+
+                else -> SessionResult(SessionError.ERROR_NOT_SUPPORTED)
+            }
+        }
+
     // ----- terminal error recovery (#326) --------------------------------
 
     /** Playback is healthy: forgive the track's retry budget and clear any banner. */
@@ -1025,6 +1160,7 @@ class JamarrPlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         recoveryJob?.cancel()
+        favouriteLookup?.cancel()
         networkCallback?.let { runCatching { connectivityManager.unregisterNetworkCallback(it) } }
         audioDeviceCallback?.let { runCatching { audioManager?.unregisterAudioDeviceCallback(it) } }
         prefetcher.cancel()
