@@ -132,6 +132,39 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   `app/services/upnp/staging.py`, driven by the monitor; transitions are matched on
   `TrackURI`, STOPPED-based advance is the fallback. Per-renderer override:
   `renderer.upnp_gapless` in `config.yaml`. Tests: `tests/unit/test_upnp_gapless.py`.
+- UPnP format negotiation: full Sink protocolInfo in `renderer.sink_protocol_info`;
+  MIME alias families + load-stage retries + fault→reason mapping in
+  `app/services/upnp/protocol_info.py` / `transport_errors.py`. A relabelled stream
+  URL carries `&mime=`, which `/api/stream` honours only within the alias family
+  (DIDL and `Content-Type` must agree). Tests: `tests/unit/test_upnp_protocol_negotiation.py`.
+- UPnP events (`app/services/upnp/events.py`): the monitor acquires/releases
+  AVTransport + RenderingControl GENA subscriptions; NOTIFY callback server on
+  the UPnP source address, port `renderer.upnp_event_port` / `UPNP_EVENT_PORT`
+  (8113). Healthy events = watchdog polling only (`_DeviceReader` in
+  monitor.py); unhealthy = 1 s polling. `supports_events` is set only by a
+  working subscription. Tests: `tests/unit/test_upnp_events.py` (FakeGena,
+  FakeNotifyServer). Android mirrors it: jUPnP `SubscriptionCallback`s in
+  `UpnpDeviceController`, health/LastChange parsing in `UpnpEventTracker`.
+- Audio output planning (`app/services/playback_plan.py`): picks original/remux/
+  decode/lossy per track from real audio properties + device constraints
+  (Cast defaults, UPnP protocolInfo), overridable per device via
+  `renderer.audio_constraints` (any `kind:` prefix / bare id); UPnP never goes
+  lossy unless `allow_lossy: true`. The plan's MIME, L16 rate/channels included,
+  drives DIDL/Cast LOAD and staged items; `/api/player/state` exposes `output_plan`.
+- Renderer capabilities (`contracts.py`) must describe operations that work now:
+  optional Protocols (`SupportsNextTrackStaging`, `SupportsPairing`, …) and
+  `queue_ownership`/`output` fields — ADR-0006; the web hides controls a renderer
+  lacks (`can_pause`/`can_seek`/`can_mute`). Mute: `POST /api/player/mute`
+  (UPnP RenderingControl SetMute, Cast). No AirPlay or OpenHome backend:
+  both were evaluated and not built (ADR-0007, ADR-0011).
+  Control handlers (pause/resume/seek/volume) write status columns only
+  (`update_renderer_status_db`), never a read-modify-write of the queue row.
+- Cast items carry Jamarr identity in media `customData` (`jamarrTrackId`,
+  `jamarrSource` server|android, `jamarrContentPath`); server re-adopts its own
+  media after restart, Android rebuilds its queue from the receiver
+  (`android/.../cast/CastQueueReconciler.kt`, pure + JVM-tested). Server receiver
+  queue/preload is opt-in (`renderer.cast_queue`); per-track LOAD is the default;
+  a queue edit that leaves no next track QUEUE_REMOVEs the staged item.
 - `HOST_IP` auto-derived in `dev.sh`/`deploy.sh` via route lookup; override by exporting it.
 - Frontend dev caches (`web/.svelte-kit`, `web/.vite`) are cleared on `dev.sh` start.
 - `test-web.sh`/`lint.sh` run in containers as root and leave root-owned artifacts in
