@@ -513,6 +513,15 @@ endpoints. Browsers and other clients keep using the API port. If the proxy
 port fails to bind, renderer URLs fall back to the API port (pre-proxy
 behaviour).
 
+Connection handling: every upstream request is sent with `Connection: close`,
+so a `GET` body is piped verbatim until upstream EOF, with backpressure. A
+`HEAD` (and any 1xx/204/304) is finished as soon as the re-cased headers are
+out: the proxy does not wait for the upstream to hang up and forwards no body
+even if one is wrongly sent, so a renderer's metadata probe never stalls on a
+lingering upstream connection. While piping, the proxy also watches the
+renderer's side of the socket; a renderer that drops mid-stream releases the
+upstream connection at once. Tests: `tests/unit/test_stream_proxy.py`.
+
 ## Stream-token policy
 
 Cast receivers parse the stream URL once and never re-auth, so the default 300 s
