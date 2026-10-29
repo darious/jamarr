@@ -1,11 +1,15 @@
 package com.jamarr.android.ui.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.jamarr.android.playback.StreamingQualityPrefs
 import com.jamarr.android.ui.theme.JamarrTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -22,6 +26,7 @@ class SettingsScreenTest {
     private var wifiOnly: Boolean? = null
     private var cleared = false
     private var deletedAll = false
+    private var streaming: Pair<String?, String?>? = null
 
     private fun setSettings() {
         compose.setContent {
@@ -41,6 +46,8 @@ class SettingsScreenTest {
                     onReadAheadMaxBytesChange = { cap = it },
                     onClearReadAhead = { cleared = true },
                     onDeleteAllDownloads = { deletedAll = true },
+                    streamingQuality = StreamingQualityPrefs(unmetered = "original", metered = "flac_16_48"),
+                    onStreamingQualityChange = { u, m -> streaming = u to m },
                 )
             }
         }
@@ -76,6 +83,24 @@ class SettingsScreenTest {
         compose.onNodeWithText("Clear").performScrollTo().performClick()
 
         assertEquals(true, cleared)
+    }
+
+    @Test
+    fun streamingCapsArePickedPerNetwork() {
+        setSettings()
+
+        // The metered row shows its current value, and picking changes only it.
+        compose.onNodeWithText("On mobile data (metered)").assertIsDisplayed()
+        compose.onNodeWithText("FLAC 16/48").assertIsDisplayed()
+        // The picker repeats the download-quality labels, so match inside it.
+        val inDialog = hasAnyAncestor(hasTestTag(STREAMING_QUALITY_DIALOG_TAG))
+        compose.onNodeWithText("On mobile data (metered)").performClick()
+        compose.onNode(hasText("Opus 128") and inDialog).performClick()
+        assertEquals(null to "opus_128", streaming)
+
+        compose.onNodeWithText("On Wi-Fi (unmetered)").performClick()
+        compose.onNode(hasText("FLAC 24-bit / 48 kHz") and inDialog).performClick()
+        assertEquals("flac_24_48" to null, streaming)
     }
 
     @Test

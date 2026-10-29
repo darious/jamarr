@@ -275,6 +275,8 @@ private fun JamarrRoot() {
                         onClearReadAhead = vm::clearReadAhead,
                         onDeleteAllDownloads = vm::deleteAllDownloads,
                         contentPadding = contentPadding,
+                        streamingQuality = vm.streamingQuality,
+                        onStreamingQualityChange = vm::updateStreamingQuality,
                     )
                 }
 

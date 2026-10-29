@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.jamarr.android.playback.StreamingQualityPrefs
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -44,6 +45,8 @@ class SettingsStore(private val context: Context) : CookieStore {
     private val wifiOnlyKey = booleanPreferencesKey("wifi_only_transfers")
     private val offlineModeKey = booleanPreferencesKey("offline_mode")
     private val downloadQualityKey = stringPreferencesKey("download_quality")
+    private val streamingQualityUnmeteredKey = stringPreferencesKey("streaming_quality_unmetered")
+    private val streamingQualityMeteredKey = stringPreferencesKey("streaming_quality_metered")
     private val prefetchMaxBytesKey = longPreferencesKey("prefetch_max_bytes")
 
     suspend fun load(): StoredSession {
@@ -81,6 +84,28 @@ class SettingsStore(private val context: Context) : CookieStore {
 
     suspend fun saveDownloadQuality(quality: String) {
         context.jamarrDataStore.edit { prefs -> prefs[downloadQualityKey] = quality }
+    }
+
+    /**
+     * Streaming ceilings per network class; see
+     * [com.jamarr.android.playback.StreamingQualityPolicy] for when each applies.
+     * Both default to the original, which is what playback did before the
+     * setting existed.
+     */
+    fun observeStreamingQuality(): Flow<StreamingQualityPrefs> = context.jamarrDataStore.data
+        .map { prefs ->
+            StreamingQualityPrefs(
+                unmetered = prefs[streamingQualityUnmeteredKey] ?: StreamingQualityPrefs.DEFAULT,
+                metered = prefs[streamingQualityMeteredKey] ?: StreamingQualityPrefs.DEFAULT,
+            )
+        }
+        .distinctUntilChanged()
+
+    suspend fun saveStreamingQuality(unmetered: String? = null, metered: String? = null) {
+        context.jamarrDataStore.edit { prefs ->
+            unmetered?.let { prefs[streamingQualityUnmeteredKey] = it }
+            metered?.let { prefs[streamingQualityMeteredKey] = it }
+        }
     }
 
     /** Ceiling for read-ahead data on disk; downloads are not counted. */

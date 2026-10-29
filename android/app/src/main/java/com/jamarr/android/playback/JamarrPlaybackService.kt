@@ -4,6 +4,8 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.media.AudioManager
 import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
@@ -72,6 +74,12 @@ class JamarrPlaybackService : MediaLibraryService() {
     private val activeQuality = AtomicReference("original")
     private val adaptiveQualityPolicy = AdaptiveStreamQualityPolicy()
     private val downgradeInFlight = AtomicBoolean(false)
+
+    // Per-network streaming ceilings (#328). `reloadingQueue` marks our own
+    // setMediaItems calls so they are not mistaken for a new queue.
+    private val streamingPrefs = AtomicReference(StreamingQualityPrefs())
+    private val reloadingQueue = AtomicBoolean(false)
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     // Terminal errors: classified, retried within a budget, then surfaced.
     private val errorPolicy = PlaybackErrorPolicy()
@@ -233,6 +241,19 @@ class JamarrPlaybackService : MediaLibraryService() {
                 if (enabled && connectivityManager.isActiveNetworkMetered) prefetcher.cancel()
             }
         }
+        serviceScope.launch {
+            settingsStore.observeStreamingQuality().collect { prefs ->
+                streamingPrefs.set(prefs)
+                onCapMaybeChanged()
+            }
+        }
+        // Metering can change without the player noticing (hotspot flagged
+        // metered, Wi-Fi to mobile hand-over); each change re-evaluates the cap.
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = onCapMaybeChanged()
+            override fun onAvailable(network: Network) = onCapMaybeChanged()
+            override fun onLost(network: Network) = onCapMaybeChanged()
+        }.also { runCatching { connectivityManager.registerDefaultNetworkCallback(it) } }
 
         // The prefetcher covers upcoming tracks; the in-progress track is
         // covered by holding a long buffer. The byte cap matters as much as the
@@ -277,6 +298,16 @@ class JamarrPlaybackService : MediaLibraryService() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // A new queue starts at the cap for the network it starts on;
+                // our own reloads (downgrade, cap change) keep their quality.
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && !reloadingQueue.get()) {
+                    val cap = currentCap()
+                    if (cap != activeQuality.get()) {
+                        prefetcher.cancel()
+                        activeQuality.set(cap)
+                        adaptiveQualityPolicy.reset()
+                    }
+                }
                 applyStreamLabels(mediaItem)
                 schedulePrefetch(player)
             }
@@ -596,32 +627,77 @@ class JamarrPlaybackService : MediaLibraryService() {
         }
     }
 
-    private fun downgradeForBuffering(player: ExoPlayer, next: String) {
+    private fun downgradeForBuffering(player: ExoPlayer, next: String) = reloadAtQuality(player, next)
+
+    /**
+     * Switches the active quality and reloads the queue at the current item
+     * and position. Cache keys carry the quality, so read-ahead at the old
+     * quality is cancelled; the queue itself is untouched.
+     */
+    private fun reloadAtQuality(player: ExoPlayer, next: String) {
         if (!downgradeInFlight.compareAndSet(false, true)) return
         val current = activeQuality.get()
         if (next == current) {
             downgradeInFlight.set(false)
             return
         }
-        // Cache keys carry the quality, so any read-ahead at the old quality is
-        // now worthless.
         prefetcher.cancel()
         serviceScope.launch(Dispatchers.Main) {
             try {
                 val position = player.currentPosition.coerceAtLeast(0L)
                 val index = player.currentMediaItemIndex.coerceAtLeast(0)
                 val items = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+                val wasPlaying = player.playWhenReady
                 activeQuality.set(next)
                 currentStreamQuality.set(next)
                 currentStreamQualityLabel.set(qualityLabel(next))
                 if (items.isNotEmpty()) {
-                    player.setMediaItems(items, index.coerceIn(items.indices), position)
+                    reloadingQueue.set(true)
+                    try {
+                        player.setMediaItems(items, index.coerceIn(items.indices), position)
+                    } finally {
+                        reloadingQueue.set(false)
+                    }
                     player.prepare()
-                    player.play()
+                    if (wasPlaying) player.play()
                 }
                 adaptiveQualityPolicy.reset()
             } finally {
                 downgradeInFlight.set(false)
+            }
+        }
+    }
+
+    // ----- streaming quality caps (#328) ---------------------------------
+
+    private fun currentCap(): String =
+        StreamingQualityPolicy.cap(streamingPrefs.get(), connectivityManager.isActiveNetworkMetered)
+
+    /**
+     * The network or the setting changed. A cap below the active quality
+     * applies now: the current track reloads at its position unless it is
+     * already on the device, in which case only what follows changes. A cap
+     * above it waits for the next queue (see [StreamingQualityPolicy]).
+     */
+    private fun onCapMaybeChanged() {
+        // Called from the connectivity thread and from settings collectors;
+        // the session's player may only be touched on the application thread.
+        serviceScope.launch(Dispatchers.Main) {
+            val player = librarySession?.player ?: return@launch
+            val active = activeQuality.get()
+            val next = StreamingQualityPolicy.applyCapNow(active, currentCap())
+            if (next == active) return@launch
+            val trackId = player.currentMediaItem?.mediaId?.let(::extractTrackId) ?: 0L
+            val onDevice = trackId > 0L && mediaCache.isFullyCached(trackId, active)
+            if (player.mediaItemCount == 0 || onDevice || player.playbackState == Player.STATE_IDLE) {
+                // Nothing streaming right now: no reload, just a new ceiling
+                // for the next open (and for read-ahead, restarted below).
+                prefetcher.cancel()
+                activeQuality.set(next)
+                adaptiveQualityPolicy.reset()
+                schedulePrefetch(player)
+            } else {
+                reloadAtQuality(player as ExoPlayer, next)
             }
         }
     }
@@ -812,6 +888,7 @@ class JamarrPlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         recoveryJob?.cancel()
+        networkCallback?.let { runCatching { connectivityManager.unregisterNetworkCallback(it) } }
         prefetcher.cancel()
         // The caches deliberately outlive the service: they are process-scoped
         // singletons on JamarrApplication and SimpleCache cannot be reopened on
