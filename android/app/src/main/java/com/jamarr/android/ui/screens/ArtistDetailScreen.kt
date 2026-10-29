@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.jamarr.android.data.LibraryChange
 import com.jamarr.android.data.AlbumDetail
 import com.jamarr.android.data.ArtistDetail
 import com.jamarr.android.data.SearchTrack
@@ -191,6 +192,7 @@ fun ArtistDetailScreen(
                                     favorite = desired,
                                 )
                             }.onFailure { isFavorite.value = !desired }
+                                .onSuccess { ctx.onLibraryChange(LibraryChange.FavouriteArtists) }
                         }
                     },
                 )

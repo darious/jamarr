@@ -29,6 +29,7 @@ import com.jamarr.android.data.HistoryStats
 import com.jamarr.android.data.HomeContent
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrApiException
+import com.jamarr.android.data.LibraryChange
 import com.jamarr.android.data.PlaylistDetail
 import com.jamarr.android.data.PlaylistSummary
 import com.jamarr.android.data.SearchResponse
@@ -40,9 +41,11 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -71,6 +74,8 @@ class JamarrLibraryProvider(
     cacheTtlMs: Long = CACHE_TTL_MS,
     /** Finished downloads, for the Downloads folder; null leaves it empty. */
     private val downloads: DownloadedLibrary? = null,
+    /** How long a burst of library changes is collected before one notification round. */
+    private val batchWindowMs: Long = CHANGE_BATCH_WINDOW_MS,
 ) {
     /** Server + token, resolved once the service has finished loading settings. */
     data class Credentials(val serverUrl: String, val token: String) {
@@ -263,18 +268,44 @@ class JamarrLibraryProvider(
         }
     }
 
-    /** A favourite was added or removed: the favourites folders must not serve the cached list. */
-    fun onFavouritesChanged() {
+    // ----- targeted invalidation (#330) ----------------------------------
+
+    private val pendingChanges = mutableSetOf<LibraryChange>()
+    private var flushJob: Job? = null
+
+    /**
+     * A library change happened on the phone: drop the stale cache entries,
+     * then tell subscribed browsers which folders moved — in that order, so a
+     * browser's refetch cannot be served from the cache it was told is stale.
+     *
+     * Changes are batched for [batchWindowMs]: toggling three favourites in a
+     * row notifies each folder once. Only affected folders are notified
+     * ([LibraryChangeRouter]); unrelated ones never refetch.
+     */
+    fun onLibraryChange(change: LibraryChange) {
         scope.launch(Dispatchers.Main) {
-            cache.invalidate("favourite-artists")
-            cache.invalidate("favourite-releases")
-            val current = session ?: return@launch
-            for (id in listOf(BrowseTree.ID_FAV_ARTISTS, BrowseTree.ID_FAV_RELEASES)) {
-                runCatching { current.notifyChildrenChanged(id, Int.MAX_VALUE, null) }
-                    .onFailure { Log.w(TAG, "notifyChildrenChanged($id) failed", it) }
+            pendingChanges += change
+            if (flushJob?.isActive == true) return@launch
+            flushJob = launch {
+                delay(batchWindowMs)
+                val batch = pendingChanges.toList().also { pendingChanges.clear() }
+                flushChanges(batch)
             }
         }
     }
+
+    private suspend fun flushChanges(batch: List<LibraryChange>) {
+        val affected = LibraryChangeRouter.affected(batch)
+        affected.cacheKeys.forEach { cache.invalidate(it) }
+        val current = session ?: return
+        affected.nodeIds.forEach { id ->
+            runCatching { current.notifyChildrenChanged(id, Int.MAX_VALUE, null) }
+                .onFailure { Log.w(TAG, "notifyChildrenChanged($id) failed", it) }
+        }
+    }
+
+    /** Applies [change] now, bypassing the batch window; for tests. */
+    suspend fun applyLibraryChangeNow(change: LibraryChange) = flushChanges(listOf(change))
 
     /** Re-publishes the Downloads folder after a download is added, finished or removed. */
     fun onDownloadsChanged() {
@@ -1321,6 +1352,7 @@ class JamarrLibraryProvider(
         const val SEARCH_PLAYLIST_LIMIT = 10
 
         private const val CACHE_TTL_MS = 45_000L
+        const val CHANGE_BATCH_WINDOW_MS = 300L
         private const val ARTWORK_CONCURRENCY = 4
         private const val JPEG_QUALITY = 90
         private const val HOME_LIMIT = 30

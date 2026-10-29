@@ -138,6 +138,7 @@ private fun JamarrRoot() {
         playbackController = vm.playbackController,
         serverUrl = vm.serverUrl,
         accessToken = accessToken,
+        onLibraryChange = vm::announceLibraryChange,
     )
 
     CompositionLocalProvider(LocalJamarrContext provides ctx) {
