@@ -5,6 +5,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class TtlCacheTest {
@@ -80,5 +81,18 @@ class TtlCacheTest {
         cache.get("playlists") { calls.incrementAndGet() }
 
         assertEquals(4, calls.get())
+    }
+
+    @Test
+    fun `the cache is bounded, dropping the least recently used entry`() = runTest {
+        val cache = TtlCache(ttlMs = 60_000L, now = { 0L }, maxEntries = 2)
+        cache.get("a") { 1 }
+        cache.get("b") { 2 }
+        cache.get("a") { 99 } // touch a: b is now the eldest
+        cache.get("c") { 3 }
+        assertEquals(2, cache.size())
+        assertEquals(1, cache.peek<Int>("a"))
+        assertNull(cache.peek<Int>("b"))
+        assertEquals(3, cache.peek<Int>("c"))
     }
 }

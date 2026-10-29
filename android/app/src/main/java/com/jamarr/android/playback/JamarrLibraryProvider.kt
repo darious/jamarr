@@ -21,7 +21,6 @@ import com.jamarr.android.data.AlbumDetail
 import com.jamarr.android.data.ArtistDetail
 import com.jamarr.android.data.ArtistTrackEntry
 import com.jamarr.android.data.HistoryStats
-import com.jamarr.android.data.HomeContent
 import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrApiException
 import com.jamarr.android.data.LibraryChange
@@ -229,7 +228,7 @@ class JamarrLibraryProvider(
             return LibraryResult.ofItemList(ImmutableList.of(signInPlaceholder()), params)
         }
         val rows = try {
-            rowsFor(parentId, creds)
+            rowsFor(parentId, creds, needed = BrowseTree.rowsNeeded(page, pageSize))
         } catch (e: Exception) {
             // An empty list here would render as an empty library; the browser
             // can only offer a retry if it is told this was a failure.
@@ -333,7 +332,13 @@ class JamarrLibraryProvider(
         val albumMbid: String? = null,
     )
 
-    private suspend fun rowsFor(parentId: String, creds: Credentials): List<Row> = when (parentId) {
+    /**
+     * Rows for a node. [needed] is how many the caller will show (the page
+     * end); nodes backed by a server endpoint that takes a `limit` fetch a
+     * prefix of about that size rather than everything (see [prefix]). Nodes
+     * without server paging return the whole list, which is one request.
+     */
+    private suspend fun rowsFor(parentId: String, creds: Credentials, needed: Int = Int.MAX_VALUE): List<Row> = when (parentId) {
         BrowseTree.ID_ROOT,
         BrowseTree.ID_FAVOURITES,
         BrowseTree.ID_RECENT,
@@ -343,11 +348,11 @@ class JamarrLibraryProvider(
         BrowseTree.ID_FAV_ARTISTS -> favouriteArtistRows(creds)
         BrowseTree.ID_FAV_RELEASES -> favouriteReleaseRows(creds)
         BrowseTree.ID_PLAYLISTS -> playlistRows(creds)
-        BrowseTree.ID_RECENT_ARTISTS -> recentArtistRows(creds)
-        BrowseTree.ID_RECENT_ALBUMS -> recentAlbumRows(creds)
-        BrowseTree.ID_RECENT_TRACKS -> recentTrackRows(creds)
+        BrowseTree.ID_RECENT_ARTISTS -> recentArtistRows(creds, needed)
+        BrowseTree.ID_RECENT_ALBUMS -> recentAlbumRows(creds, needed)
+        BrowseTree.ID_RECENT_TRACKS -> recentTrackRows(creds, needed)
         BrowseTree.ID_CHARTS -> chartRows(creds)
-        BrowseTree.ID_ADDED -> recentlyAddedRows(creds)
+        BrowseTree.ID_ADDED -> recentlyAddedRows(creds, needed)
         BrowseTree.ID_HISTORY_ALBUMS -> historyAlbumRows(creds)
         BrowseTree.ID_HISTORY_ARTISTS -> historyArtistRows(creds)
         BrowseTree.ID_DOWNLOADS -> downloadRows()
@@ -578,37 +583,74 @@ class JamarrLibraryProvider(
         cache.get("playlists") { apiClient.playlists(creds.serverUrl, creds.token) }
             .map { playlistRow(it) }
 
-    private suspend fun recentArtistRows(creds: Credentials): List<Row> =
-        home(creds).recentlyPlayedArtists
+    private suspend fun recentArtistRows(creds: Credentials, needed: Int): List<Row> =
+        prefix("recent-artists", needed) { limit -> apiClient.historyArtists(creds.serverUrl, creds.token, limit) }
             .filter { !it.mbid.isNullOrBlank() }
             .map { artistRow(mbid = it.mbid!!, name = it.name, artSha1 = it.artSha1) }
 
-    private suspend fun recentAlbumRows(creds: Credentials): List<Row> =
-        home(creds).recentlyPlayedAlbums.mapNotNull { a ->
-            val mbid = a.albumMbid ?: a.mbReleaseId ?: a.mbid ?: return@mapNotNull null
-            albumRow(
-                albumMbid = mbid,
-                title = a.album,
-                artist = a.artistName,
-                year = a.year,
-                artSha1 = a.artSha1,
-            )
-        }
+    private suspend fun recentAlbumRows(creds: Credentials, needed: Int): List<Row> =
+        prefix("recent-albums", needed) { limit -> apiClient.historyAlbums(creds.serverUrl, creds.token, limit) }
+            .mapNotNull { a ->
+                val mbid = a.albumMbid ?: a.mbReleaseId ?: a.mbid ?: return@mapNotNull null
+                albumRow(
+                    albumMbid = mbid,
+                    title = a.album,
+                    artist = a.artistName,
+                    year = a.year,
+                    artSha1 = a.artSha1,
+                )
+            }
 
-    private suspend fun recentlyAddedRows(creds: Credentials): List<Row> =
-        home(creds).recentlyAddedAlbums.mapNotNull { a ->
-            val mbid = a.albumMbid ?: a.mbReleaseId ?: a.mbid ?: return@mapNotNull null
-            albumRow(
-                albumMbid = mbid,
-                title = a.album,
-                artist = a.artistName,
-                year = a.year,
-                artSha1 = a.artSha1,
-            )
-        }
+    private suspend fun recentlyAddedRows(creds: Credentials, needed: Int): List<Row> =
+        prefix("added", needed) { limit -> apiClient.recentlyAddedAlbums(creds.serverUrl, creds.token, limit) }
+            .mapNotNull { a ->
+                val mbid = a.albumMbid ?: a.mbReleaseId ?: a.mbid ?: return@mapNotNull null
+                albumRow(
+                    albumMbid = mbid,
+                    title = a.album,
+                    artist = a.artistName,
+                    year = a.year,
+                    artSha1 = a.artSha1,
+                )
+            }
 
-    private suspend fun recentTrackRows(creds: Credentials): List<Row> =
-        recentTracks(creds).map { trackRow(it, BrowseTree.ID_RECENT_TRACKS) }
+    private suspend fun recentTrackRows(creds: Credentials, needed: Int): List<Row> =
+        recentTracks(creds, needed).map { trackRow(it, BrowseTree.ID_RECENT_TRACKS) }
+
+    // ----- prefix batches (#321) -----------------------------------------
+
+    /**
+     * A prefix of a server-ordered list, long enough for [needed] rows.
+     *
+     * The first page of a large node used to wait for the whole list (and,
+     * for the home-backed folders, for five sequential requests). Instead the
+     * batch ladder [PREFIX_BATCHES] is climbed as the browser pages deeper:
+     * 50 rows for the first pages, 100 when the browser passes 50, and so on.
+     * Every page slices the same ordered prefix, so pages have no gaps or
+     * duplicates; a prefix shorter than its limit is the complete list, and a
+     * page past it is empty. A larger cached prefix always serves a smaller
+     * need, so paging back never refetches.
+     */
+    private suspend fun <T : Any> prefix(key: String, needed: Int, load: suspend (limit: Int) -> List<T>): List<T> {
+        val want = PREFIX_BATCHES.firstOrNull { it >= needed } ?: PREFIX_BATCHES.last()
+        // Anything already loaded that covers the need, largest first.
+        for (batch in PREFIX_BATCHES.reversed()) {
+            if (batch < want) break
+            cache.peek<List<T>>("$key@$batch")?.let { return it }
+        }
+        // A smaller cached batch that turned out complete is also the answer.
+        for (batch in PREFIX_BATCHES) {
+            if (batch >= want) break
+            cache.peek<List<T>>("$key@$batch")?.let { if (it.size < batch) return it }
+        }
+        return cache.get("$key@$want") { load(want) }
+    }
+
+    /** The longest prefix already loaded for [key], or null. */
+    private suspend fun <T : Any> loadedPrefix(key: String): List<T>? {
+        for (batch in PREFIX_BATCHES.reversed()) cache.peek<List<T>>("$key@$batch")?.let { return it }
+        return null
+    }
 
     private suspend fun chartRows(creds: Credentials): List<Row> =
         cache.get("chart") { apiClient.chart(creds.serverUrl, creds.token) }
@@ -723,9 +765,6 @@ class JamarrLibraryProvider(
     // Recently Added are one /api/home response, and an artist's discography,
     // Singles and Most Scrobbled folders are one artist detail.
 
-    private suspend fun home(creds: Credentials): HomeContent =
-        cache.get("home") { apiClient.home(creds.serverUrl, creds.token, limit = HOME_LIMIT) }
-
     private suspend fun historyStats(creds: Credentials): HistoryStats =
         cache.get("history-stats") { apiClient.historyStats(creds.serverUrl, creds.token) }
 
@@ -742,10 +781,17 @@ class JamarrLibraryProvider(
     private suspend fun playlistDetail(id: Long, creds: Credentials): PlaylistDetail =
         cache.get("playlist:$id") { apiClient.playlistDetail(creds.serverUrl, creds.token, id) }
 
-    private suspend fun recentTracks(creds: Credentials): List<SearchTrack> =
-        cache.get("recent-tracks") {
-            apiClient.recentlyPlayedTracks(creds.serverUrl, creds.token, limit = RECENT_TRACK_LIMIT)
+    /**
+     * Recent tracks for [needed] rows; for queue construction (needed
+     * unspecified) the longest prefix the browser already listed, so what
+     * plays is what was shown.
+     */
+    private suspend fun recentTracks(creds: Credentials, needed: Int = Int.MAX_VALUE): List<SearchTrack> {
+        if (needed == Int.MAX_VALUE) loadedPrefix<SearchTrack>("recent-tracks")?.let { return it }
+        return prefix("recent-tracks", if (needed == Int.MAX_VALUE) PREFIX_BATCHES.first() else needed) { limit ->
+            apiClient.recentlyPlayedTracks(creds.serverUrl, creds.token, limit = limit)
         }
+    }
 
     private suspend fun artistSinglesTracks(mbid: String, creds: Credentials): List<SearchTrack> {
         if (mbid.isBlank()) return emptyList()
@@ -1264,7 +1310,7 @@ class JamarrLibraryProvider(
 
         private const val CACHE_TTL_MS = 45_000L
         const val CHANGE_BATCH_WINDOW_MS = 300L
-        private const val HOME_LIMIT = 30
-        private const val RECENT_TRACK_LIMIT = 50
+        /** Prefix sizes for server-paged nodes; the browser climbs them as it pages. */
+        val PREFIX_BATCHES = listOf(50, 100, 200, 500, 1000, 2000)
     }
 }

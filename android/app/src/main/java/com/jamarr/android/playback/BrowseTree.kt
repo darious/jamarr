@@ -220,6 +220,13 @@ object BrowseTree {
     /** How the *playable* children of [mediaId] should render: tracks are always a list. */
     fun playableChildStyle(mediaId: String): Int = CONTENT_STYLE_LIST
 
+    /** How many rows a page request needs from the top of the list; the whole list when unpaged. */
+    fun rowsNeeded(page: Int, pageSize: Int): Int {
+        if (page < 0 || pageSize <= 0) return Int.MAX_VALUE
+        val end = (page.toLong() + 1L) * pageSize.toLong()
+        return if (end >= Int.MAX_VALUE) Int.MAX_VALUE else end.toInt()
+    }
+
     /**
      * Applies the browser's page window.
      *

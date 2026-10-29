@@ -24,9 +24,11 @@ class LibraryChangeRouterTest {
     }
 
     @Test
-    fun `history drops the shared home payload but does not re-notify Recently Added`() {
+    fun `history drops every recent prefix but does not re-notify Recently Added`() {
         val a = LibraryChangeRouter.affected(LibraryChange.History)
-        assertTrue("home" in a.cacheKeys)
+        assertTrue("recent-albums@50" in a.cacheKeys)
+        assertTrue("recent-tracks@2000" in a.cacheKeys)
+        assertFalse("added@50" in a.cacheKeys)
         assertTrue(BrowseTree.ID_RECENT_TRACKS in a.nodeIds)
         assertFalse(BrowseTree.ID_ADDED in a.nodeIds)
     }

@@ -170,4 +170,13 @@ class BrowseTreeTest {
         }
         assertEquals(BrowseTree.CONTENT_STYLE_LIST, BrowseTree.playableChildStyle(BrowseTree.albumId("x")))
     }
+
+    @Test
+    fun `rows needed is the page end, or everything when unpaged`() {
+        assertEquals(20, BrowseTree.rowsNeeded(0, 20))
+        assertEquals(60, BrowseTree.rowsNeeded(2, 20))
+        assertEquals(Int.MAX_VALUE, BrowseTree.rowsNeeded(0, Int.MAX_VALUE))
+        assertEquals(Int.MAX_VALUE, BrowseTree.rowsNeeded(-1, 20))
+        assertEquals(Int.MAX_VALUE, BrowseTree.rowsNeeded(3, Int.MAX_VALUE / 2))
+    }
 }
