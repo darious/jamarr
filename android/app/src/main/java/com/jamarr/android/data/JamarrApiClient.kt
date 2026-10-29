@@ -18,6 +18,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -192,6 +198,18 @@ class JamarrApiClient(
             recentlyPlayedArtists = get(serverUrl, "/api/history/artists", limit),
         )
     }
+
+    /** The user's recently played artists, most recent first, at most [limit]. */
+    suspend fun historyArtists(serverUrl: String, accessToken: String, limit: Int): List<HomeArtist> =
+        withContext(Dispatchers.IO) { get(serverUrl, "/api/history/artists", limit) }
+
+    /** The user's recently played albums, most recent first, at most [limit]. */
+    suspend fun historyAlbums(serverUrl: String, accessToken: String, limit: Int): List<HomeAlbum> =
+        withContext(Dispatchers.IO) { get(serverUrl, "/api/history/albums", limit) }
+
+    /** Albums most recently added to the library, at most [limit]. */
+    suspend fun recentlyAddedAlbums(serverUrl: String, accessToken: String, limit: Int): List<HomeAlbum> =
+        withContext(Dispatchers.IO) { get(serverUrl, "/api/home/recently-added-albums", limit) }
 
     suspend fun albumTracks(
         serverUrl: String,
@@ -532,7 +550,7 @@ class JamarrApiClient(
 
     private fun apiUrl(serverUrl: String, path: String): String = resolveUrl(serverUrl, path)
 
-    private inline fun <reified T> get(
+    private suspend inline fun <reified T> get(
         serverUrl: String,
         path: String,
         limit: Int,
@@ -781,14 +799,35 @@ class JamarrApiClient(
         }
     }
 
-    private inline fun <reified T> execute(request: Request): T {
-        httpClient.newCall(request).execute().use { response ->
-            val body = response.body.string()
-            if (!response.isSuccessful) {
-                throw JamarrApiException(response.code, errorMessage(response.code, body))
-            }
-            return json.decodeFromString(body)
-        }
+    private suspend inline fun <reified T> execute(request: Request): T = json.decodeFromString(awaitBody(request))
+
+    /**
+     * Runs the call asynchronously and cancels it when the caller's coroutine
+     * is cancelled: a browse request the car has moved on from stops using the
+     * network instead of completing into a cache nobody reads (#321).
+     */
+    private suspend fun awaitBody(request: Request): String = suspendCancellableCoroutine { cont ->
+        val call = httpClient.newCall(request)
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(
+            object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val outcome = runCatching {
+                        response.use { r ->
+                            val body = r.body.string()
+                            if (!r.isSuccessful) throw JamarrApiException(r.code, errorMessage(r.code, body))
+                            body
+                        }
+                    }
+                    if (!cont.isActive) return
+                    outcome.fold({ cont.resume(it) }, { cont.resumeWithException(it) })
+                }
+            },
+        )
     }
 
     private fun errorMessage(statusCode: Int, body: String): String {

@@ -32,7 +32,10 @@ object LibraryChangeRouter {
         )
 
         LibraryChange.History -> Affected(
-            cacheKeys = setOf("home", "history-stats", "recent-tracks"),
+            cacheKeys = setOf("history-stats") +
+                listOf("recent-artists", "recent-albums", "recent-tracks").flatMap { k ->
+                    JamarrLibraryProvider.PREFIX_BATCHES.map { "$k@$it" }
+                },
             nodeIds = setOf(
                 BrowseTree.ID_RECENT_ARTISTS,
                 BrowseTree.ID_RECENT_ALBUMS,
