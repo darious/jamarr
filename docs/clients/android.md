@@ -945,3 +945,160 @@ The harness earned its keep immediately: the session callback was first written
 with Kotlin interface delegation (`by`), which does not generate overrides for
 Java default methods — so every browse call fell through to media3's defaults
 and returned `ERROR_NOT_SUPPORTED`. Only a real `MediaBrowser` could see that.
+
+## Playback, downloads and Android Auto hardening - 2026-10-29
+
+One pass over the Android issues #320, #321, #323, #324, #326, #327, #328,
+#329, #330, #331 and #333. Each landed as its own commit; this section is the
+map. Everything below was exercised on the headless emulator against the LAN
+server unless a line says otherwise.
+
+### Local playback
+
+- **Audio focus, becoming-noisy, wake mode (#323).** The ExoPlayer is built
+  with `USAGE_MEDIA`/`CONTENT_TYPE_MUSIC` attributes and ExoPlayer-managed
+  focus, pauses on `AUDIO_BECOMING_NOISY`, and holds `WAKE_MODE_NETWORK`
+  only while playing (`PlayerAudioConfig`, `WAKE_LOCK` permission). Verified
+  with a simulated incoming call on the emulator: focus loss paused, regain
+  resumed. Remote renderers are untouched: UPnP and Cast never go through
+  this player.
+- **Terminal errors (#326).** `onPlayerError` now runs `PlaybackErrorPolicy`:
+  classify from the error code plus the HTTP status behind it, then retry
+  with backoff (1 s / 3 s / 8 s, three per track per two minutes), with a
+  fresh stream token for 401/403, a cache purge and re-download for
+  unreadable bytes on disk, or a quality step-down for decoder trouble on an
+  original; skip missing/unsupported tracks (three in a row at most);
+  otherwise give up and leave the player in its error state. The queue,
+  index and position survive because the player is only re-prepared.
+  `PlaybackDiagnostics` keeps a 40-entry in-memory record with tokens and
+  signed URLs redacted; the phone shows the summary in the banner and a
+  Retry control in Now Playing, the car gets a readable `SessionError`.
+  Verified on the emulator by cutting all networks mid-queue: three retries,
+  gave up, Retry after the network came back resumed the same position.
+- **Streaming quality ceilings (#328).** One cap per network class
+  (`StreamingQualityPolicy`, settings "Streaming quality"), keyed on
+  `isActiveNetworkMetered` so a metered hotspot is metered. Boundary rules:
+  a new queue starts at the cap for its network; a lower cap applies at
+  once (reloading the current track at its position unless it is already
+  on the device, then only what follows changes); a higher cap applies from
+  the next queue so read-ahead on disk is not refetched. Defaults are
+  "original" on both, which is what playback did before. Verified on the
+  emulator: Wi-Fi off mid-album moved the next track to Opus 128.
+- **Playback details (#333).** Tap the quality badge in Now Playing (local
+  playback only) for source / decoder / output layers gathered from
+  `AnalyticsListener` (`onAudioInputFormatChanged`,
+  `onAudioDecoderInitialized`, `onAudioTrackInitialized`, `onAudioUnderrun`)
+  and an `AudioDeviceCallback` for the route. `PlaybackDetails.processing()`
+  infers only what the numbers support (server transcode, resample,
+  re-quantise, offload, mixer rate, underruns); unknown fields read "not
+  reported"; the pre-API-33 route is marked as a guess. The sheet also lists
+  the last diagnostics and offers "Copy diagnostics" as the only export.
+
+### Downloads
+
+- **Failure reasons and a storage hold (#327).** `DownloadFailures`
+  classifies Media3's `finalException` (sign-in expired, not on server,
+  network, server, no space left, storage error) and the reason is kept in
+  Room (schema v2, `downloaded_track.failureReason`) because Media3's index
+  only remembers "failed". `StorageReservePolicy` keeps the larger of 500 MB
+  and 5 % of the volume free, pausing the `DownloadManager` under the
+  reserve (through the download service, so the foreground service follows
+  the queue) and resuming 100 MB above it; Android's own low-storage signal
+  (the *smaller* of 5 % / 500 MB) is a second line via
+  `DEVICE_STORAGE_NOT_LOW`. Partial downloads stay resumable and nothing is
+  ever deleted to make room. `JamarrDownloads.hold` tells waiting apart from
+  failure; the Downloads screen shows the hold, each failed row says why,
+  its trailing control retries, and "Retry all / Retry failed" requeue the
+  retryable ones. Verified on the emulator by filling the data partition
+  mid-download: held at 227 MB free, resumed after the file was deleted,
+  all 31 tracks finished. During a hold the download notification is gone
+  (Media3 stops the service when no task runs); the in-app banner is the
+  signal.
+
+### Android Auto
+
+- **Search (#324).** `onSearch`/`onGetSearchResult` are implemented and
+  forwarded explicitly through the service callback; the root advertises
+  `SEARCH_SUPPORTED`. Results are one flat bounded list in group order
+  (artists, albums, playlists, tracks) with group-title hints, from
+  `/api/search` plus playlists matched by name. Track results name the
+  search as their parent (`search:<urlencoded query>`) so a tap queues the
+  other results. A query superseded by a newer one from the same browser
+  never announces its count. Voice play-from-search is still rejected.
+- **Session buttons and style hints (#329).** `MediaButtonPolicy` publishes
+  shuffle, repeat and a favourite-album button (tracks cannot be favourites
+  in Jamarr) as media button preferences, rebuilt from confirmed state on
+  every change. The commands are session commands authorised only for
+  controllers `onConnect` accepts and handled in `onCustomCommand`. Track
+  items carry their album id in extras. The root declares
+  `CONTENT_STYLE_SUPPORTED`; album/artist/playlist folders hint a grid,
+  track folders a list; the host still decides the layout.
+- **Targeted invalidation (#330).** `LibraryChanges` (on the application) is
+  the one channel for changes made on this phone: favourite toggles (screens
+  and the session button), plays that will land in history (same 30 s / 20 %
+  rule the server applies, device/server-renderer track changes, offline
+  upload), playlists. `LibraryChangeRouter` maps each change to the cache
+  keys to drop and the folders to re-notify; the provider batches a burst
+  for 300 ms, invalidates before notifying, and never re-notifies an
+  unaffected folder. Server-originated changes were evaluated and left on
+  the TTL: the server's event stream only carries scan events.
+- **Artwork content provider (#331).** Browse items no longer embed image
+  bytes. `ArtworkContentProvider` serves `content://<pkg>.artwork/art/<sha1>`
+  and `/grid/<sha1,...>`: offline store first, then its own cache
+  (`cacheDir/auto_art`, 48 MB, oldest out), then one bounded, single-flight
+  server fetch published by temp-file + rename. Only artwork hashes parse;
+  everything else is `FileNotFoundException`. The service grants a prefix
+  read grant to each accepted controller. `ArtworkPolicy` is now URI (HTTPS)
+  or CONTENT (cleartext server, and always for downloaded art). **Not
+  verified on a head unit** (no DHU here); this is the UAMP reference
+  approach.
+- **First-page latency (#321).** Measured with
+  `BrowseLatencyBenchmarkTest` (fake server, 40 ms per request, 2,000-row
+  nodes, 20-row pages):
+
+  | node | before | after |
+  |---|---|---|
+  | Recently Played › Albums | 5 requests, ~418 ms, capped at 30 rows | 1 request, ~47 ms, no cap |
+  | Recently Played › Artists | 5 requests, ~418 ms, capped at 30 rows | 1 request, ~52 ms, no cap |
+  | Recently Added | 5 requests, ~414 ms, capped at 30 rows | 1 request, ~51 ms, no cap |
+  | Recently Played › Tracks | 1 request, ~74 ms, capped at 50 rows | 1 request, ~76 ms, no cap |
+  | Favourite Artists | 1 request, ~121 ms | 1 request, ~99 ms |
+
+  The home-backed folders now read their own endpoint with a `limit`,
+  climbing a prefix ladder (50, 100, 200, 500, 1000, 2000) as the browser
+  pages; every page slices one server-ordered prefix (2,000 rows in six
+  requests, no gaps or duplicates). Queue construction for Recently Played
+  tracks uses the longest listed prefix. API calls are cancellable (a browse
+  the car moved on from stops using the network) and the browse cache is
+  bounded to 256 LRU entries. Nodes without server paging remain one request.
+
+### Direct renderer queue recovery (#320)
+
+`RendererResumeSnapshot` (DataStore `renderer_resume_v1`) records the UPnP
+queue the phone drives: renderer id, track ids and display metadata, index,
+position, server URL and the session's JWT subject; never a stream URL.
+Written debounced from the controller's state, cleared by Stop and logout.
+On start `RendererResumePolicy` validates it (same server and account, under
+12 h), waits for the renderer to be discovered, probes it without touching it,
+and asks: **Take control** when it is still on a track of our queue (adopts
+queue and index at the renderer's own position; no transport command),
+**Resume** when idle, **Replace** when it plays a foreign stream (the dialog
+says another controller may be using it). An unreachable renderer offers
+nothing and keeps the snapshot. Accepting re-checks the tracks against the
+server so deleted ones drop out. Cast was audited and left alone: the
+receiver owns that queue and the app already rebuilds it from the receiver's
+`customData`. **The live probe/adopt path is not exercised against a real
+renderer in this pass**; the policy and `UpnpTrackSequencer.adopt` are
+unit-tested.
+
+### Testing additions
+
+| What | Where |
+|---|---|
+| Error policy, diagnostics redaction, streaming caps, playback details inference, media buttons, change router, artwork URI grammar, resume policy | `app/src/test/.../playback/`, `.../renderer/` |
+| Download failure classification, storage reserve | `app/src/test/.../download/` |
+| Room v1→v2 migration, failure-reason DAO | `app/src/androidTest/.../download/db/` |
+| Search, style hints, album ids, invalidation ordering, content URIs | `JamarrLibraryProviderInstrumentedTest` |
+| Content provider through the resolver (sources, refusals, concurrency) | `ArtworkContentProviderInstrumentedTest` |
+| Custom commands and search over a real `MediaBrowser` | `MediaBrowserHarnessTest` |
+| First-page latency baseline/after | `BrowseLatencyBenchmarkTest` |
