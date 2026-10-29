@@ -495,4 +495,37 @@ class UpnpTrackSequencerTest {
         clock += 1_000
         assertEquals(PollOutcome.None, seq.observe(seq.currentUri, "STOPPED"))
     }
+
+    @Test
+    fun adoptingALiveQueueSendsNothingAndStagesTheNextTrackWhenDue() = runTest {
+        val port = FakePort()
+        val seq = sequencer()
+        val liveUri = "http://jamarr.lan/api/stream/2?token=fromBeforeRestart"
+
+        seq.adopt(queue, 1, liveUri, playing = true)
+
+        assertTrue(port.calls.isEmpty())
+        assertEquals(1, seq.currentIndex)
+        assertEquals(liveUri, seq.currentUri)
+        // Still mid-track: nothing to do; near the end: the next track is staged.
+        assertEquals(PollOutcome.None, seq.observe(liveUri, "PLAYING"))
+        seq.syncNext(port, positionSeconds = 100.0, durationSeconds = 200.0)
+        assertTrue(port.calls.isEmpty())
+        seq.syncNext(port, positionSeconds = 195.0, durationSeconds = 200.0)
+        assertEquals(listOf("setNext:http://jamarr.lan/api/stream/3?token=t1"), port.calls)
+        // The renderer rolls onto it: recognised as a transition, no reload.
+        assertEquals(PollOutcome.Transitioned(2, needsPlay = false), seq.observe("http://jamarr.lan/api/stream/3?token=t1", "PLAYING"))
+    }
+
+    @Test
+    fun adoptingThenLoadingClearsAPossiblyStaleNextSlot() = runTest {
+        val port = FakePort()
+        val seq = sequencer()
+        seq.adopt(queue, 0, "http://jamarr.lan/api/stream/1?token=old", playing = true)
+
+        assertEquals(LoadResult.Playing, seq.load(port, 2))
+
+        // The slot the dead process may have staged is cleared before play.
+        assertEquals(listOf("setUri:http://jamarr.lan/api/stream/3?token=t1", "setNext:", "play"), port.calls)
+    }
 }

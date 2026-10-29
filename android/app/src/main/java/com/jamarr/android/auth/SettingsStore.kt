@@ -38,6 +38,7 @@ class SettingsStore(private val context: Context) : CookieStore {
     private val clientIdKey = stringPreferencesKey("client_id")
     private val useDeviceUpnpKey = booleanPreferencesKey("use_device_upnp")
     private val resumeQueueKey = stringPreferencesKey("resume_queue_v1")
+    private val rendererResumeKey = stringPreferencesKey("renderer_resume_v1")
 
     // Gates background network use (read-ahead now, downloads later) to
     // unmetered networks. Off by default: read-ahead only pulls the track that
@@ -184,6 +185,16 @@ class SettingsStore(private val context: Context) : CookieStore {
         context.jamarrDataStore.edit { prefs ->
             if (encoded.isNullOrBlank()) prefs.remove(resumeQueueKey)
             else prefs[resumeQueueKey] = encoded
+        }
+    }
+
+    /** The direct-renderer queue context (`RendererResumeSnapshot`), or null. */
+    suspend fun loadRendererResume(): String? =
+        context.jamarrDataStore.data.first()[rendererResumeKey]
+
+    suspend fun saveRendererResume(encoded: String?) {
+        context.jamarrDataStore.edit { prefs ->
+            if (encoded.isNullOrBlank()) prefs.remove(rendererResumeKey) else prefs[rendererResumeKey] = encoded
         }
     }
 

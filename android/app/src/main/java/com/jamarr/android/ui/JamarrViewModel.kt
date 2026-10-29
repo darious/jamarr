@@ -34,7 +34,12 @@ import com.jamarr.android.playback.StreamingQualityPrefs
 import com.jamarr.android.cast.CastDeviceController
 import com.jamarr.android.renderer.DeviceRendererController
 import com.jamarr.android.renderer.DeviceRendererInfo
+import com.jamarr.android.renderer.JwtClaims
 import com.jamarr.android.renderer.QueuedTrack
+import com.jamarr.android.renderer.RendererResumePolicy
+import com.jamarr.android.renderer.RendererResumeSnapshot
+import com.jamarr.android.renderer.RendererResumeTrack
+import com.jamarr.android.renderer.ResumeOffer
 import com.jamarr.android.renderer.deviceQueueStreamUrls
 import com.jamarr.android.ui.nav.JamarrTab
 import com.jamarr.android.ui.nav.Routes
@@ -43,7 +48,9 @@ import com.jamarr.android.ui.screens.StorageUsage
 import com.jamarr.android.upnp.UpnpDeviceController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -167,6 +174,11 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     var initialRestoreDone by mutableStateOf(false)
     var pendingSavedRoute by mutableStateOf<String?>(null)
 
+    /** A direct-renderer queue from before the process died, awaiting the user's decision (#320). */
+    var pendingRendererResume by mutableStateOf<ResumeOffer?>(null)
+        private set
+    private var rendererRecovery: Job? = null
+
     init {
         // UPnP stream tokens are short-lived: mint each track's URL when the
         // renderer is about to load or stage it, not when the queue was built.
@@ -203,6 +215,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
                 status = "Welcome back."
                 refreshHome()
                 loadCachedRenderers()
+                recoverRendererQueue()
                 if (!initialRestoreDone) {
                     initialRestoreDone = true
                     val savedRoute = JamarrTab.fromIndex(saved.activeTabIndex).route()
@@ -324,6 +337,35 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             upnpController.state.collectLatest { st ->
                 if (isDeviceUpnp) applyDevicePlaybackState(st)
+            }
+        }
+
+        // The direct UPnP queue lives only in this process; write it down so a
+        // restart can offer to pick it up (#320). Debounced: at once when the
+        // track, queue or play state changes, else every 10 s while playing.
+        viewModelScope.launch {
+            var lastKey: String? = null
+            var lastWriteMs = 0L
+            upnpController.state.collect { st ->
+                if (!isDeviceUpnp || st.queue.isEmpty() || st.currentIndex < 0 || st.activeRendererId == null) return@collect
+                val key = "${st.activeRendererId}|${st.queue.joinToString(",") { it.id.toString() }}|${st.currentIndex}|${st.isPlaying}"
+                val now = System.currentTimeMillis()
+                val due = key != lastKey || (st.isPlaying && now - lastWriteMs >= RENDERER_SNAPSHOT_INTERVAL_MS)
+                if (!due) return@collect
+                lastKey = key
+                lastWriteMs = now
+                val snapshot = RendererResumeSnapshot(
+                    rendererId = st.activeRendererId,
+                    rendererName = deviceRenderers.firstOrNull { it.rendererId == st.activeRendererId }?.name ?: "renderer",
+                    tracks = st.queue.map { RendererResumeTrack(it.id, it.title, it.artist, it.album, it.durationSeconds, artSha1Of(it.artUrl)) },
+                    currentIndex = st.currentIndex,
+                    positionSeconds = st.positionSeconds,
+                    isPlaying = st.isPlaying,
+                    savedAtMs = now,
+                    serverUrl = serverUrl,
+                    subject = JwtClaims.subject(tokenHolder.get()),
+                )
+                runCatching { settingsStore.saveRendererResume(RendererResumeSnapshot.encode(snapshot)) }
             }
         }
 
@@ -571,6 +613,112 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Fans a change made on the phone out to the playback service's browse tree (#330). */
     fun announceLibraryChange(change: LibraryChange) = app.libraryChanges.emit(change)
+
+    // ----- direct renderer queue recovery (#320) --------------------------
+
+    private fun artSha1Of(artUrl: String?): String? =
+        artUrl?.let { com.jamarr.android.download.ArtworkUrls.sha1FromUrl(it) }
+
+    /**
+     * After a restart: if a snapshot survives validation (same server and
+     * account, under 12 h old), wait for its renderer to be discovered, ask
+     * the renderer what it is doing, and put the matching offer to the user.
+     * Nothing is sent to the renderer until they decide; a renderer that
+     * never shows up leaves the snapshot for a later start, until it ages out.
+     */
+    private fun recoverRendererQueue() {
+        rendererRecovery?.cancel()
+        rendererRecovery = viewModelScope.launch {
+            val stored = RendererResumeSnapshot.decode(settingsStore.loadRendererResume()) ?: return@launch
+            val snapshot = RendererResumePolicy.validate(
+                stored,
+                System.currentTimeMillis(),
+                serverUrl,
+                JwtClaims.subject(tokenHolder.get()),
+            )
+            if (snapshot == null) {
+                settingsStore.saveRendererResume(null)
+                return@launch
+            }
+            if (!useDeviceUpnp) return@launch
+            upnpController.renderers.first { list -> list.any { it.rendererId == snapshot.rendererId } }
+            // The user started something else meanwhile: do not interrupt them.
+            if (isRemoteMode || nowPlayingTrack != null) return@launch
+            val live = upnpController.probe(snapshot.rendererId) ?: return@launch
+            pendingRendererResume = RendererResumePolicy.offer(snapshot, live)
+        }
+    }
+
+    fun declineRendererResume() {
+        pendingRendererResume = null
+        viewModelScope.launch { settingsStore.saveRendererResume(null) }
+    }
+
+    /**
+     * Acts on the offer. Tracks are re-checked against the server first so a
+     * deleted track drops out and metadata is current; stream URLs are minted
+     * by the controller at load time, never taken from the snapshot.
+     */
+    fun acceptRendererResume() {
+        val offer = pendingRendererResume ?: return
+        pendingRendererResume = null
+        viewModelScope.launch {
+            val snapshot = offer.snapshot
+            val ids = snapshot.tracks.map { it.id }
+            val fresh = runCatching { apiClient.tracksByIds(serverUrl, ids) }.getOrNull()?.associateBy { it.id }
+            val tracks = snapshot.tracks.mapNotNull { t ->
+                // Server unreachable: trust the snapshot; otherwise only what still exists.
+                val f = fresh?.get(t.id)
+                if (fresh != null && f == null) return@mapNotNull null
+                QueuedTrack(
+                    id = t.id,
+                    title = f?.title ?: t.title,
+                    artist = f?.artist ?: t.artist.ifBlank { "Unknown Artist" },
+                    album = f?.album ?: t.album.ifBlank { "Unknown Album" },
+                    mime = "audio/flac",
+                    durationSeconds = f?.durationSeconds ?: t.durationSeconds,
+                    streamUrl = "",
+                    artUrl = (f?.artSha1 ?: t.artSha1)?.let { apiClient.artworkUrl(serverUrl, it, maxSize = 600) },
+                )
+            }
+            if (tracks.isEmpty()) {
+                status = "Those tracks are no longer on the server."
+                settingsStore.saveRendererResume(null)
+                return@launch
+            }
+            // The saved current track, or the first surviving one after it.
+            val currentId = snapshot.currentTrack?.id
+            val index = tracks.indexOfFirst { it.id == currentId }.takeIf { it >= 0 }
+                ?: snapshot.tracks.drop(snapshot.currentIndex).firstNotNullOfOrNull { t -> tracks.indexOfFirst { it.id == t.id }.takeIf { i -> i >= 0 } }
+                ?: 0
+            playbackController.clearQueue()
+            runCatching {
+                when (offer) {
+                    is ResumeOffer.TakeControl -> upnpController.adoptQueue(
+                        rendererId = snapshot.rendererId,
+                        tracks = tracks,
+                        index = index,
+                        liveUri = offer.liveUri,
+                        positionSeconds = offer.positionSeconds,
+                        playing = offer.playing,
+                    )
+                    is ResumeOffer.Resume, is ResumeOffer.Replace -> {
+                        upnpController.selectRenderer(snapshot.rendererId)
+                        upnpController.playQueue(tracks, index)
+                        if (snapshot.positionSeconds >= RESUME_SEEK_MIN_SECONDS && tracks[index].id == currentId) {
+                            upnpController.seek(snapshot.positionSeconds)
+                        }
+                    }
+                }
+            }.onFailure { status = it.message ?: "Could not resume on the renderer." }
+            activeRendererUdn = snapshot.rendererId
+            activeRendererSource = RendererSource.DEVICE
+            applyDevicePlaybackState(upnpController.state.value)
+            reportedDeviceQueueIds = emptyList()
+            reportDeviceQueueIfChanged(upnpController.state.value)
+            runCatching { apiClient.setRenderer(serverUrl, clientId, "local:$clientId") }
+        }
+    }
 
     fun refreshHome() {
         val token = tokenHolder.get()
@@ -912,6 +1060,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             runCatching { apiClient.logout(serverUrl) }
             settingsStore.clearAccessToken()
+            settingsStore.saveRendererResume(null)
             cookieJar.clear()
             tokenHolder.clear()
             playbackController.stop()
@@ -934,7 +1083,11 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
     fun stopPlayback() {
         when {
-            isDeviceRenderer -> viewModelScope.launch { runCatching { activeDeviceController()?.stopPlayback() } }
+            isDeviceRenderer -> viewModelScope.launch {
+                runCatching { activeDeviceController()?.stopPlayback() }
+                // Stopped on purpose: nothing to offer after a restart.
+                settingsStore.saveRendererResume(null)
+            }
             isRemoteMode -> viewModelScope.launch {
                 runCatching { apiClient.remoteClearQueue(serverUrl, clientId) }
                     .onSuccess { refreshServerPlaybackState() }
@@ -1171,5 +1324,11 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
 private const val DELETE_SETTLE_POLLS = 40
 private const val DELETE_SETTLE_POLL_MS = 250L
+
+/** How often the direct-renderer queue is written down while it plays. */
+private const val RENDERER_SNAPSHOT_INTERVAL_MS = 10_000L
+
+/** Below this a resumed track just starts from the top. */
+private const val RESUME_SEEK_MIN_SECONDS = 5.0
 
 enum class RendererSource { SERVER, DEVICE }

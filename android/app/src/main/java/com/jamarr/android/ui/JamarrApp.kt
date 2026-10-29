@@ -34,6 +34,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
+import com.jamarr.android.renderer.ResumeOffer
+import com.jamarr.android.ui.components.ConfirmDialog
 import com.jamarr.android.ui.components.MiniPlayer
 import com.jamarr.android.ui.components.RendererPicker
 import com.jamarr.android.ui.nav.BottomNavBar
@@ -604,6 +606,37 @@ private fun JamarrRoot() {
                         color = Color.White,
                     )
                 }
+            }
+
+            // A direct-renderer queue from before the app died (#320): the
+            // renderer is never touched until the user says so.
+            vm.pendingRendererResume?.let { offer ->
+                val name = offer.snapshot.rendererName.ifBlank { "the renderer" }
+                val title = offer.snapshot.currentTrack?.title?.ifBlank { null } ?: "your queue"
+                val (heading, body, label) = when (offer) {
+                    is ResumeOffer.TakeControl -> Triple(
+                        "Still playing on $name",
+                        "“$title” is ${if (offer.playing) "playing" else "paused"} there. Pick the queue back up on this phone? Nothing restarts.",
+                        "Take control",
+                    )
+                    is ResumeOffer.Resume -> Triple(
+                        "Resume on $name?",
+                        "You were listening to “$title”. $name is idle now.",
+                        "Resume",
+                    )
+                    is ResumeOffer.Replace -> Triple(
+                        "$name is playing something else",
+                        "Another controller may be using it. Replace what it plays with your queue from “$title”?",
+                        "Replace",
+                    )
+                }
+                ConfirmDialog(
+                    title = heading,
+                    text = body,
+                    confirmLabel = label,
+                    onConfirm = { vm.acceptRendererResume() },
+                    onDismiss = { vm.declineRendererResume() },
+                )
             }
 
             // Renderer picker overlay
