@@ -163,6 +163,23 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   both were evaluated and not built (ADR-0007, ADR-0011).
   Control handlers (pause/resume/seek/volume) write status columns only
   (`update_renderer_status_db`), never a read-modify-write of the queue row.
+- Android local playback: terminal errors go through `PlaybackErrorPolicy`
+  (bounded retry/skip/give-up, diagnostics in `PlaybackTelemetry`, tokens
+  redacted); per-network streaming caps in `StreamingQualityPolicy` (new queue
+  starts at the cap, lower cap applies now, higher from the next queue);
+  `PlayerAudioConfig` owns focus/noisy/wake settings. Downloads: failure
+  reasons persisted in Room (`failureReason`, schema v2) and a storage hold
+  (`StorageReservePolicy`: keep max(500 MB, 5 %) free; pauses via
+  `DownloadService`, never deletes). Direct UPnP queue context is snapshotted
+  (`RendererResumeSnapshot`) and offered back after a restart, always via an
+  explicit dialog; nothing touches the renderer before the user decides.
+- Android Auto: browse artwork is `content://` through
+  `ArtworkContentProvider` (hash-only URIs, per-controller prefix grant, not
+  verified on a head unit); search, session buttons (`MediaButtonPolicy`) and
+  content-style hints live in the provider/service; library changes made on
+  the phone go through `LibraryChanges` → `LibraryChangeRouter` (invalidate
+  before notify, affected folders only). Home-backed folders page by prefix
+  ladder (`PREFIX_BATCHES`), measured by `BrowseLatencyBenchmarkTest`.
 - Cast items carry Jamarr identity in media `customData` (`jamarrTrackId`,
   `jamarrSource` server|android, `jamarrContentPath`); server re-adopts its own
   media after restart, Android rebuilds its queue from the receiver
