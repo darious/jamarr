@@ -2849,6 +2849,14 @@ All auth (stream tokens), range handling, and quality logic stay in the normal
 endpoints. Browsers and other clients keep using the API port. If the proxy
 port fails to bind, renderer URLs fall back to the API port (pre-proxy
 behaviour).</p>
+<p>Connection handling: every upstream request is sent with <code>Connection: close</code>,
+so a <code>GET</code> body is piped verbatim until upstream EOF, with backpressure. A
+<code>HEAD</code> (and any 1xx/204/304) is finished as soon as the re-cased headers are
+out: the proxy does not wait for the upstream to hang up and forwards no body
+even if one is wrongly sent, so a renderer's metadata probe never stalls on a
+lingering upstream connection. While piping, the proxy also watches the
+renderer's side of the socket; a renderer that drops mid-stream releases the
+upstream connection at once. Tests: <code>tests/unit/test_stream_proxy.py</code>.</p>
 <h2 id="stream-token-policy">Stream-token policy<a class="headerlink" href="#stream-token-policy" title="Permanent link">&para;</a></h2>
 <p>Cast receivers parse the stream URL once and never re-auth, so the default 300 s
 token is too short for a long track. The orchestrator (<code>token_policy.py</code>) issues
