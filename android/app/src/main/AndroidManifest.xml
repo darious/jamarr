@@ -73,6 +73,17 @@
         </service>
 
         <!--
+            Album art for the Android Auto host. Not exported: the playback
+            service grants read access per accepted controller (prefix grant on
+            the authority), and the provider only answers artwork-hash URIs.
+        -->
+        <provider
+            android:name=".playback.ArtworkContentProvider"
+            android:authorities="${applicationId}.artwork"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <!--
             Playback resumption: the system delivers the media button that
             starts a resumed session here, which is what makes the car's
             "continue listening" affordance reach onPlaybackResumption.

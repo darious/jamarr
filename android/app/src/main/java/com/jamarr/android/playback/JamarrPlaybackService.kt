@@ -160,6 +160,10 @@ class JamarrPlaybackService : MediaLibraryService() {
             },
             scope = serviceScope,
             downloads = RoomDownloadedLibrary(app.downloads, app.artworkStore),
+            contentArtwork = object : JamarrLibraryProvider.ContentArtwork {
+                override fun art(sha1: String): Uri = ArtworkContentProvider.artUri(this@JamarrPlaybackService, sha1)
+                override fun grid(sha1s: List<String>): Uri? = ArtworkContentProvider.gridUri(this@JamarrPlaybackService, sha1s)
+            },
         )
         // Favourite toggles and plays made anywhere in this process reach the
         // car's subscribed folders through the shared channel (#330). The
@@ -638,6 +642,7 @@ class JamarrPlaybackService : MediaLibraryService() {
                     Log.w(TAG, "Rejected media session connection from ${controller.packageName}")
                     return MediaSession.ConnectionResult.reject()
                 }
+                grantArtworkAccess(controller.packageName)
                 // Custom commands are only reachable by controllers accepted
                 // here; the buttons go with them so the host can render them.
                 return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
@@ -882,6 +887,26 @@ class JamarrPlaybackService : MediaLibraryService() {
                 reloadAtQuality(player as ExoPlayer, next)
             }
         }
+    }
+
+    /**
+     * Lets an accepted controller open our artwork `content://` URIs (#331).
+     * A prefix grant on the authority covers every hash; nothing else of ours
+     * is reachable through it. The grant lasts until reboot or revocation.
+     */
+    private fun grantArtworkAccess(packageName: String) {
+        if (packageName.isBlank() || packageName == this.packageName ||
+            packageName == ControllerAccess.LEGACY_UNKNOWN_PACKAGE
+        ) {
+            return
+        }
+        runCatching {
+            grantUriPermission(
+                packageName,
+                ArtworkContentProvider.baseUri(this),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
+            )
+        }.onFailure { Log.w(TAG, "artwork grant to $packageName failed: ${it.message}") }
     }
 
     // ----- session buttons and custom commands (#329) ---------------------

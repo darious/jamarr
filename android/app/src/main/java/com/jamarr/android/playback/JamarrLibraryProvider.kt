@@ -2,11 +2,6 @@
 
 package com.jamarr.android.playback
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.Rect
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -37,19 +32,15 @@ import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.data.sortedReleasesDesc
 import com.jamarr.android.data.sortedSinglesAsc
 import com.jamarr.android.download.db.DownloadGroupKind
-import java.io.ByteArrayOutputStream
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 
 /**
  * Browse tree + tap-to-play for Android Auto.
@@ -76,7 +67,15 @@ class JamarrLibraryProvider(
     private val downloads: DownloadedLibrary? = null,
     /** How long a burst of library changes is collected before one notification round. */
     private val batchWindowMs: Long = CHANGE_BATCH_WINDOW_MS,
+    /** `content://` artwork for browse rows; null falls back to server URLs (tests without a provider). */
+    private val contentArtwork: ContentArtwork? = null,
 ) {
+    /** Builds the `content://` URIs [ArtworkContentProvider] serves. */
+    interface ContentArtwork {
+        fun art(sha1: String): Uri
+        fun grid(sha1s: List<String>): Uri?
+    }
+
     /** Server + token, resolved once the service has finished loading settings. */
     data class Credentials(val serverUrl: String, val token: String) {
         val authenticated: Boolean get() = serverUrl.isNotBlank() && token.isNotBlank()
@@ -90,9 +89,6 @@ class JamarrLibraryProvider(
     var session: MediaLibrarySession? = null
 
     private val cache = TtlCache(cacheTtlMs)
-
-    /** Bounds artwork fan-out; OkHttp queues past 5 per host anyway. */
-    private val artworkGate = Semaphore(ARTWORK_CONCURRENCY)
 
     /**
      * Thin adapter over the suspend functions below.
@@ -241,14 +237,7 @@ class JamarrLibraryProvider(
             return LibraryResult.ofError(errorCodeFor(e))
         }
         val window = BrowseTree.page(rows, page, pageSize)
-        // The Downloads folder must work with no signal, so its art comes from
-        // disk or not at all: one network fetch per row would each sit out the
-        // connect timeout before the folder could render.
-        val localArtOnly = parentId == BrowseTree.ID_DOWNLOADS || BrowseTree.isDownloaded(parentId)
-        return LibraryResult.ofItemList(
-            ImmutableList.copyOf(buildItems(window, creds, forBrowse = true, localArtOnly = localArtOnly)),
-            params,
-        )
+        return LibraryResult.ofItemList(ImmutableList.copyOf(buildItems(window, creds, forBrowse = true)), params)
     }
 
     /**
@@ -907,7 +896,6 @@ class JamarrLibraryProvider(
                     ),
                     creds,
                     forBrowse = false,
-                    artBytes = null,
                 )
             }
 
@@ -925,7 +913,6 @@ class JamarrLibraryProvider(
                     ),
                     creds,
                     forBrowse = false,
-                    artBytes = null,
                 )
             }
 
@@ -936,7 +923,6 @@ class JamarrLibraryProvider(
                     artistRow(mbid = mbid, name = detail?.name ?: "Artist", artSha1 = detail?.artSha1),
                     creds,
                     forBrowse = false,
-                    artBytes = null,
                 )
             }
 
@@ -974,7 +960,6 @@ class JamarrLibraryProvider(
                 ),
                 creds,
                 forBrowse = false,
-                artBytes = null,
             )
 
             else -> null
@@ -990,7 +975,6 @@ class JamarrLibraryProvider(
         trackFolderRow(mediaId = mediaId, title = title, artist = null, tracks = tracks),
         creds,
         forBrowse = false,
-        artBytes = null,
     )
 
     private fun browsableNode(id: String): MediaItem {
@@ -1043,7 +1027,7 @@ class JamarrLibraryProvider(
                 mediaType = MediaMetadata.MEDIA_TYPE_MUSIC,
                 trackId = trackId,
             )
-        return buildItem(row.copy(mediaId = mediaId), creds, forBrowse = false, artBytes = null)
+        return buildItem(row.copy(mediaId = mediaId), creds, forBrowse = false)
     }
 
     // ----- tap-to-play expansion -----------------------------------------
@@ -1165,54 +1149,19 @@ class JamarrLibraryProvider(
 
     // ----- item building --------------------------------------------------
 
-    private suspend fun buildItems(
-        rows: List<Row>,
-        creds: Credentials,
-        forBrowse: Boolean,
-        localArtOnly: Boolean = false,
-    ): List<MediaItem> {
-        if (rows.isEmpty()) return emptyList()
-        val artwork = if (localArtOnly || ArtworkPolicy.embedsBytes(creds.serverUrl, forBrowse)) {
-            fetchArtwork(rows, creds, localArtOnly)
-        } else {
-            List(rows.size) { null }
-        }
-        return rows.mapIndexed { index, row -> buildItem(row, creds, forBrowse, artwork[index]) }
-    }
-
-    private suspend fun fetchArtwork(
-        rows: List<Row>,
-        creds: Credentials,
-        localOnly: Boolean = false,
-    ): List<ByteArray?> =
-        coroutineScope {
-            rows.map { row ->
-                async {
-                    artworkGate.withPermit {
-                        when {
-                            row.artSha1 != null -> artworkBytes(row.artSha1, creds, localOnly)
-
-                            row.artShas.isNotEmpty() -> gridArtwork(row.artShas, creds, localOnly)
-                            else -> null
-                        }
-                    }
-                }
-            }.awaitAll()
-        }
-
     /**
-     * Downloaded art from disk, anything else from the server. Offline every
-     * network fetch would sit out the connect timeout, one per browse row.
+     * Rows become items with an artwork *URI* only. The car host loads browse
+     * art itself through [ArtworkContentProvider] (or straight from an HTTPS
+     * server), so no bytes are fetched or decoded here and a page renders as
+     * soon as its rows are known.
      */
-    private suspend fun artworkBytes(sha: String, creds: Credentials, localOnly: Boolean = false): ByteArray? =
-        downloads?.localArtwork(sha)?.let { file -> runCatching { file.readBytes() }.getOrNull() }
-            ?: if (localOnly) null else apiClient.fetchArtworkBytes(creds.serverUrl, sha, ArtworkPolicy.ART_SIZE_PX)
+    private fun buildItems(rows: List<Row>, creds: Credentials, forBrowse: Boolean): List<MediaItem> =
+        rows.map { row -> buildItem(row, creds, forBrowse) }
 
     private fun buildItem(
         row: Row,
         creds: Credentials,
         forBrowse: Boolean,
-        artBytes: ByteArray?,
     ): MediaItem {
         val metadata = MediaMetadata.Builder()
             .setTitle(row.title)
@@ -1235,9 +1184,6 @@ class JamarrLibraryProvider(
         }
 
         artworkUri(row, creds, forBrowse)?.let { metadata.setArtworkUri(it) }
-        if (artBytes != null) {
-            metadata.setArtworkData(artBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-        }
         extrasFor(row, forBrowse)?.let { metadata.setExtras(it) }
 
         val builder = MediaItem.Builder()
@@ -1248,12 +1194,28 @@ class JamarrLibraryProvider(
     }
 
     private fun artworkUri(row: Row, creds: Credentials, forBrowse: Boolean): Uri? {
-        val sha = row.artSha1 ?: row.artShas.firstOrNull() ?: return null
+        val sha = row.artSha1?.takeIf { it.isNotBlank() }
+        val shas = row.artShas.filter { it.isNotBlank() }
+        val first = sha ?: shas.firstOrNull() ?: return null
         // Queue items feed our own notification art, loaded in this process, so
-        // a downloaded file works there with no network. Browse items keep the
-        // server URL: the car's host app loads those and cannot read our files.
-        if (!forBrowse) downloads?.localArtwork(sha)?.let { return Uri.fromFile(it) }
-        if (sha.isBlank() || creds.serverUrl.isBlank()) return null
+        // a downloaded file works there with no network; otherwise the server.
+        if (!forBrowse) {
+            downloads?.localArtwork(first)?.let { return Uri.fromFile(it) }
+            return serverArtworkUri(first, creds)
+        }
+        val content = contentArtwork ?: return serverArtworkUri(first, creds)
+        // Browse rows: the host loads these. A composite can only come from
+        // the provider; a single cover follows the policy.
+        if (sha == null) return content.grid(shas) ?: serverArtworkUri(first, creds)
+        val downloaded = downloads?.localArtwork(sha) != null
+        return when (ArtworkPolicy.browseMode(creds.serverUrl, downloaded)) {
+            ArtworkPolicy.Mode.CONTENT -> content.art(sha)
+            ArtworkPolicy.Mode.URI -> serverArtworkUri(sha, creds)
+        }
+    }
+
+    private fun serverArtworkUri(sha: String, creds: Credentials): Uri? {
+        if (creds.serverUrl.isBlank()) return null
         val url = apiClient.artworkUrl(creds.serverUrl, sha, ArtworkPolicy.ART_SIZE_PX) ?: return null
         return runCatching { Uri.parse(url) }.getOrNull()
     }
@@ -1267,57 +1229,6 @@ class JamarrLibraryProvider(
         }
         row.albumMbid?.let { extras.putString(MediaButtonPolicy.EXTRA_ALBUM_MBID, it) }
         return extras.takeIf { !it.isEmpty }
-    }
-
-    /**
-     * Composites up to four covers into a 2x2 grid, matching the playlist
-     * covers in the phone UI. Sources are taken in order rather than shuffled
-     * so a folder keeps the same cover between visits.
-     */
-    private suspend fun gridArtwork(shas: List<String>, creds: Credentials, localOnly: Boolean = false): ByteArray? {
-        if (creds.serverUrl.isBlank()) return null
-        val size = ArtworkPolicy.ART_SIZE_PX
-        val candidates = shas.filter { it.isNotBlank() }.distinct().take(4)
-        if (candidates.isEmpty()) return null
-
-        val fetched = coroutineScope {
-            candidates.map { sha ->
-                async { artworkBytes(sha, creds, localOnly) }
-            }.awaitAll()
-        }.filterNotNull()
-        if (fetched.isEmpty()) return null
-        if (fetched.size == 1) return fetched[0]
-
-        val tiles = fetched.mapNotNull { BitmapFactory.decodeByteArray(it, 0, it.size) }
-        if (tiles.size <= 1) {
-            tiles.forEach { it.recycle() }
-            return fetched[0]
-        }
-
-        // Pad to four quadrants by repeating earlier tiles.
-        val padded = when (tiles.size) {
-            2 -> listOf(tiles[0], tiles[1], tiles[1], tiles[0])
-            3 -> listOf(tiles[0], tiles[1], tiles[2], tiles[0])
-            else -> tiles.take(4)
-        }
-
-        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(out)
-        val half = size / 2
-        val rects = listOf(
-            Rect(0, 0, half, half),
-            Rect(half, 0, size, half),
-            Rect(0, half, half, size),
-            Rect(half, half, size, size),
-        )
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-        padded.forEachIndexed { i, bitmap -> canvas.drawBitmap(bitmap, null, rects[i], paint) }
-
-        val stream = ByteArrayOutputStream()
-        out.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, stream)
-        out.recycle()
-        tiles.forEach { it.recycle() }
-        return stream.toByteArray()
     }
 
     private fun errorCodeFor(error: Throwable): Int = when {
@@ -1353,8 +1264,6 @@ class JamarrLibraryProvider(
 
         private const val CACHE_TTL_MS = 45_000L
         const val CHANGE_BATCH_WINDOW_MS = 300L
-        private const val ARTWORK_CONCURRENCY = 4
-        private const val JPEG_QUALITY = 90
         private const val HOME_LIMIT = 30
         private const val RECENT_TRACK_LIMIT = 50
     }

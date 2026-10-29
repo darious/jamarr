@@ -181,6 +181,13 @@ class JamarrLibraryProviderInstrumentedTest {
         """.trimIndent()
     }
 
+    private val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+
+    private val contentArtwork = object : JamarrLibraryProvider.ContentArtwork {
+        override fun art(sha1: String) = ArtworkContentProvider.artUri(context, sha1)
+        override fun grid(sha1s: List<String>) = ArtworkContentProvider.gridUri(context, sha1s)
+    }
+
     private fun provider(
         token: String = "test-token",
         downloads: DownloadedLibrary? = null,
@@ -191,6 +198,7 @@ class JamarrLibraryProviderInstrumentedTest {
             credentials = { JamarrLibraryProvider.Credentials(url, token) },
             scope = scope,
             downloads = downloads,
+            contentArtwork = contentArtwork,
         )
     }
 
@@ -282,14 +290,16 @@ class JamarrLibraryProviderInstrumentedTest {
     }
 
     @Test
-    fun downloadedArtIsReadFromDisk() = runTest {
-        val bytes = byteArrayOf(9, 8, 7)
-        val file = File.createTempFile("art", ".img").apply { writeBytes(bytes) }
+    fun downloadedArtIsAContentUriNotBytes() = runTest {
+        val file = File.createTempFile("art", ".img").apply { writeBytes(byteArrayOf(9, 8, 7)) }
 
         val items = provider(downloads = fakeDownloads(art = mapOf(SHA_A to file)))
             .childrenResult(BrowseTree.downloadId("album:dummy"), 0, Int.MAX_VALUE).items()
 
-        assertTrue(items[1].mediaMetadata.artworkData.contentEquals(bytes))
+        // The host opens the provider when it wants the image; nothing is
+        // fetched or embedded while the folder is built.
+        assertEquals(ArtworkContentProvider.artUri(context, SHA_A), items[1].mediaMetadata.artworkUri)
+        assertNull(items[1].mediaMetadata.artworkData)
         assertEquals(0, hitsFor("/api/art/file/$SHA_A"))
     }
 
@@ -742,21 +752,26 @@ class JamarrLibraryProviderInstrumentedTest {
     // ----- artwork -------------------------------------------------------
 
     @Test
-    fun aCleartextServerStillEmbedsBrowseArtwork() = runTest {
-        // MockWebServer is http, so the host could not load an icon URI.
+    fun aCleartextServerHandsTheCarContentUris() = runTest {
+        // MockWebServer is http, so the host could not load the server's own
+        // URL; the provider serves it instead, on demand.
         val items = provider().childrenResult(BrowseTree.ID_FAV_ARTISTS, 0, Int.MAX_VALUE).items()
 
-        assertNotNull(items.first().mediaMetadata.artworkData)
-        assertNotNull(items.first().mediaMetadata.artworkUri)
-        assertEquals(1, hitsFor("/api/art/file/$SHA_A"))
+        assertEquals(ArtworkContentProvider.artUri(context, SHA_A), items.first().mediaMetadata.artworkUri)
+        assertNull(items.first().mediaMetadata.artworkData)
+        assertEquals(0, hitsFor("/api/art/file/$SHA_A"))
     }
 
     @Test
-    fun artworkIsOnlyFetchedForTheRequestedPage() = runTest {
-        provider().childrenResult(BrowseTree.albumId("album-1"), 0, 2)
+    fun compositeCoversAreGridUrisAndQueueItemsKeepServerArt() = runTest {
+        val p = provider()
+        val playlist = p.childrenResult(BrowseTree.ID_PLAYLISTS, 0, Int.MAX_VALUE).items().single()
+        assertEquals(ArtworkContentProvider.gridUri(context, listOf(SHA_A, SHA_B)), playlist.mediaMetadata.artworkUri)
 
-        // Play all + one track on this page; the other three tracks are untouched.
-        assertTrue("art fetches should be bounded by the page", hitsFor("/api/art/file/$SHA_A") <= 2)
+        // Queue items are loaded by this process: server URL, no provider hop.
+        val queued = p.expandForPlayback(listOf(playlist)).items
+        assertEquals("http", queued.first().mediaMetadata.artworkUri?.scheme)
+        assertEquals(0, hits.keys.count { it.startsWith("/api/art/file/") })
     }
 
     companion object {
