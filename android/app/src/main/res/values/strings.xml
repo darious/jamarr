@@ -3,6 +3,8 @@
     <string name="app_name">Jamarr</string>
     <string name="download_channel_name">Downloads</string>
     <string name="download_waiting_for_network">Waiting for network</string>
+    <string name="download_waiting_for_storage">Waiting for free space</string>
+    <string name="download_paused_low_storage">Paused: device storage is low</string>
     <plurals name="download_in_progress">
         <item quantity="one">Downloading %d track</item>
         <item quantity="other">Downloading %d tracks</item>

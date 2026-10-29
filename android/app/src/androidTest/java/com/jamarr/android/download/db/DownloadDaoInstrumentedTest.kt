@@ -171,6 +171,22 @@ class DownloadDaoInstrumentedTest {
         assertTrue(dao.allGroups().isEmpty())
     }
 
+    @Test
+    fun aFailureReasonIsKeptUntilTheNextAttempt() = runTest {
+        dao.addGroup(group("album:1", DownloadGroupKind.ALBUM), listOf(track(10), track(11)))
+
+        dao.updateState(10, DownloadRecordState.FAILED, 0L, "NETWORK")
+        assertEquals("NETWORK", dao.track(10)?.failureReason)
+        assertEquals(listOf(10L), dao.failedTracks().map { it.trackId })
+        assertEquals(listOf(10L), dao.failedTracksInGroup("album:1").map { it.trackId })
+        assertTrue(dao.failedTracksInGroup("album:none").isEmpty())
+
+        // Requeued: the reason goes with the failed state.
+        dao.updateState(10, DownloadRecordState.QUEUED, 0L, null)
+        assertNull(dao.track(10)?.failureReason)
+        assertTrue(dao.failedTracks().isEmpty())
+    }
+
     private fun group(id: String, kind: DownloadGroupKind) = DownloadGroupEntity(
         groupId = id,
         kind = kind,

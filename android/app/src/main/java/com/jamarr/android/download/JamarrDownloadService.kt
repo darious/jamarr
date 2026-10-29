@@ -10,6 +10,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadService
+import androidx.media3.exoplayer.scheduler.Requirements
 import androidx.media3.exoplayer.scheduler.Scheduler
 import androidx.media3.exoplayer.workmanager.WorkManagerScheduler
 import com.jamarr.android.JamarrApplication
@@ -59,7 +60,11 @@ class JamarrDownloadService : DownloadService(
             .filter { it >= 0f }
         val percent = progress.average().takeIf { progress.isNotEmpty() && !it.isNaN() }
 
+        val hold = (application as JamarrApplication).downloads.hold.value
         val text = when {
+            hold is DownloadHold.LowStorage -> getString(R.string.download_paused_low_storage)
+            notMetRequirements and Requirements.DEVICE_STORAGE_NOT_LOW != 0 ->
+                getString(R.string.download_waiting_for_storage)
             notMetRequirements != 0 -> getString(R.string.download_waiting_for_network)
             active == 0 && queued > 0 -> resources.getQuantityString(
                 R.plurals.download_queued,

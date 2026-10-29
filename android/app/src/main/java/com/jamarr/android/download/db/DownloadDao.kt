@@ -91,8 +91,26 @@ interface DownloadDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLinks(links: List<DownloadGroupTrackEntity>)
 
-    @Query("UPDATE downloaded_track SET state = :state, sizeBytes = :sizeBytes WHERE trackId = :trackId")
-    suspend fun updateState(trackId: Long, state: DownloadRecordState, sizeBytes: Long)
+    @Query(
+        """
+        UPDATE downloaded_track SET state = :state, sizeBytes = :sizeBytes, failureReason = :failureReason
+        WHERE trackId = :trackId
+        """,
+    )
+    suspend fun updateState(trackId: Long, state: DownloadRecordState, sizeBytes: Long, failureReason: String? = null)
+
+    /** Tracks whose last attempt failed, with the recorded reason. */
+    @Query("SELECT * FROM downloaded_track WHERE state = 'FAILED'")
+    suspend fun failedTracks(): List<DownloadedTrackEntity>
+
+    @Query(
+        """
+        SELECT t.* FROM downloaded_track t
+        JOIN download_group_track gt ON gt.trackId = t.trackId
+        WHERE gt.groupId = :groupId AND t.state = 'FAILED'
+        """,
+    )
+    suspend fun failedTracksInGroup(groupId: String): List<DownloadedTrackEntity>
 
     @Query("DELETE FROM download_group WHERE groupId = :groupId")
     suspend fun deleteGroup(groupId: String)

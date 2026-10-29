@@ -1,5 +1,6 @@
 package com.jamarr.android.download.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -26,6 +27,8 @@ data class DownloadedTrackEntity(
     val sizeBytes: Long,
     val state: DownloadRecordState,
     val addedAt: Long,
+    /** [com.jamarr.android.download.DownloadFailureReason] name while [state] is FAILED; null otherwise. */
+    @ColumnInfo(defaultValue = "NULL") val failureReason: String? = null,
 )
 
 /**
