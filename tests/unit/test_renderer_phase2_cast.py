@@ -1158,3 +1158,60 @@ def test_cast_queue_mode_config(monkeypatch):
     )
     assert app_config.cast_queue_enabled("abc") is True
     assert app_config.cast_queue_enabled("def") is False
+
+
+
+
+@pytest.mark.asyncio
+async def test_mute_is_volume_so_unmute_cannot_restore_the_device_level():
+    """A Sony TV unmuted through the receiver flag came back at its own
+    pre-mute level (0 -> 10) and overrode corrections while settling. Jamarr
+    mutes Cast by volume instead and restores its own level."""
+    cast = FakeCast()
+    backend, _ = make_backend(cast)
+    renderer_id = "cast:11111111-1111-1111-1111-111111111111"
+    await backend.discover(refresh=True)
+    await backend._get_ready_cast(renderer_id)
+    cast.status = SimpleNamespace(volume_level=0.3, volume_muted=False)
+
+    def volume_calls():
+        return [c for c in cast.calls if c[0].startswith("set_volume")]
+
+    cast.calls.clear()
+    muted = await backend.mute(renderer_id, True)
+    assert muted.volume_muted is True
+    assert volume_calls() == [("set_volume", 0.0)]  # never the mute flag
+
+    # The receiver now reports 0: Jamarr shows it muted at the old level.
+    report = backend.status_from_receiver_status(
+        renderer_id, SimpleNamespace(volume_level=0.0, volume_muted=False)
+    )
+    assert (report.volume_percent, report.volume_muted) == (30, True)
+
+    cast.status = SimpleNamespace(volume_level=0.0, volume_muted=False)
+    cast.calls.clear()
+    await backend.mute(renderer_id, False)
+    assert volume_calls() == [("set_volume", 0.3)]
+
+
+@pytest.mark.asyncio
+async def test_device_side_mute_is_cleared_with_the_flag_and_raising_volume_ends_jamarr_mute():
+    cast = FakeCast()
+    backend, _ = make_backend(cast)
+    renderer_id = "cast:11111111-1111-1111-1111-111111111111"
+    await backend.discover(refresh=True)
+    await backend._get_ready_cast(renderer_id)
+
+    # Muted on the TV remote: Jamarr's unmute clears the flag, sets no level.
+    cast.status = SimpleNamespace(volume_level=0.2, volume_muted=True)
+    cast.calls.clear()
+    await backend.mute(renderer_id, False)
+    assert [c for c in cast.calls if c[0].startswith("set_volume")] == [("set_volume_muted", False)]
+
+    # Muted from Jamarr, then the volume raised on the device: no longer muted.
+    cast.status = SimpleNamespace(volume_level=0.2, volume_muted=False)
+    await backend.mute(renderer_id, True)
+    report = backend.status_from_receiver_status(
+        renderer_id, SimpleNamespace(volume_level=0.15, volume_muted=False)
+    )
+    assert (report.volume_percent, report.volume_muted) == (15, False)
