@@ -31,8 +31,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.jamarr.android.download.formatBytes
+import com.jamarr.android.playback.StreamQualityLadder
+import com.jamarr.android.playback.StreamingQualityPrefs
 import com.jamarr.android.ui.components.ConfirmDialog
 import com.jamarr.android.ui.theme.JamarrColors
 import com.jamarr.android.ui.theme.JamarrDims
@@ -53,6 +57,9 @@ internal val DOWNLOAD_QUALITY_OPTIONS = listOf(
     "mp3_320" to ("MP3 320" to "Lossy, about 2.4 MB a minute"),
     "opus_128" to ("Opus 128" to "Lossy, about 1 MB a minute"),
 )
+
+/** Test tag on the streaming-cap picker, whose options repeat the download quality labels. */
+internal const val STREAMING_QUALITY_DIALOG_TAG = "streaming-quality-dialog"
 
 internal val READ_AHEAD_CAP_OPTIONS = listOf(
     256L * 1024 * 1024,
@@ -79,8 +86,13 @@ fun SettingsScreen(
     onClearReadAhead: () -> Unit,
     onDeleteAllDownloads: () -> Unit,
     contentPadding: PaddingValues = PaddingValues(0.dp),
+    streamingQuality: StreamingQualityPrefs = StreamingQualityPrefs(),
+    /** (unmetered, metered): null leaves that one unchanged. */
+    onStreamingQualityChange: (String?, String?) -> Unit = { _, _ -> },
 ) {
     var confirmDeleteAll by remember { mutableStateOf(false) }
+    // Which streaming cap is being picked: "unmetered", "metered" or null.
+    var pickingStreamingCap by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -110,6 +122,23 @@ fun SettingsScreen(
             Text(text = "Settings", style = JamarrType.ScreenTitle, color = JamarrColors.Text)
         }
 
+        SectionHeader("Streaming quality")
+        ChoiceRow(
+            title = "On Wi-Fi (unmetered)",
+            value = StreamQualityLadder.label(streamingQuality.unmetered),
+            onClick = { pickingStreamingCap = "unmetered" },
+        )
+        ChoiceRow(
+            title = "On mobile data (metered)",
+            value = StreamQualityLadder.label(streamingQuality.metered),
+            onClick = { pickingStreamingCap = "metered" },
+        )
+        Note(
+            "The most playback asks for on each kind of network; it still steps down if a stream keeps " +
+                "buffering. A lower limit applies straight away when the network changes; a higher one from " +
+                "the next thing you play. Downloads play at the quality they were saved at.",
+        )
+
         SectionHeader("Download quality")
         DOWNLOAD_QUALITY_OPTIONS.forEach { (key, text) ->
             RadioRow(
@@ -132,7 +161,8 @@ fun SettingsScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text("Downloads on Wi-Fi only", style = JamarrType.CardTitle, color = JamarrColors.Text)
                 Text(
-                    text = "Downloads and read-ahead wait for an unmetered network",
+                    text = "Downloads and read-ahead wait for an unmetered network. Playback itself is " +
+                        "governed by Streaming quality above.",
                     style = JamarrType.CaptionSmall,
                     color = JamarrColors.Muted,
                 )
@@ -174,6 +204,19 @@ fun SettingsScreen(
         )
     }
 
+    pickingStreamingCap?.let { which ->
+        val current = if (which == "metered") streamingQuality.metered else streamingQuality.unmetered
+        QualityPickerDialog(
+            title = if (which == "metered") "Streaming on mobile data" else "Streaming on Wi-Fi",
+            selected = current,
+            onSelect = { key ->
+                if (which == "metered") onStreamingQualityChange(null, key) else onStreamingQualityChange(key, null)
+                pickingStreamingCap = null
+            },
+            onDismiss = { pickingStreamingCap = null },
+        )
+    }
+
     if (confirmDeleteAll) {
         ConfirmDialog(
             title = "Delete all downloads?",
@@ -185,6 +228,54 @@ fun SettingsScreen(
             },
             onDismiss = { confirmDeleteAll = false },
         )
+    }
+}
+
+/** A setting whose value is picked from a dialog: title on the left, current value on the right. */
+@Composable
+private fun ChoiceRow(title: String, value: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = JamarrDims.ScreenPadding, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = title, style = JamarrType.CardTitle, color = JamarrColors.Text, modifier = Modifier.weight(1f))
+        Text(text = value, style = JamarrType.Body, color = JamarrColors.Primary)
+    }
+}
+
+@Composable
+private fun QualityPickerDialog(
+    title: String,
+    selected: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .testTag(STREAMING_QUALITY_DIALOG_TAG)
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                .background(JamarrColors.Card)
+                .padding(vertical = 12.dp),
+        ) {
+            Text(
+                text = title,
+                style = JamarrType.SectionHeader,
+                color = JamarrColors.Text,
+                modifier = Modifier.padding(horizontal = JamarrDims.ScreenPadding, vertical = 6.dp),
+            )
+            DOWNLOAD_QUALITY_OPTIONS.forEach { (key, text) ->
+                RadioRow(
+                    title = text.first,
+                    subtitle = text.second,
+                    selected = key == selected,
+                    onClick = { onSelect(key) },
+                )
+            }
+        }
     }
 }
 

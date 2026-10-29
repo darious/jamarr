@@ -27,6 +27,7 @@ import com.jamarr.android.playback.JamarrPlaybackController
 import com.jamarr.android.playback.PlaybackErrorState
 import com.jamarr.android.playback.PlaybackTelemetry
 import com.jamarr.android.playback.ResolvedTrack
+import com.jamarr.android.playback.StreamingQualityPrefs
 import com.jamarr.android.cast.CastDeviceController
 import com.jamarr.android.renderer.DeviceRendererController
 import com.jamarr.android.renderer.DeviceRendererInfo
@@ -119,6 +120,8 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
     var prefetchMaxBytes by mutableStateOf(SettingsStore.DEFAULT_PREFETCH_MAX_BYTES)
         private set
     var wifiOnlyTransfers by mutableStateOf(false)
+        private set
+    var streamingQuality by mutableStateOf(StreamingQualityPrefs())
         private set
     var storageUsage by mutableStateOf<StorageUsage?>(null)
         private set
@@ -245,6 +248,7 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { settingsStore.observeDownloadQuality().collectLatest { downloadQuality = it } }
         viewModelScope.launch { settingsStore.observePrefetchMaxBytes().collectLatest { prefetchMaxBytes = it } }
         viewModelScope.launch { settingsStore.observeWifiOnlyTransfers().collectLatest { wifiOnlyTransfers = it } }
+        viewModelScope.launch { settingsStore.observeStreamingQuality().collectLatest { streamingQuality = it } }
 
         // Created here as well as by the playback service, so plays logged
         // offline go up when the app opens, not only once something plays.
@@ -798,6 +802,11 @@ class JamarrViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateWifiOnlyTransfers(enabled: Boolean) {
         viewModelScope.launch { settingsStore.saveWifiOnlyTransfers(enabled) }
+    }
+
+    /** Streaming ceilings; the playback service observes the store and applies them. */
+    fun updateStreamingQuality(unmetered: String?, metered: String?) {
+        viewModelScope.launch { settingsStore.saveStreamingQuality(unmetered = unmetered, metered = metered) }
     }
 
     /**
