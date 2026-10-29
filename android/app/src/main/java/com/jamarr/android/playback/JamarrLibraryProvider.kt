@@ -31,11 +31,13 @@ import com.jamarr.android.data.JamarrApiClient
 import com.jamarr.android.data.JamarrApiException
 import com.jamarr.android.data.PlaylistDetail
 import com.jamarr.android.data.PlaylistSummary
+import com.jamarr.android.data.SearchResponse
 import com.jamarr.android.data.SearchTrack
 import com.jamarr.android.data.sortedReleasesDesc
 import com.jamarr.android.data.sortedSinglesAsc
 import com.jamarr.android.download.db.DownloadGroupKind
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -143,7 +145,38 @@ class JamarrLibraryProvider(
             val safeStart = resolvedStart ?: startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
             MediaSession.MediaItemsWithStartPosition(items, safeStart, startPositionMs)
         }
+
+        /**
+         * Runs the search and, once the results are in, tells the browser how
+         * many there are via `notifySearchResultChanged`; the browser then
+         * pages them through [onGetSearchResult]. A query superseded by a
+         * newer one from the same browser is dropped silently (#324).
+         */
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> = scope.future {
+            search(query, browserKey(browser)) { count ->
+                runCatching { session.notifySearchResultChanged(browser, query, count, params) }
+                    .onFailure { Log.w(TAG, "notifySearchResultChanged failed", it) }
+            }
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
+            searchResult(query, page, pageSize, params)
+        }
     }
+
+    private fun browserKey(browser: MediaSession.ControllerInfo): String = "${browser.packageName}:${browser.uid}"
 
     /**
      * Makes items playable without changing what was asked for — adding one
@@ -153,7 +186,15 @@ class JamarrLibraryProvider(
         mediaItems.map { fillTrackUri(it) }
 
     fun rootResult(params: LibraryParams? = null): LibraryResult<MediaItem> =
-        LibraryResult.ofItem(browsableNode(BrowseTree.ID_ROOT), params)
+        LibraryResult.ofItem(browsableNode(BrowseTree.ID_ROOT), rootParams())
+
+    /**
+     * What the root tells the browser about this tree: search is supported.
+     * Legacy browsers (Android Auto) read these as the `BrowserRoot` extras.
+     */
+    fun rootParams(): LibraryParams = LibraryParams.Builder()
+        .setExtras(Bundle().apply { putBoolean(SEARCH_SUPPORTED_KEY, true) })
+        .build()
 
     suspend fun itemResult(mediaId: String): LibraryResult<MediaItem> {
         val item = try {
@@ -292,8 +333,102 @@ class JamarrLibraryProvider(
                 withPlayAll(parentId, playlistTrackRows(id, creds))
             }
 
+            parentId.startsWith(BrowseTree.PREFIX_SEARCH) ->
+                BrowseTree.searchQueryOf(parentId)?.let { searchRows(it, creds) }.orEmpty()
+
             else -> emptyList()
         }
+    }
+
+    // ----- search (#324) --------------------------------------------------
+
+    /** Latest query per browser, so a slow earlier search cannot announce itself after a newer one. */
+    private val latestQuery = ConcurrentHashMap<String, String>()
+
+    /**
+     * Loads the results for [query] and reports their count through [notify]
+     * — unless a newer query from the same browser arrived meanwhile, in
+     * which case nothing is reported and the newer search's count stands.
+     */
+    suspend fun search(query: String, browserKey: String, notify: (Int) -> Unit): LibraryResult<Void> {
+        val creds = credentials()
+        if (!creds.authenticated) return LibraryResult.ofError(SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED)
+        val q = query.trim()
+        latestQuery[browserKey] = q
+        val rows = try {
+            searchRows(q, creds)
+        } catch (e: Exception) {
+            Log.w(TAG, "Search failed for \"$q\"", e)
+            return LibraryResult.ofError(errorCodeFor(e))
+        }
+        if (latestQuery[browserKey] == q) notify(rows.size)
+        return LibraryResult.ofVoid()
+    }
+
+    suspend fun searchResult(
+        query: String,
+        page: Int,
+        pageSize: Int,
+        params: LibraryParams? = null,
+    ): LibraryResult<ImmutableList<MediaItem>> {
+        val creds = credentials()
+        if (!creds.authenticated) return LibraryResult.ofError(SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED)
+        val rows = try {
+            searchRows(query.trim(), creds)
+        } catch (e: Exception) {
+            Log.w(TAG, "Search page failed for \"$query\"", e)
+            return LibraryResult.ofError(errorCodeFor(e))
+        }
+        val window = BrowseTree.page(rows, page, pageSize)
+        return LibraryResult.ofItemList(ImmutableList.copyOf(buildItems(window, creds, forBrowse = true)), params)
+    }
+
+    /**
+     * One flat list in group order — artists, albums, playlists, tracks —
+     * each row carrying its group title so the host renders headed sections.
+     * Artists, albums and tracks come from `/api/search` (20 per kind);
+     * playlists are matched by name against the user's list, which the API's
+     * search does not cover. Rows without a stable id are dropped.
+     */
+    private suspend fun searchRows(query: String, creds: Credentials): List<Row> {
+        if (query.length < MIN_SEARCH_LENGTH) return emptyList()
+        val (response, playlists) = coroutineScope {
+            val r = async { cache.get("search:$query") { apiClient.search(creds.serverUrl, creds.token, query) } }
+            val p = async {
+                runCatching { cache.get("playlists") { apiClient.playlists(creds.serverUrl, creds.token) } }
+                    .getOrDefault(emptyList())
+            }
+            r.await() to p.await()
+        }
+        return searchRowsFrom(query, response, playlists)
+    }
+
+    private fun searchRowsFrom(query: String, response: SearchResponse, playlists: List<PlaylistSummary>): List<Row> {
+        val parent = BrowseTree.searchId(query)
+        val rows = mutableListOf<Row>()
+        rows += response.artists
+            .filter { !it.mbid.isNullOrBlank() }
+            .take(SEARCH_GROUP_LIMIT)
+            .map { artistRow(mbid = it.mbid!!, name = it.name, artSha1 = it.artSha1).copy(group = GROUP_ARTISTS) }
+        rows += response.albums
+            .filter { !it.mbid.isNullOrBlank() }
+            .take(SEARCH_GROUP_LIMIT)
+            .map { albumRow(albumMbid = it.mbid!!, title = it.title, artist = it.artist, year = null, artSha1 = it.artSha1, group = GROUP_ALBUMS) }
+        rows += playlists
+            .filter { it.name.contains(query, ignoreCase = true) }
+            .take(SEARCH_PLAYLIST_LIMIT)
+            .map { playlistRow(it).copy(group = GROUP_PLAYLISTS) }
+        rows += response.tracks
+            .take(SEARCH_GROUP_LIMIT)
+            .map { trackRow(it, parent).copy(group = GROUP_TRACKS) }
+        return rows
+    }
+
+    /** The tracks a search's track rows queue around a tapped one. */
+    private suspend fun searchTracks(query: String, creds: Credentials): List<SearchTrack> {
+        if (query.length < MIN_SEARCH_LENGTH) return emptyList()
+        return cache.get("search:$query") { apiClient.search(creds.serverUrl, creds.token, query) }
+            .tracks.take(SEARCH_GROUP_LIMIT)
     }
 
     private fun staticChildRows(parentId: String): List<Row> =
@@ -768,6 +903,11 @@ class JamarrLibraryProvider(
                 folderItem(mediaId, title, downloadedTracks(groupId), creds)
             }
 
+            mediaId.startsWith(BrowseTree.PREFIX_SEARCH) -> {
+                val query = BrowseTree.searchQueryOf(mediaId) ?: return null
+                folderItem(mediaId, "Search: $query", if (creds.authenticated) searchTracks(query, creds) else emptyList(), creds)
+            }
+
             mediaId.startsWith(BrowseTree.PREFIX_PLAY_ALL) -> buildItem(
                 Row(
                     mediaId = mediaId,
@@ -940,6 +1080,9 @@ class JamarrLibraryProvider(
             artistTopTracks(parentId.removePrefix(BrowseTree.PREFIX_TOP), creds)
 
         parentId == BrowseTree.ID_RECENT_TRACKS -> recentTracks(creds)
+
+        parentId.startsWith(BrowseTree.PREFIX_SEARCH) ->
+            BrowseTree.searchQueryOf(parentId)?.let { searchTracks(it, creds) }.orEmpty()
 
         else -> emptyList()
     }
@@ -1131,6 +1274,19 @@ class JamarrLibraryProvider(
         // AAOS group title hint — items sharing a value render under one header.
         // See developer.android.com/training/cars/media#group_items.
         private const val GROUP_TITLE_KEY = "android.media.browse.CONTENT_STYLE_GROUP_TITLE_HINT"
+
+        /** Root extra the car reads to show its search affordance at all. */
+        const val SEARCH_SUPPORTED_KEY = "android.media.browse.SEARCH_SUPPORTED"
+
+        const val GROUP_ARTISTS = "Artists"
+        const val GROUP_ALBUMS = "Albums"
+        const val GROUP_PLAYLISTS = "Playlists"
+        const val GROUP_TRACKS = "Tracks"
+
+        /** The server returns nothing under two characters; do not even ask. */
+        const val MIN_SEARCH_LENGTH = 2
+        const val SEARCH_GROUP_LIMIT = 20
+        const val SEARCH_PLAYLIST_LIMIT = 10
 
         private const val CACHE_TTL_MS = 45_000L
         private const val ARTWORK_CONCURRENCY = 4

@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.Dispatcher
@@ -52,6 +53,9 @@ class JamarrLibraryProviderInstrumentedTest {
     /** Path -> HTTP status, for the failure cases. */
     private val failures = ConcurrentHashMap<String, Int>()
 
+    /** Path+query -> milliseconds to hold the response, for ordering cases. */
+    private val delays = ConcurrentHashMap<String, Long>()
+
     private val hits = ConcurrentHashMap<String, AtomicInteger>()
 
     @Before
@@ -61,6 +65,7 @@ class JamarrLibraryProviderInstrumentedTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.url.encodedPath
                 hits.getOrPut(path) { AtomicInteger() }.incrementAndGet()
+                (delays[path + "?" + request.url.encodedQuery] ?: delays[path])?.let { Thread.sleep(it) }
                 failures[path]?.let { code ->
                     return MockResponse.Builder().code(code).body("""{"detail":"nope"}""").build()
                 }
@@ -153,6 +158,14 @@ class JamarrLibraryProviderInstrumentedTest {
             [{"position":1,"title":"Mezzanine","artist":"Massive Attack","in_library":true,
               "local_album_mbid":"album-1","art_sha1":"$SHA_A"},
              {"position":2,"title":"Not Here","artist":"Nobody","in_library":false}]
+        """.trimIndent()
+        routes["/api/search"] = """
+            {"artists":[{"name":"Massive Attack","mbid":"artist-1","art_sha1":"$SHA_A"},
+                        {"name":"No Mbid Artist","mbid":""}],
+             "albums":[{"title":"Mezzanine","artist":"Massive Attack","mbid":"album-1","art_sha1":"$SHA_A"},
+                       {"title":"Loose Album","artist":"Nobody"}],
+             "tracks":[{"id":101,"title":"Angel","artist":"Massive Attack","album":"Mezzanine","duration_seconds":379.0,"art_sha1":"$SHA_A"},
+                       {"id":103,"title":"Teardrop","artist":"Massive Attack","album":"Mezzanine","duration_seconds":330.0}]}
         """.trimIndent()
         routes["/api/home/new-releases"] = "[]"
         routes["/api/home/recently-added-albums"] = """
@@ -407,6 +420,109 @@ class JamarrLibraryProviderInstrumentedTest {
         val items = provider().childrenResult(BrowseTree.albumId("album-1"), 0, Int.MAX_VALUE).items()
 
         assertEquals(emptyList<MediaItem>(), items)
+    }
+
+    // ----- search (#324) -------------------------------------------------
+
+    private fun group(item: MediaItem) = item.mediaMetadata.extras?.getString("android.media.browse.CONTENT_STYLE_GROUP_TITLE_HINT")
+
+    @Test
+    fun rootAdvertisesSearch() = runTest {
+        val root = provider().rootResult()
+        assertEquals(true, root.params?.extras?.getBoolean(JamarrLibraryProvider.SEARCH_SUPPORTED_KEY))
+    }
+
+    @Test
+    fun searchReturnsGroupedResultsWithStableIds() = runTest {
+        val p = provider()
+        var announced = -1
+        val outcome = p.search("mass", "browser-a") { announced = it }
+        assertEquals(LibraryResult.RESULT_SUCCESS, outcome.resultCode)
+
+        val items = p.searchResult("mass", 0, Int.MAX_VALUE).items()
+        // Rows without an id are dropped; the "Night drive" playlist does not match.
+        assertEquals(announced, items.size)
+        assertEquals(listOf("Massive Attack", "Mezzanine", "Angel", "Teardrop"), titles(items))
+        assertEquals(listOf("Artists", "Albums", "Tracks", "Tracks"), items.map(::group))
+        assertEquals(BrowseTree.artistId("artist-1"), items[0].mediaId)
+        assertEquals(true, items[0].mediaMetadata.isBrowsable)
+        assertEquals(BrowseTree.albumId("album-1"), items[1].mediaId)
+        assertEquals(true, items[1].mediaMetadata.isBrowsable)
+        assertEquals(BrowseTree.trackId(101L, BrowseTree.searchId("mass")), items[2].mediaId)
+        assertEquals(true, items[2].mediaMetadata.isPlayable)
+        assertNotNull(items[2].localConfiguration?.uri)
+    }
+
+    @Test
+    fun searchMatchesPlaylistsByName() = runTest {
+        val p = provider()
+        p.search("night", "b") {}
+        val items = p.searchResult("night", 0, Int.MAX_VALUE).items()
+        assertTrue(items.any { it.mediaId == BrowseTree.playlistId(7) && group(it) == "Playlists" })
+    }
+
+    @Test
+    fun searchPagesAreWindowsOfOneResultList() = runTest {
+        val p = provider()
+        p.search("mass", "b") {}
+        val first = p.searchResult("mass", 0, 3).items()
+        val second = p.searchResult("mass", 1, 3).items()
+        assertEquals(listOf("Massive Attack", "Mezzanine", "Angel"), titles(first))
+        assertEquals(listOf("Teardrop"), titles(second))
+        assertEquals(1, hitsFor("/api/search"))
+    }
+
+    @Test
+    fun aTappedSearchTrackQueuesTheSearchTracks() = runTest {
+        val p = provider()
+        p.search("mass", "b") {}
+        val tapped = p.searchResult("mass", 0, Int.MAX_VALUE).items().first { it.mediaId.startsWith("track:103") }
+
+        val expansion = p.expandForPlayback(listOf(tapped))
+
+        assertEquals(listOf(101L, 103L), expansion.items.map { BrowseTree.trackIdOf(it.mediaId) })
+        assertEquals(1, expansion.startIndex)
+    }
+
+    @Test
+    fun emptyAuthFailureAndServerFailureAreDistinct() = runTest {
+        routes["/api/search"] = """{"artists":[],"albums":[],"tracks":[]}"""
+        var count = -1
+        assertEquals(LibraryResult.RESULT_SUCCESS, provider().search("zzz", "b") { count = it }.resultCode)
+        assertEquals(0, count)
+
+        assertEquals(
+            SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED,
+            provider(token = "").search("zzz", "b") { count = 99 }.resultCode,
+        )
+        failures["/api/search"] = 401
+        assertEquals(SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED, provider().search("zzz", "b") {}.resultCode)
+        failures["/api/search"] = 503
+        assertEquals(SessionError.ERROR_IO, provider().search("zzz", "b") {}.resultCode)
+        assertEquals(0, count)
+    }
+
+    @Test
+    fun aQueryTooShortForTheServerIsNotSent() = runTest {
+        var count = -1
+        provider().search("m", "b") { count = it }
+        assertEquals(0, count)
+        assertEquals(0, hitsFor("/api/search"))
+    }
+
+    @Test
+    fun aSupersededQueryNeverAnnouncesItsCount() = runTest {
+        delays["/api/search?q=slow"] = 600L
+        val p = provider()
+        val announced = mutableListOf<String>()
+        val slow = async(Dispatchers.IO) { p.search("slow", "same-browser") { announced += "slow" } }
+        kotlinx.coroutines.delay(100)
+        p.search("fast", "same-browser") { announced += "fast" }
+        slow.await()
+        assertEquals(listOf("fast"), announced)
+        // A different browser's query is its own.
+        p.search("slow", "other-browser") { announced += "other" }
+        assertEquals(listOf("fast", "other"), announced)
     }
 
     // ----- tap to play ---------------------------------------------------

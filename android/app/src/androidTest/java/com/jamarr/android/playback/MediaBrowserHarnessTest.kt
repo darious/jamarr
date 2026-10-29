@@ -109,6 +109,23 @@ class MediaBrowserHarnessTest {
         assertTrue("expected at least one row", children.value.orEmpty().isNotEmpty())
     }
 
+    @Test
+    fun searchIsAnsweredOverTheBrowserInterface() {
+        val connected = connect()
+        onMain { connected.getLibraryRoot(null) }
+
+        val outcome = onMain { connected.search("angel", null) }
+
+        // Signed out the service says so; signed in it accepts and later
+        // notifies. Either is an answer; a hang or ERROR_NOT_SUPPORTED means
+        // the callback was not forwarded through the service.
+        assertTrue(
+            "unexpected search result code ${outcome.resultCode}",
+            outcome.resultCode == 0 ||
+                outcome.resultCode == androidx.media3.session.SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED,
+        )
+    }
+
     companion object {
         private const val TIMEOUT_SECONDS = 20L
         private const val PAGE_SIZE = 20
