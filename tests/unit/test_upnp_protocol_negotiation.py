@@ -34,6 +34,7 @@ from app.services.upnp.device import (
     with_mime_param,
 )
 from app.services.upnp.protocol_info import (
+    SEEKABLE_ADDITIONAL_INFO as SEEKABLE,
     canonical_mime,
     is_alias,
     mimes_from_protocol_info,
@@ -151,7 +152,7 @@ def test_alias_negotiation(stream, advertised, expected):
     negotiated = negotiate_format(stream, _entries(*advertised))
     assert negotiated.mime == expected
     assert negotiated.advertised_support is True
-    assert negotiated.protocol_info == f"http-get:*:{expected}:*"  # wildcard default
+    assert negotiated.protocol_info == f"http-get:*:{expected}:{SEEKABLE}"  # seekable default
 
 
 def test_a_label_never_converts_audio():
@@ -189,7 +190,8 @@ def test_exact_entry_prefers_plain_entries_and_differs_from_default():
     )
     assert negotiated.exact_protocol_info == "http-get:*:audio/mpeg:DLNA.ORG_OP=01"
     plain = negotiate_format("audio/flac", _entries("http-get:*:audio/flac:*"))
-    assert plain.exact_protocol_info is None  # same as the default: no extra stage
+    # A plain "*" entry differs from the seekable default: its own stage.
+    assert plain.exact_protocol_info == "http-get:*:audio/flac:*"
     star = negotiate_format("audio/flac", _entries("*:*:audio/flac:DLNA.ORG_OP=01"))
     assert star.exact_protocol_info == "http-get:*:audio/flac:DLNA.ORG_OP=01"
     non_http = negotiate_format("audio/flac", _entries("rtsp-rtp-udp:*:audio/flac:*"))
@@ -320,7 +322,7 @@ async def test_didl_label_and_http_content_type_agree():
     await control.play_track(7, "/m/7.flac", dict(META))
 
     call = dmr.set_calls[0]
-    assert 'protocolInfo="http-get:*:audio/x-flac:*"' in call["meta_data"]
+    assert f'protocolInfo="http-get:*:audio/x-flac:{SEEKABLE}"' in call["meta_data"]
     # The URL asks the stream endpoint for the same label the DIDL names...
     assert call["media_url"].endswith("&mime=audio%2Fx-flac")
     # ...which it serves for FLAC bytes (and would refuse for anything else).
@@ -344,7 +346,7 @@ async def test_retry_with_exact_advertised_entry_then_remember_it():
     await control.play_track(7, "/m/7.flac", dict(META))
 
     assert len(dmr.set_calls) == 2
-    assert 'protocolInfo="http-get:*:audio/x-flac:*"' in dmr.set_calls[0]["meta_data"]
+    assert f'protocolInfo="http-get:*:audio/x-flac:{SEEKABLE}"' in dmr.set_calls[0]["meta_data"]
     second = dmr.set_calls[1]["meta_data"]
     assert 'protocolInfo="http-get:*:audio/x-flac:DLNA.ORG_OP=01"' in second
     assert "albumArtURI" in second  # still the full description
@@ -617,7 +619,7 @@ def test_l16_keeps_its_parameters_and_matches_only_its_own_rate():
     assert negotiated.mime == L16_48K
     assert negotiated.advertised.mime_params == {"rate": "48000", "channels": "2"}
     assert negotiated.exact_protocol_info == f"http-get:*:{L16_48K}:DLNA.ORG_PN=LPCM"
-    assert negotiated.protocol_info == f"http-get:*:{L16_48K}:*"
+    assert negotiated.protocol_info == f"http-get:*:{L16_48K}:{SEEKABLE}"
 
     # Only another rate advertised: no entry describes these bytes.
     other = negotiate_format(L16_48K, _entries(L16_SINK[0]))
@@ -642,7 +644,7 @@ async def test_l16_didl_protocol_info_equals_the_served_content_type():
 
     default, advertised = (c["meta_data"] for c in dmr.set_calls)
     served = served_content_type(L16_48K, None)
-    assert f'protocolInfo="http-get:*:{served}:*"' in default
+    assert f'protocolInfo="http-get:*:{served}:{SEEKABLE}"' in default
     # The retry stage uses the 48 kHz entry, never the 44.1 kHz one.
     assert f'protocolInfo="http-get:*:{served}:DLNA.ORG_PN=LPCM"' in advertised
     assert "44100" not in advertised

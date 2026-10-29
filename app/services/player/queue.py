@@ -97,5 +97,7 @@ async def play_next_track_internal(udn: str):
             logger.info("[Player] End of queue reached.")
             state["is_playing"] = False
             state["position_seconds"] = 0
-            # state['transport_state'] = "STOPPED" # Already stopped
+            # Not necessarily written yet: with UPnP events healthy the monitor
+            # reads transport from events and stored state can still say PLAYING.
+            state["transport_state"] = "STOPPED"
             await update_renderer_state_db(db, udn, state)

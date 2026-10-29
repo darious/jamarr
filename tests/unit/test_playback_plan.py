@@ -403,3 +403,31 @@ def test_cast_capabilities_advertise_the_planner_defaults():
     backend = CastRendererBackend(browser_factory=lambda _b: None, discovery_timeout=0)
     device = backend._device_from_info("abc", None)
     assert device.capabilities.supported_mime_types == set(CAST_DEFAULT_MIME_TYPES)
+
+
+def test_sonos_gets_its_documented_flac_limit():
+    """A Sonos lists audio/flac with no rate, then stops on 24/96 (seen on a
+    Play:3): plan within Sonos's documented 24-bit/48 kHz instead."""
+    info = {"manufacturer": "Sonos, Inc.", "supported_mime_types": "audio/flac,audio/mpeg"}
+    constraints = constraints_for_upnp(info, "uuid:RINCON_X")
+    assert constraints.max_sample_rate_hz == 48000 and constraints.max_bit_depth == 24
+    assert "documented" in constraints.sources
+
+    plan = plan_playback(flac(96000, 24), constraints)
+    assert plan.output.sample_rate_hz == 48000
+    assert plan.lossless
+    # 16/44.1 still goes out untouched.
+    assert plan_playback(flac(44100, 16), constraints).action == "original"
+    # Other vendors get no invented limit.
+    other = constraints_for_upnp({"manufacturer": "Naim Audio", "supported_mime_types": "audio/flac"}, "uuid:N")
+    assert other.max_sample_rate_hz is None
+
+
+def test_config_overrides_the_documented_sonos_limit(monkeypatch):
+    monkeypatch.setattr(
+        app_config,
+        "_config",
+        {"renderer": {"audio_constraints": {"uuid:RINCON_X": {"max_sample_rate_hz": 44100}}}},
+    )
+    info = {"manufacturer": "Sonos, Inc.", "supported_mime_types": "audio/flac"}
+    assert constraints_for_upnp(info, "uuid:RINCON_X").max_sample_rate_hz == 44100

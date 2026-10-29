@@ -121,6 +121,8 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 - UPnP renderers fetch streams/art via a header-recasing proxy on port 8112
   (`app/services/renderer/stream_proxy.py`), not uvicorn directly — uvicorn
   lowercases response headers and some renderers parse them case-sensitively.
+  It also answers DLNA `getcontentFeatures.dlna.org` (byte-range seekable); DIDL
+  carries the same `DLNA.ORG_OP=01`. Sony TVs refuse Seek without it.
 - UPnP discovery (`app/services/upnp/discovery.py`) separates liveness (SSDP
   alive/byebye + HTTP probe) from hydration (description/DMR/DB save, only on new
   LOCATION / BOOTID / CONFIGID / refresh). Gone devices are hidden and get

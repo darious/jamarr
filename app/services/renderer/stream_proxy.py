@@ -40,8 +40,44 @@ def get_upstream_port() -> int:
     return int(os.environ.get("HOST_PORT") or 8111)
 
 
+# DLNA's own header names are camelCase, not HTTP-canonical.
+_DLNA_HEADER_NAMES = {
+    b"contentfeatures.dlna.org": b"contentFeatures.dlna.org",
+    b"transfermode.dlna.org": b"transferMode.dlna.org",
+}
+
+# Byte-range seekable (OP=01), streaming transfer, DLNA 1.5 (FLAGS). Without
+# it DLNA renderers treat the stream as unseekable: a Sony Bravia then lists
+# only Play,Stop as transport actions and refuses Seek.
+DLNA_CONTENT_FEATURES = b"DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+
+
 def canonicalize_header_name(name: bytes) -> bytes:
+    dlna = _DLNA_HEADER_NAMES.get(name.lower())
+    if dlna is not None:
+        return dlna
     return b"-".join(part.capitalize() for part in name.split(b"-"))
+
+
+def dlna_response_headers(request_headers: dict[bytes, bytes], response_head: bytes) -> list[bytes]:
+    """DLNA headers a renderer asked for (getcontentFeatures / transferMode),
+    for a successful response that supports byte ranges."""
+    status_line, _, block = response_head.partition(b"\r\n")
+    parts = status_line.split(b" ")
+    if len(parts) < 2 or parts[1] not in (b"200", b"206"):
+        return []
+    present = {line.partition(b":")[0].strip().lower(): line.partition(b":")[2].strip().lower()
+               for line in block.split(b"\r\n") if b":" in line}
+    out = []
+    if (
+        request_headers.get(b"getcontentfeatures.dlna.org", b"").strip() == b"1"
+        and b"contentfeatures.dlna.org" not in present
+        and present.get(b"accept-ranges") == b"bytes"
+    ):
+        out.append(b"contentFeatures.dlna.org: " + DLNA_CONTENT_FEATURES)
+    if request_headers.get(b"transfermode.dlna.org") and b"transfermode.dlna.org" not in present:
+        out.append(b"transferMode.dlna.org: Streaming")
+    return out
 
 
 async def _read_head(reader: asyncio.StreamReader) -> bytes:
@@ -86,10 +122,12 @@ async def _handle_client(
         # Forward the request with hop-by-hop headers replaced; Connection: close
         # makes the upstream body end at EOF so we can pipe it verbatim.
         out_headers = [b"connection: close"]
+        request_headers: dict[bytes, bytes] = {}
         for line in header_block.split(b"\r\n"):
             if not line:
                 continue
             name = line.split(b":", 1)[0].strip().lower()
+            request_headers[name] = line.partition(b":")[2]
             if name in (b"connection", b"keep-alive", b"proxy-connection"):
                 continue
             out_headers.append(line)
@@ -117,6 +155,7 @@ async def _handle_client(
             if name.strip().lower() in (b"connection", b"keep-alive"):
                 continue
             recased.append(canonicalize_header_name(name.strip()) + b": " + value.strip())
+        recased.extend(dlna_response_headers(request_headers, response_head))
         recased.append(b"Connection: close")
         client_writer.write(b"\r\n".join(recased) + b"\r\n\r\n")
 

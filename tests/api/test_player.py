@@ -510,3 +510,63 @@ async def test_scrobble_skipped_without_session_key(auth_client: AsyncClient, db
         
         # Verify scrobble was NOT called
         assert not mock_scrobble.called
+
+
+async def test_end_of_queue_marks_the_transport_stopped(db):
+    """With UPnP events healthy the stored transport can still say PLAYING
+    when the last track ends; reaching the end of the queue must clear it."""
+    from app.services.player.queue import play_next_track_internal
+    from app.services.player.state import get_renderer_state_db, update_renderer_state_db
+
+    udn = "uuid:end-of-queue-0001"
+    await update_renderer_state_db(
+        db,
+        udn,
+        {"queue": [{"id": 1, "title": "Last", "artist": "A", "album": "B", "duration_seconds": 60}],
+         "current_index": 0, "position_seconds": 59, "is_playing": True,
+         "transport_state": "PLAYING", "volume": 10},
+    )
+    await play_next_track_internal(udn)
+    state = await get_renderer_state_db(db, udn)
+    assert state["is_playing"] is False
+    assert state["transport_state"] == "STOPPED"
+
+
+async def test_pause_records_the_paused_transport(db, monkeypatch):
+    """Pausing stops the monitor, so the stored transport must say paused,
+    not the PLAYING it last wrote."""
+    from app.services.player.state import get_renderer_state_db, update_renderer_state_db
+    from app.services.renderer.orchestrator import RendererOrchestrator
+    from app.services.renderer.registry import RendererRegistry
+
+    class Backend:
+        kind = "upnp"
+
+        def __init__(self):
+            self.paused = []
+
+        async def pause(self, renderer_id):
+            self.paused.append(renderer_id)
+
+    backend = Backend()
+    registry = RendererRegistry()
+    registry.register_backend(backend)
+    orchestrator = RendererOrchestrator(registry)
+    udn = "uuid:pause-state-0001"
+    await update_renderer_state_db(
+        db,
+        udn,
+        {"queue": [], "current_index": -1, "position_seconds": 40, "is_playing": True,
+         "transport_state": "PLAYING", "volume": 10},
+    )
+
+    async def active(_db, _client_id):
+        return f"upnp:{udn}", udn
+
+    monkeypatch.setattr(orchestrator, "get_active", active)
+    await orchestrator.pause(db, "client-1")
+
+    state = await get_renderer_state_db(db, udn)
+    assert backend.paused == [f"upnp:{udn}"]
+    assert state["is_playing"] is False
+    assert state["transport_state"] == "PAUSED_PLAYBACK"

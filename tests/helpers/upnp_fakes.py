@@ -112,11 +112,24 @@ AVT_SCPD = _scpd(
                 ("InstanceID", "in", "A_ARG_TYPE_InstanceID"),
                 ("CurrentTransportState", "out", "TransportState"),
             ],
-        )
+        ),
+        _action(
+            "Seek",
+            [
+                ("InstanceID", "in", "A_ARG_TYPE_InstanceID"),
+                ("Unit", "in", "A_ARG_TYPE_SeekMode"),
+                ("Target", "in", "A_ARG_TYPE_SeekTarget"),
+            ],
+        ),
+        _action("Pause", [("InstanceID", "in", "A_ARG_TYPE_InstanceID")]),
+        _action("Stop", [("InstanceID", "in", "A_ARG_TYPE_InstanceID")]),
     ],
     [
         _state_var("LastChange", events=True),
         _state_var("A_ARG_TYPE_InstanceID", "ui4"),
+        _state_var("A_ARG_TYPE_SeekMode"),
+        _state_var("A_ARG_TYPE_SeekTarget"),
+        _state_var("CurrentTransportActions"),
         _state_var("TransportState"),
         _state_var("CurrentTrackURI"),
         _state_var("AVTransportURI"),
