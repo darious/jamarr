@@ -117,6 +117,25 @@ def get_user_agent():
     return "Jamarr/0.1 ( internal )"
 
 
+def get_art_resize_workers() -> int:
+    """How many artwork resizes may decode at once (default 2, minimum 1).
+
+    Env ``ART_RESIZE_WORKERS`` wins over ``artwork.resize_workers`` in
+    config.yaml. Each in-flight resize holds the decoded source (reduced where
+    the format allows) plus the output, so this bounds peak image memory.
+    """
+    value = os.environ.get("ART_RESIZE_WORKERS")
+    if not value:
+        try:
+            value = (load_config().get("artwork") or {}).get("resize_workers")
+        except (FileNotFoundError, AttributeError):
+            value = None
+    try:
+        return max(1, int(value)) if value else 2
+    except (TypeError, ValueError):
+        return 2
+
+
 def get_upnp_source_ip():
     """Optional IPv4 address UPnP discovery binds to and advertises in stream URLs.
 

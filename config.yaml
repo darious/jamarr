@@ -24,6 +24,12 @@ audio_analysis:
   concurrency: 2 # ffmpeg analyses run at once
   timeout_seconds: 600 # per-track ffmpeg timeout
 
+# Artwork resizing (/api/art/file/{sha1}?max_size=N). Resizes run on their own
+# small thread pool; each one holds a reduced decode of the source plus the
+# output, so this bounds peak image memory. Env override: ART_RESIZE_WORKERS.
+artwork:
+  resize_workers: 2
+
 # UPnP renderers fetch streams/art via a header-recasing proxy on this port
 # (uvicorn lowercases response headers; some renderers need canonical casing).
 # Env override: RENDERER_PROXY_PORT.
