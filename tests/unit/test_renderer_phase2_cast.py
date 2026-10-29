@@ -63,9 +63,17 @@ class FakeMediaController:
             volume_muted=False,
             content_id="http://media",
             idle_reason=None,
+            media_custom_data={},
+            media_session_id=7,
         )
         self.load_response = LOAD_ACCEPTED
         self.pending_load_callback = None
+        # Raw media-namespace requests (QUEUE_INSERT / QUEUE_REMOVE) and the
+        # reply each gets: a (success, data) pair, or a callable building one
+        # from the message.
+        self.sent_messages = []
+        self.message_response = None
+        self.next_item_id = 100
 
     def play_media(self, *args, **kwargs) -> None:
         """Answers the LOAD like a receiver would: ``load_response`` is the
@@ -81,7 +89,25 @@ class FakeMediaController:
             self.status.content_id = args[0]
             self.status.player_state = "BUFFERING"
             self.status.idle_reason = None
+            self.status.media_custom_data = dict(
+                (kwargs.get("media_info") or {}).get("customData") or {}
+            )
         callback(success, data)
+
+    def send_message(self, data, inc_session_id=False, callback_function=None, no_add_request_id=False):
+        self.sent_messages.append(data)
+        response = self.message_response
+        if callable(response):
+            response = response(data)
+        if response is None:
+            # Like a receiver: accept, and report inserted items with ids.
+            items = []
+            for item in data.get("items") or []:
+                items.append({"itemId": self.next_item_id, "media": item.get("media")})
+                self.next_item_id += 1
+            response = (True, {"type": "MEDIA_STATUS", "status": [{"mediaSessionId": 7, "items": items}]})
+        if callback_function:
+            callback_function(*response)
 
     def pause(self) -> None:
         self.calls.append(("pause", (), {}))
@@ -124,6 +150,20 @@ class FakeCast:
             volume_muted=False,
         )
         self.calls = []
+        # Receiver (platform) status listeners, where pychromecast keeps them.
+        self.receiver_listeners = []
+        self.socket_client = SimpleNamespace(
+            receiver_controller=SimpleNamespace(_status_listeners=self.receiver_listeners)
+        )
+
+    def register_status_listener(self, listener) -> None:
+        self.receiver_listeners.append(listener)
+
+    def receiver_status(self, volume_level, volume_muted=False) -> None:
+        """The device reports a new receiver status (remote, other controller)."""
+        self.status = SimpleNamespace(volume_level=volume_level, volume_muted=volume_muted)
+        for listener in list(self.receiver_listeners):
+            listener.new_cast_status(self.status)
 
     def wait(self, timeout=None) -> None:
         self.calls.append(("wait", timeout))
@@ -757,3 +797,364 @@ def test_cast_untracked_idle_without_reason_defers_to_position():
     )
     assert finished.ended is True
     assert finished.completion_reported is True
+
+
+# --- Media identity, receiver status and receiver queue (issue #316) -------
+
+
+def playing_status(content_id, custom=None, position=12, state="PLAYING"):
+    return SimpleNamespace(
+        player_state=state,
+        idle_reason=None,
+        adjusted_current_time=position,
+        duration=180,
+        content_id=content_id,
+        media_custom_data=custom or {},
+    )
+
+
+@pytest.mark.asyncio
+async def test_cast_load_stamps_track_identity_in_custom_data():
+    backend, cast = await loaded_backend()
+
+    status = await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+
+    kwargs = cast.media_controller.calls[0][2]
+    assert kwargs["media_info"]["customData"] == {
+        "jamarrTrackId": 904,
+        "jamarrSource": "server",
+        "jamarrContentPath": "http://127.0.0.1:8111/api/stream/904",
+    }
+    assert status.current_track_id == 904
+    assert backend.jamarr_track_id(cast.media_controller.status) == 904
+
+
+def test_cast_custom_data_must_match_the_media():
+    custom = CastRendererBackend.media_custom_data(904, STREAM_URL)
+    # Same media under a refreshed token still counts.
+    assert CastRendererBackend.jamarr_track_id(
+        playing_status("http://127.0.0.1:8111/api/stream/904?token=new", custom)
+    ) == 904
+    # pychromecast keeps stale customData when new media has none.
+    assert CastRendererBackend.jamarr_track_id(playing_status("https://elsewhere/v.mp4", custom)) is None
+    # The Android app's items are not the server's to adopt.
+    assert CastRendererBackend.jamarr_track_id(
+        playing_status(STREAM_URL, {**custom, "jamarrSource": "android"})
+    ) is None
+    assert CastRendererBackend.jamarr_track_id(playing_status(STREAM_URL, {})) is None
+
+
+def test_cast_readopts_own_media_after_restart():
+    """A fresh backend (server restart) sees media it stamped: it follows it
+    again, so completion is FINISHED-only and exactly once, as before."""
+    backend = CastRendererBackend()
+    custom = CastRendererBackend.media_custom_data(904, STREAM_URL)
+
+    mapped = backend.status_from_media_status(RENDERER_ID, playing_status(STREAM_URL, custom))
+
+    assert mapped.current_track_id == 904
+    assert backend._loads[RENDERER_ID].adopted is True
+    finished = idle_status("FINISHED")
+    first = backend.status_from_media_status(RENDERER_ID, finished)
+    again = backend.status_from_media_status(RENDERER_ID, finished, trust_idle=True)
+    assert first.ended is True
+    assert again.ended is False
+    # Cancelled on the device instead: a halt, not an advance.
+    backend2 = CastRendererBackend()
+    backend2.status_from_media_status(RENDERER_ID, playing_status(STREAM_URL, custom))
+    cancelled = backend2.status_from_media_status(RENDERER_ID, idle_status("CANCELLED"))
+    assert cancelled.ended is False
+    assert cancelled.stop_reason == "renderer_stopped"
+
+
+def test_cast_does_not_adopt_foreign_or_idle_media():
+    backend = CastRendererBackend()
+    foreign = backend.status_from_media_status(RENDERER_ID, playing_status("https://elsewhere/v.mp4"))
+    assert foreign.current_track_id is None
+    assert RENDERER_ID not in backend._loads
+
+    custom = CastRendererBackend.media_custom_data(904, STREAM_URL)
+    idle = backend.status_from_media_status(
+        RENDERER_ID, playing_status(STREAM_URL, custom, state="IDLE"), trust_idle=True
+    )
+    # Finished while the server was down: left to the position heuristic.
+    assert idle.current_track_id is None
+    assert RENDERER_ID not in backend._loads
+
+
+@pytest.mark.asyncio
+async def test_cast_receiver_volume_changes_reach_listener_without_polling():
+    cast = FakeCast()
+    backend, _browser = make_backend(cast)
+    await backend.start()
+    received = []
+
+    async def callback(status):
+        received.append(status)
+
+    unsubscribe = backend.register_status_listener(RENDERER_ID, callback)
+    assert len(cast.receiver_listeners) == 1
+
+    cast.receiver_status(0.4, False)  # unchanged from the seeded status
+    cast.receiver_status(0.3, True)  # hardware remote: down and muted
+    cast.receiver_status(0.3, True)  # re-sent unchanged
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    assert len(received) == 1
+    status = received[0]
+    assert status.volume_percent == 30
+    assert status.volume_muted is True
+    assert status.state == "UNKNOWN"
+    assert status.position_seconds is None
+    assert status.completion_reported is True
+    assert cast.media_controller.calls == []  # no polling involved
+
+    unsubscribe()
+    assert cast.receiver_listeners == []
+
+
+class _CastWithoutReceiverListeners(FakeCast):
+    """Standalone/older Cast objects that offer media listeners only."""
+
+    def __getattribute__(self, name):
+        if name == "register_status_listener":
+            raise AttributeError(name)
+        return super().__getattribute__(name)
+
+
+@pytest.mark.asyncio
+async def test_cast_listener_works_without_receiver_listener_support():
+    cast = _CastWithoutReceiverListeners()
+    backend, _browser = make_backend(cast)
+    await backend.start()
+
+    async def callback(_status):
+        pass
+
+    unsubscribe = backend.register_status_listener(RENDERER_ID, callback)
+    assert len(cast.media_controller.listeners) == 1
+    assert cast.receiver_listeners == []
+    unsubscribe()
+
+
+async def staged_backend():
+    backend, cast = await loaded_backend()
+    await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+    accepted = await backend.stage_next(RENDERER_ID, TRACK_B, CONTEXT_B)
+    assert accepted is True
+    return backend, cast
+
+
+@pytest.mark.asyncio
+async def test_cast_stage_next_queues_item_with_preload_and_identity():
+    backend, cast = await staged_backend()
+
+    insert = cast.media_controller.sent_messages[-1]
+    assert insert["type"] == "QUEUE_INSERT"
+    assert insert["mediaSessionId"] == 7
+    item = insert["items"][0]
+    assert item["preloadTime"] == 20.0
+    assert item["media"]["contentId"] == CONTEXT_B.stream_url
+    assert item["media"]["customData"]["jamarrTrackId"] == 905
+    assert backend.staged_track_id(RENDERER_ID) == 905
+    assert backend._staged[RENDERER_ID].item_id == 100
+
+
+@pytest.mark.asyncio
+async def test_cast_receiver_advance_to_queued_item_is_reported_once():
+    backend, cast = await staged_backend()
+    custom = CastRendererBackend.media_custom_data(905, CONTEXT_B.stream_url)
+
+    moved = backend.status_from_media_status(
+        RENDERER_ID, playing_status(CONTEXT_B.stream_url, custom, position=1)
+    )
+    again = backend.status_from_media_status(
+        RENDERER_ID, playing_status(CONTEXT_B.stream_url, custom, position=2)
+    )
+
+    assert moved.advanced_by_renderer is True
+    assert moved.current_track_id == 905
+    assert moved.ended is False
+    assert again.advanced_by_renderer is False
+    assert again.current_track_id == 905
+    assert backend.staged_track_id(RENDERER_ID) is None
+    # The old item's late FINISHED is about media no longer followed.
+    late = backend.status_from_media_status(RENDERER_ID, idle_status("FINISHED"))
+    assert late.ended is False
+
+
+@pytest.mark.asyncio
+async def test_cast_finished_while_queued_waits_then_falls_back(monkeypatch):
+    backend, cast = await staged_backend()
+
+    held = backend.status_from_media_status(RENDERER_ID, idle_status("FINISHED"))
+    assert held.ended is False
+    assert held.completion_reported is True
+
+    # The receiver never rolled into the queued item: after the grace the
+    # track ends the per-track way, once.
+    import app.services.renderer.cast_backend as cast_module
+
+    monkeypatch.setattr(cast_module, "STAGED_FINISH_GRACE_S", 0)
+    fallback = backend.status_from_media_status(RENDERER_ID, idle_status("FINISHED"), trust_idle=True)
+    again = backend.status_from_media_status(RENDERER_ID, idle_status("FINISHED"), trust_idle=True)
+    assert fallback.ended is True
+    assert again.ended is False
+    assert backend.staged_track_id(RENDERER_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_cast_finished_recheck_fires_without_new_status(monkeypatch):
+    """The listener re-evaluates a held FINISHED by itself after the grace."""
+    import app.services.renderer.cast_backend as cast_module
+
+    monkeypatch.setattr(cast_module, "STAGED_FINISH_GRACE_S", 0.05)
+    backend, cast = await staged_backend()
+    backend._loop = asyncio.get_running_loop()
+    received = []
+
+    async def callback(status):
+        received.append(status)
+
+    backend.register_status_listener(RENDERER_ID, callback)
+    listener = cast.media_controller.listeners[0]
+    cast.media_controller.status = idle_status("FINISHED")
+    listener.new_media_status(cast.media_controller.status)
+    for _ in range(50):
+        if any(status.ended for status in received):
+            break
+        await asyncio.sleep(0.02)
+
+    assert [status.ended for status in received].count(True) == 1
+
+
+@pytest.mark.asyncio
+async def test_cast_error_on_queued_item_halts():
+    backend, cast = await staged_backend()
+    custom = CastRendererBackend.media_custom_data(905, CONTEXT_B.stream_url)
+    backend.status_from_media_status(RENDERER_ID, playing_status(CONTEXT_B.stream_url, custom))
+
+    failed = backend.status_from_media_status(
+        RENDERER_ID, idle_status("ERROR", content_id=CONTEXT_B.stream_url)
+    )
+
+    assert failed.ended is False
+    assert failed.stop_reason == "renderer_error"
+
+
+@pytest.mark.asyncio
+async def test_cast_stage_next_refused_stages_nothing():
+    backend, cast = await loaded_backend()
+    await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+    cast.media_controller.message_response = (
+        True,
+        {"type": "INVALID_REQUEST", "reason": "INVALID_COMMAND"},
+    )
+
+    assert await backend.stage_next(RENDERER_ID, TRACK_B, CONTEXT_B) is False
+    assert backend.staged_track_id(RENDERER_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_cast_stage_next_replaces_previous_item():
+    backend, cast = await staged_backend()
+    track_c = {**TRACK, "id": 906}
+    context_c = PlaybackContext(
+        base_url="http://127.0.0.1:8111",
+        user_id=42,
+        stream_url="http://127.0.0.1:8111/api/stream/906?token=c",
+    )
+
+    assert await backend.stage_next(RENDERER_ID, track_c, context_c) is True
+
+    remove, insert = cast.media_controller.sent_messages[-2:]
+    assert remove == {"type": "QUEUE_REMOVE", "mediaSessionId": 7, "itemIds": [100]}
+    assert insert["items"][0]["media"]["customData"]["jamarrTrackId"] == 906
+    assert backend.staged_track_id(RENDERER_ID) == 906
+
+
+@pytest.mark.asyncio
+async def test_cast_unstage_next_removes_the_queued_item():
+    backend, cast = await staged_backend()
+
+    assert await backend.unstage_next(RENDERER_ID) is True
+
+    assert cast.media_controller.sent_messages[-1] == {
+        "type": "QUEUE_REMOVE",
+        "mediaSessionId": 7,
+        "itemIds": [100],
+    }
+    assert backend.staged_track_id(RENDERER_ID) is None
+    # Nothing staged: nothing more to send.
+    sent = len(cast.media_controller.sent_messages)
+    assert await backend.unstage_next(RENDERER_ID) is True
+    assert len(cast.media_controller.sent_messages) == sent
+
+
+@pytest.mark.asyncio
+async def test_cast_unstage_next_keeps_the_record_when_refused():
+    backend, cast = await staged_backend()
+    cast.media_controller.message_response = (
+        True,
+        {"type": "INVALID_REQUEST", "reason": "INVALID_COMMAND"},
+    )
+
+    assert await backend.unstage_next(RENDERER_ID) is False
+    # Still known, so the receiver starting it is caught as stale.
+    assert backend.staged_track_id(RENDERER_ID) == 905
+
+
+@pytest.mark.asyncio
+async def test_cast_unstage_next_without_item_id_sends_nothing():
+    backend, cast = await staged_backend()
+    backend._staged[RENDERER_ID].item_id = None
+    sent = len(cast.media_controller.sent_messages)
+
+    assert await backend.unstage_next(RENDERER_ID) is False
+    assert len(cast.media_controller.sent_messages) == sent
+    assert backend.staged_track_id(RENDERER_ID) == 905
+
+
+@pytest.mark.asyncio
+async def test_cast_load_and_stop_drop_the_staged_item():
+    backend, cast = await staged_backend()
+    await backend.play_track(RENDERER_ID, TRACK, CONTEXT)
+    assert backend.staged_track_id(RENDERER_ID) is None
+
+    assert await backend.stage_next(RENDERER_ID, TRACK_B, CONTEXT_B) is True
+    await backend.stop_playback(RENDERER_ID)
+    assert backend.staged_track_id(RENDERER_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_cast_stage_next_needs_a_confirmed_load():
+    backend, cast = await loaded_backend()
+    assert await backend.stage_next(RENDERER_ID, TRACK_B, CONTEXT_B) is False
+    assert cast.media_controller.sent_messages == []
+
+
+def test_cast_queue_mode_config(monkeypatch):
+    import app.config as app_config
+
+    monkeypatch.setattr(app_config, "_config", {"renderer": {}})
+    assert app_config.cast_queue_enabled("abc") is False
+    assert CastRendererBackend().queue_mode_enabled("cast:abc") is False
+
+    monkeypatch.setattr(
+        app_config,
+        "_config",
+        {"renderer": {"cast_queue": {"enabled_uuids": ["ABC"], "preload_seconds": 30}}},
+    )
+    assert app_config.cast_queue_enabled("abc") is True
+    assert app_config.cast_queue_enabled("cast:abc") is True
+    assert app_config.cast_queue_enabled("def") is False
+    assert CastRendererBackend.queue_preload_seconds() == 30.0
+
+    monkeypatch.setattr(
+        app_config,
+        "_config",
+        {"renderer": {"cast_queue": {"enabled": True, "disabled_uuids": ["def"]}}},
+    )
+    assert app_config.cast_queue_enabled("abc") is True
+    assert app_config.cast_queue_enabled("def") is False

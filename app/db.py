@@ -277,6 +277,7 @@ async def init_db():
                 supports_events BOOLEAN DEFAULT FALSE,
                 supports_gapless BOOLEAN DEFAULT FALSE,
                 supported_mime_types TEXT,
+                sink_protocol_info TEXT[],
                 icon_url TEXT,
                 icon_mime TEXT,
                 icon_width INTEGER,
@@ -298,6 +299,7 @@ async def init_db():
             ALTER TABLE renderer ADD COLUMN IF NOT EXISTS available BOOLEAN DEFAULT TRUE;
             ALTER TABLE renderer ADD COLUMN IF NOT EXISTS enabled_by_default BOOLEAN DEFAULT TRUE;
             ALTER TABLE renderer ADD COLUMN IF NOT EXISTS renderer_metadata JSONB DEFAULT '{}'::jsonb;
+            ALTER TABLE renderer ADD COLUMN IF NOT EXISTS sink_protocol_info TEXT[];
             UPDATE renderer
             SET
                 kind = COALESCE(kind, 'upnp'),

@@ -1,4 +1,3 @@
-import mimetypes
 import os
 from typing import Optional
 
@@ -14,6 +13,8 @@ from app.audio_normalization import (
 from app.auth_tokens import verify_stream_token
 from app.db import db_conn, get_db
 from app.services.audio_streaming import build_stream_url
+from app.services.upnp.protocol_info import served_content_type
+from app.services.playback_plan import OutputSpec, source_mime_type
 from app.services.stream_profiles import (
     PROFILES,
     ProfileVariant,
@@ -40,22 +41,7 @@ _ORIGINAL_NORMALIZED_ARGS = (
 
 
 def _guess_media_type(path: str) -> str:
-    media_type, _ = mimetypes.guess_type(path)
-    if media_type is not None:
-        return media_type
-
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".flac":
-        return "audio/flac"
-    if ext == ".mp3":
-        return "audio/mpeg"
-    if ext == ".m4a":
-        return "audio/mp4"
-    if ext == ".wav":
-        return "audio/wav"
-    if ext == ".ogg":
-        return "audio/ogg"
-    return "application/octet-stream"
+    return source_mime_type(path)
 
 
 def _original_encode_args(bit_depth: Optional[int]) -> tuple[str, ...]:
@@ -143,7 +129,15 @@ async def stream_track(
     token: Optional[str] = None,
     quality: Optional[str] = None,
     normalize: Optional[str] = None,
+    mime: Optional[str] = None,
 ):
+    """Serve a track's audio.
+
+    ``mime`` names the alias a UPnP renderer was told in its DIDL
+    (``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias
+    of what is actually served -- it relabels, it never claims another format
+    -- so the renderer sees one MIME in its metadata and in Content-Type.
+    """
     # Deliberately no Depends(get_db): dependencies with yield are only torn
     # down after the response finishes, which would pin a pool connection for
     # the whole file transfer. Acquire briefly instead.
@@ -183,16 +177,25 @@ async def stream_track(
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File not found on disk")
 
-    selected_quality = normalize_quality(
-        quality or stream_claims.get("stream_quality")
-    )
-
     normalization_requested = normalize is None or normalize.strip().lower() not in {
         "0",
         "false",
         "off",
         "no",
     }
+
+    # A renderer stream carries its playback plan in the token: serve exactly
+    # what the renderer was told (DIDL / Cast LOAD MIME) -- an explicit
+    # ?quality= from a browser still takes the profile path below.
+    planned = OutputSpec.from_claims(stream_claims) if not quality else None
+    if planned is not None:
+        return await _serve_planned_output(
+            path, dict(row), planned, stream_claims, normalization_requested, mime
+        )
+
+    selected_quality = normalize_quality(
+        quality or stream_claims.get("stream_quality")
+    )
     can_normalize = (
         normalization_requested
         and row["analysis_status"] == "complete"
@@ -227,7 +230,7 @@ async def stream_track(
             raise HTTPException(status_code=500, detail=f"Transcode failed: {exc}") from exc
         return FileResponse(
             cached_path,
-            media_type=profile.mime_type,
+            media_type=served_content_type(profile.mime_type, mime),
             headers={
                 "X-Jamarr-Loudness-Normalized": "1",
                 "X-Jamarr-Loudness-Target-LUFS": f"{TARGET_LOUDNESS_LUFS:g}",
@@ -249,7 +252,7 @@ async def stream_track(
             raise HTTPException(status_code=500, detail=f"Transcode failed: {exc}") from exc
         return FileResponse(
             cached_path,
-            media_type=profile.mime_type,
+            media_type=served_content_type(profile.mime_type, mime),
             headers={
                 "X-Jamarr-Stream-Quality": selected_quality,
                 "X-Jamarr-Stream-Quality-Label": profile.label,
@@ -258,9 +261,82 @@ async def stream_track(
 
     return FileResponse(
         path,
-        media_type=_guess_media_type(path),
+        media_type=served_content_type(_guess_media_type(path), mime),
         headers={
             "X-Jamarr-Stream-Quality": "original",
             "X-Jamarr-Stream-Quality-Label": PROFILES["original"].label,
         },
+    )
+
+
+async def _serve_planned_output(
+    path: str,
+    track: dict,
+    output: OutputSpec,
+    claims: dict,
+    normalization_requested: bool,
+    mime: Optional[str] = None,
+) -> FileResponse:
+    """Serve a planned renderer output as a plain (cached) file.
+
+    Transcoded outputs go through the same seekable stream cache as quality
+    profiles, so Range requests and Content-Length keep working -- which UPnP
+    renderers and the header-recasing proxy rely on.
+    """
+    headers = {"X-Jamarr-Output-Format": output.format}
+    if output.is_original:
+        return FileResponse(
+            path,
+            media_type=served_content_type(output.mime_type or source_mime_type(path), mime),
+            headers={
+                **headers,
+                "X-Jamarr-Stream-Quality": "original",
+                "X-Jamarr-Stream-Quality-Label": PROFILES["original"].label,
+            },
+        )
+
+    gain_db = None
+    if (
+        normalization_requested
+        and claims.get("loudness_normalized")
+        and claims.get("loudness_gain_db") is not None
+        and not output.remux
+    ):
+        gain_db = float(claims["loudness_gain_db"])
+    gain_mode = claims.get("loudness_gain_mode") or "track"
+    key = output.cache_key()
+    filters: tuple[str, ...] = ()
+    if gain_db is not None:
+        key += f"-gain-{gain_mode}-{gain_db:.3f}".replace(".", "_").replace("-", "m")
+        filters = ("-filter:a", f"volume={gain_db:.3f}dB")
+    variant = ProfileVariant(
+        key=key,
+        filters=filters,
+        encode_args=output.ffmpeg_args(),
+        extension=output.extension,
+        mime_type=output.mime_type,
+    )
+    try:
+        cached_path, _profile = await cached_profile_path(
+            source_path=path,
+            track=track,
+            quality="original",
+            variant=variant,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=f"Transcode failed: {exc}") from exc
+    if gain_db is not None:
+        headers.update(
+            {
+                "X-Jamarr-Loudness-Normalized": "1",
+                "X-Jamarr-Loudness-Target-LUFS": f"{TARGET_LOUDNESS_LUFS:g}",
+                "X-Jamarr-Loudness-Gain-DB": f"{gain_db:.3f}",
+                "X-Jamarr-Loudness-Gain-Mode": gain_mode,
+            }
+        )
+    headers["X-Jamarr-Stream-Quality"] = output.profile or output.format
+    # Content-Type is the plan's MIME (audio/L16 keeps its rate and channel
+    # parameters), relabelled only to the alias a UPnP renderer was told.
+    return FileResponse(
+        cached_path, media_type=served_content_type(output.mime_type, mime), headers=headers
     )

@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 class Track(BaseModel):
@@ -41,12 +41,19 @@ class PlayerState(BaseModel):
     renderer_kind: Optional[str] = None
     transport_state: Optional[str] = "STOPPED"
     volume: Optional[int] = None
+    # Mute as the renderer last reported it (UPnP RenderingControl events,
+    # Cast receiver status), so a mute made on the device shows; None when unknown.
+    muted: Optional[bool] = None
     # Set when the queue halted by itself rather than because the listener
     # stopped it: "renderer_stopped" (the device dropped out or was stopped
     # mid-track), "renderer_error" (the device reported a playback error) or
     # "load_failed" (the device rejected the track or never confirmed it).
     # Lets the UI say what happened instead of going quiet.
     stopped_reason: Optional[str] = None
+    # Renderer audio output plan for the current track (see
+    # app/services/playback_plan.py): action, format, mime_type, reason,
+    # source_label, quality_label, ... None for local playback.
+    output_plan: Optional[Dict[str, Any]] = None
 
 
 class QueueUpdate(BaseModel):

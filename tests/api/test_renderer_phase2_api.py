@@ -647,3 +647,583 @@ async def test_upnp_unregistered_device_still_raises_value_error():
             {"id": 901, "path": "/music/x.flac"},
             PlaybackContext(base_url="http://127.0.0.1:8111", user_id=None),
         )
+
+
+def _token_claims(url):
+    from urllib.parse import parse_qs, urlparse
+
+    import jwt
+
+    return jwt.decode(
+        parse_qs(urlparse(url).query)["token"][0], options={"verify_signature": False}
+    )
+
+
+@pytest.mark.asyncio
+async def test_cast_load_mime_matches_plan_and_state_exposes_it(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    fake_cast_backend,
+    monkeypatch,
+):
+    """An ALAC .m4a is not playable on the Default Media Receiver: the plan
+    decodes it, the LOAD and the token agree on audio/flac, and player state
+    and the renderer API explain it."""
+    from app import config as app_config
+
+    monkeypatch.setattr(app_config, "_config", {"renderer": {}})
+    monkeypatch.setattr(
+        "app.services.audio_streaming.probe_audio_file", lambda _path: {"codec": "alac"}
+    )
+    monkeypatch.setattr("app.services.audio_streaming.os.path.exists", lambda _p: True)
+    await db.execute(
+        """
+        INSERT INTO track (id, path, title, artist, album, duration_seconds,
+                           codec, sample_rate_hz, bit_depth, channels)
+        VALUES (905, '/music/alac.m4a', 'Alac Song', 'Artist', 'Album', 200,
+                'MP4', 44100, 24, 2)
+        """
+    )
+    _, cast, _ = fake_cast_backend
+
+    play = await auth_client.post("/api/player/play", json={"track_id": 905}, headers=HEADERS)
+    assert play.status_code == 200, play.text
+
+    url, load_mime = _play_media_calls(cast)[-1][1][0], _play_media_calls(cast)[-1][1][1]
+    assert load_mime == "audio/flac"
+    claims = _token_claims(url)
+    assert claims["out"] == "flac" and claims["out_mime"] == load_mime
+
+    state = await auth_client.get("/api/player/state", headers=HEADERS)
+    assert state.status_code == 200, state.text
+    plan = state.json()["output_plan"]
+    assert plan["action"] == "decode"
+    assert plan["mime_type"] == "audio/flac"
+    assert "ALAC" in plan["reason"]
+    assert plan["quality_label"] == "FLAC 24 bit 44.1 kHz"
+
+    renderers = (await auth_client.get("/api/renderers", headers=HEADERS)).json()
+    cast_row = next(r for r in renderers if r["kind"] == "cast")
+    assert "audio/flac" in cast_row["output_constraints"]["supported_mime_types"]
+    assert cast_row["output_constraints"]["flac_max_block_size"] is None
+
+
+class _RecordingUpnpManager(_FailingUpnpManager):
+    def __init__(self, renderer_info):
+        super().__init__(None)
+        self.renderers = {"uuid:refuses": renderer_info}
+        self.played = []
+
+    async def play_track(self, track_id, track_path, metadata, username=None):
+        self.played.append(metadata)
+
+
+@pytest.mark.asyncio
+async def test_upnp_didl_mime_and_size_follow_the_plan(
+    auth_client: AsyncClient, db, phase2_cast_track, refusing_upnp_renderer, monkeypatch
+):
+    """A WAV-only renderer: DIDL gets audio/wav (the served Content-Type) and
+    loses the FLAC file's size, which no longer describes the bytes."""
+    import app.api.player as player_api
+    from app import config as app_config
+    from app.services.renderer.upnp_backend import UpnpRendererBackend
+
+    monkeypatch.setattr(app_config, "_config", {"renderer": {}})
+    await db.execute(
+        "UPDATE track SET codec = 'FLAC', sample_rate_hz = 44100, bit_depth = 16, "
+        "channels = 2, size_bytes = 12345 WHERE id = 901"
+    )
+    manager = _RecordingUpnpManager(
+        {"friendly_name": "Amp", "supported_mime_types": "audio/wav,audio/mpeg"}
+    )
+    monkeypatch.setitem(
+        player_api.renderer_orchestrator.registry.backends,
+        "upnp",
+        UpnpRendererBackend(manager=manager),
+    )
+
+    play = await auth_client.post(
+        "/api/player/play",
+        json={"track_id": 901},
+        headers=HEADERS,
+    )
+
+    assert play.status_code == 200, play.text
+    metadata = manager.played[-1]
+    assert metadata["mime"] == "audio/wav"
+    assert "size_bytes" not in metadata
+    assert _token_claims(metadata["stream_url"])["out"] == "wav"
+
+
+# --- Cast receiver status, queue mode and restart re-adoption (#316) -------
+
+
+@pytest.fixture
+def cast_queue_mode(two_track_cast_queue, clean_cast_player_globals, monkeypatch):
+    """The two-track Cast queue with receiver-queue staging switched on."""
+    import app.services.renderer.orchestrator as orchestrator_module
+
+    backend, cast, _ = two_track_cast_queue
+    orchestrator = clean_cast_player_globals
+    monkeypatch.setattr(backend, "queue_mode_enabled", lambda renderer_id: True)
+    # The fixture tracks are not on disk in the test container.
+    monkeypatch.setattr(orchestrator_module, "track_path_exists", lambda track: True)
+    monkeypatch.setattr(orchestrator, "_staging_in_flight", set())
+    monkeypatch.setattr(orchestrator, "_stage_failures", {})
+    return backend, cast, orchestrator
+
+
+def _media_snapshot(cast, **changes):
+    status = cast.media_controller.status
+    for key, value in changes.items():
+        setattr(status, key, value)
+    return SimpleNamespace(**vars(status))
+
+
+async def _drain(orchestrator):
+    if orchestrator._background_tasks:
+        await asyncio.wait_for(asyncio.gather(*orchestrator._background_tasks), timeout=5)
+
+
+def _queue_inserts(cast):
+    return [m for m in cast.media_controller.sent_messages if m.get("type") == "QUEUE_INSERT"]
+
+
+@pytest.mark.asyncio
+async def test_cast_queue_mode_stages_next_and_follows_receiver_advance(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    cast_queue_mode,
+):
+    from app.services.player.state import get_renderer_state_db
+
+    backend, cast, orchestrator = cast_queue_mode
+    playing = _media_snapshot(cast, player_state="PLAYING", adjusted_current_time=15)
+
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+    )
+    await _drain(orchestrator)
+
+    inserts = _queue_inserts(cast)
+    assert len(inserts) == 1
+    staged_url = inserts[0]["items"][0]["media"]["contentId"]
+    assert "/api/stream/902" in staged_url
+    assert backend.staged_track_id(selected_cast_renderer) == 902
+
+    # Played on: no second insert for the same next track.
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+    )
+    await _drain(orchestrator)
+    assert len(_queue_inserts(cast)) == 1
+
+    # The current item finishes; the receiver holds it, then plays 902 itself.
+    finished = _receiver_goes_idle(cast, "FINISHED")
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, finished)
+    )
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    assert state["current_index"] == 0
+
+    rolled = _media_snapshot(
+        cast,
+        player_state="PLAYING",
+        idle_reason=None,
+        adjusted_current_time=1,
+        content_id=staged_url,
+        media_custom_data=inserts[0]["items"][0]["media"]["customData"],
+    )
+    status = backend.status_from_media_status(selected_cast_renderer, rolled)
+    assert status.advanced_by_renderer is True
+    await orchestrator.handle_status(selected_cast_renderer, status)
+    again = backend.status_from_media_status(selected_cast_renderer, rolled)
+    await orchestrator.handle_status(selected_cast_renderer, again)
+
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    assert state["current_index"] == 1
+    assert state["is_playing"] is True
+    # Exactly once, and nothing was reloaded.
+    assert len(_play_media_calls(cast)) == 1
+
+
+@pytest.mark.asyncio
+async def test_cast_queue_mode_stale_queued_item_loads_real_next(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    cast_queue_mode,
+):
+    from app.services.player.state import get_renderer_state_db, update_renderer_state_db
+
+    backend, cast, orchestrator = cast_queue_mode
+    await db.execute(
+        """
+        INSERT INTO track (id, path, title, artist, album, duration_seconds)
+        VALUES (903, '/music/phase2-cast-3.flac', 'Other Song', 'Cast Artist', 'Cast Album', 210)
+        """
+    )
+    playing = _media_snapshot(cast, player_state="PLAYING", adjusted_current_time=15)
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+    )
+    await _drain(orchestrator)
+    staged = _queue_inserts(cast)[0]["items"][0]["media"]
+
+    # The listener edits the queue: 903 replaces 902 as the next track.
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    state["queue"][1] = {"id": 903, "title": "Other Song", "duration_seconds": 210}
+    await update_renderer_state_db(db, selected_cast_renderer, state)
+
+    rolled = _media_snapshot(
+        cast,
+        player_state="PLAYING",
+        adjusted_current_time=1,
+        content_id=staged["contentId"],
+        media_custom_data=staged["customData"],
+    )
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, rolled)
+    )
+
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    assert state["current_index"] == 1
+    assert len(_play_media_calls(cast)) == 2
+    assert "/api/stream/903" in _play_media_calls(cast)[1][1][0]
+
+
+def _queue_removes(cast):
+    return [m for m in cast.media_controller.sent_messages if m.get("type") == "QUEUE_REMOVE"]
+
+
+@pytest.mark.asyncio
+async def test_cast_queue_mode_removes_staged_item_when_no_next_track_remains(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    cast_queue_mode,
+):
+    from app.services.player.state import get_renderer_state_db, update_renderer_state_db
+
+    backend, cast, orchestrator = cast_queue_mode
+    playing = _media_snapshot(cast, player_state="PLAYING", adjusted_current_time=15)
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+    )
+    await _drain(orchestrator)
+    [insert] = _queue_inserts(cast)
+    assert backend.staged_track_id(selected_cast_renderer) == 902
+    assert _queue_removes(cast) == []
+
+    # The listener removes the only next track from the queue.
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    state["queue"] = state["queue"][:1]
+    await update_renderer_state_db(db, selected_cast_renderer, state)
+
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+    )
+    await _drain(orchestrator)
+
+    [remove] = _queue_removes(cast)
+    assert remove["itemIds"] == [100]
+    assert backend.staged_track_id(selected_cast_renderer) is None
+
+    # Played on: nothing staged, nothing further sent.
+    sent = len(cast.media_controller.sent_messages)
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+    )
+    await _drain(orchestrator)
+    assert len(cast.media_controller.sent_messages) == sent
+    assert len(_queue_inserts(cast)) == 1
+
+
+@pytest.mark.asyncio
+async def test_cast_queue_mode_refused_remove_is_not_retried_at_once(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    cast_queue_mode,
+):
+    from app.services.player.state import get_renderer_state_db, update_renderer_state_db
+
+    backend, cast, orchestrator = cast_queue_mode
+    playing = _media_snapshot(cast, player_state="PLAYING", adjusted_current_time=15)
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+    )
+    await _drain(orchestrator)
+
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    state["queue"] = state["queue"][:1]
+    await update_renderer_state_db(db, selected_cast_renderer, state)
+    cast.media_controller.message_response = (
+        True,
+        {"type": "INVALID_REQUEST", "reason": "INVALID_COMMAND"},
+    )
+
+    for _ in range(2):
+        await orchestrator.handle_status(
+            selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+        )
+        await _drain(orchestrator)
+
+    assert len(_queue_removes(cast)) == 1
+    # Kept, so the receiver starting it later is still recognised as stale.
+    assert backend.staged_track_id(selected_cast_renderer) == 902
+
+
+@pytest.mark.asyncio
+async def test_cast_queue_mode_off_keeps_per_track_loads(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+):
+    backend, cast, _ = two_track_cast_queue
+    orchestrator = clean_cast_player_globals
+    playing = _media_snapshot(cast, player_state="PLAYING", adjusted_current_time=15)
+
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+    )
+    await _drain(orchestrator)
+
+    assert _queue_inserts(cast) == []
+
+
+@pytest.mark.asyncio
+async def test_cast_receiver_volume_and_mute_update_player_state(
+    auth_client: AsyncClient,
+    db,
+    phase2_cast_track,
+    selected_cast_renderer,
+    fake_cast_backend,
+    clean_cast_player_globals,
+):
+    from app.services.player.globals import renderer_muted
+
+    backend, cast, _ = fake_cast_backend
+    backend._loop = asyncio.get_running_loop()
+    play = await auth_client.post("/api/player/play", json={"track_id": 901}, headers=HEADERS)
+    assert play.status_code == 200, play.text
+    await db.execute(
+        "UPDATE renderer_state SET position_seconds = 10 WHERE renderer_udn = $1",
+        selected_cast_renderer,
+    )
+    calls_before = list(cast.media_controller.calls)
+
+    # Volume turned down and muted on the device's own remote.
+    cast.receiver_status(0.2, True)
+    for _ in range(100):
+        row = await db.fetchrow(
+            "SELECT volume, position_seconds FROM renderer_state WHERE renderer_udn = $1",
+            selected_cast_renderer,
+        )
+        if row["volume"] == 20:
+            break
+        await asyncio.sleep(0.02)
+
+    assert row["volume"] == 20
+    assert row["position_seconds"] == 10  # progress untouched
+    assert renderer_muted[selected_cast_renderer] is True
+    assert cast.media_controller.calls == calls_before  # no polling
+    renderer_muted.pop(selected_cast_renderer, None)
+
+
+@pytest.mark.asyncio
+async def test_cast_server_restart_readopts_receiver_media(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+    monkeypatch,
+):
+    """After a restart the server finds its own media on the receiver, one
+    track further on than the stored queue: it follows it instead of treating
+    it as foreign, without reloading, and listens for it again."""
+    backend, cast, _ = two_track_cast_queue
+    orchestrator = clean_cast_player_globals
+    # The restart: no loads tracked, no listeners registered.
+    backend._loads.clear()
+    cast.media_controller.listeners.clear()
+    cast.receiver_listeners.clear()
+    monkeypatch.setattr(orchestrator, "_status_unsubscribers", {})
+    url = "http://127.0.0.1:8111/api/stream/902?token=old"
+    _media_snapshot(
+        cast,
+        player_state="PLAYING",
+        adjusted_current_time=30,
+        content_id=url,
+        media_custom_data=backend.media_custom_data(902, url),
+    )
+
+    state = await auth_client.get("/api/player/state", headers=HEADERS)
+
+    assert state.status_code == 200, state.text
+    assert state.json()["current_index"] == 1
+    assert state.json()["is_playing"] is True
+    assert len(_play_media_calls(cast)) == 1
+    assert backend._loads[selected_cast_renderer].adopted is True
+    assert len(cast.media_controller.listeners) == 1
+    assert len(cast.receiver_listeners) == 1
+
+
+@pytest.mark.asyncio
+async def test_cast_other_controllers_media_is_not_adopted(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+    monkeypatch,
+):
+    backend, cast, _ = two_track_cast_queue
+    orchestrator = clean_cast_player_globals
+    backend._loads.clear()
+    monkeypatch.setattr(orchestrator, "_status_unsubscribers", {})
+    _media_snapshot(
+        cast,
+        player_state="PLAYING",
+        content_id="https://video.example/clip.mp4",
+        media_custom_data={},
+    )
+
+    state = await auth_client.get("/api/player/state", headers=HEADERS)
+
+    assert state.status_code == 200, state.text
+    assert state.json()["current_index"] == 0
+    assert selected_cast_renderer not in backend._loads
+
+
+# --- Review fixes (#316): Previous race, planned staged items ---------------
+
+
+@pytest.mark.asyncio
+async def test_cast_previous_is_not_undone_by_the_old_media_still_playing(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    two_track_cast_queue,
+    clean_cast_player_globals,
+    monkeypatch,
+):
+    """Previous from 902 to 901: until the new LOAD lands, the receiver still
+    plays 902, which is now queue[current + 1]. A status for it (a callback,
+    or GET /api/player/state's sync) is no advance: current_index stays 0."""
+    import app.services.renderer.orchestrator as orchestrator_module
+    from app.services.player.state import get_renderer_state_db
+
+    backend, cast, _ = two_track_cast_queue
+    orchestrator = clean_cast_player_globals
+    monkeypatch.setattr(orchestrator_module, "track_path_exists", lambda track: True)
+    nxt = await auth_client.post("/api/player/index", json={"index": 1}, headers=HEADERS)
+    assert nxt.status_code == 200, nxt.text
+    old_media = _media_snapshot(cast, player_state="PLAYING", adjusted_current_time=40)
+    assert "/api/stream/902" in old_media.content_id
+
+    seen_during_load = []
+    real_play_track = backend.play_track
+
+    async def play_track_after_stale_status(renderer_id, track, context):
+        # The old media reports in while the new track is being prepared.
+        status = backend.status_from_media_status(renderer_id, old_media)
+        assert status.current_track_id == 902 and not status.advanced_by_renderer
+        await orchestrator.handle_status(selected_cast_renderer, status)
+        seen_during_load.append(
+            (await get_renderer_state_db(db, selected_cast_renderer))["current_index"]
+        )
+        return await real_play_track(renderer_id, track, context)
+
+    monkeypatch.setattr(backend, "play_track", play_track_after_stale_status)
+    prev = await auth_client.post("/api/player/index", json={"index": 0}, headers=HEADERS)
+    assert prev.status_code == 200, prev.text
+
+    assert seen_during_load == [0]
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    assert state["current_index"] == 0
+    assert "/api/stream/901" in _play_media_calls(cast)[-1][1][0]
+
+    # Settled, and no load in flight: 902 reported again (say, a late status)
+    # is still not a receiver advance, so the queue does not jump.
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, old_media)
+    )
+    state = await get_renderer_state_db(db, selected_cast_renderer)
+    assert state["current_index"] == 0
+
+
+@pytest.mark.asyncio
+async def test_cast_receiver_advance_during_a_load_is_not_followed(
+    clean_cast_player_globals, monkeypatch
+):
+    """A receiver-queue advance reported while a load is in flight describes
+    media that load replaces: not followed, and no 'stale' reload either."""
+    from app.services.player.monitor import _clear_monitor_starting, _mark_monitor_starting
+    from app.services.renderer.contracts import RendererStatus
+
+    orchestrator = clean_cast_player_globals
+    key = "cast:review-race"
+    state = {"queue": [{"id": 1}, {"id": 2}, {"id": 3}], "current_index": 0}
+    advanced = RendererStatus(
+        renderer_id=key, state="PLAYING", current_track_id=3, advanced_by_renderer=True
+    )
+    _mark_monitor_starting(key)
+    try:
+        assert await orchestrator._follow_renderer_track(None, key, state, advanced) == "loading"
+    finally:
+        _clear_monitor_starting(key)
+    # Without a load in flight the same report is a stale receiver item...
+    assert await orchestrator._follow_renderer_track(None, key, state, advanced) == "stale"
+    # ...and a plain PLAYING report naming the next track is not an advance.
+    plain = RendererStatus(renderer_id=key, state="PLAYING", current_track_id=2)
+    assert await orchestrator._follow_renderer_track(None, key, state, plain) is None
+
+
+@pytest.mark.asyncio
+async def test_cast_queue_mode_staged_item_is_planned_like_a_load(
+    auth_client: AsyncClient,
+    db,
+    selected_cast_renderer,
+    cast_queue_mode,
+    monkeypatch,
+):
+    """The staged next track goes through the playback plan: an ALAC file is
+    decoded to FLAC for the Default Media Receiver, QUEUE_INSERT says
+    audio/flac like the token, and the plan is recorded for that track."""
+    from app import config as app_config
+    from app.services.player.globals import output_plan_for
+
+    backend, cast, orchestrator = cast_queue_mode
+    monkeypatch.setattr(app_config, "_config", {"renderer": {}})
+    monkeypatch.setattr(
+        "app.services.audio_streaming.probe_audio_file", lambda _path: {"codec": "alac"}
+    )
+    monkeypatch.setattr("app.services.audio_streaming.os.path.exists", lambda _p: True)
+    await db.execute(
+        """
+        UPDATE track SET path = '/music/phase2-cast-2.m4a', codec = 'MP4',
+               sample_rate_hz = 44100, bit_depth = 24, channels = 2
+        WHERE id = 902
+        """
+    )
+    playing = _media_snapshot(cast, player_state="PLAYING", adjusted_current_time=15)
+
+    await orchestrator.handle_status(
+        selected_cast_renderer, backend.status_from_media_status(selected_cast_renderer, playing)
+    )
+    await _drain(orchestrator)
+
+    [insert] = _queue_inserts(cast)
+    media = insert["items"][0]["media"]
+    claims = _token_claims(media["contentId"])
+    assert media["contentType"] == "audio/flac"
+    assert claims["out"] == "flac" and claims["out_mime"] == "audio/flac"
+    plan = output_plan_for(selected_cast_renderer, 902)
+    assert plan is not None and plan["action"] == "decode"
+    assert plan["mime_type"] == "audio/flac"

@@ -39,5 +39,32 @@ renderer:
   #   enabled: true          # false = never stage, on any renderer
   #   disabled_udns: []      # never stage on these
   #   forced_udns: []        # stage even if not advertised
+  # UPnP event subscriptions (AVTransport/RenderingControl LastChange): the
+  # renderer NOTIFYs a callback server bound to the source address above on
+  # this port. Events off = 1 s polling. Env overrides: UPNP_EVENTS,
+  # UPNP_EVENT_PORT.
+  # upnp_events: true
+  # upnp_event_port: 8113
+  # Per-device audio output constraints for output planning (see
+  # docs/architecture/renderers.md#audio-output-planning). Keys: renderer id
+  # (upnp:/cast: prefix optional), UPnP UDN or Cast UUID. Device quirks are
+  # opt-in, never global.
+  # audio_constraints:
+  #   "cast:<uuid>":
+  #     flac_max_block_size: 4608  # receivers that need fixed FLAC blocks <= 4608
+  #     max_sample_rate_hz: 96000
+  #   "uuid:<udn>":
+  #     max_bit_depth: 16
+  #     max_channels: 2
+  #     prefer_wav: true           # decode to WAV rather than FLAC
+  #     allow_lossy: false         # never fall back to MP3/Opus
+  # Server Cast: queue the next track on the receiver (QUEUE_INSERT with a
+  # preloadTime) so it can fetch it before the current one ends, instead of a
+  # fresh LOAD per track. Off by default (transition silence unmeasured).
+  # cast_queue:
+  #   enabled: false         # true = every Cast device
+  #   enabled_uuids: []      # or just these (Cast device UUIDs)
+  #   disabled_uuids: []     # never on these
+  #   preload_seconds: 20
 
 pearlarr: {}

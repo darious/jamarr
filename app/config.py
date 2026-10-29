@@ -133,6 +133,38 @@ def get_upnp_source_ip():
     return value or None
 
 
+DEFAULT_UPNP_EVENT_PORT = 8113
+
+
+def get_upnp_event_config():
+    """UPnP event (GENA) subscription settings.
+
+    ``renderer.upnp_events`` (env ``UPNP_EVENTS``): ``false`` turns event
+    subscriptions off, leaving the monitor on 1 s polling. ``renderer.
+    upnp_event_port`` (env ``UPNP_EVENT_PORT``, default 8113): TCP port of the
+    NOTIFY callback server, bound to the UPnP source address; ``0`` lets the
+    OS pick one.
+    """
+    try:
+        section = load_config().get("renderer") or {}
+    except (FileNotFoundError, AttributeError):
+        section = {}
+    if not isinstance(section, dict):
+        section = {}
+    enabled_env = os.environ.get("UPNP_EVENTS")
+    if enabled_env:
+        enabled = enabled_env.strip().lower() not in ("false", "0", "no", "off")
+    else:
+        enabled = section.get("upnp_events", True) is not False
+    port_env = os.environ.get("UPNP_EVENT_PORT")
+    raw_port = port_env if port_env else section.get("upnp_event_port", DEFAULT_UPNP_EVENT_PORT)
+    try:
+        port = int(raw_port)
+    except (TypeError, ValueError):
+        port = DEFAULT_UPNP_EVENT_PORT
+    return {"enabled": enabled, "port": port}
+
+
 def _normalize_udn(value) -> str:
     udn = str(value or "").strip().lower()
     return udn[len("uuid:"):] if udn.startswith("uuid:") else udn
@@ -170,3 +202,47 @@ def upnp_gapless_override(udn: str):
     if key in cfg["forced_udns"]:
         return "on"
     return None
+
+
+CAST_QUEUE_DEFAULT_PRELOAD_SECONDS = 20
+
+
+def _normalize_cast_uuid(value) -> str:
+    uuid = str(value or "").strip().lower()
+    return uuid[len("cast:"):] if uuid.startswith("cast:") else uuid
+
+
+def get_cast_queue_config():
+    """Server Cast receiver-queue (preload) policy from config.yaml.
+
+    ``renderer.cast_queue``: ``enabled: true`` stages the next track in the
+    receiver's queue on every Cast device; ``enabled_uuids`` turns it on for
+    listed devices only (when ``enabled`` is unset or false);
+    ``disabled_uuids`` always wins. ``preload_seconds`` is the receiver's
+    preloadTime. Off by default: transition silence is unmeasured.
+    """
+    try:
+        section = (load_config().get("renderer") or {}).get("cast_queue") or {}
+    except (FileNotFoundError, AttributeError):
+        section = {}
+    if not isinstance(section, dict):
+        section = {}
+    try:
+        preload = float(section.get("preload_seconds", CAST_QUEUE_DEFAULT_PRELOAD_SECONDS))
+    except (TypeError, ValueError):
+        preload = CAST_QUEUE_DEFAULT_PRELOAD_SECONDS
+    return {
+        "enabled": section.get("enabled") is True,
+        "enabled_uuids": {_normalize_cast_uuid(u) for u in section.get("enabled_uuids") or [] if u},
+        "disabled_uuids": {_normalize_cast_uuid(u) for u in section.get("disabled_uuids") or [] if u},
+        "preload_seconds": max(0.0, preload),
+    }
+
+
+def cast_queue_enabled(uuid: str) -> bool:
+    """Whether server Cast stages the next track in the receiver queue."""
+    cfg = get_cast_queue_config()
+    key = _normalize_cast_uuid(uuid)
+    if key in cfg["disabled_uuids"]:
+        return False
+    return cfg["enabled"] or key in cfg["enabled_uuids"]

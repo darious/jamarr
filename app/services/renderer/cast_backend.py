@@ -11,9 +11,16 @@ from datetime import timedelta
 from typing import Any, Awaitable, Callable
 
 from app.auth_tokens import create_stream_token
+from app.services.playback_plan import (
+    CAST_DEFAULT_MIME_TYPES,
+    RendererConstraints,
+    constraints_for_cast,
+)
 from app.services.renderer.contracts import (
     PlaybackContext,
     RendererBackend,
+    OutputConstraints,
+    QueueOwnership,
     RendererCapabilities,
     RendererDevice,
     RendererLoadError,
@@ -28,6 +35,18 @@ logger = logging.getLogger(__name__)
 # track played to its end; the others are a stop, a replacement or a failure.
 IDLE_REASON_FINISHED = "FINISHED"
 IDLE_REASON_ERROR = "ERROR"
+
+# MediaInformation.customData keys marking media as Jamarr's. The Android app
+# uses the same keys, so either controller can recognise the other's items.
+CUSTOM_TRACK_ID = "jamarrTrackId"
+CUSTOM_SOURCE = "jamarrSource"
+CUSTOM_CONTENT_PATH = "jamarrContentPath"
+CUSTOM_SOURCE_SERVER = "server"
+
+# A FINISHED for the current item while a next item is queued on the receiver
+# normally turns into that item playing by itself; if it has not after this
+# long, the queue advances the per-track way (a fresh LOAD).
+STAGED_FINISH_GRACE_S = 5.0
 
 
 @dataclass
@@ -45,6 +64,22 @@ class _CastLoad:
     # Set once the media went idle, so repeated IDLE statuses for the same
     # media (listener + polling, receiver re-broadcasts) act only once.
     idle_reason: str | None = None
+    # Re-adopted from the receiver's status (customData) rather than loaded by
+    # this process, e.g. after a server restart.
+    adopted: bool = False
+    # When FINISHED was seen while a queued next item was expected to take
+    # over, and whether the fallback end of track has been reported.
+    finished_at: float | None = None
+    ended_reported: bool = False
+
+
+@dataclass
+class _CastStaged:
+    """The next track queued on the receiver (QUEUE_INSERT) behind the load."""
+
+    url: str
+    track_id: int
+    item_id: int | None = None
 
 
 class _CastStatusListener:
@@ -69,6 +104,47 @@ class _CastStatusListener:
             started_at=self.started_at,
         )
         self.last_state = renderer_status.state
+        self.backend.dispatch_status_callback(self.callback, renderer_status)
+        self.backend.schedule_finish_recheck(self.renderer_id, self)
+
+    def load_media_failed(self, queue_item_id: int, error_code: int) -> None:
+        # The LOAD reply (or the IDLE/ERROR status that follows) carries this.
+        logger.debug(
+            "Cast load_media_failed renderer=%s item=%s code=%s",
+            self.renderer_id,
+            queue_item_id,
+            error_code,
+        )
+
+
+class _CastReceiverListener:
+    """Receiver (platform) status listener.
+
+    Volume and mute set on the device itself, by its remote or by another
+    controller, arrive here without any media status, so they reach player
+    state without polling.
+    """
+
+    def __init__(
+        self,
+        backend: "CastRendererBackend",
+        renderer_id: str,
+        callback: Callable[[RendererStatus], Awaitable[None]],
+    ) -> None:
+        self.backend = backend
+        self.renderer_id = renderer_id
+        self.callback = callback
+        self.last_volume: tuple[int | None, bool | None] | None = None
+
+    def new_cast_status(self, status: Any) -> None:
+        renderer_status = self.backend.status_from_receiver_status(self.renderer_id, status)
+        if renderer_status is None:
+            return
+        key = (renderer_status.volume_percent, renderer_status.volume_muted)
+        if key == self.last_volume:
+            # App launches, idle-screen changes etc. re-send the same volume.
+            return
+        self.last_volume = key
         self.backend.dispatch_status_callback(self.callback, renderer_status)
 
 
@@ -98,6 +174,9 @@ class CastRendererBackend(RendererBackend):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._discovery_lock = asyncio.Lock()
         self._loads: dict[str, _CastLoad] = {}
+        self._staged: dict[str, _CastStaged] = {}
+        self._receiver_listeners: dict[str, list[_CastReceiverListener]] = {}
+        self._finish_rechecks: dict[str, Any] = {}
         # Statuses arrive on pychromecast's socket thread as well as the loop.
         self._loads_lock = threading.Lock()
 
@@ -172,6 +251,7 @@ class CastRendererBackend(RendererBackend):
         cast = self.casts.pop(uuid, None)
         self.devices.pop(uuid, None)
         self._listeners.pop(renderer_id, None)
+        self._receiver_listeners.pop(renderer_id, None)
         self._forget_load(renderer_id)
         if cast and hasattr(cast, "disconnect"):
             await asyncio.to_thread(cast.disconnect, 1)
@@ -192,7 +272,7 @@ class CastRendererBackend(RendererBackend):
         cast = await self._get_ready_cast(renderer_id)
         await asyncio.to_thread(cast.start_app, self._media_receiver_app_id(), True, self.launch_timeout)
         media_url = self._stream_url(track, context)
-        mime_type = context.stream_mime_type or self._mime_type(track)
+        mime_type = self._load_mime_type(track, context)
         metadata = self._media_metadata(track, context)
         thumb = self._art_url(track, context)
         logger.info(
@@ -206,6 +286,8 @@ class CastRendererBackend(RendererBackend):
         load = _CastLoad(url=media_url, track_id=track_id)
         with self._loads_lock:
             self._loads[renderer_id] = load
+            # A LOAD replaces the receiver's whole queue, staged item included.
+            self._staged.pop(renderer_id, None)
         response: asyncio.Future[tuple[bool, dict[str, Any] | None]] = (
             asyncio.get_running_loop().create_future()
         )
@@ -219,6 +301,7 @@ class CastRendererBackend(RendererBackend):
                     thumb=thumb,
                     metadata=metadata,
                     stream_type=self._stream_type(),
+                    media_info={"customData": self.media_custom_data(track_id, media_url)},
                     callback_function=self._load_callback(renderer_id, track_id, response),
                 )
             except Exception as exc:
@@ -279,6 +362,7 @@ class CastRendererBackend(RendererBackend):
             renderer_id=renderer_id,
             state=state,
             current_media_url=media_url,
+            current_track_id=track_id,
             completion_reported=True,
         )
 
@@ -296,6 +380,8 @@ class CastRendererBackend(RendererBackend):
         # An explicit stop ends our load: the CANCELLED status it produces is
         # not a device-side halt and must not be reported as one.
         self._forget_load(renderer_id)
+        with self._loads_lock:
+            self._staged.pop(renderer_id, None)
         cast = await self._get_ready_cast(renderer_id)
         try:
             await asyncio.to_thread(cast.media_controller.stop)
@@ -348,6 +434,7 @@ class CastRendererBackend(RendererBackend):
         listener = _CastStatusListener(self, renderer_id, callback)
         cast.media_controller.register_status_listener(listener)
         self._listeners.setdefault(renderer_id, []).append(listener)
+        receiver_listener = self._register_receiver_listener(cast, renderer_id, callback)
 
         def unsubscribe() -> None:
             try:
@@ -358,8 +445,321 @@ class CastRendererBackend(RendererBackend):
                 self._listeners.get(renderer_id, []).remove(listener)
             except ValueError:
                 pass
+            if receiver_listener is not None:
+                # pychromecast has no unregister call for receiver listeners.
+                receiver = getattr(getattr(cast, "socket_client", None), "receiver_controller", None)
+                try:
+                    receiver._status_listeners.remove(receiver_listener)
+                except (ValueError, AttributeError):
+                    pass
+                try:
+                    self._receiver_listeners.get(renderer_id, []).remove(receiver_listener)
+                except ValueError:
+                    pass
 
         return unsubscribe
+
+    def _register_receiver_listener(
+        self,
+        cast: Any,
+        renderer_id: str,
+        callback: Callable[[RendererStatus], Awaitable[None]],
+    ) -> _CastReceiverListener | None:
+        """Subscribe to receiver status (volume/mute) where the client offers it."""
+        if not hasattr(cast, "register_status_listener"):
+            return None
+        listener = _CastReceiverListener(self, renderer_id, callback)
+        # Seed with the current values, so only an actual change is reported.
+        current = self.status_from_receiver_status(renderer_id, getattr(cast, "status", None))
+        if current is not None:
+            listener.last_volume = (current.volume_percent, current.volume_muted)
+        try:
+            cast.register_status_listener(listener)
+        except Exception:
+            logger.debug("Cast receiver listener failed for %s", renderer_id, exc_info=True)
+            return None
+        self._receiver_listeners.setdefault(renderer_id, []).append(listener)
+        return listener
+
+    def status_from_receiver_status(self, renderer_id: str, status: Any) -> RendererStatus | None:
+        """A volume-only RendererStatus from a receiver CastStatus, or None.
+
+        ``position_seconds`` is None so progress is left alone, and
+        ``completion_reported`` keeps the position end-of-track heuristic out.
+        """
+        volume = self._status_attr(status, "volume_level")
+        muted = self._status_attr(status, "volume_muted")
+        if volume is None and muted is None:
+            return None
+        return RendererStatus(
+            renderer_id=renderer_id,
+            state="UNKNOWN",
+            position_seconds=None,  # type: ignore[arg-type]
+            volume_percent=round(float(volume) * 100) if volume is not None else None,
+            volume_muted=bool(muted) if muted is not None else None,
+            completion_reported=True,
+        )
+
+    # --- Receiver queue (next-item preload) ---------------------------------
+
+    def queue_mode_enabled(self, renderer_id: str) -> bool:
+        """Whether the next track is staged in the receiver's queue."""
+        _, uuid = split_renderer_id(renderer_id)
+        try:
+            from app.config import cast_queue_enabled
+
+            return cast_queue_enabled(uuid)
+        except Exception:
+            logger.debug("Could not read cast_queue config", exc_info=True)
+            return False
+
+    @staticmethod
+    def queue_preload_seconds() -> float:
+        try:
+            from app.config import get_cast_queue_config
+
+            return float(get_cast_queue_config()["preload_seconds"])
+        except Exception:
+            return 20.0
+
+    def staged_track_id(self, renderer_id: str) -> int | None:
+        with self._loads_lock:
+            staged = self._staged.get(renderer_id)
+            return staged.track_id if staged is not None else None
+
+    def current_load_track_id(self, renderer_id: str) -> int | None:
+        """The track of the confirmed media this backend is following."""
+        with self._loads_lock:
+            load = self._loads.get(renderer_id)
+            return load.track_id if load is not None and load.confirmed else None
+
+    async def stage_next(
+        self,
+        renderer_id: str,
+        track: dict[str, Any],
+        context: PlaybackContext,
+    ) -> bool:
+        """Queue ``track`` on the receiver behind the current item.
+
+        QUEUE_INSERT with a ``preloadTime`` lets the receiver fetch and buffer
+        it before the current item ends, then move on without a new LOAD. A
+        previously staged item is removed first. True once the receiver
+        accepted it.
+        """
+        cast = await self._get_ready_cast(renderer_id)
+        controller = cast.media_controller
+        with self._loads_lock:
+            load = self._loads.get(renderer_id)
+            previous = self._staged.get(renderer_id)
+        session_id = getattr(getattr(controller, "status", None), "media_session_id", None)
+        if load is None or not load.confirmed or session_id is None:
+            return False
+        if previous is not None and previous.item_id is not None:
+            await self._send_media_request(
+                controller,
+                renderer_id,
+                {"type": "QUEUE_REMOVE", "mediaSessionId": session_id, "itemIds": [previous.item_id]},
+            )
+        with self._loads_lock:
+            if self._staged.get(renderer_id) is previous:
+                self._staged.pop(renderer_id, None)
+        track_id = int(track["id"])
+        media_url = self._stream_url(track, context)
+        # The plan's MIME, exactly as a LOAD of this track would send it.
+        mime_type = self._load_mime_type(track, context)
+        item = {
+            "media": {
+                "contentId": media_url,
+                "streamType": self._stream_type(),
+                "contentType": mime_type,
+                "metadata": self._media_metadata(track, context),
+                "customData": self.media_custom_data(track_id, media_url),
+            },
+            "autoplay": True,
+            "startTime": 0,
+            "preloadTime": self.queue_preload_seconds(),
+        }
+        accepted, data = await self._send_media_request(
+            controller,
+            renderer_id,
+            {"type": "QUEUE_INSERT", "mediaSessionId": session_id, "items": [item]},
+        )
+        if not accepted:
+            logger.warning(
+                "Cast queue insert refused renderer=%s track_id=%s: %s",
+                renderer_id,
+                track_id,
+                (data or {}).get("type") or "no reply",
+            )
+            return False
+        staged = _CastStaged(
+            url=media_url, track_id=track_id, item_id=self._inserted_item_id(data, media_url)
+        )
+        with self._loads_lock:
+            if self._loads.get(renderer_id) is not load:
+                # A new LOAD replaced the receiver's queue meanwhile.
+                return False
+            self._staged[renderer_id] = staged
+        logger.info(
+            "Cast queued next renderer=%s track_id=%s item_id=%s",
+            renderer_id,
+            track_id,
+            staged.item_id,
+        )
+        return True
+
+    async def unstage_next(self, renderer_id: str) -> bool:
+        """Remove the item queued on the receiver (QUEUE_REMOVE) and forget it.
+
+        For a queue edit that leaves no next track: without this the receiver
+        would roll into the dropped track by itself. True once nothing is
+        staged any more. If the receiver can't be told (no item id, no media
+        session, refused), the record stays, so the item is still recognised
+        as stale should the receiver start it.
+        """
+        with self._loads_lock:
+            staged = self._staged.get(renderer_id)
+        if staged is None:
+            return True
+        if staged.item_id is None:
+            return False
+        cast = await self._get_ready_cast(renderer_id)
+        controller = cast.media_controller
+        session_id = getattr(getattr(controller, "status", None), "media_session_id", None)
+        if session_id is None:
+            return False
+        removed, data = await self._send_media_request(
+            controller,
+            renderer_id,
+            {"type": "QUEUE_REMOVE", "mediaSessionId": session_id, "itemIds": [staged.item_id]},
+        )
+        if not removed:
+            logger.warning(
+                "Cast queue remove refused renderer=%s track_id=%s: %s",
+                renderer_id,
+                staged.track_id,
+                (data or {}).get("type") or "no reply",
+            )
+            return False
+        with self._loads_lock:
+            if self._staged.get(renderer_id) is staged:
+                self._staged.pop(renderer_id, None)
+        logger.info(
+            "Cast removed queued track renderer=%s track_id=%s item_id=%s",
+            renderer_id,
+            staged.track_id,
+            staged.item_id,
+        )
+        return True
+
+    async def _send_media_request(
+        self,
+        controller: Any,
+        renderer_id: str,
+        message: dict[str, Any],
+    ) -> tuple[bool, dict[str, Any] | None]:
+        """Send a raw media-namespace request; (accepted, reply)."""
+        response: asyncio.Future[tuple[bool, dict[str, Any] | None]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        loop = response.get_loop()
+
+        def resolve(success: bool, data: dict[str, Any] | None) -> None:
+            if not response.done():
+                response.set_result((success, data))
+
+        def callback(success: bool, data: dict[str, Any] | None) -> None:
+            try:
+                loop.call_soon_threadsafe(resolve, success, data)
+            except RuntimeError:
+                pass
+
+        try:
+            await asyncio.to_thread(
+                controller.send_message, message, inc_session_id=True, callback_function=callback
+            )
+            success, data = await asyncio.wait_for(response, timeout=self.load_timeout)
+        except Exception as exc:
+            logger.debug("Cast %s failed renderer=%s: %s", message.get("type"), renderer_id, exc)
+            return False, None
+        return bool(success) and (data or {}).get("type") == "MEDIA_STATUS", data
+
+    @staticmethod
+    def _inserted_item_id(data: dict[str, Any] | None, media_url: str) -> int | None:
+        for entry in (data or {}).get("status") or []:
+            for item in (entry or {}).get("items") or []:
+                media = (item or {}).get("media") or {}
+                if media.get("contentId") == media_url and item.get("itemId") is not None:
+                    return int(item["itemId"])
+        return None
+
+    def schedule_finish_recheck(self, renderer_id: str, listener: _CastStatusListener) -> None:
+        """Re-evaluate a FINISHED that is waiting for the queued item.
+
+        Statuses only arrive when the receiver sends one; if it never rolls
+        into the staged item, nothing else would end the track.
+        """
+        with self._loads_lock:
+            load = self._loads.get(renderer_id)
+            waiting = (
+                load is not None
+                and load.finished_at is not None
+                and not load.ended_reported
+                and renderer_id in self._staged
+            )
+        loop = self._loop
+        if not waiting or loop is None or not loop.is_running():
+            return
+        try:
+            loop.call_soon_threadsafe(self._arm_finish_recheck, renderer_id, listener)
+        except RuntimeError:
+            pass
+
+    def _arm_finish_recheck(self, renderer_id: str, listener: _CastStatusListener) -> None:
+        if renderer_id in self._finish_rechecks:
+            return
+
+        def recheck() -> None:
+            self._finish_rechecks.pop(renderer_id, None)
+            _, uuid = split_renderer_id(renderer_id)
+            cast = self.casts.get(uuid)
+            status = getattr(getattr(cast, "media_controller", None), "status", None)
+            if status is not None:
+                listener.new_media_status(status)
+
+        loop = asyncio.get_running_loop()
+        self._finish_rechecks[renderer_id] = loop.call_later(STAGED_FINISH_GRACE_S + 0.1, recheck)
+
+    # --- Media identity ----------------------------------------------------
+
+    @staticmethod
+    def media_custom_data(track_id: int, media_url: str) -> dict[str, Any]:
+        """customData stamped on every item the server loads or queues."""
+        return {
+            CUSTOM_TRACK_ID: int(track_id),
+            CUSTOM_SOURCE: CUSTOM_SOURCE_SERVER,
+            CUSTOM_CONTENT_PATH: media_url.split("?", 1)[0],
+        }
+
+    @staticmethod
+    def jamarr_track_id(status: Any) -> int | None:
+        """The Jamarr track id of the receiver's current media, if the server put it there.
+
+        pychromecast keeps the previous customData when new media arrives
+        without any, so the stamped content path must match the media too.
+        """
+        custom = getattr(status, "media_custom_data", None)
+        if not isinstance(custom, dict) or custom.get(CUSTOM_SOURCE) != CUSTOM_SOURCE_SERVER:
+            return None
+        try:
+            track_id = int(custom.get(CUSTOM_TRACK_ID))
+        except (TypeError, ValueError):
+            return None
+        content_id = getattr(status, "content_id", None)
+        path = custom.get(CUSTOM_CONTENT_PATH)
+        if not content_id or not path or content_id.split("?", 1)[0] != path:
+            return None
+        return track_id
 
     def dispatch_status_callback(
         self,
@@ -403,9 +803,68 @@ class CastRendererBackend(RendererBackend):
         ended = False
         stop_reason = None
         completion_reported = True
+        advanced_by_renderer = False
+        adopted = False
+        current_track_id = None
+        custom_track_id = self.jamarr_track_id(status)
         with self._loads_lock:
             load = self._loads.get(renderer_id)
-            if load is not None and not load.confirmed:
+            staged = self._staged.get(renderer_id)
+            if (
+                load is not None
+                and load.confirmed
+                and staged is not None
+                and content_id
+                and self._is_load_media(staged, content_id)
+                and not self._is_load_media(load, content_id)
+            ):
+                # The receiver moved on to the queued item by itself: that is
+                # now the media being followed (exactly once: staged is gone).
+                load = _CastLoad(url=staged.url, track_id=staged.track_id, confirmed=True)
+                self._loads[renderer_id] = load
+                del self._staged[renderer_id]
+                staged = None
+                advanced_by_renderer = True
+                logger.info(
+                    "Cast receiver advanced to queued track renderer=%s track_id=%s",
+                    renderer_id,
+                    load.track_id,
+                )
+            elif (
+                load is None
+                and custom_track_id is not None
+                and state in {"PLAYING", "PAUSED"}
+            ):
+                # Media the server loaded before a restart: stamped with our
+                # customData, so it is ours to follow, not a foreign session.
+                load = _CastLoad(
+                    url=content_id, track_id=custom_track_id, confirmed=True, adopted=True
+                )
+                self._loads[renderer_id] = load
+                adopted = True
+                logger.info(
+                    "Cast re-adopted server media renderer=%s track_id=%s",
+                    renderer_id,
+                    custom_track_id,
+                )
+            if load is not None and load.confirmed and self._is_load_media(load, content_id):
+                current_track_id = load.track_id
+            if (
+                load is not None
+                and load.confirmed
+                and load.idle_reason == IDLE_REASON_FINISHED
+                and load.finished_at is not None
+                and not load.ended_reported
+                and state == "IDLE"
+                and self._is_load_media(load, content_id)
+                and (staged is None or time.time() - load.finished_at >= STAGED_FINISH_GRACE_S)
+            ):
+                # FINISHED held back for a queued item that never started (or
+                # was dropped since): end the track the per-track way.
+                load.ended_reported = True
+                self._staged.pop(renderer_id, None)
+                ended = True
+            elif load is not None and not load.confirmed:
                 # LOAD still pending: whatever this says is about the previous
                 # media (often IDLE/INTERRUPTED as it is replaced) or the new
                 # one buffering. Neither may move player state.
@@ -413,7 +872,12 @@ class CastRendererBackend(RendererBackend):
             elif load is not None and self._is_load_media(load, content_id):
                 if state == "IDLE" and idle_reason and load.idle_reason is None:
                     load.idle_reason = idle_reason
-                    if idle_reason == IDLE_REASON_FINISHED:
+                    if idle_reason == IDLE_REASON_FINISHED and staged is not None:
+                        # The receiver plays the queued item next by itself;
+                        # its media status, not this, moves the queue.
+                        load.finished_at = time.time()
+                    elif idle_reason == IDLE_REASON_FINISHED:
+                        load.ended_reported = True
                         ended = True
                     elif idle_reason == IDLE_REASON_ERROR:
                         stop_reason = "renderer_error"
@@ -448,9 +912,12 @@ class CastRendererBackend(RendererBackend):
             volume_percent=round(float(volume) * 100) if volume is not None else None,
             volume_muted=volume_muted,
             current_media_url=content_id,
+            current_track_id=current_track_id,
             ended=ended,
             completion_reported=completion_reported,
             stop_reason=stop_reason,
+            advanced_by_renderer=advanced_by_renderer,
+            adopted=adopted,
         )
 
     def _is_current_load(self, renderer_id: str, load: _CastLoad) -> bool:
@@ -674,8 +1141,18 @@ class CastRendererBackend(RendererBackend):
             discovered_by="server",
             capabilities=RendererCapabilities(
                 can_mute=True,
+                # pychromecast pushes media status over the open socket.
                 supports_events=True,
-                supported_mime_types={"audio/flac", "audio/mpeg", "audio/mp4", "audio/wav", "audio/ogg"},
+                supported_mime_types=set(CAST_DEFAULT_MIME_TYPES),
+                # Server Cast loads one track at a time (no receiver queue yet).
+                queue_ownership=QueueOwnership.SERVER,
+                # Google's Cast supported-media list; not checked per device.
+                output=OutputConstraints(
+                    codecs={"aac", "flac", "mp3", "opus", "pcm", "vorbis"},
+                    max_sample_rate_hz=96000,
+                    max_bit_depth=24,
+                    source="documented",
+                ),
             ),
             is_group=(cast_type == "group"),
         )
@@ -755,6 +1232,27 @@ class CastRendererBackend(RendererBackend):
             return STREAM_TYPE_BUFFERED
         except Exception:
             return "BUFFERED"
+
+    def output_constraints(self, renderer_id: str) -> RendererConstraints:
+        """Default Media Receiver formats plus per-device config overrides.
+
+        Receiver quirks (FLAC block size, sample-rate ceilings) are opt-in via
+        ``renderer.audio_constraints``: they differ between Cast generations.
+        """
+        _, uuid = split_renderer_id(renderer_id)
+        return constraints_for_cast(renderer_id, uuid)
+
+    @classmethod
+    def _load_mime_type(cls, track: dict[str, Any], context: PlaybackContext) -> str:
+        """contentType for the LOAD: the plan's output MIME when there is one.
+
+        It must match the Content-Type /api/stream serves for that URL; the
+        plan is what decided the bytes.
+        """
+        plan = context.playback_plan
+        if plan is not None and getattr(plan, "mime_type", None):
+            return plan.mime_type
+        return context.stream_mime_type or cls._mime_type(track)
 
     @staticmethod
     def _mime_type(track: dict[str, Any]) -> str:

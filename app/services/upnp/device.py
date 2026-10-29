@@ -1,11 +1,86 @@
 import logging
 import html
-from typing import Dict, Any, Optional, Set
+from typing import Dict, Any, List, Optional, Set
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from async_upnp_client.exceptions import UpnpError
 from app.auth_tokens import create_stream_token
+from app.services.renderer.contracts import RendererLoadError, make_renderer_id
+from app.services.upnp.protocol_info import (
+    NegotiatedFormat,
+    default_protocol_info,
+    mimes_from_protocol_info,
+    negotiate_format,
+    parse_protocol_info_list,
+    split_protocol_info_list,
+)
 from app.services.upnp.staging import staging, staging_allowed
+from app.services.upnp.transport_errors import (
+    describe_transport_error,
+    is_metadata_fault,
+    upnp_error_code,
+)
 
 logger = logging.getLogger(__name__)
+
+# Ways of describing one stream to SetAVTransportURI / SetNextAVTransportURI,
+# tried in this order when a renderer rejects the description with a fault
+# that a different description could fix (see transport_errors):
+#   default    -- full DIDL, res@protocolInfo "http-get:*:<mime>:*" (the
+#                 wildcard fourth field Jamarr has always sent)
+#   advertised -- full DIDL, the renderer's own matching GetProtocolInfo entry
+#   minimal    -- title/creator/class/res only: no art, album, duration or size
+#   empty      -- no metadata at all; the renderer sniffs the stream
+LOAD_STAGES = ("default", "advertised", "minimal", "empty")
+MAX_LOAD_ATTEMPTS = len(LOAD_STAGES)
+
+
+class LoadStrategyMemory:
+    """Per renderer and action: the metadata stage that last worked.
+
+    In memory only: it is cheap to rediscover (one extra fault on the first
+    load after a restart) and a firmware update may change the answer.
+    """
+
+    def __init__(self) -> None:
+        self.stages: Dict[tuple, str] = {}
+        self.last_errors: Dict[str, Dict[str, Any]] = {}
+
+    def get(self, udn: str, action: str) -> Optional[str]:
+        return self.stages.get((udn, action))
+
+    def record(self, udn: str, action: str, stage: str) -> None:
+        if stage == "default":
+            self.stages.pop((udn, action), None)
+        else:
+            self.stages[(udn, action)] = stage
+
+    def note_error(
+        self, udn: str, action: str, reason: str, detail: str, code: Optional[int]
+    ) -> None:
+        self.last_errors[udn] = {
+            "action": action,
+            "reason": reason,
+            "detail": detail,
+            "upnp_error_code": code,
+        }
+
+    def reset(self, udn: Optional[str] = None) -> None:
+        if udn is None:
+            self.stages.clear()
+            self.last_errors.clear()
+            return
+        for key in [k for k in self.stages if k[0] == udn]:
+            del self.stages[key]
+        self.last_errors.pop(udn, None)
+
+    def snapshot(self) -> Dict[str, Any]:
+        stages: Dict[str, Dict[str, str]] = {}
+        for (udn, action), stage in self.stages.items():
+            stages.setdefault(udn, {})[action] = stage
+        return {"stages": stages, "last_errors": dict(self.last_errors)}
+
+
+load_strategies = LoadStrategyMemory()
 
 
 def format_didl_duration(seconds: float | None) -> Optional[str]:
@@ -22,21 +97,15 @@ def format_didl_duration(seconds: float | None) -> Optional[str]:
 
 def negotiate_mime(mime_type: str, supported_mimes: Set[str]) -> str:
     """Pick the alias of mime_type the renderer advertises, if it has one."""
-    if mime_type == "audio/flac":
-        if "audio/flac" in supported_mimes:
-            logger.debug("Device supports audio/flac")
-            return "audio/flac"
-        if "audio/x-flac" in supported_mimes:
-            logger.debug("Device supports audio/x-flac")
-            return "audio/x-flac"
-        logger.debug("Device protocols unknown, using audio/flac as default")
-        return "audio/flac"
-    if mime_type == "audio/mp4":
-        if "audio/mp4" in supported_mimes:
-            return "audio/mp4"
-        if "audio/x-m4a" in supported_mimes:
-            return "audio/x-m4a"
-    return mime_type
+    return negotiate_format(mime_type, (), supported_mimes).mime
+
+
+def with_mime_param(url: str, mime: str) -> str:
+    """url plus ``mime=<label>``: /api/stream then serves the label the DIDL names."""
+    parts = urlsplit(url)
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "mime"]
+    query.append(("mime", mime))
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 def build_didl_lite(
@@ -49,11 +118,31 @@ def build_didl_lite(
     art_url: Optional[str] = None,
     duration_seconds: float | None = None,
     size_bytes: int | None = None,
+    protocol_info: Optional[str] = None,
+    minimal: bool = False,
 ) -> str:
-    """DIDL-Lite item for SetAVTransportURI / SetNextAVTransportURI metadata."""
+    """DIDL-Lite item for SetAVTransportURI / SetNextAVTransportURI metadata.
+
+    ``protocol_info`` defaults to ``http-get:*:<mime>:*``. ``minimal`` drops
+    whatever a picky DIDL parser could choke on: art, album, duration, size.
+    """
     title_esc = html.escape(title)
     artist_esc = html.escape(artist)
     album_esc = html.escape(album)
+    protocol_info_esc = html.escape(protocol_info or default_protocol_info(mime_type))
+    url_esc = html.escape(media_url, quote=False)
+
+    if minimal:
+        return f"""
+        <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
+            <item id="1" parentID="0" restricted="1">
+                <dc:title>{title_esc}</dc:title>
+                <dc:creator>{artist_esc}</dc:creator>
+                <upnp:class>object.item.audioItem.musicTrack</upnp:class>
+                <res protocolInfo="{protocol_info_esc}">{url_esc}</res>
+            </item>
+        </DIDL-Lite>
+        """
 
     art_element = ""
     if art_url:
@@ -76,7 +165,7 @@ def build_didl_lite(
                 <upnp:album>{album_esc}</upnp:album>
                 <upnp:class>object.item.audioItem.musicTrack</upnp:class>
                 {art_element}
-                <res protocolInfo="http-get:*:{mime_type}:*"{res_attrs}>{media_url}</res>
+                <res protocolInfo="{protocol_info_esc}"{res_attrs}>{url_esc}</res>
             </item>
         </DIDL-Lite>
         """
@@ -90,12 +179,20 @@ class UPnPDeviceControl:
         self._track_uris: Dict[str, Optional[str]] = {}
 
     async def get_supported_protocols(self, udn: str, dmr=None) -> Set[str]:
-        """
-        Query device's supported MIME types via GetProtocolInfo.
+        """Bare MIME types the device advertises (legacy view of the Sink list)."""
+        entries = await self.get_sink_protocol_info(udn, dmr)
+        return mimes_from_protocol_info(parse_protocol_info_list(entries))
+
+    async def get_sink_protocol_info(self, udn: str, dmr=None) -> List[str]:
+        """The device's GetProtocolInfo Sink entries, complete and verbatim.
+
+        All four fields are kept (MIME parameters, DLNA.ORG_PN/OP/FLAGS), in
+        the device's order. Empty if the device has no ConnectionManager or
+        does not answer.
         """
         dmr = dmr or self.manager.dmr_devices.get(udn)
         if not dmr:
-            return set()
+            return []
 
         device = dmr.device
 
@@ -108,33 +205,34 @@ class UPnPDeviceControl:
 
         if not cm_service:
             logger.debug(f"No ConnectionManager service found for {udn}")
-            return set()
+            return []
 
         try:
             action = cm_service.action("GetProtocolInfo")
             result = await action.async_call()
 
-            # Parse Sink protocols (what the device can play)
-            sink = result.get("Sink", "")
-            if not sink:
-                return set()
-
-            # Extract unique MIME types
-            mime_types = set()
-            protocols = sink.split(",")
-            for proto in protocols:
-                parts = proto.split(":")
-                if len(parts) >= 3:
-                    mime = parts[2]
-                    if mime and mime != "*":
-                        mime_types.add(mime)
-
-            logger.debug(f"Device {udn} supports {len(mime_types)} MIME types")
-            return mime_types
+            # Sink: what the device can play
+            raw_entries = split_protocol_info_list(result.get("Sink", ""))
+            # Keep only well-formed entries, verbatim; drop exact duplicates.
+            entries: List[str] = []
+            for entry in parse_protocol_info_list(raw_entries):
+                if entry.raw not in entries:
+                    entries.append(entry.raw)
+            logger.debug(f"Device {udn} advertises {len(entries)} sink protocolInfo entries")
+            return entries
 
         except Exception as e:
             logger.debug(f"Error querying protocols for {udn}: {e}")
-            return set()
+            return []
+
+    def negotiated_format(self, udn: str, mime: Optional[str]) -> NegotiatedFormat:
+        """The label/protocolInfo to describe a stream of ``mime`` with on udn."""
+        renderer_info = self.manager.renderers.get(udn, {})
+        entries = parse_protocol_info_list(renderer_info.get("sink_protocol_info") or [])
+        legacy = renderer_info.get("supported_mime_types") or ""
+        if isinstance(legacy, str):
+            legacy = [m for m in legacy.split(",") if m]
+        return negotiate_format(mime, entries, legacy)
 
     def _media_for_track(
         self,
@@ -142,7 +240,7 @@ class UPnPDeviceControl:
         track_id: int,
         metadata: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Stream URL, negotiated MIME and DIDL-Lite for one track on udn.
+        """Stream URL, negotiated format and DIDL-Lite variants for one track on udn.
 
         Shared by SetAVTransportURI (play_track) and SetNextAVTransportURI
         (set_next_track) so a staged track is described exactly like a
@@ -161,13 +259,17 @@ class UPnPDeviceControl:
                 f"?token={stream_token}"
             )
 
-        # Get supported MIME types from renderer info
         renderer_info = self.manager.renderers.get(udn, {})
-        supported_mimes_str = renderer_info.get("supported_mime_types", "")
-        supported_mimes = (
-            set(supported_mimes_str.split(",")) if supported_mimes_str else set()
-        )
-        mime_type = negotiate_mime(metadata.get("mime", "audio/flac"), supported_mimes)
+        # The plan's MIME as /api/stream serves it, parameters included:
+        # audio/L16 without its rate/channels is not the stream's
+        # Content-Type, and could match an advertised entry of another rate.
+        stream_mime = (metadata.get("mime") or "").strip() or "audio/flac"
+        negotiated = self.negotiated_format(udn, stream_mime)
+        mime_type = negotiated.mime
+        if mime_type != stream_mime:
+            # A relabel within the alias family: the stream endpoint must send
+            # the same name in Content-Type as the DIDL does.
+            media_url = with_mime_param(media_url, mime_type)
 
         # Build art URL if available
         art_url = None
@@ -180,7 +282,7 @@ class UPnPDeviceControl:
         title = metadata.get("title", "Unknown Track")
         artist = metadata.get("artist", "Unknown Artist")
         album = metadata.get("album", "Unknown Album")
-        didl_lite = build_didl_lite(
+        didl_args: Dict[str, Any] = dict(
             media_url=media_url,
             mime_type=mime_type,
             title=title,
@@ -190,14 +292,84 @@ class UPnPDeviceControl:
             duration_seconds=metadata.get("duration_seconds"),
             size_bytes=metadata.get("size_bytes"),
         )
+        # One description per load stage (see LOAD_STAGES).
+        exact = negotiated.exact_protocol_info
+        variants: Dict[str, str] = {"default": build_didl_lite(**didl_args)}
+        if exact:
+            variants["advertised"] = build_didl_lite(**didl_args, protocol_info=exact)
+        variants["minimal"] = build_didl_lite(**didl_args, protocol_info=exact, minimal=True)
+        variants["empty"] = ""
         return {
             "media_url": media_url,
             "mime_type": mime_type,
+            "stream_mime_type": stream_mime,
+            "negotiated": negotiated,
             "title": title,
             "artist": artist,
-            "didl": didl_lite,
+            "didl": variants["default"],
+            "didl_variants": variants,
             "renderer_info": renderer_info,
         }
+
+    @staticmethod
+    def _load_plan(udn: str, action: str, variants: Dict[str, str]) -> List[str]:
+        """Stages to try, the one that last worked first, at most MAX_LOAD_ATTEMPTS."""
+        order = [stage for stage in LOAD_STAGES if stage in variants]
+        remembered = load_strategies.get(udn, action)
+        if remembered in order:
+            order.remove(remembered)
+            order.insert(0, remembered)
+        return order[:MAX_LOAD_ATTEMPTS]
+
+    async def _send_with_fallback(
+        self, udn: str, action: str, media: Dict[str, Any], send
+    ) -> str:
+        """Run ``send(meta_data)`` through the load stages; return the one that worked.
+
+        Retries only faults another description might fix
+        (``transport_errors.is_metadata_fault``); any other fault, or the last
+        attempt's, is raised unchanged.
+        """
+        variants = media["didl_variants"]
+        plan = self._load_plan(udn, action, variants)
+        for attempt, stage in enumerate(plan, start=1):
+            try:
+                await send(variants[stage])
+            except Exception as exc:
+                retry = attempt < len(plan) and is_metadata_fault(exc)
+                logger.warning(
+                    f"[UPnP] {action} on {udn} failed with {stage} metadata "
+                    f"(attempt {attempt}/{len(plan)}, {media['mime_type']}): {exc}"
+                    + ("; retrying with a different description" if retry else "")
+                )
+                if not retry:
+                    raise
+                continue
+            if attempt > 1 or stage != "default":
+                logger.info(f"[UPnP] {action} on {udn} accepted {stage} metadata")
+            load_strategies.record(udn, action, stage)
+            return stage
+        raise RuntimeError("empty load plan")  # pragma: no cover - plan is never empty
+
+    def _load_error(
+        self, udn: str, action: str, exc: BaseException, media: Dict[str, Any]
+    ) -> RendererLoadError:
+        """An actionable RendererLoadError for a failed transport action."""
+        renderer_info = media.get("renderer_info") or {}
+        base = getattr(self.manager, "renderer_base_url", None)
+        stream_host = urlsplit(base).netloc if isinstance(base, str) and base else None
+        negotiated = media.get("negotiated")
+        reason, detail = describe_transport_error(
+            exc,
+            action=action,
+            renderer_name=renderer_info.get("friendly_name") or "Renderer",
+            mime_type=media.get("mime_type"),
+            advertised_support=negotiated.advertised_support if negotiated else None,
+            stream_host=stream_host,
+        )
+        load_strategies.note_error(udn, action, reason, detail, upnp_error_code(exc))
+        logger.warning(f"[UPnP] {action} on {udn} failed: {reason}: {detail}")
+        return RendererLoadError(make_renderer_id("upnp", udn), reason, detail)
 
     async def play_track(
         self,
@@ -243,9 +415,15 @@ class UPnPDeviceControl:
         staging.forget(udn)
 
         # Set transport URI
-        await dmr.async_set_transport_uri(
-            media_url=media["media_url"], media_title=title, meta_data=media["didl"]
-        )
+        async def send(meta_data: str) -> None:
+            await dmr.async_set_transport_uri(
+                media_url=media["media_url"], media_title=title, meta_data=meta_data
+            )
+
+        try:
+            await self._send_with_fallback(udn, "SetAVTransportURI", media, send)
+        except (UpnpError, OSError) as exc:
+            raise self._load_error(udn, "SetAVTransportURI", exc, media) from exc
 
         # Wait for device
         await dmr.async_wait_for_can_play(max_wait_time=5)
@@ -253,11 +431,11 @@ class UPnPDeviceControl:
         # Start playback
         try:
             await dmr.async_play()
-        except UpnpError as e:
-            if "701" in str(e):
+        except (UpnpError, OSError) as e:
+            if upnp_error_code(e) == 701 or (isinstance(e, UpnpError) and "701" in str(e)):
                 logger.info("Device already playing, ignoring play command")
             else:
-                raise
+                raise self._load_error(udn, "Play", e, media) from e
 
     def next_track_staging_allowed(self, udn: str) -> bool:
         """Whether to stage the next track on udn (config, faults, advert)."""
@@ -278,18 +456,24 @@ class UPnPDeviceControl:
     ) -> str:
         """Stage track_id as udn's next URI (SetNextAVTransportURI).
 
-        Returns the URI staged. Raises whatever the device raised; the caller
-        decides whether that disables staging.
+        Returns the URI staged. Metadata faults go through the same bounded
+        description ladder as a load; whatever the device raised last is
+        re-raised unchanged, and the caller decides whether that disables
+        staging.
         """
         dmr = self.manager.dmr_devices.get(udn)
         if not dmr:
             raise ValueError(f"DMR device not found for {udn}")
         media = self._media_for_track(udn, track_id, metadata)
-        await dmr.async_set_next_transport_uri(
-            media_url=media["media_url"],
-            media_title=media["title"],
-            meta_data=media["didl"],
-        )
+
+        async def send(meta_data: str) -> None:
+            await dmr.async_set_next_transport_uri(
+                media_url=media["media_url"],
+                media_title=media["title"],
+                meta_data=meta_data,
+            )
+
+        await self._send_with_fallback(udn, "SetNextAVTransportURI", media, send)
         logger.info(
             f"[Gapless] Staged next track on {udn}: {media['title']} by "
             f"{media['artist']} ({media['mime_type']})"
@@ -381,6 +565,28 @@ class UPnPDeviceControl:
         await dmr.async_set_volume_level(volume_level)
         self.manager.log(f"Volume set to {volume}")
 
+    def can_mute(self, udn: str) -> bool:
+        """Whether udn's RenderingControl has a SetMute action (not merely a
+        Mute state variable, which is all DmrDevice.has_volume_mute checks)."""
+        dmr = self.manager.dmr_devices.get(udn)
+        if dmr is None:
+            return False
+        try:
+            # "RC" is async_upnp_client's key for RenderingControl.
+            return dmr._action("RC", "SetMute") is not None
+        except Exception:
+            return False
+
+    async def set_mute(self, muted: bool) -> None:
+        """RenderingControl SetMute on the active renderer."""
+        if not self.manager.active_renderer:
+            raise ValueError("No active renderer set")
+        dmr = self.manager.dmr_devices.get(self.manager.active_renderer)
+        if not dmr:
+            raise ValueError(f"DMR device not found for {self.manager.active_renderer}")
+        await dmr.async_mute_volume(bool(muted))
+        self.manager.log(f"Mute set to {bool(muted)}")
+
     async def get_volume(self, udn: Optional[str] = None) -> Optional[int]:
         """Read the renderer's current volume as 0-100 percent, or None.
 
@@ -394,7 +600,9 @@ class UPnPDeviceControl:
         if not dmr:
             return None
         try:
-            action = dmr._action("RenderingControl", "GetVolume")
+            # "RC", not "RenderingControl": _action keys are the abbreviations
+            # (see set_volume); the long name never resolves.
+            action = dmr._action("RC", "GetVolume")
             if not action:
                 return None
             result = await action.async_call(InstanceID=0, Channel="Master")
@@ -403,7 +611,7 @@ class UPnPDeviceControl:
                 return None
             max_volume = 100
             try:
-                state_var = dmr._state_variable("RenderingControl", "Volume")
+                state_var = dmr._state_variable("RC", "Volume")
                 if state_var is not None and state_var.max_value:
                     max_volume = int(state_var.max_value) or 100
             except Exception:

@@ -19,9 +19,9 @@ async def register_or_update_renderer(
             renderer_id, kind, native_id, udn, friendly_name, ip, manufacturer,
             model_name, cast_type, last_discovered_by, available,
             enabled_by_default, supported_mime_types, icon_url, icon_mime,
-            icon_width, icon_height, last_seen_at
+            icon_width, icon_height, last_seen_at, sink_protocol_info
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), $18)
         ON CONFLICT (renderer_id) DO UPDATE SET
             kind = EXCLUDED.kind,
             native_id = EXCLUDED.native_id,
@@ -35,6 +35,9 @@ async def register_or_update_renderer(
             available = EXCLUDED.available,
             enabled_by_default = EXCLUDED.enabled_by_default,
             supported_mime_types = EXCLUDED.supported_mime_types,
+            -- Backends without protocolInfo send NULL: never wipe what
+            -- UPnP hydration saved.
+            sink_protocol_info = COALESCE(EXCLUDED.sink_protocol_info, renderer.sink_protocol_info),
             icon_url = EXCLUDED.icon_url,
             icon_mime = EXCLUDED.icon_mime,
             icon_width = EXCLUDED.icon_width,
@@ -58,6 +61,7 @@ async def register_or_update_renderer(
         device.icon_mime,
         device.icon_width,
         device.icon_height,
+        list(device.capabilities.protocol_info) or None,
     )
 
 
@@ -95,6 +99,7 @@ def renderer_row_to_api(row: asyncpg.Record | dict[str, Any]) -> dict[str, Any]:
         "supported_mime_types": [
             item for item in supported_mime_types.split(",") if item
         ],
+        "protocol_info": list(_row_get(row, "sink_protocol_info", None) or []),
     }
     metadata = _row_get(row, "renderer_metadata")
     if isinstance(metadata, str):

@@ -13,6 +13,8 @@ from app.services.player.globals import (
     last_playing_seen,
     last_playing_position,
     last_stop_reason,
+    record_output_plan,
+    seek_generations,
     start_retries,
 )
 from app.services.player.state import (
@@ -22,6 +24,7 @@ from app.services.player.state import (
     track_path_exists,
 )
 from app.services.player.queue import play_next_track_internal
+from app.services.playback_plan import apply_plan_to_metadata, constraints_for_upnp
 from app.services.player.history import log_history, reset_history_tracker
 from app.services.audio_streaming import build_stream_url
 from app.services.renderer.token_policy import staged_stream_token_ttl_seconds
@@ -62,6 +65,13 @@ STAGED_STOP_GRACE_S = 3.0
 # Transport states in which a TrackURI equal to the staged URI means the
 # renderer has moved on to the staged track.
 STAGED_ADVANCE_STATES = ("PLAYING", "TRANSITIONING", "PAUSED_PLAYBACK")
+# While AVTransport events are healthy (app/services/upnp/events.py) transport
+# state and TrackURI arrive by event, so the device is only polled as a
+# watchdog: GetPositionInfo this often (position is never evented; in between
+# it is extrapolated) and GetTransportInfo this often, cross-checked against
+# the events. Unhealthy or absent events: everything is polled every second.
+EVENT_POSITION_POLL_S = 5.0
+EVENT_TRANSPORT_POLL_S = 15.0
 
 
 async def _sync_device_volume(upnp, udn: str) -> None:
@@ -329,11 +339,18 @@ async def _sync_staged_next(
             queue=queue,
             queue_index=next_idx,
             ttl_seconds=ttl,
+            # Staged exactly as a loaded track would be planned.
+            constraints=constraints_for_upnp(
+                (getattr(upnp, "renderers", None) or {}).get(udn), udn
+            ),
         )
     metadata = dict(enriched)
     metadata["stream_url"] = stream.url
     if stream.mime_type:
         metadata["mime"] = stream.mime_type
+    apply_plan_to_metadata(metadata, stream.plan)
+    if stream.plan is not None:
+        record_output_plan(udn, int(target_id), stream.plan.as_dict())
     try:
         staged_url = await upnp.set_next_track(udn, int(target_id), metadata)
     except Exception as exc:
@@ -396,6 +413,102 @@ async def _prewarm_next_track(path: str) -> None:
         logger.debug("Prewarm failed for %s", path, exc_info=True)
 
 
+class _DeviceReader:
+    """Reads position, transport state and TrackURI once per monitor loop.
+
+    Without healthy events: GetPositionInfo + GetTransportInfo every loop, as
+    always. With them: the event-derived state, plus a watchdog poll every
+    EVENT_POSITION_POLL_S (and transport every EVENT_TRANSPORT_POLL_S) whose
+    results win and are reported back so missed events are noticed. An
+    AVTransport event (state or TrackURI change) wakes the loop at once.
+
+    A seek (``player.globals.note_seek``) invalidates the polled baseline:
+    the next read polls position again rather than extrapolating a pre-seek
+    one, so progress, near-end staging and history see where playback is.
+    """
+
+    def __init__(self, upnp, udn: str) -> None:
+        self.upnp = upnp
+        self.udn = udn
+        self.events = getattr(upnp, "events", None)
+        self.event_mode = False
+        self.generation = -1
+        self.position = None
+        self.position_at = 0.0
+        self.transport_at = 0.0
+        self.seek_generation = seek_generations.get(udn, 0)
+
+    def rc_healthy(self) -> bool:
+        return bool(self.events is not None and self.events.rc_healthy(self.udn))
+
+    def seeked(self) -> bool:
+        """A seek happened since the last position poll."""
+        return seek_generations.get(self.udn, 0) != self.seek_generation
+
+    async def _poll_position(self):
+        # Taken before the call: a seek landing during the poll forces another.
+        self.seek_generation = seek_generations.get(self.udn, 0)
+        rel_time, _ = await self.upnp.get_position(self.udn)
+        self.position = rel_time
+        self.position_at = time.monotonic()
+        return rel_time
+
+    async def read(self):
+        events = self.events
+        snap = None
+        if events is not None:
+            events.check(self.udn)
+            snap = events.snapshot(self.udn)
+        if snap is None or not snap.avt_healthy or not snap.transport_state:
+            if self.event_mode:
+                logger.info(f"[Player] Monitor {self.udn}: events unhealthy, polling every second")
+            self.event_mode = False
+            rel_time = await self._poll_position()
+            transport_state = await self.upnp.get_transport_info(self.udn)
+            return rel_time, transport_state, _current_track_uri(self.upnp, self.udn)
+
+        if not self.event_mode:
+            logger.info(f"[Player] Monitor {self.udn}: events healthy, polling as watchdog only")
+            self.event_mode = True
+        now = time.monotonic()
+        changed = snap.generation != self.generation
+        self.generation = snap.generation
+        transport_state = snap.transport_state
+        track_uri = snap.track_uri
+        if (
+            changed
+            or self.position is None
+            or self.seeked()
+            or now - self.position_at >= EVENT_POSITION_POLL_S
+        ):
+            rel_time = await self._poll_position()
+            polled_uri = _current_track_uri(self.upnp, self.udn)
+            polled_state = None
+            if now - self.transport_at >= EVENT_TRANSPORT_POLL_S:
+                self.transport_at = now
+                polled_state = await self.upnp.get_transport_info(self.udn)
+            events.note_poll(self.udn, transport_state=polled_state, track_uri=polled_uri)
+            # Polls are the freshest truth; note_poll folded them into events.
+            transport_state = polled_state or transport_state
+            track_uri = polled_uri or track_uri
+            self.generation = events.snapshot(self.udn).generation
+            return rel_time, transport_state, track_uri
+
+        # Between watchdog polls: extrapolate from the last polled position.
+        rel_time = self.position or 0
+        if transport_state == "PLAYING":
+            rel_time = rel_time + int(now - self.position_at)
+            if snap.track_duration:
+                rel_time = min(rel_time, int(snap.track_duration))
+        return rel_time, transport_state, track_uri
+
+    async def idle(self, seconds: float) -> None:
+        if self.event_mode and self.events is not None:
+            await self.events.wait_for_change(self.udn, self.generation, seconds)
+        else:
+            await asyncio.sleep(seconds)
+
+
 def _mark_monitor_starting(udn: str):
     monitor_starting[udn] = time.time()
 
@@ -419,9 +532,23 @@ def start_monitor_task(udn: str):
 
 
 async def monitor_upnp_playback(udn: str):
-    """Background task to poll UPnP device for position and update DB."""
+    """Background task to follow a UPnP device (events + polling) and update DB."""
     logger.info(f"[Player] Starting UPnP monitor for {udn}")
     upnp = UPnPManager.get_instance()
+    # Subscribe to the renderer's events while the monitor runs; released
+    # (with a linger, so pause/skip does not churn subscriptions) on exit.
+    events = getattr(upnp, "events", None)
+    if events is not None:
+        events.acquire(udn)
+    try:
+        await _monitor_loop(udn, upnp)
+    finally:
+        if events is not None:
+            events.release(udn)
+
+
+async def _monitor_loop(udn: str, upnp):
+    reader = _DeviceReader(upnp, udn)
 
     # Grace period: Wait for device to react to Play command before polling
     logger.info(f"[Player] Monitor {udn}: Task started, waiting 3s grace period...")
@@ -437,14 +564,14 @@ async def monitor_upnp_playback(udn: str):
     try:
         while True:
             poll_count += 1
-            if poll_count % VOLUME_REFRESH_POLLS == 0:
+            # Evented volume is written as it arrives (events.py); poll it
+            # only when RenderingControl events are not healthy.
+            if poll_count % VOLUME_REFRESH_POLLS == 0 and not reader.rc_healthy():
                 await _sync_device_volume(upnp, udn)
             # 1. Fetch position & transport from UPnP
             try:
                 logger.info(f"[Player] Monitor {udn}: Polling...")
-                rel_time, _ = await upnp.get_position(udn)
-                transport_state = await upnp.get_transport_info(udn)
-                track_uri = _current_track_uri(upnp, udn)
+                rel_time, transport_state, track_uri = await reader.read()
                 logger.info(f"[Player] Monitor {udn}: Got pos={rel_time}, state={transport_state}")
                 consecutive_errors = 0  # Reset on success
                 error_started_at = 0.0
@@ -788,7 +915,8 @@ async def monitor_upnp_playback(udn: str):
                 except Exception:
                     logger.exception(f"[Gapless] Staging the next track failed for {udn}")
 
-            await asyncio.sleep(1)
+            # 1 s, or sooner when an AVTransport event arrives.
+            await reader.idle(1)
 
     except asyncio.CancelledError:
         logger.info(f"UPnP monitor for {udn} cancelled")

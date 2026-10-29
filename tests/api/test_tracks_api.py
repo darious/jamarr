@@ -184,3 +184,27 @@ async def test_tracks_response_excludes_quick_hash_and_maps_release_ids(auth_cli
     # Release IDs should be exposed via frontend-friendly keys
     assert track.get("mb_release_id") == release_id
     assert track.get("mb_release_group_id") == release_group_id
+
+
+@pytest.mark.asyncio
+async def test_get_tracks_by_ids(auth_client, db):
+    """/api/tracks?ids= returns exactly those tracks (Cast queue rebuild)."""
+    for track_id in (990101, 990102, 990103):
+        await db.execute(
+            """
+            INSERT INTO track (id, title, artist, album, path, duration_seconds)
+            VALUES ($1, $2, 'Ids Artist', 'Ids Album', $3, 120)
+            """,
+            track_id,
+            f"Track {track_id}",
+            f"/tmp/ids-{track_id}.flac",
+        )
+
+    response = await auth_client.get("/api/tracks?ids=990103,990101,bogus,")
+
+    assert response.status_code == 200, response.text
+    assert sorted(t["id"] for t in response.json()) == [990101, 990103]
+
+    empty = await auth_client.get("/api/tracks?ids=")
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import logging
 import os
 import time
@@ -19,7 +20,9 @@ from app.services.player.globals import (
     last_stop_reason,
     last_track_start_time,
     monitor_start_times,
+    note_renderer_muted,
     playback_monitors,
+    record_output_plan,
     start_retries,
 )
 from app.services.player.history import (
@@ -29,6 +32,7 @@ from app.services.player.history import (
 )
 from app.services.player.monitor import (
     _clear_monitor_starting,
+    _is_monitor_starting,
     _mark_monitor_starting,
     start_monitor_task,
 )
@@ -39,8 +43,10 @@ from app.services.player.state import (
     update_playback_progress_db,
     update_queue_logged_db,
     update_renderer_state_db,
+    update_renderer_status_db,
 )
 from app.services.audio_streaming import build_stream_url
+from app.services.playback_plan import RendererConstraints, constraints_for_device
 from app.services.renderer.contracts import (
     PlaybackContext,
     RendererDevice,
@@ -49,7 +55,10 @@ from app.services.renderer.contracts import (
     is_local_renderer,
 )
 from app.services.renderer.registry import RendererRegistry, get_renderer_registry
-from app.services.renderer.token_policy import stream_token_ttl_seconds
+from app.services.renderer.token_policy import (
+    staged_stream_token_ttl_seconds,
+    stream_token_ttl_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +94,10 @@ class RendererOrchestrator:
         self._last_ended_at: dict[str, float] = {}
         # Strong refs: the loop only keeps weak ones to running tasks.
         self._background_tasks: set[asyncio.Task] = set()
+        # Receiver-queue staging (Cast queue mode): one insert at a time per
+        # renderer, and refused inserts are not retried straight away.
+        self._staging_in_flight: set[str] = set()
+        self._stage_failures: dict[str, tuple[Any, float]] = {}
 
     async def get_active(self, db: asyncpg.Connection, client_id: str) -> tuple[str, str]:
         return await self.registry.get_active(db, client_id)
@@ -176,6 +189,16 @@ class RendererOrchestrator:
         renderer_id, state_key = await self.registry.set_active(db, client_id, renderer_id_or_udn)
         if previous_renderer_id.startswith("cast:") and previous_renderer_id != renderer_id:
             await self._stop_previous_cast(previous_renderer_id, previous_state_key)
+        if previous_renderer_id.startswith("upnp:") and previous_renderer_id != renderer_id:
+            monitor = playback_monitors.get(previous_state_key)
+            if monitor is None or monitor.done():
+                # Nothing is playing there any more: drop its UPnP event
+                # subscriptions (a running monitor keeps them until it ends).
+                release = getattr(
+                    self.registry.backends.get("upnp"), "release_events", None
+                )
+                if release is not None:
+                    await release(previous_renderer_id)
         return renderer_id, state_key
 
     async def list_renderers(
@@ -187,7 +210,14 @@ class RendererOrchestrator:
         devices = await self.registry.discover_all(refresh=refresh) if refresh else await self.registry.list_all()
         async with db_conn() as db:
             await self.registry.persist_all(db, devices)
-        return [self.registry.local_renderer(client_id), *[d.as_api_dict() for d in devices]]
+        renderers = []
+        for device in devices:
+            data = device.as_api_dict()
+            data["output_constraints"] = (
+                await self.output_constraints(device.renderer_id)
+            ).as_dict()
+            renderers.append(data)
+        return [self.registry.local_renderer(client_id), *renderers]
 
     async def add_manual(self, address: str) -> RendererDevice | None:
         """Add a UPnP renderer by IP or description URL; the device, or None."""
@@ -279,9 +309,9 @@ class RendererOrchestrator:
     @_heals_stale_renderer
     async def pause(self, db: asyncpg.Connection, client_id: str) -> None:
         renderer_id, state_key = await self.get_active(db, client_id)
-        state = await get_renderer_state_db(db, state_key)
-        state["is_playing"] = False
-        await update_renderer_state_db(db, state_key, state)
+        # Status columns only: a whole-row write here could put back a queue
+        # read before a concurrent edit landed.
+        await update_renderer_status_db(db, state_key, is_playing=False)
         if not is_local_renderer(renderer_id):
             await self.registry.get_backend(renderer_id).pause(renderer_id)
             if state_key in playback_monitors:
@@ -293,7 +323,7 @@ class RendererOrchestrator:
         renderer_id, state_key = await self.get_active(db, client_id)
         state = await get_renderer_state_db(db, state_key)
         state["is_playing"] = True
-        await update_renderer_state_db(db, state_key, state)
+        await update_renderer_status_db(db, state_key, is_playing=True)
         if not is_local_renderer(renderer_id):
             backend = self.registry.get_backend(renderer_id)
             halted = last_stop_reason.get(state_key)
@@ -342,9 +372,7 @@ class RendererOrchestrator:
     @_heals_stale_renderer
     async def seek(self, db: asyncpg.Connection, client_id: str, seconds: float) -> str:
         renderer_id, state_key = await self.get_active(db, client_id)
-        state = await get_renderer_state_db(db, state_key)
-        state["position_seconds"] = seconds
-        await update_renderer_state_db(db, state_key, state)
+        await update_renderer_status_db(db, state_key, position_seconds=seconds)
         if not is_local_renderer(renderer_id):
             await self.registry.get_backend(renderer_id).seek(renderer_id, seconds)
             return "remote"
@@ -353,19 +381,33 @@ class RendererOrchestrator:
     @_heals_stale_renderer
     async def set_volume(self, db: asyncpg.Connection, client_id: str, percent: int) -> None:
         renderer_id, state_key = await self.get_active(db, client_id)
-        state = await get_renderer_state_db(db, state_key)
-        state["volume"] = percent
-        await update_renderer_state_db(db, state_key, state)
+        await update_renderer_status_db(db, state_key, volume=percent)
         if not is_local_renderer(renderer_id):
             try:
                 await self.registry.get_backend(renderer_id).set_volume(renderer_id, percent)
-            except UpnpError as exc:
-                # A device that is slow, busy or briefly unreachable is not a
-                # server error. The value is already persisted above, so the app
+            except (UpnpError, NotImplementedError) as exc:
+                # A device that is slow, busy or briefly unreachable (or one
+                # without volume control) is not a server error. The value is already persisted above, so the app
                 # stays consistent and the next change will carry it across.
                 logger.warning(
                     "Renderer %s rejected volume %d%%: %s", renderer_id, percent, exc
                 )
+
+    @_heals_stale_renderer
+    async def mute(self, db: asyncpg.Connection, client_id: str, muted: bool) -> bool:
+        """Mute/unmute the active remote renderer; returns the new state.
+
+        The local (browser) renderer mutes itself, and a backend without mute
+        raises NotImplementedError, which the API turns into a 400.
+        """
+        renderer_id, state_key = await self.get_active(db, client_id)
+        if is_local_renderer(renderer_id):
+            raise HTTPException(status_code=409, detail="The browser player mutes itself.")
+        status = await self.registry.get_backend(renderer_id).mute(renderer_id, bool(muted))
+        result = status.volume_muted if status.volume_muted is not None else bool(muted)
+        # Shown by /api/player/state until the renderer reports otherwise.
+        note_renderer_muted(state_key, result)
+        return result
 
     @_heals_stale_renderer
     async def skip_to_index(
@@ -376,6 +418,26 @@ class RendererOrchestrator:
         request: Request | None = None,
     ) -> tuple[dict[str, Any], str]:
         renderer_id, state_key = await self.get_active(db, client_id)
+        if is_local_renderer(renderer_id):
+            return await self._skip_to_index(db, client_id, renderer_id, state_key, index, request)
+        # A load is in flight from the moment current_index moves: statuses
+        # of the media still playing must not be followed meanwhile (see
+        # _follow_renderer_track).
+        _mark_monitor_starting(state_key)
+        try:
+            return await self._skip_to_index(db, client_id, renderer_id, state_key, index, request)
+        finally:
+            _clear_monitor_starting(state_key)
+
+    async def _skip_to_index(
+        self,
+        db: asyncpg.Connection,
+        client_id: str,
+        renderer_id: str,
+        state_key: str,
+        index: int,
+        request: Request | None,
+    ) -> tuple[dict[str, Any], str]:
         state = await get_renderer_state_db(db, state_key)
         state["current_index"] = index
         state["position_seconds"] = 0
@@ -443,6 +505,7 @@ class RendererOrchestrator:
         try:
             renderer_kind = renderer_id.split(":", 1)[0] if ":" in renderer_id else None
             stream = None
+            constraints = await self.output_constraints(renderer_id)
             async with self._conn(db) as conn:
                 state = await get_renderer_state_db(conn, state_key)
                 stream = await build_stream_url(
@@ -454,6 +517,17 @@ class RendererOrchestrator:
                     renderer_kind=renderer_kind,
                     queue=state.get("queue") or [],
                     queue_index=state.get("current_index"),
+                    constraints=constraints,
+                )
+            if stream.plan is not None:
+                record_output_plan(state_key, int(track["id"]), stream.plan.as_dict())
+                logger.info(
+                    "Output plan renderer=%s track_id=%s: %s (%s) -> %s",
+                    renderer_id,
+                    track.get("id"),
+                    stream.plan.action,
+                    stream.plan.reason,
+                    stream.plan.quality_label,
                 )
             context = PlaybackContext(
                 base_url=self._base_url(request),
@@ -465,6 +539,7 @@ class RendererOrchestrator:
                 stream_url=stream.url,
                 stream_mime_type=stream.mime_type,
                 stream_claims=stream.claims,
+                playback_plan=stream.plan,
             )
             backend = self.registry.get_backend(renderer_id)
             # A new track supersedes whatever halted the last one.
@@ -492,6 +567,35 @@ class RendererOrchestrator:
                 start_retries.pop(state_key, None)
         finally:
             _clear_monitor_starting(state_key)
+
+    async def output_constraints(self, renderer_id: str) -> RendererConstraints:
+        """What this renderer accepts, for planning its audio output.
+
+        Backends may answer themselves (``output_constraints``); otherwise the
+        device record's advertised MIME types plus config overrides apply.
+        Unknown renderers get no constraints, which plans the original bytes.
+        """
+        try:
+            backend = self.registry.get_backend(renderer_id)
+        except ValueError:
+            return RendererConstraints()
+        hook = getattr(backend, "output_constraints", None)
+        if callable(hook):
+            try:
+                constraints = hook(renderer_id)
+                if inspect.iscoroutine(constraints):
+                    constraints.close()
+                if isinstance(constraints, RendererConstraints):
+                    return constraints
+            except Exception:
+                logger.debug("output_constraints failed for %s", renderer_id, exc_info=True)
+        try:
+            for device in await backend.list_devices():
+                if device.renderer_id == renderer_id:
+                    return constraints_for_device(device)
+        except Exception:
+            logger.debug("Device lookup for constraints failed for %s", renderer_id, exc_info=True)
+        return RendererConstraints()
 
     async def _record_load_failure(
         self,
@@ -685,6 +789,17 @@ class RendererOrchestrator:
             logger.debug("Renderer status sync failed for %s", renderer_id, exc_info=True)
             return state or await get_renderer_state_db(db, state_key)
         current_state = state or await get_renderer_state_db(db, state_key)
+        if (
+            status.current_track_id is not None
+            and hasattr(backend, "register_status_listener")
+            and state_key not in self._status_unsubscribers
+        ):
+            # Our own media, still on the receiver after a server restart:
+            # follow it by callbacks again, as if this process had loaded it.
+            try:
+                self._register_status_listener(backend, renderer_id, state_key)
+            except Exception:
+                logger.debug("Re-subscribing to %s failed", renderer_id, exc_info=True)
         # Polled from GET /api/player/state: an end-of-track advance must not
         # hold the request (and its connection) for the next track's load.
         return await self._apply_status(
@@ -706,6 +821,25 @@ class RendererOrchestrator:
         has_volume_update = status.volume_percent is not None or status.volume_muted is not None
         if status.state == "UNKNOWN" and not status.current_media_url and not has_volume_update:
             return state
+        if status.volume_muted is not None:
+            note_renderer_muted(state_key, status.volume_muted)
+        if status.current_track_id is not None and (
+            status.advanced_by_renderer or status.state in ("PLAYING", "PAUSED")
+        ):
+            followed = await self._follow_renderer_track(db, state_key, state, status)
+            if followed == "loading":
+                # Describes media a load in flight is replacing: neither its
+                # track, position nor end may move this queue.
+                return state
+            if followed == "advanced":
+                state = await get_renderer_state_db(db, state_key)
+            elif followed == "stale":
+                # The renderer rolled into a queued item that a queue edit has
+                # since replaced: load the real next track (or stop at the end).
+                await self._advance_queue_from_status(
+                    db, state_key, state, load_in_background=load_in_background
+                )
+                return await get_renderer_state_db(db, state_key)
         if status.stop_reason:
             last_stop_reason[state_key] = {
                 "reason": status.stop_reason,
@@ -735,7 +869,227 @@ class RendererOrchestrator:
                 db, state_key, state, load_in_background=load_in_background
             )
             state = await get_renderer_state_db(db, state_key)
+        else:
+            self._maybe_stage_next(status, state_key, state)
         return state
+
+    async def _follow_renderer_track(
+        self,
+        db: asyncpg.Connection,
+        state_key: str,
+        state: dict[str, Any],
+        status: RendererStatus,
+    ) -> str | None:
+        """Line the queue up with the track the renderer reports playing.
+
+        "advanced": the renderer moved on to the next queue item by itself
+        (it played a staged receiver-queue item, or moved on while the server
+        was down and its media was just re-adopted) and current_index moved
+        once, without reloading anything. "stale": it rolled into a queued
+        item that is no longer next. "loading": a load for this renderer is
+        in flight, so the report describes media being replaced. None:
+        nothing to do.
+
+        Reporting queue[current + 1] alone is no advance: after Previous the
+        old media (now queue[current + 1]) plays on until the new load lands.
+        """
+        queue = state.get("queue") or []
+        idx = state.get("current_index")
+        idx = idx if isinstance(idx, int) else -1
+        if 0 <= idx < len(queue) and queue[idx].get("id") == status.current_track_id:
+            return None
+        if self._load_in_flight(state_key):
+            logger.debug(
+                "Not following track %s on %s: a load is in flight",
+                status.current_track_id,
+                state_key,
+            )
+            return "loading"
+        if not (status.advanced_by_renderer or status.adopted):
+            return None
+        next_idx = idx + 1
+        if 0 <= next_idx < len(queue) and queue[next_idx].get("id") == status.current_track_id:
+            # Conditional on current_index: a skip racing this status wins, and
+            # a re-broadcast of the same status cannot advance twice.
+            result = await db.execute(
+                """
+                UPDATE renderer_state
+                SET current_index = $1, position_seconds = $2, transport_state = $3,
+                    is_playing = $4, updated_at = NOW()
+                WHERE renderer_udn = $5 AND current_index = $6
+                """,
+                next_idx,
+                float(status.position_seconds or 0),
+                status.state if status.state != "UNKNOWN" else "PLAYING",
+                status.state != "PAUSED",
+                state_key,
+                idx,
+            )
+            if not result or result.rsplit(" ", 1)[-1] == "0":
+                return None
+            self._last_ended_at[state_key] = time.time()
+            reset_history_tracker(state_key)
+            last_stop_reason.pop(state_key, None)
+            logger.info(
+                "Renderer %s moved on to queued track %s (index %d)",
+                state_key,
+                status.current_track_id,
+                next_idx,
+            )
+            return "advanced"
+        if status.advanced_by_renderer:
+            logger.warning(
+                "Renderer %s started queued track %s, which is no longer next in the queue",
+                state_key,
+                status.current_track_id,
+            )
+            return "stale"
+        return None
+
+    # A load marks itself in flight (monitor_starting) and clears the mark
+    # when done; a mark older than this is a leak, not a load.
+    LOAD_IN_FLIGHT_MAX_S = 120.0
+
+    def _load_in_flight(self, state_key: str) -> bool:
+        return _is_monitor_starting(state_key, window_s=self.LOAD_IN_FLIGHT_MAX_S)
+
+    # Let a freshly loaded track settle before queueing the next one behind it.
+    STAGE_NEXT_AFTER_S = 10.0
+    # Do not retry a refused queue insert for the same track sooner than this.
+    STAGE_NEXT_RETRY_S = 60.0
+
+    def _maybe_stage_next(
+        self,
+        status: RendererStatus,
+        state_key: str,
+        state: dict[str, Any],
+    ) -> None:
+        """Keep the renderer's queued next item equal to queue[current + 1].
+
+        Only for backends with a receiver queue (``stage_next``) switched on
+        for this renderer. Runs in the background: an insert waits on the
+        device.
+        """
+        if status.state != "PLAYING" or state_key in self._staging_in_flight:
+            return
+        try:
+            backend = self.registry.get_backend(status.renderer_id)
+        except ValueError:
+            return
+        if not hasattr(backend, "stage_next") or not backend.queue_mode_enabled(status.renderer_id):
+            return
+        if not status.advanced_by_renderer and (status.position_seconds or 0) < self.STAGE_NEXT_AFTER_S:
+            return
+        queue = state.get("queue") or []
+        idx = state.get("current_index")
+        if not isinstance(idx, int) or not (0 <= idx < len(queue)):
+            return
+        if backend.current_load_track_id(status.renderer_id) != queue[idx].get("id"):
+            return
+        next_idx = idx + 1
+        if next_idx >= len(queue):
+            # Nothing to queue. An item still staged from before a queue edit
+            # must come off the receiver, or it would play it by itself.
+            if backend.staged_track_id(status.renderer_id) is None or not hasattr(
+                backend, "unstage_next"
+            ):
+                return
+            failed = self._stage_failures.get(state_key)
+            if failed and failed[0] is None and time.time() - failed[1] < self.STAGE_NEXT_RETRY_S:
+                return
+            self._staging_in_flight.add(state_key)
+            self._spawn(self._unstage_next_background(backend, status.renderer_id, state_key))
+            return
+        next_track = queue[next_idx]
+        if backend.staged_track_id(status.renderer_id) == next_track.get("id"):
+            return
+        failed = self._stage_failures.get(state_key)
+        if failed and failed[0] == next_track.get("id") and time.time() - failed[1] < self.STAGE_NEXT_RETRY_S:
+            return
+        current = queue[idx]
+        lead = max(
+            0.0,
+            float(current.get("duration_seconds") or 0) - float(status.position_seconds or 0),
+        )
+        self._staging_in_flight.add(state_key)
+        self._spawn(
+            self._stage_next_background(backend, status.renderer_id, state_key, next_idx, lead)
+        )
+
+    async def _unstage_next_background(self, backend: Any, renderer_id: str, state_key: str) -> None:
+        """Take the staged item off the receiver (QUEUE_REMOVE). A refusal is
+        not retried for STAGE_NEXT_RETRY_S (recorded as a failure for None);
+        the item is then still caught as stale if the receiver plays it."""
+        try:
+            if await backend.unstage_next(renderer_id):
+                self._stage_failures.pop(state_key, None)
+            else:
+                self._stage_failures[state_key] = (None, time.time())
+        except Exception:
+            logger.warning("Removing the queued track on %s failed", state_key, exc_info=True)
+            self._stage_failures[state_key] = (None, time.time())
+        finally:
+            self._staging_in_flight.discard(state_key)
+
+    async def _stage_next_background(
+        self,
+        backend: Any,
+        renderer_id: str,
+        state_key: str,
+        next_idx: int,
+        lead_seconds: float,
+    ) -> None:
+        track: dict[str, Any] | None = None
+        try:
+            renderer_kind = renderer_id.split(":", 1)[0]
+            # Planned exactly like a load of the same track (_play_remote):
+            # the receiver gets the bytes, MIME and plan it would on a LOAD.
+            constraints = await self.output_constraints(renderer_id)
+            async with db_conn() as conn:
+                state = await get_renderer_state_db(conn, state_key)
+                queue = state.get("queue") or []
+                if not (0 <= next_idx < len(queue)) or state.get("current_index") != next_idx - 1:
+                    return
+                track = await enrich_track_metadata(queue[next_idx], conn)
+                if not track_path_exists(track):
+                    logger.info("Not queueing missing track %s on %s", track.get("id"), state_key)
+                    self._stage_failures[state_key] = (track.get("id"), time.time())
+                    return
+                stream = await build_stream_url(
+                    conn,
+                    track_id=int(track["id"]),
+                    base_url=self._stream_base_url(renderer_kind, None),
+                    user_id=track.get("user_id"),
+                    duration_seconds=track.get("duration_seconds"),
+                    renderer_kind=renderer_kind,
+                    queue=queue,
+                    queue_index=next_idx,
+                    ttl_seconds=staged_stream_token_ttl_seconds(
+                        lead_seconds, track.get("duration_seconds")
+                    ),
+                    constraints=constraints,
+                )
+            if stream.plan is not None:
+                # Keyed by track: still there once the staged item is current.
+                record_output_plan(state_key, int(track["id"]), stream.plan.as_dict())
+            context = PlaybackContext(
+                base_url=self._base_url(None),
+                user_id=track.get("user_id"),
+                stream_url=stream.url,
+                stream_mime_type=stream.mime_type,
+                stream_claims=stream.claims,
+                playback_plan=stream.plan,
+            )
+            if not await backend.stage_next(renderer_id, track, context):
+                self._stage_failures[state_key] = (track.get("id"), time.time())
+            else:
+                self._stage_failures.pop(state_key, None)
+        except Exception:
+            logger.warning("Queueing the next track on %s failed", state_key, exc_info=True)
+            if track is not None:
+                self._stage_failures[state_key] = (track.get("id"), time.time())
+        finally:
+            self._staging_in_flight.discard(state_key)
 
     @staticmethod
     def _detect_track_ended(

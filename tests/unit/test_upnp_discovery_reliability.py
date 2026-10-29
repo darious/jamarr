@@ -59,6 +59,7 @@ class Harness:
         self.saved: list[dict] = []
         self.persisted: list[tuple[list[str], bool]] = []
         self.protocol_queries: list[str] = []
+        self.sink_entries: list[str] = ["http-get:*:audio/flac:*"]
         self.migrations: list[tuple[str, str]] = []
 
         manager = UPnPManager()
@@ -77,15 +78,19 @@ class Harness:
         async def existing_mimes(_udn):
             return None
 
+        async def existing_protocol_info(_udn):
+            return None
+
         async def protocols(udn, dmr=None):
             self.protocol_queries.append(udn)
-            return {"audio/flac"}
+            return list(self.sink_entries)
 
         manager._ensure_session = ensure_session
         manager.save_renderer = save_renderer
         manager._cache_renderer_icon = cache_icon
         manager._existing_mime_types = existing_mimes
-        manager.get_supported_protocols = protocols
+        manager._existing_protocol_info = existing_protocol_info
+        manager.get_sink_protocol_info = protocols
 
         async def migrate(old_udn, new_udn):
             self.migrations.append((old_udn, new_udn))
@@ -146,6 +151,52 @@ async def test_service_only_reply_is_registered(h):
     assert [r["udn"] for r in found] == [UDN_A]
     info = h.manager.renderers[UDN_A]
     assert info["control_url"] == "http://192.0.2.10:49152/aaaa-0001/AVTransport/control"
+    assert info["supported_mime_types"] == "audio/flac"
+    assert info["sink_protocol_info"] == ["http-get:*:audio/flac:*"]
+
+
+@pytest.mark.asyncio
+async def test_hydration_keeps_complete_protocol_info(h):
+    """Full Sink entries are kept verbatim; the MIME list is derived from them."""
+    h.sink_entries = [
+        "http-get:*:audio/x-flac:*",
+        "http-get:*:audio/mpeg:DLNA.ORG_PN=MP3;DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000",
+        "http-get:*:audio/L16;rate=44100;channels=2:DLNA.ORG_PN=LPCM",
+        "http-get:*:*:*",
+    ]
+    h.serve(LOC_A, device_xml(UDN_A, "Kitchen"))
+    h.ssdp.multicast_replies = [search_reply(LOC_A, UDN_A)]
+
+    await h.discovery.discover(timeout=0)
+
+    info = h.manager.renderers[UDN_A]
+    assert info["sink_protocol_info"] == h.sink_entries
+    assert info["supported_mime_types"] == "audio/l16,audio/mpeg,audio/x-flac"
+    assert h.saved[-1]["sink_protocol_info"] == h.sink_entries
+    diag = h.manager.protocol_diagnostics()[UDN_A]
+    assert diag["sink_protocol_info"][1]["dlna"]["PN"] == "MP3"
+    assert diag["sink_protocol_info"][2]["mime_params"] == {"rate": "44100", "channels": "2"}
+
+
+@pytest.mark.asyncio
+async def test_hydration_keeps_saved_protocol_info_when_device_does_not_answer(h):
+    h.sink_entries = []
+
+    async def saved_entries(_udn):
+        return ["http-get:*:audio/flac:*"]
+
+    async def saved_mimes(_udn):
+        return "audio/flac"
+
+    h.manager._existing_protocol_info = saved_entries
+    h.manager._existing_mime_types = saved_mimes
+    h.serve(LOC_A, device_xml(UDN_A, "Kitchen"))
+    h.ssdp.multicast_replies = [search_reply(LOC_A, UDN_A)]
+
+    await h.discovery.discover(timeout=0)
+
+    info = h.manager.renderers[UDN_A]
+    assert info["sink_protocol_info"] == ["http-get:*:audio/flac:*"]
     assert info["supported_mime_types"] == "audio/flac"
 
 

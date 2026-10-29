@@ -17,6 +17,7 @@ from app.services.upnp.utils import (
 )
 from app.services.upnp.discovery import SSDP_TARGET_MEDIA_RENDERER, UPnPDiscovery  # noqa: F401
 from app.services.upnp.device import UPnPDeviceControl
+from app.services.upnp.events import UpnpEventManager
 from app.services.upnp.network import default_route_ip
 from app.services.upnp.tree import TreeKeepingUpnpFactory
 
@@ -59,6 +60,8 @@ class UPnPManager:
         # Delegated Services
         self.discovery = UPnPDiscovery(self)
         self.control = UPnPDeviceControl(self)
+        # GENA subscriptions for renderers being played to (see events.py).
+        self.events = UpnpEventManager(self)
 
     @property
     def renderer_base_url(self) -> str:
@@ -176,6 +179,10 @@ class UPnPManager:
 
     async def stop_background_scan(self):
         await self.discovery.stop_background_scan()
+        try:
+            await self.events.stop()  # unsubscribe before the session goes
+        except Exception as e:
+            logger.debug(f"Error stopping UPnP event subscriptions: {e}")
         # Cleanup HTTP session part kept here as it owns the session
         if self._session:
             try:
@@ -204,6 +211,16 @@ class UPnPManager:
             )
         return row["supported_mime_types"] if row and row["supported_mime_types"] else None
 
+    async def _existing_protocol_info(self, udn: str) -> Optional[List[str]]:
+        """Sink protocolInfo saved for udn, kept when a device stops answering."""
+        from app.db import db_conn
+
+        async with db_conn() as db:
+            row = await db.fetchrow(
+                "SELECT sink_protocol_info FROM renderer WHERE udn = $1", udn
+            )
+        return list(row["sink_protocol_info"]) if row and row["sink_protocol_info"] else None
+
     async def load_persisted_renderers(self):
         await self.discovery.load_persisted_renderers()
 
@@ -216,14 +233,15 @@ class UPnPManager:
         # Discovery uses it. Let's keep it here to allow Discovery to call back.
         from app.db import db_conn
         async with db_conn() as db:
-            await db.execute(
+            row = await db.fetchrow(
                 """
                 INSERT INTO renderer 
                 (udn, kind, native_id, renderer_id, friendly_name, location_url, ip, control_url, rendering_control_url,
                  device_type, manufacturer, model_name, model_number, serial_number, 
                  firmware_version, supports_events, supports_gapless, supported_mime_types,
-                 icon_url, icon_mime, icon_width, icon_height, last_discovered_by, available, enabled_by_default, last_seen_at)
-                VALUES ($1, 'upnp', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'server', TRUE, TRUE, NOW())
+                 icon_url, icon_mime, icon_width, icon_height, last_discovered_by, available, enabled_by_default, last_seen_at,
+                 sink_protocol_info)
+                VALUES ($1, 'upnp', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'server', TRUE, TRUE, NOW(), $21)
                 ON CONFLICT (udn) DO UPDATE SET
                     kind = 'upnp',
                     native_id = EXCLUDED.native_id,
@@ -239,9 +257,16 @@ class UPnPManager:
                     model_number = EXCLUDED.model_number,
                     serial_number = EXCLUDED.serial_number,
                     firmware_version = EXCLUDED.firmware_version,
-                    supports_events = EXCLUDED.supports_events,
+                    -- Only a subscription that delivered events proves
+                    -- support (events.py records it in renderer_metadata);
+                    -- discovery alone never claims it.
+                    supports_events = COALESCE(
+                        (renderer.renderer_metadata->'upnp_events'->>'usable')::boolean,
+                        EXCLUDED.supports_events
+                    ),
                     supports_gapless = EXCLUDED.supports_gapless,
                     supported_mime_types = EXCLUDED.supported_mime_types,
+                    sink_protocol_info = COALESCE(EXCLUDED.sink_protocol_info, renderer.sink_protocol_info),
                     icon_url = EXCLUDED.icon_url,
                     icon_mime = EXCLUDED.icon_mime,
                     icon_width = EXCLUDED.icon_width,
@@ -250,6 +275,7 @@ class UPnPManager:
                     available = TRUE,
                     enabled_by_default = COALESCE(renderer.enabled_by_default, TRUE),
                     last_seen_at = NOW()
+                RETURNING supports_events
             """,
                 r["udn"],
                 f"upnp:{r['udn']}",
@@ -271,7 +297,10 @@ class UPnPManager:
                 r.get("icon_mime"),
                 r.get("icon_width"),
                 r.get("icon_height"),
+                list(r.get("sink_protocol_info") or []) or None,
             )
+        if row is not None:
+            r["supports_events"] = bool(row["supports_events"])
 
     async def add_device_by_ip(self, address: str) -> Optional[List[Dict[str, Any]]]:
         """Add by IP or description URL; returns the registered renderers or None."""
@@ -303,7 +332,30 @@ class UPnPManager:
             udn: {"queue_index": s.queue_index, "track_id": s.track_id}
             for udn, s in staging.staged.items()
         }
+        data["protocol_negotiation"] = self.protocol_diagnostics()
+        # Event subscriptions: callback server, per-renderer/per-service health.
+        data["events"] = self.events.diagnostics()
         return data
+
+    def protocol_diagnostics(self) -> Dict[str, Any]:
+        """Per renderer: full sink protocolInfo, what worked, the last load error."""
+        from app.services.upnp.device import load_strategies
+        from app.services.upnp.protocol_info import parse_protocol_info_list
+
+        memory = load_strategies.snapshot()
+        renderers = {}
+        for udn, info in self.renderers.items():
+            entries = parse_protocol_info_list(info.get("sink_protocol_info") or [])
+            renderers[udn] = {
+                "name": info.get("friendly_name"),
+                "sink_protocol_info": [e.as_dict() for e in entries],
+                "supported_mime_types": [
+                    m for m in (info.get("supported_mime_types") or "").split(",") if m
+                ],
+                "load_stages": memory["stages"].get(udn, {}),
+                "last_load_error": memory["last_errors"].get(udn),
+            }
+        return renderers
 
     @property
     def is_scanning_subnet(self):
@@ -337,6 +389,10 @@ class UPnPManager:
     async def get_supported_protocols(self, udn: str, dmr: Optional[DmrDevice] = None) -> set:
         """GetProtocolInfo for udn; pass ``dmr`` for a device not registered yet."""
         return await self.control.get_supported_protocols(udn, dmr)
+
+    async def get_sink_protocol_info(self, udn: str, dmr: Optional[DmrDevice] = None) -> List[str]:
+        """Complete GetProtocolInfo Sink entries for udn (all four fields)."""
+        return await self.control.get_sink_protocol_info(udn, dmr)
 
     async def migrate_renderer_udn(self, old_udn: str, new_udn: str) -> None:
         """Repoint everything saved under old_udn to new_udn, then drop old_udn.
@@ -431,6 +487,10 @@ class UPnPManager:
     async def stop_renderer(self, udn: str) -> None:
         return await self.control.stop_renderer(udn)
 
+    async def release_events(self, udn: str) -> None:
+        """Unsubscribe udn's events now (playback stopped, renderer switched)."""
+        await self.events.drop(udn)
+
     async def pause(self):
         return await self.control.pause()
 
@@ -442,6 +502,12 @@ class UPnPManager:
 
     async def set_volume(self, volume: int) -> None:
         return await self.control.set_volume(volume)
+
+    def can_mute(self, udn: str) -> bool:
+        return self.control.can_mute(udn)
+
+    async def set_mute(self, muted: bool) -> None:
+        return await self.control.set_mute(muted)
 
     async def get_volume(self, udn: str | None = None):
         return await self.control.get_volume(udn)

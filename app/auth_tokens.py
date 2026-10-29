@@ -164,8 +164,13 @@ def create_stream_token(
     )
 
 
-def verify_stream_token(token: str, track_id: int) -> dict:
-    """Verify a stream token and ensure it matches the requested track."""
+def verify_stream_token(token: str, track_id: int, verify_exp: bool = True) -> dict:
+    """Verify a stream token and ensure it matches the requested track.
+
+    ``verify_exp=False`` only asks whether this server minted the token for
+    that track (e.g. to recognise its own URLs on a renderer), not whether
+    it may still be used.
+    """
     settings = _get_stream_jwt_settings()
     _validate_jwt_config(settings["secret_key"])
 
@@ -176,6 +181,7 @@ def verify_stream_token(token: str, track_id: int) -> dict:
             algorithms=[settings["algorithm"]],
             issuer=settings["issuer"],
             audience=settings["audience"],
+            options={"verify_exp": verify_exp},
         )
     except jwt.ExpiredSignatureError:
         detail = "Stream token has expired"
