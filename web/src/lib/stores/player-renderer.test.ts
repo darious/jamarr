@@ -47,4 +47,40 @@ describe("player renderer store", () => {
         expect(get(playerState).renderer).toBe("upnp:uuid:speaker");
         expect(get(playerState).renderer_kind).toBe("upnp");
     });
+
+    it("gates seek on the active renderer's capabilities", async () => {
+        const { playerState, rendererControls, seek } = await import("./player");
+        playerState.update((s) => ({
+            ...s,
+            renderer: "upnp:uuid:ABC",
+            renderers: [
+                {
+                    udn: "uuid:ABC",
+                    renderer_id: "upnp:uuid:ABC",
+                    name: "Living Room",
+                    type: "upnp",
+                    kind: "upnp",
+                    capabilities: { can_pause: false, can_seek: false },
+                },
+            ],
+            position_seconds: 12,
+        }));
+
+        expect(get(rendererControls)).toEqual({ canPause: false, canSeek: false });
+        await seek(60);
+        expect(fetchWithAuth).not.toHaveBeenCalled();
+        expect(get(playerState).position_seconds).toBe(12);
+
+        // A renderer without capabilities (older server) keeps seek enabled.
+        playerState.update((s) => ({
+            ...s,
+            renderer: "uuid:speaker",
+            renderers: [{ udn: "uuid:speaker", name: "Speaker", type: "upnp" }],
+        }));
+        expect(get(rendererControls)).toEqual({ canPause: true, canSeek: true });
+        fetchWithAuth.mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+        await seek(30);
+        expect(fetchWithAuth.mock.calls[0][0]).toBe("/api/player/seek");
+        expect(get(playerState).position_seconds).toBe(30);
+    });
 });

@@ -16,6 +16,9 @@
     toggleRepeat,
     advanceIndexLocal,
     computeNextTrackToArm,
+    rendererControls,
+    canMute,
+    setMuted,
   } from "$stores/player";
   import { fetchWithAuth, getStreamUrlInfo, getArtUrl } from "$lib/api";
   import {
@@ -36,6 +39,11 @@
     setPlaybackState as setMediaSessionPlaybackState,
     setPositionState as setMediaSessionPositionState,
   } from "$lib/media-session";
+  import {
+    PLAY_BUTTON_LABELS,
+    SEEK_DISABLED_LABEL,
+    playButtonAction,
+  } from "$lib/renderer-utils";
   import { onMount, onDestroy } from "svelte";
 
   // Two audio elements so we can pre-arm the next track while the current
@@ -211,7 +219,14 @@
 
   // Subscribe to store
   $: currentTrack = $playerState.queue[$playerState.current_index];
+  // Only remote renderers get a server-side output plan; hide it locally.
+  $: remotePlan = $playerState.renderer.startsWith("local") ? null : $playerState.output_plan;
   $: isPlaying = $playerState.is_playing;
+  // Renderers that can't pause or seek: the play button
+  // becomes "stop" (play restarts the track) and the progress bar is read-only.
+  $: canSeek = $rendererControls.canSeek;
+  $: playAction = playButtonAction(isPlaying, $rendererControls);
+  $: playButtonLabel = PLAY_BUTTON_LABELS[playAction];
   $: if (currentTrack) {
     duration = effectiveDuration(audio);
   }
@@ -582,6 +597,7 @@
   }
 
   function handleSeek(e: MouseEvent & { currentTarget: HTMLDivElement }) {
+    if (!canSeek) return;
     if (!$playerState.queue.length && !$playerState.renderer) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -614,6 +630,7 @@
   }
 
   function handleSeekKeyDown(event: KeyboardEvent) {
+    if (!canSeek) return;
     const totalDuration = effectiveDuration(audio);
     if (!totalDuration) return;
 
@@ -880,6 +897,19 @@
                 changed = true;
               }
 
+              const plan = state.output_plan ?? null;
+              if (JSON.stringify(s.output_plan ?? null) !== JSON.stringify(plan)) {
+                newState.output_plan = plan;
+                changed = true;
+              }
+
+              // Mute as the device reports it (null when unknown).
+              const muted = state.muted ?? null;
+              if ((s.muted ?? null) !== muted) {
+                newState.muted = muted;
+                changed = true;
+              }
+
               // Sync volume from device for remote renderers
               if (
                 state.volume !== null &&
@@ -1106,6 +1136,10 @@
             <div class="mt-0.5 truncate text-[11px] text-subtle">
               {$playerState.original_quality_label || "Original"} -> {$playerState.stream_quality_label || "Original"}
             </div>
+          {:else if remotePlan && remotePlan.action !== "original"}
+            <div class="mt-0.5 truncate text-[11px] text-subtle" title={remotePlan.reason}>
+              {remotePlan.source_label} -> {remotePlan.quality_label}
+            </div>
           {/if}
         </div>
       {:else}
@@ -1147,8 +1181,15 @@
           </svg>
         </button>
 
-        <button class="btn btn-primary" on:click={togglePlay}>
-          {#if isPlaying}
+        <button
+          class="btn btn-primary"
+          on:click={togglePlay}
+          aria-label={playButtonLabel}
+          title={playButtonLabel}
+        >
+          {#if playAction === "stop"}
+            <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+          {:else if playAction === "pause"}
             <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
               <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
             </svg>
@@ -1246,14 +1287,16 @@
     <div class="flex items-center gap-2 text-[11px] text-muted">
       <span class="w-9 text-left">{formatTime(progress)}</span>
       <div
-        class="relative h-4 flex-1 cursor-pointer"
+        class="relative h-4 flex-1 {canSeek ? 'cursor-pointer' : 'cursor-default'}"
         on:click={handleSeek}
         on:keydown={handleSeekKeyDown}
         role="slider"
         aria-valuenow={progress}
         aria-valuemin={0}
         aria-valuemax={duration || 100}
-        tabindex="0"
+        aria-disabled={!canSeek}
+        title={canSeek ? undefined : SEEK_DISABLED_LABEL}
+        tabindex={canSeek ? 0 : -1}
       >
         <div class="absolute top-1/2 h-1 w-full -translate-y-1/2 rounded-full bg-surface-3 overflow-hidden">
           <div
@@ -1349,6 +1392,10 @@
             <div class="mt-0.5 truncate text-xs text-subtle">
               {$playerState.original_quality_label || "Original"} -> {$playerState.stream_quality_label || "Original"}
             </div>
+          {:else if remotePlan && remotePlan.action !== "original"}
+            <div class="mt-0.5 truncate text-xs text-subtle" title={remotePlan.reason}>
+              {remotePlan.source_label} -> {remotePlan.quality_label}
+            </div>
           {/if}
         </div>
       {:else}
@@ -1369,8 +1416,15 @@
           >
         </button>
 
-        <button class="btn btn-primary" on:click={togglePlay}>
-          {#if isPlaying}
+        <button
+          class="btn btn-primary"
+          on:click={togglePlay}
+          aria-label={playButtonLabel}
+          title={playButtonLabel}
+        >
+          {#if playAction === "stop"}
+            <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+          {:else if playAction === "pause"}
             <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"
               ><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg
             >
@@ -1397,13 +1451,15 @@
         <span>{formatTime(progress)}</span>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <div
-          class="relative w-full h-4 flex items-center cursor-pointer group"
+          class="relative w-full h-4 flex items-center group {canSeek ? 'cursor-pointer' : 'cursor-default'}"
           on:click={handleSeek}
           role="slider"
           aria-valuenow={progress}
           aria-valuemin={0}
           aria-valuemax={duration || 100}
-          tabindex="0"
+          aria-disabled={!canSeek}
+          title={canSeek ? undefined : SEEK_DISABLED_LABEL}
+          tabindex={canSeek ? 0 : -1}
         >
           <!-- Background Track -->
           <div
@@ -1417,7 +1473,7 @@
           </div>
           <!-- Thumb (visible on hover) -->
           <div
-            class="absolute h-3 w-3 bg-white border border-subtle rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+            class="absolute h-3 w-3 bg-white border border-subtle rounded-full shadow-lg opacity-0 transition-opacity pointer-events-none {canSeek ? 'group-hover:opacity-100' : ''}"
             style="left: {(progress / (duration || 1)) * 100}%"
           ></div>
         </div>
@@ -1502,6 +1558,42 @@
           />
         </div>
         <div class="flex items-center gap-2 group">
+          {#if $canMute}
+            <button
+              class="btn btn-outline btn-sm {$playerState.muted
+                ? 'border-accent bg-accent/10 text-accent'
+                : ''}"
+              on:click={() => setMuted(!$playerState.muted)}
+              title={$playerState.muted ? "Unmute device" : "Mute device"}
+              aria-label={$playerState.muted ? "Unmute device" : "Mute device"}
+              aria-pressed={$playerState.muted === true}
+            >
+              {#if $playerState.muted}
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  ><path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+                  /><path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M17 14l4-4m0 4l-4-4"
+                  /></svg
+                >
+              {:else}
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  ><path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15.536 8.464a5 5 0 010 7.072M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+                  /></svg
+                >
+              {/if}
+            </button>
+          {/if}
           <VolumeControl
             showIcon={true}
             iconClass="h-5 w-5 text-muted"
