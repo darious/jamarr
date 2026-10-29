@@ -86,8 +86,46 @@ async def _read_head(reader: asyncio.StreamReader) -> bytes:
     )
 
 
+def _response_has_body(method: bytes, status_line: bytes) -> bool:
+    """RFC 9110 §6.4.1: HEAD responses and 1xx/204/304 statuses have no body,
+    whatever Content-Length says."""
+    if method == b"HEAD":
+        return False
+    parts = status_line.split(b" ")
+    status = parts[1] if len(parts) > 1 else b""
+    return not (status.startswith(b"1") or status in (b"204", b"304"))
+
+
 def _bad_request(status_line: bytes) -> bytes:
     return status_line + b"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+
+
+async def _pipe_body(
+    upstream_reader: asyncio.StreamReader,
+    client_reader: asyncio.StreamReader,
+    client_writer: asyncio.StreamWriter,
+) -> None:
+    """Relay the upstream body to the renderer until upstream EOF, with
+    backpressure. Also watch the renderer's side of the socket: a renderer
+    that hangs up mid-stream must release the upstream connection at once,
+    not when the upstream next sends something we fail to write."""
+    client_gone = asyncio.ensure_future(client_reader.read())
+    try:
+        while True:
+            chunk_read = asyncio.ensure_future(upstream_reader.read(PIPE_CHUNK_SIZE))
+            done, _ = await asyncio.wait(
+                {chunk_read, client_gone}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if chunk_read not in done:
+                chunk_read.cancel()
+                return  # the renderer went away
+            chunk = chunk_read.result()
+            if not chunk:
+                return
+            client_writer.write(chunk)
+            await client_writer.drain()
+    finally:
+        client_gone.cancel()
 
 
 async def _handle_client(
@@ -158,13 +196,15 @@ async def _handle_client(
         recased.extend(dlna_response_headers(request_headers, response_head))
         recased.append(b"Connection: close")
         client_writer.write(b"\r\n".join(recased) + b"\r\n\r\n")
+        await client_writer.drain()
 
-        while True:
-            chunk = await upstream_reader.read(PIPE_CHUNK_SIZE)
-            if not chunk:
-                break
-            client_writer.write(chunk)
-            await client_writer.drain()
+        if not _response_has_body(method, status_line):
+            # HEAD (and 1xx/204/304) carry no body: the renderer's probe is
+            # complete once the headers are out. Do not wait for the upstream
+            # to hang up, and forward nothing it might wrongly send.
+            return
+
+        await _pipe_body(upstream_reader, client_reader, client_writer)
     except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
         pass
     except Exception as e:
