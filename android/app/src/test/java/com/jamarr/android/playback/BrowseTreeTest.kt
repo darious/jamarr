@@ -144,4 +144,17 @@ class BrowseTreeTest {
         // It is appended after the synthetic Singles / Most Scrobbled folders.
         assertEquals(false, BrowseTree.ALBUM_GROUP_ORDER.contains(BrowseTree.GROUP_APPEARS_ON))
     }
+
+    @Test
+    fun `search ids survive queries with the grammar's own separators`() {
+        val id = BrowseTree.searchId(" blue | monday: 12\" ")
+        assertEquals("blue | monday: 12\"", BrowseTree.searchQueryOf(id))
+        // The query never leaks a raw separator into the id, so a track row
+        // under it still splits cleanly into track and parent.
+        val track = BrowseTree.trackId(7L, id)
+        assertEquals(7L, BrowseTree.trackIdOf(track))
+        assertEquals(id, BrowseTree.parentOf(track))
+        assertNull(BrowseTree.searchQueryOf("album:x"))
+        assertNull(BrowseTree.searchQueryOf("search:"))
+    }
 }

@@ -17,6 +17,7 @@ package com.jamarr.android.playback
  *   playlist:<id>                       browsable -> tracks
  *   dl:<groupId>                        browsable -> a download group's tracks, from Room
  *   playall:<parent>                    playable, queues the whole parent from the top
+ *   search:<urlencoded query>           the result list of one search; parent of its track rows
  *   track:<id>|p:<parent>               playable, parent encodes the siblings to queue
  *   track:<id>                          playable, no siblings
  * ```
@@ -48,6 +49,7 @@ object BrowseTree {
     const val PREFIX_TOP = "top:"
     const val PREFIX_PLAY_ALL = "playall:"
     const val PREFIX_DOWNLOAD = "dl:"
+    const val PREFIX_SEARCH = "search:"
 
     /** Marks the sibling list handed to the player by a "Play all" row. */
     const val ID_TRACK_LIST = "node:track-list"
@@ -126,6 +128,23 @@ object BrowseTree {
     fun playAllId(parentId: String): String = "$PREFIX_PLAY_ALL$parentId"
 
     fun downloadId(groupId: String): String = "$PREFIX_DOWNLOAD$groupId"
+
+    /**
+     * The media id a search's track rows name as their parent, so a tapped
+     * result queues the other results. The query is percent-encoded: ids are
+     * split on `|` and `:`, and a query may contain either.
+     */
+    fun searchId(query: String): String =
+        PREFIX_SEARCH + java.net.URLEncoder.encode(query.trim(), "UTF-8")
+
+    /** The query behind a `search:` id, or null for anything else. */
+    fun searchQueryOf(mediaId: String): String? =
+        if (mediaId.startsWith(PREFIX_SEARCH)) {
+            runCatching { java.net.URLDecoder.decode(mediaId.removePrefix(PREFIX_SEARCH), "UTF-8") }
+                .getOrNull()?.takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
 
     /** The download group a `dl:` media id browses, or null for anything else. */
     fun downloadGroupOf(mediaId: String): String? =

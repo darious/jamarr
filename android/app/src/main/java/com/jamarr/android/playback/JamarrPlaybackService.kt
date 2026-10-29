@@ -570,6 +570,22 @@ class JamarrPlaybackService : MediaLibraryService() {
                 startPositionMs: Long,
             ) = library.onSetMediaItems(mediaSession, controller, mediaItems, startIndex, startPositionMs)
 
+            override fun onSearch(
+                session: MediaLibrarySession,
+                browser: MediaSession.ControllerInfo,
+                query: String,
+                params: MediaLibraryService.LibraryParams?,
+            ) = library.onSearch(session, browser, query, params)
+
+            override fun onGetSearchResult(
+                session: MediaLibrarySession,
+                browser: MediaSession.ControllerInfo,
+                query: String,
+                page: Int,
+                pageSize: Int,
+                params: MediaLibraryService.LibraryParams?,
+            ) = library.onGetSearchResult(session, browser, query, page, pageSize, params)
+
             override fun onConnect(
                 session: MediaSession,
                 controller: MediaSession.ControllerInfo,

@@ -43,9 +43,11 @@
             filters connections in onConnect.
 
             MEDIA_PLAY_FROM_SEARCH is required of every Android Auto media app
-            (lint: MissingIntentFilterForMediaSearch), but search is not
-            implemented — JamarrLibraryProvider rejects search requests with an
-            error rather than handing the player an unplayable item.
+            (lint: MissingIntentFilterForMediaSearch). Typed media-browser
+            search (onSearch/onGetSearchResult) is implemented; a *voice* play
+            request, which arrives as an item with a query and no media id, is
+            still rejected with an error rather than handed to the player as an
+            unplayable item.
         -->
         <service
             android:name=".playback.JamarrPlaybackService"
