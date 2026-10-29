@@ -46,6 +46,7 @@ Non-secret app config (MusicBrainz URL, logging, concurrency) lives in
 | `DB_DATA_PATH` | Host dir for PostgreSQL data (prod) |
 | `CACHE_PATH` | Host dir for Jamarr cache (scan db, charts, artwork) |
 | `DEV_DB_DATA_PATH` / `DEV_CACHE_PATH` | Dev overrides used by `docker-compose.dev.yml` |
+| `ART_RESIZE_WORKERS` | Artwork resizes decoded at once (default `2`, min `1`). Overrides `artwork.resize_workers` in `config.yaml`; see [Artwork](../architecture/artwork.md#resize-cache) |
 
 ## Music volume (NFS)
 

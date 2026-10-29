@@ -1,12 +1,19 @@
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
+from app.config import get_art_resize_workers
 from app.db import db_conn
 from app.security import is_production
+import asyncio
 import os
 import io
+import logging
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from email.utils import parsedate_to_datetime, formatdate
 from datetime import timezone
+
+log = logging.getLogger(__name__)
 
 def _build_test_art_bytes():
     """Generate a 600x600 JPEG test image; Pillow is required for the larger size."""
@@ -100,37 +107,138 @@ def _is_not_modified(request: Request, etag: str, stat_result: os.stat_result) -
     return False
 
 
-def _create_resized(original_path: str, resized_path: str, target_size: int) -> None:
-    """Resize *original_path* to fit target_size and save as JPEG. Blocking."""
+def _fit_within(width: int, height: int, target_size: int) -> tuple[int, int]:
+    """Largest size with the same aspect ratio that fits in a target square.
+
+    Never upscales, and never returns a zero dimension: a 10000x1 banner at
+    600 comes back as 600x1, not 600x0.
+    """
+    if width <= target_size and height <= target_size:
+        return width, height
+    scale = target_size / max(width, height)
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+def _has_alpha(img) -> bool:
+    if img.mode in ("RGBA", "LA", "PA", "RGBa", "La"):
+        return True
+    return img.mode == "P" and "transparency" in img.info
+
+
+def _encode_resized(original_path: str, out, target_size: int) -> None:
+    """Decode *original_path*, fit it in *target_size* and write a JPEG to *out*.
+
+    Memory is kept proportional to the output, not the source, wherever the
+    format allows: JPEGs are decoded at reduced scale (``draft``), everything is
+    resized before it is converted, and transparency is flattened onto white
+    only after the resize, so a transparent cover never allocates a
+    full-resolution RGB background. Pillow resizes RGBA/LA through
+    premultiplied alpha, so edges stay clean. Blocking.
+    """
     from PIL import Image
 
-    os.makedirs(os.path.dirname(resized_path), exist_ok=True)
     with Image.open(original_path) as img:
-        # Convert to RGB if needed (handles PNG with transparency)
-        if img.mode in ("RGBA", "LA", "P"):
-            background = Image.new("RGB", img.size, (255, 255, 255))
-            if img.mode == "P":
-                img = img.convert("RGBA")
-            background.paste(
-                img,
-                mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None,
-            )
-            img = background
-        elif img.mode != "RGB":
-            img = img.convert("RGB")
-
         width, height = img.size
-        if width > target_size or height > target_size:
-            if width > height:
-                new_width = target_size
-                new_height = int(height * (target_size / width))
-            else:
-                new_height = target_size
-                new_width = int(width * (target_size / height))
+        new_size = _fit_within(width, height, target_size)
+        # JPEG only (no-op elsewhere): decode at 1/2, 1/4 or 1/8 scale while
+        # staying at least as large as the output we need.
+        img.draft(img.mode, new_size)
 
-            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        if _has_alpha(img):
+            if img.mode not in ("RGBA", "LA"):
+                img = img.convert("RGBA")
+            if img.size != new_size:
+                img = img.resize(new_size, Image.Resampling.LANCZOS, reducing_gap=2.0)
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            background.paste(img, mask=img.getchannel("A"))
+            img = background
+        else:
+            if img.mode not in ("RGB", "L", "CMYK"):
+                # Modes the resampler cannot handle well (P, 1, I;16, ...).
+                try:
+                    img = img.convert("RGB")
+                except ValueError:
+                    img = img.convert("L")
+            if img.size != new_size:
+                img = img.resize(new_size, Image.Resampling.LANCZOS, reducing_gap=2.0)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
 
-        img.save(resized_path, format="JPEG", quality=85, optimize=True)
+        img.save(out, format="JPEG", quality=85, optimize=True)
+
+
+def _create_resized(original_path: str, resized_path: str, target_size: int) -> None:
+    """Resize *original_path* to fit target_size and publish it at *resized_path*.
+
+    The JPEG is encoded into a uniquely named staging file in the same
+    directory and renamed into place, so a reader (this process or another one
+    sharing the cache) only ever sees a missing file or a complete one. A
+    failure leaves nothing behind for the next request to trip over. Blocking.
+    """
+    resized_dir = os.path.dirname(resized_path)
+    os.makedirs(resized_dir, exist_ok=True)
+    if os.path.isfile(resized_path):
+        return  # Published by another worker while we waited.
+    fd, staging_path = tempfile.mkstemp(
+        dir=resized_dir, prefix=f".{os.path.basename(resized_path)}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as out:
+            _encode_resized(original_path, out, target_size)
+            out.flush()
+            os.fsync(out.fileno())
+        os.chmod(staging_path, 0o644)  # mkstemp made it 0600
+        os.replace(staging_path, resized_path)
+    except BaseException:
+        try:
+            os.unlink(staging_path)
+        except OSError:
+            pass
+        raise
+
+
+# One resize per (artwork, size) per process. Waiters share the task and are
+# shielded from each other: a cancelled request does not cancel the resize the
+# others are waiting on. Coalescing is per process; across processes the atomic
+# rename above keeps the cache correct, each process just resizes once itself.
+_inflight: dict[tuple[str, int], asyncio.Task] = {}
+_resize_pool: ThreadPoolExecutor | None = None
+
+
+def _resize_executor() -> ThreadPoolExecutor:
+    """A small pool of its own, so a grid of cold covers cannot flood the shared
+    threadpool or decode more images at once than configured."""
+    global _resize_pool
+    if _resize_pool is None:
+        _resize_pool = ThreadPoolExecutor(
+            max_workers=get_art_resize_workers(), thread_name_prefix="art-resize"
+        )
+    return _resize_pool
+
+
+def _forget_inflight(key: tuple[str, int], task: asyncio.Task) -> None:
+    if _inflight.get(key) is task:
+        del _inflight[key]
+    if not task.cancelled():
+        task.exception()  # Retrieved: every waiter may have gone away.
+
+
+async def ensure_resized(original_path: str, resized_path: str, target_size: int) -> None:
+    """Make sure *resized_path* exists, sharing in-flight work for the same key."""
+    key = (resized_path, target_size)
+    task = _inflight.get(key)
+    if task is None or task.done():
+        loop = asyncio.get_running_loop()
+
+        async def _run() -> None:
+            await loop.run_in_executor(
+                _resize_executor(), _create_resized, original_path, resized_path, target_size
+            )
+
+        task = loop.create_task(_run())
+        _inflight[key] = task
+        task.add_done_callback(lambda t, key=key: _forget_inflight(key, t))
+    await asyncio.shield(task)
 
 
 def _sniff_mime(path: str) -> str | None:
@@ -194,16 +302,15 @@ async def get_artwork_by_sha1(sha1: str, request: Request, max_size: int = 0):
         if os.path.isfile(resized_path):  # lgtm[py/path-injection]
             return _cached_file_response(request, resized_path, sha1, "image/jpeg")
 
-        # Create if missing; Pillow decode/resize is CPU-bound, keep it off
-        # the event loop.
+        # Create if missing: one shared, bounded resize per key, published
+        # atomically, so no request ever serves a half-written file.
         try:
-            await run_in_threadpool(
-                _create_resized, original_path, resized_path, target_size
-            )
+            await ensure_resized(original_path, resized_path, target_size)
             return _cached_file_response(request, resized_path, sha1, "image/jpeg")
-        except Exception:
+        except Exception as exc:
             # Fallback to original file on error
-            pass
+            log.warning("artwork %s: resize to %d failed (%s); serving original",
+                        sha1, target_size, exc)
 
     # Fallback
     if not mime:

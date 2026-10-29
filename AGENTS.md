@@ -168,6 +168,12 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   queue/preload is opt-in (`renderer.cast_queue`); per-track LOAD is the default;
   a queue edit that leaves no next track QUEUE_REMOVEs the staged item.
 - `HOST_IP` auto-derived in `dev.sh`/`deploy.sh` via route lookup; override by exporting it.
+- Artwork resizes (`app/media/art.py`): one shared task per (sha1, bucket) per
+  process, own thread pool (`artwork.resize_workers` / `ART_RESIZE_WORKERS`,
+  default 2), staging file + `os.replace` so the cache never holds a partial
+  JPEG; JPEG `draft` + resize-before-flatten keeps memory output-sized. Tests:
+  `tests/unit/test_art_resize.py`. Android `OfflineArtworkStore.ensure` mirrors
+  it (per-hash mutex, unique temp + rename).
 - Frontend dev caches (`web/.svelte-kit`, `web/.vite`) are cleared on `dev.sh` start.
 - `test-web.sh`/`lint.sh` run in containers as root and leave root-owned artifacts in
   the bind mount (`web/.svelte-kit`, `web/build`, `__pycache__/`). `dev.sh` then dies
