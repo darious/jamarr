@@ -212,7 +212,18 @@ def mimes_from_protocol_info(entries: Iterable[ProtocolInfo]) -> set[str]:
     return {e.mime for e in entries if e.mime and not e.is_wildcard_format}
 
 
+# res@protocolInfo fourth field for Jamarr's streams: byte-range seekable
+# (OP=01), streaming, DLNA 1.5. DLNA renderers take seekability from here; a
+# Sony Bravia given "*" refuses Seek. The "minimal" load stage falls back to
+# the bare "*" for renderers that object to DLNA fields.
+SEEKABLE_ADDITIONAL_INFO = "DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+
+
 def default_protocol_info(mime: str) -> str:
+    return f"http-get:*:{mime}:{SEEKABLE_ADDITIONAL_INFO}"
+
+
+def plain_protocol_info(mime: str) -> str:
     return f"http-get:*:{mime}:{DEFAULT_ADDITIONAL_INFO}"
 
 
@@ -232,7 +243,7 @@ class NegotiatedFormat:
 
     @property
     def protocol_info(self) -> str:
-        """Default res@protocolInfo: wildcard fourth field (long-standing behaviour)."""
+        """Default res@protocolInfo: seekable DLNA fourth field (see SEEKABLE_ADDITIONAL_INFO)."""
         return default_protocol_info(self.mime)
 
     @property

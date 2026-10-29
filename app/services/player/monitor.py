@@ -717,6 +717,14 @@ async def _monitor_loop(udn: str, upnp):
                                     f"[Player] Track failed to start after {MAX_START_RETRIES} "
                                     f"Play retries; skipping to next"
                                 )
+                                if idx >= len(queue) - 1:
+                                    # Nothing left to skip to: say why it went
+                                    # quiet instead of just stopping.
+                                    last_stop_reason[udn] = {
+                                        "reason": "load_failed",
+                                        "position_seconds": 0,
+                                        "at": time.time(),
+                                    }
                                 finished_reason = "stopped"
                         elif duration > 0:
                             # Stopped mid-track: either an external stop (TV

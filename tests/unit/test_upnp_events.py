@@ -680,6 +680,43 @@ async def test_evented_volume_newest_read_back_wins():
     assert rig.events.snapshot(UDN).volume == 20
 
 
+async def test_seek_and_pause_reach_a_device_that_names_its_actions_its_own_way():
+    """Sonos events CurrentTransportActions without a plain "Seek" (it lists
+    X_DLNA_SeekTime). Once events fill that list in, DmrDevice's own seek
+    helper silently does nothing; Jamarr sends the action regardless."""
+    from app.services.upnp.device import UPnPDeviceControl
+
+    rig = Rig()
+    await rig.healthy_rig()
+    await rig.notify_avt(CurrentTransportActions="Set, Stop, Pause, Play, X_DLNA_SeekTime, Next")
+    dmr = rig.manager.dmr_devices[UDN]
+    assert not dmr._can_transport_action("seek")  # the library's gate is shut
+
+    manager = SimpleNamespace(
+        active_renderer=UDN, dmr_devices=rig.manager.dmr_devices, log=lambda _msg: None
+    )
+    avt_url = dmr._service("AVT").control_url
+    rig.requester.soap[(avt_url, "Seek")] = {}
+    rig.requester.soap[(avt_url, "Pause")] = {}
+    rig.requester.soap[(avt_url, "Stop")] = {}
+    rig.requester.soap_calls.clear()
+    await UPnPDeviceControl(manager).seek(54.76)
+    await UPnPDeviceControl(manager).pause()
+    # Clearing the queue stops the device (it used to only pause it: the
+    # backend called a control.stop() that did not exist).
+    await UPnPDeviceControl(manager).stop()
+    assert [action for _url, action in rig.requester.soap_calls] == ["Seek", "Pause", "Stop"]
+    await rig.events.stop()
+
+
+def test_seek_target_is_upnp_rel_time():
+    from app.services.upnp.device import _rel_time
+
+    assert _rel_time(54.76) == "0:00:54"
+    assert _rel_time(3725) == "1:02:05"
+    assert _rel_time(-3) == "0:00:00"
+
+
 async def test_evented_mute_expires_with_the_subscription():
     """Mute last evented is only the device's state while RenderingControl
     events are healthy: not once they lapse, nor after the drop."""

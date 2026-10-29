@@ -9,6 +9,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
+
+from app.services.upnp.protocol_info import SEEKABLE_ADDITIONAL_INFO
 from async_upnp_client.exceptions import UpnpActionError, UpnpConnectionError
 
 from app import config as app_config
@@ -747,7 +749,7 @@ async def test_set_next_track_sends_the_same_didl_as_a_load():
     call = dmr.set_next_calls[0]
     assert call["media_url"] == url
     didl = call["meta_data"]
-    assert 'protocolInfo="http-get:*:audio/x-flac:*"' in didl  # as for SetAVTransportURI
+    assert f'protocolInfo="http-get:*:audio/x-flac:{SEEKABLE_ADDITIONAL_INFO}"' in didl  # as for SetAVTransportURI
     assert 'duration="0:03:01.000"' in didl
     assert "http://10.0.0.1:8112/art/file/cafe" in didl
 
@@ -824,6 +826,21 @@ async def test_get_position_records_track_uri():
     assert await control.get_position(udn) == (5, 180)
     assert control.current_track_uri(udn) == "http://u"
 
+
+
+async def test_get_position_reads_fractional_seconds():
+    """Sony Bravias report RelTime with milliseconds. Reading that as 0 froze
+    the position: nothing was ever staged, and every track end looked like a
+    failed start that re-played the same track."""
+    udn = "uuid:device-millis"
+
+    class Action:
+        async def async_call(self, **kwargs):
+            return {"RelTime": "0:00:15.618", "TrackDuration": "0:01:14.760", "TrackURI": "http://u"}
+
+    dmr = SimpleNamespace(_action=lambda service, name: Action())
+    control = _control(udn, dmr)
+    assert await control.get_position(udn) == (15, 74)
 
 # --- renderer backend ----------------------------------------------------------
 

@@ -435,6 +435,24 @@ def constraints_for_cast(renderer_id: str, native_id: str | None = None) -> Rend
     return apply_overrides(base, configured_constraints(renderer_id, native_id))
 
 
+# Limits a vendor documents but its devices don't advertise: they list FLAC
+# without rates, then refuse what they can't decode (a Sonos Play:3 stops on
+# 24/96 FLAC). Keyed by a lowercase substring of the UPnP manufacturer.
+# Config (renderer.audio_constraints) still wins per device.
+DOCUMENTED_UPNP_LIMITS: dict[str, dict[str, Any]] = {
+    # Sonos documents FLAC up to 24-bit/48 kHz; a Play:3 (S2) stopped on 24/96.
+    "sonos": {"max_sample_rate_hz": 48000, "max_bit_depth": 24},
+}
+
+
+def documented_upnp_limits(manufacturer: Any) -> dict[str, Any]:
+    name = str(manufacturer or "").lower()
+    for vendor, limits in DOCUMENTED_UPNP_LIMITS.items():
+        if vendor in name:
+            return limits
+    return {}
+
+
 def constraints_for_upnp(
     renderer_info: dict[str, Any] | None, udn: str, renderer_id: str | None = None
 ) -> RendererConstraints:
@@ -459,6 +477,7 @@ def constraints_for_upnp(
         allow_lossy=False,
         sources=("upnp-protocol-info",) if mimes else (),
     )
+    base = apply_overrides(base, documented_upnp_limits(info.get("manufacturer")), "documented")
     # Keyed by the UDN (with or without upnp:) or the renderer id.
     return apply_overrides(base, configured_constraints(udn, renderer_id))
 

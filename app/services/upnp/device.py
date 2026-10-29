@@ -8,6 +8,7 @@ from app.services.renderer.contracts import RendererLoadError, make_renderer_id
 from app.services.upnp.protocol_info import (
     NegotiatedFormat,
     default_protocol_info,
+    plain_protocol_info,
     mimes_from_protocol_info,
     negotiate_format,
     parse_protocol_info_list,
@@ -129,7 +130,11 @@ def build_didl_lite(
     title_esc = html.escape(title)
     artist_esc = html.escape(artist)
     album_esc = html.escape(album)
-    protocol_info_esc = html.escape(protocol_info or default_protocol_info(mime_type))
+    if protocol_info is None:
+        # The minimal stage is the fallback for renderers that object to DLNA
+        # fields, so it never carries them.
+        protocol_info = plain_protocol_info(mime_type) if minimal else default_protocol_info(mime_type)
+    protocol_info_esc = html.escape(protocol_info)
     url_esc = html.escape(media_url, quote=False)
 
     if minimal:
@@ -169,6 +174,36 @@ def build_didl_lite(
             </item>
         </DIDL-Lite>
         """
+
+
+def _rel_time(seconds: float) -> str:
+    """A Seek REL_TIME target, H:MM:SS (UPnP AVTransport's format)."""
+    total = int(max(0.0, seconds))
+    return f"{total // 3600}:{total % 3600 // 60:02d}:{total % 60:02d}"
+
+
+async def _transport(dmr, name: str, **args) -> None:
+    """Send an AVTransport command straight to the device.
+
+    DmrDevice's async_play/pause/stop/seek_rel_time silently do nothing when
+    the device's CurrentTransportActions lacks the plain action name, and
+    devices name them their own way (Sonos lists X_DLNA_SeekTime, never
+    Seek). UPnP events now keep that list filled in, so going through those
+    helpers turned seek into a silent no-op on Sonos. The device decides
+    instead: a refusal comes back as a UPnP error.
+    """
+    action_for = getattr(dmr, "_action", None)
+    action = action_for("AVT", name) if action_for else None
+    if action is None:
+        # Not a full DmrDevice (or no such action): its own helper.
+        helper = {"Play": "async_play", "Pause": "async_pause", "Stop": "async_stop"}.get(name)
+        if helper is None:
+            raise UpnpError(f"Missing action AVT/{name}")
+        await getattr(dmr, helper)()
+        return
+    if name == "Play":
+        args.setdefault("Speed", "1")
+    await action.async_call(InstanceID=0, **args)
 
 
 class UPnPDeviceControl:
@@ -430,7 +465,7 @@ class UPnPDeviceControl:
 
         # Start playback
         try:
-            await dmr.async_play()
+            await _transport(dmr, "Play")
         except (UpnpError, OSError) as e:
             if upnp_error_code(e) == 701 or (isinstance(e, UpnpError) and "701" in str(e)):
                 logger.info("Device already playing, ignoring play command")
@@ -510,7 +545,7 @@ class UPnPDeviceControl:
         """Stop udn's transport (used when it rolled into a dropped track)."""
         dmr = self.manager.dmr_devices.get(udn)
         if dmr:
-            await dmr.async_stop()
+            await _transport(dmr, "Stop")
 
     async def pause(self):
         """Pause playback on active renderer."""
@@ -519,8 +554,18 @@ class UPnPDeviceControl:
 
         dmr = self.manager.dmr_devices.get(self.manager.active_renderer)
         if dmr:
-            await dmr.async_pause()
+            await _transport(dmr, "Pause")
             self.manager.log("Playback paused")
+
+    async def stop(self):
+        """Stop the active renderer (queue cleared or stopped)."""
+        if not self.manager.active_renderer:
+            return
+
+        dmr = self.manager.dmr_devices.get(self.manager.active_renderer)
+        if dmr:
+            await _transport(dmr, "Stop")
+            self.manager.log("Playback stopped")
 
     async def resume(self):
         """Resume playback on active renderer."""
@@ -529,7 +574,7 @@ class UPnPDeviceControl:
 
         dmr = self.manager.dmr_devices.get(self.manager.active_renderer)
         if dmr:
-            await dmr.async_play()
+            await _transport(dmr, "Play")
             self.manager.log("Playback resumed")
 
     async def seek(self, target_seconds: float):
@@ -539,10 +584,8 @@ class UPnPDeviceControl:
 
         dmr = self.manager.dmr_devices.get(self.manager.active_renderer)
         if dmr:
-            from datetime import timedelta
-
-            target = timedelta(seconds=max(0.0, target_seconds))
-            await dmr.async_seek_rel_time(target)
+            target = _rel_time(target_seconds)
+            await _transport(dmr, "Seek", Unit="REL_TIME", Target=target)
             self.manager.log(f"Seeked to {target}")
 
     async def set_volume(self, volume: int) -> None:
@@ -647,13 +690,14 @@ class UPnPDeviceControl:
             track_duration = result.get("TrackDuration", "0:00:00")
 
             def parse_time(t_str):
-                try:
-                    parts = list(map(int, t_str.split(":")))
-                    if len(parts) == 3:
-                        return parts[0] * 3600 + parts[1] * 60 + parts[2]
-                    return 0
-                except ValueError:
-                    return 0
+                # H+:MM:SS[.F+]: Sony Bravias report milliseconds
+                # ("0:00:15.618"), which an int() parse read as 0 -- the
+                # position never moved, so the next track was never staged
+                # and the end of every track looked like a failed start.
+                from app.services.upnp.events import parse_upnp_duration
+
+                seconds = parse_upnp_duration(t_str)
+                return int(seconds) if seconds else 0
 
             p_secs = parse_time(rel_time)
             d_secs = parse_time(track_duration)

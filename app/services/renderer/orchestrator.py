@@ -314,6 +314,9 @@ class RendererOrchestrator:
         await update_renderer_status_db(db, state_key, is_playing=False)
         if not is_local_renderer(renderer_id):
             await self.registry.get_backend(renderer_id).pause(renderer_id)
+            # The monitor stops here, so nothing else would replace the
+            # PLAYING it last stored.
+            await update_renderer_status_db(db, state_key, transport_state="PAUSED_PLAYBACK")
             if state_key in playback_monitors:
                 playback_monitors[state_key].cancel()
                 del playback_monitors[state_key]

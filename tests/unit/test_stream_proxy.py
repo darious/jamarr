@@ -131,3 +131,31 @@ async def test_proxy_rejects_non_get(proxy_setup):
     )
     assert response.startswith(b"HTTP/1.1 405")
     assert requests == []
+
+
+def test_dlna_header_names_keep_their_camel_case():
+    from app.services.renderer.stream_proxy import canonicalize_header_name
+
+    assert canonicalize_header_name(b"contentfeatures.dlna.org") == b"contentFeatures.dlna.org"
+    assert canonicalize_header_name(b"transfermode.dlna.org") == b"transferMode.dlna.org"
+    assert canonicalize_header_name(b"content-length") == b"Content-Length"
+
+
+def test_dlna_headers_answer_what_the_renderer_asked_for():
+    """A Sony Bravia asks getcontentFeatures.dlna.org: 1 and treats a stream
+    without the reply as unseekable (it then refuses Seek)."""
+    from app.services.renderer.stream_proxy import DLNA_CONTENT_FEATURES, dlna_response_headers
+
+    asked = {b"getcontentfeatures.dlna.org": b" 1", b"transfermode.dlna.org": b" Streaming"}
+    ok = b"HTTP/1.1 200 OK\r\naccept-ranges: bytes\r\ncontent-length: 10"
+    assert dlna_response_headers(asked, ok) == [
+        b"contentFeatures.dlna.org: " + DLNA_CONTENT_FEATURES,
+        b"transferMode.dlna.org: Streaming",
+    ]
+    partial = b"HTTP/1.1 206 Partial Content\r\naccept-ranges: bytes"
+    assert len(dlna_response_headers(asked, partial)) == 2
+    # Nothing unasked, nothing on errors, no seek claim without byte ranges.
+    assert dlna_response_headers({}, ok) == []
+    assert dlna_response_headers(asked, b"HTTP/1.1 401 Unauthorized\r\naccept-ranges: bytes") == []
+    no_ranges = dlna_response_headers(asked, b"HTTP/1.1 200 OK\r\ncontent-length: 10")
+    assert no_ranges == [b"transferMode.dlna.org: Streaming"]
