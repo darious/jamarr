@@ -608,6 +608,7 @@ async def get_tracks(
     album: str = None,
     artist: str = None,
     album_mbid: str = None,
+    ids: str = None,
     db: asyncpg.Connection = Depends(get_db),
 ):
     # Base query
@@ -657,6 +658,14 @@ async def get_tracks(
     param_num = 1
 
     query += " WHERE 1=1"
+
+    if ids is not None:
+        # Comma-separated track ids, e.g. to rebuild a Cast queue from the ids
+        # a receiver reports. Anything that is not an id is ignored.
+        id_list = [int(part) for part in ids.split(",") if part.strip().isdigit()][:500]
+        query += f" AND t.id = ANY(${param_num}::int[])"
+        params.append(id_list)
+        param_num += 1
 
     if album_mbid:
         query += f" AND (t.release_group_mbid = ${param_num} OR t.release_mbid = ${param_num + 1})"

@@ -5,6 +5,12 @@ from typing import Any
 
 from async_upnp_client.exceptions import UpnpError
 
+from app.services.player.globals import note_seek
+from app.services.playback_plan import (
+    RendererConstraints,
+    apply_plan_to_metadata,
+    constraints_for_upnp,
+)
 from app.services.renderer.contracts import (
     PlaybackContext,
     RendererBackend,
@@ -45,7 +51,11 @@ class UpnpRendererBackend(RendererBackend):
 
     async def list_devices(self) -> list[RendererDevice]:
         renderers = await self.manager.get_renderers()  # available ones only
-        return [self._device_from_renderer(renderer) for renderer in renderers]
+        return [
+            self._device_from_renderer(renderer)
+            for renderer in renderers
+            if (renderer.get("kind") or self.kind) == self.kind
+        ]
 
     async def is_available(self, renderer_id: str) -> bool | None:
         """Tracked availability (SSDP liveness + probes); None if unknown here."""
@@ -67,6 +77,12 @@ class UpnpRendererBackend(RendererBackend):
         except Exception:
             logger.debug("note_control_failure failed for %s", renderer_id, exc_info=True)
 
+    def output_constraints(self, renderer_id: str) -> RendererConstraints:
+        """Constraints from the renderer's advertised sink protocolInfo."""
+        _, udn = split_renderer_id(renderer_id)
+        renderers = getattr(self.manager, "renderers", None) or {}
+        return constraints_for_upnp(renderers.get(udn), udn, renderer_id)
+
     async def unload_device(self, renderer_id: str) -> None:
         _, udn = split_renderer_id(renderer_id)
         self.manager.renderers.pop(udn, None)
@@ -86,6 +102,7 @@ class UpnpRendererBackend(RendererBackend):
             metadata["stream_url"] = context.stream_url
         if context.stream_mime_type:
             metadata["mime"] = context.stream_mime_type
+        apply_plan_to_metadata(metadata, context.playback_plan)
         try:
             await self.manager.play_track(
                 int(track["id"]),
@@ -128,11 +145,28 @@ class UpnpRendererBackend(RendererBackend):
             await control.stop()
         else:
             await self.manager.pause()
+        await self.release_events(renderer_id)
         return RendererStatus(renderer_id=renderer_id, state="STOPPED")
 
+    async def release_events(self, renderer_id: str) -> None:
+        """Drop udn's event subscriptions now (stopped, or switched away from)."""
+        release = getattr(self.manager, "release_events", None)
+        if release is None:
+            return
+        try:
+            await release(split_renderer_id(renderer_id)[1])
+        except Exception:
+            logger.debug("Releasing UPnP events failed for %s", renderer_id, exc_info=True)
+
     async def seek(self, renderer_id: str, seconds: float) -> RendererStatus:
-        await self._set_active(renderer_id)
-        await self.manager.seek(seconds)
+        udn = await self._set_active(renderer_id)
+        # Before and after: the monitor must not extrapolate a pre-seek
+        # position while the seek is in flight, nor once it landed.
+        note_seek(udn)
+        try:
+            await self.manager.seek(seconds)
+        finally:
+            note_seek(udn)
         return RendererStatus(renderer_id=renderer_id, state="PLAYING", position_seconds=seconds)
 
     async def set_volume(self, renderer_id: str, percent: int) -> RendererStatus:
@@ -141,7 +175,21 @@ class UpnpRendererBackend(RendererBackend):
         return RendererStatus(renderer_id=renderer_id, state="UNKNOWN", volume_percent=percent)
 
     async def mute(self, renderer_id: str, muted: bool) -> RendererStatus:
-        raise NotImplementedError("UPnP mute is not implemented")
+        udn = await self._set_active(renderer_id)
+        if not self._can_mute(udn):
+            raise NotImplementedError("This UPnP renderer has no RenderingControl SetMute")
+        await self.manager.set_mute(bool(muted))
+        return RendererStatus(renderer_id=renderer_id, state="UNKNOWN", volume_muted=bool(muted))
+
+    def _can_mute(self, udn: str) -> bool:
+        check = getattr(self.manager, "can_mute", None)
+        if check is None:
+            return False
+        try:
+            return bool(check(udn))
+        except Exception:
+            logger.debug("can_mute failed for %s", udn, exc_info=True)
+            return False
 
     async def get_status(self, renderer_id: str) -> RendererStatus:
         _, udn = split_renderer_id(renderer_id)
@@ -189,9 +237,49 @@ class UpnpRendererBackend(RendererBackend):
             icon_height=renderer.get("icon_height"),
             capabilities=RendererCapabilities(
                 supported_mime_types=supported_mimes,
-                supports_events=bool(renderer.get("supports_events", False)),
+                protocol_info=list(renderer.get("sink_protocol_info") or []),
+                # Discovery's supports_events only says the services exist;
+                # report events once a subscription has proven them usable.
+                supports_events=self._events_healthy(udn, renderer),
+                can_stage_next=self._staging_allowed(udn),
+                # Only when RenderingControl actually offers SetMute.
+                can_mute=self._can_mute(udn),
             ),
         )
+
+    def _events_healthy(self, udn: str, renderer: dict[str, Any]) -> bool:
+        """Whether a subscription has proven events usable on this renderer.
+
+        This run's verdict (app/services/upnp/events.py) or, before one, the
+        verdict persisted from an earlier run; discovery never claims it.
+        """
+        events = getattr(self.manager, "events", None)
+        try:
+            if events is not None and events.supports_events(udn):
+                return True
+        except Exception:
+            logger.debug("supports_events failed for %s", udn, exc_info=True)
+        return bool(renderer.get("supports_events", False))
+
+    def _staging_allowed(self, udn: str) -> bool:
+        """Config override, runtime faults and the device advert, as the
+        monitor applies them (app.services.upnp.staging.staging_allowed)."""
+        check = getattr(self.manager, "next_track_staging_allowed", None)
+        if check is None:
+            return False
+        try:
+            return bool(check(udn))
+        except Exception:
+            logger.debug("next_track_staging_allowed failed for %s", udn, exc_info=True)
+            return False
+
+    def next_track_staging_allowed(self, renderer_id: str) -> bool:
+        return self._staging_allowed(split_renderer_id(renderer_id)[1])
+
+    async def clear_next_track(self, renderer_id: str) -> None:
+        clear_next = getattr(self.manager, "clear_next_track", None)
+        if clear_next is not None:
+            await clear_next(split_renderer_id(renderer_id)[1])
 
     @staticmethod
     def normalize_transport_state(transport_state: str | None) -> str:
@@ -202,3 +290,4 @@ class UpnpRendererBackend(RendererBackend):
         if transport_state in {"STOPPED", "NO_MEDIA_PRESENT", "IDLE"}:
             return "IDLE"
         return "UNKNOWN"
+

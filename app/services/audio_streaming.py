@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Optional
@@ -15,6 +17,14 @@ from app.audio_normalization import (
     is_album_sequence_item,
 )
 from app.auth_tokens import create_stream_token
+from app.services.playback_plan import (
+    PlaybackPlan,
+    RendererConstraints,
+    audio_properties_from_track,
+    needs_probe,
+    plan_playback,
+    probe_audio_file,
+)
 from app.services.renderer.token_policy import stream_token_ttl_seconds
 
 
@@ -23,6 +33,9 @@ class StreamUrl:
     url: str
     claims: dict[str, Any]
     mime_type: str | None
+    # Set when the URL was planned for a renderer's constraints: what is
+    # served, and why. mime_type is then always the plan's output MIME.
+    plan: PlaybackPlan | None = None
 
 
 def raw_normalization_claims() -> dict[str, Any]:
@@ -47,7 +60,14 @@ async def build_stream_url(
     client_id: str | None = None,
     extra_claims: dict[str, Any] | None = None,
     ttl_seconds: int | None = None,
+    constraints: RendererConstraints | None = None,
 ) -> StreamUrl:
+    """Mint a tokenised stream URL.
+
+    With ``constraints`` (renderer playback) the output is planned against
+    them and the plan rides in the token, so ``/api/stream`` serves exactly
+    the format -- and Content-Type -- that the renderer was told about.
+    """
     if duration_seconds is None:
         duration_seconds = await db.fetchval(
             "SELECT duration_seconds FROM track WHERE id = $1",
@@ -67,6 +87,11 @@ async def build_stream_url(
     # the output format and the gain from the token alone.
     if extra_claims:
         claims = {**claims, **extra_claims}
+    plan = None
+    if constraints is not None:
+        plan = await plan_for_track(db, track_id, claims, constraints)
+        if plan is not None:
+            claims = {**claims, **plan.output.token_claims()}
     token = create_stream_token(
         track_id=track_id,
         user_id=user_id,
@@ -76,7 +101,45 @@ async def build_stream_url(
     return StreamUrl(
         url=f"{base_url}/api/stream/{track_id}?token={token}",
         claims=claims,
-        mime_type=stream_mime_type(claims),
+        mime_type=plan.mime_type if plan is not None else stream_mime_type(claims),
+        plan=plan,
+    )
+
+
+async def plan_for_track(
+    db: asyncpg.Connection,
+    track_id: int,
+    claims: dict[str, Any],
+    constraints: RendererConstraints,
+) -> PlaybackPlan | None:
+    row = await db.fetchrow(
+        """
+        SELECT id, path, codec, sample_rate_hz, bit_depth, channels
+        FROM track WHERE id = $1
+        """,
+        track_id,
+    )
+    if not row:
+        return None
+    track = dict(row)
+    probe = None
+    if needs_probe(track, constraints):
+        from app.config import get_music_path
+
+        path = track["path"] or ""
+        if not os.path.isabs(path):
+            path = os.path.join(get_music_path(), path)
+        if os.path.exists(path):
+            probe = await asyncio.to_thread(probe_audio_file, path)
+    gain_db = None
+    if claims.get("loudness_normalized") and claims.get("loudness_gain_db") is not None:
+        gain_db = float(claims["loudness_gain_db"])
+    return plan_playback(
+        audio_properties_from_track(track, probe),
+        constraints,
+        gain_db=gain_db,
+        gain_mode=claims.get("loudness_gain_mode") if gain_db is not None else None,
+        requested_quality=claims.get("stream_quality") if claims.get("stream_quality") != "original" else None,
     )
 
 

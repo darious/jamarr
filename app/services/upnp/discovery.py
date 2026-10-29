@@ -39,6 +39,7 @@ from async_upnp_client.search import SsdpSearchListener
 
 from app.db import db_conn
 from app.services.upnp.network import interface_name, scan_network
+from app.services.upnp.protocol_info import mimes_from_protocol_info, parse_protocol_info_list
 from app.services.upnp.tree import (
     avtransport_service,
     make_dmr,
@@ -782,13 +783,23 @@ class UPnPDiscovery:
             info["rendering_control_url"] = rc.control_url
 
         dmr = make_dmr(node)
-        info["supports_events"] = True
+        # Only true once a subscription actually delivered events (events.py);
+        # an eventSubURL in the description proves nothing. save_renderer
+        # keeps a verdict persisted by an earlier run.
+        events = getattr(self.manager, "events", None)
+        info["supports_events"] = bool(events and events.supports_events(udn))
         info["supports_gapless"] = dmr.has_next_transport_uri
 
-        supported_mimes = await self.manager.get_supported_protocols(udn, dmr)
-        if supported_mimes:
+        # Complete Sink entries (MIME parameters, DLNA.ORG_* fields) for
+        # negotiation; the bare MIME list is derived from them for compatibility.
+        sink_entries = await self.manager.get_sink_protocol_info(udn, dmr)
+        if sink_entries:
+            info["sink_protocol_info"] = list(sink_entries)
+            supported_mimes = mimes_from_protocol_info(parse_protocol_info_list(sink_entries))
             info["supported_mime_types"] = ",".join(sorted(supported_mimes))
         else:
+            # Device did not answer this time: keep what it told us before.
+            info["sink_protocol_info"] = await self.manager._existing_protocol_info(udn) or []
             info["supported_mime_types"] = await self.manager._existing_mime_types(udn) or ""
 
         icon = _pick_best_icon(_node_icons(node))

@@ -740,11 +740,14 @@ async def test_set_next_track_sends_the_same_didl_as_a_load():
 
     url = await control.set_next_track(udn, 7, meta)
 
-    assert url == meta["stream_url"]
+    # Relabelled to the advertised alias: the URL asks /api/stream to serve
+    # the same name, and still matches the plain URL by its stream token.
+    assert url == meta["stream_url"] + "&mime=audio%2Fx-flac"
+    assert same_media_uri(meta["stream_url"], url)
     call = dmr.set_next_calls[0]
-    assert call["media_url"] == meta["stream_url"]
+    assert call["media_url"] == url
     didl = call["meta_data"]
-    assert "audio/x-flac" in didl  # negotiated alias, as for SetAVTransportURI
+    assert 'protocolInfo="http-get:*:audio/x-flac:*"' in didl  # as for SetAVTransportURI
     assert 'duration="0:03:01.000"' in didl
     assert "http://10.0.0.1:8112/art/file/cafe" in didl
 

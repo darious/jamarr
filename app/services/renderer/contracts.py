@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Protocol
+from enum import StrEnum
+from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
 
 
 KNOWN_RENDERER_KINDS = {
@@ -16,8 +17,73 @@ KNOWN_RENDERER_KINDS = {
 }
 
 
+class QueueOwnership(StrEnum):
+    """Who decides what plays next on a renderer.
+
+    ``SERVER``: Jamarr holds the queue and loads each track (UPnP AVTransport,
+    server Cast). ``RENDERER``: the device holds the playlist and Jamarr edits
+    it (no backend does this yet; see ADR-0011). ``CONTINUOUS_STREAM``:
+    one long-lived stream carries many tracks, so track changes happen inside
+    Jamarr's encoder rather than on the device.
+    """
+
+    SERVER = "server"
+    RENDERER = "renderer"
+    CONTINUOUS_STREAM = "continuous_stream"
+
+
+class QueueOperation(StrEnum):
+    """Edits a renderer-owned queue accepts (meaningless for SERVER queues)."""
+
+    READ = "read"
+    INSERT = "insert"
+    DELETE = "delete"
+    MOVE = "move"
+    CLEAR = "clear"
+    PLAY_ITEM = "play_item"
+    SHUFFLE = "shuffle"
+    REPEAT = "repeat"
+
+
+class PairingRequirement(StrEnum):
+    """Whether the device needs credentials before Jamarr may control it."""
+
+    NONE = "none"
+    OPTIONAL = "optional"
+    REQUIRED = "required"
+
+
+@dataclass
+class OutputConstraints:
+    """What audio the device accepts. Empty / ``None`` means *unknown*, not
+    *unlimited*: callers must not infer support from a missing value.
+
+    ``source`` says how the values are known: ``"advertised"`` (the device
+    told us, e.g. GetProtocolInfo), ``"protocol"`` (fixed by the wire
+    protocol), ``"documented"`` (vendor docs, not checked per device) or ``"measured"`` (tested on hardware).
+    """
+
+    codecs: set[str] = field(default_factory=set)
+    max_sample_rate_hz: int | None = None
+    max_bit_depth: int | None = None
+    max_channels: int | None = None
+    source: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "codecs": sorted(self.codecs),
+            "max_sample_rate_hz": self.max_sample_rate_hz,
+            "max_bit_depth": self.max_bit_depth,
+            "max_channels": self.max_channels,
+            "source": self.source,
+        }
+
+
 @dataclass
 class RendererCapabilities:
+    """What a renderer can do *now*. A flag is only true when the operation
+    works through Jamarr, not merely when the device advertises it."""
+
     can_play: bool = True
     can_pause: bool = True
     can_stop: bool = True
@@ -32,10 +98,33 @@ class RendererCapabilities:
     supports_events: bool = False
     requires_flow_mode: bool = False
     supported_mime_types: set[str] = field(default_factory=set)
+    # UPnP: the complete GetProtocolInfo Sink entries, verbatim (four fields,
+    # MIME parameters, DLNA.ORG_* info). Empty for protocols without them.
+    protocol_info: list[str] = field(default_factory=list)
+    # Who owns the queue, and which edits a renderer-owned queue accepts.
+    queue_ownership: QueueOwnership = QueueOwnership.SERVER
+    queue_operations: set[QueueOperation] = field(default_factory=set)
+    # The next track can be handed to the device ahead of time (UPnP
+    # SetNextAVTransportURI) and the backend implements SupportsNextTrackStaging.
+    can_stage_next: bool = False
+    # Credentials the device demands; ``has_credentials`` is None when the
+    # device needs none, else whether Jamarr holds them.
+    pairing: PairingRequirement = PairingRequirement.NONE
+    has_credentials: bool | None = None
+    # How a pairing-capable device takes its credentials: True when it wants a
+    # password, False when it pairs by PIN instead,
+    # None when unknown or not applicable (``pairing == NONE``).
+    requires_password: bool | None = None
+    output: OutputConstraints = field(default_factory=OutputConstraints)
 
     def as_dict(self) -> dict[str, Any]:
         data = self.__dict__.copy()
         data["supported_mime_types"] = sorted(self.supported_mime_types)
+        data["protocol_info"] = list(self.protocol_info)
+        data["queue_ownership"] = str(self.queue_ownership)
+        data["queue_operations"] = sorted(str(op) for op in self.queue_operations)
+        data["pairing"] = str(self.pairing)
+        data["output"] = self.output.as_dict()
         return data
 
 
@@ -110,6 +199,14 @@ class RendererStatus:
     # Why playback halted without the listener asking (``last_stop_reason``),
     # e.g. "renderer_error" or "renderer_stopped".
     stop_reason: str | None = None
+    # The renderer moved on to an item queued on it (receiver queue / staged
+    # next) by itself; ``current_track_id`` names it. The queue advances
+    # without a reload, or reloads the real next track if that item is stale.
+    advanced_by_renderer: bool = False
+    # The backend just re-adopted its own media after a server restart
+    # (Cast customData). The renderer may have moved on by itself while the
+    # server was down, so a report one queue item further on is followed.
+    adopted: bool = False
 
 
 class RendererLoadError(RuntimeError):
@@ -132,6 +229,9 @@ class PlaybackContext:
     stream_url: str | None = None
     stream_mime_type: str | None = None
     stream_claims: dict[str, Any] = field(default_factory=dict)
+    # app.services.playback_plan.PlaybackPlan the stream URL was minted for;
+    # its MIME is what the renderer must be told (DIDL / Cast LOAD).
+    playback_plan: Any = None
 
 
 class RendererBackend(Protocol):
@@ -158,12 +258,61 @@ class RendererBackend(Protocol):
     async def get_status(self, renderer_id: str) -> RendererStatus: ...
 
 
+@runtime_checkable
 class SupportsStatusEvents(Protocol):
     def register_status_listener(
         self,
         renderer_id: str,
         callback: Callable[[RendererStatus], Awaitable[None]],
     ) -> Callable[[], None]: ...
+
+
+class SupportsOutputConstraints(Protocol):
+    """Optional: what audio a renderer accepts, for output planning.
+
+    Returns an ``app.services.playback_plan.RendererConstraints``. Backends
+    without it get ``constraints_for_device`` from their device record.
+    """
+
+    def output_constraints(self, renderer_id: str) -> Any: ...
+
+
+@runtime_checkable
+class SupportsNextTrackStaging(Protocol):
+    """Next-track handover to the device (gapless where the device honours it)."""
+
+    def next_track_staging_allowed(self, renderer_id: str) -> bool: ...
+    async def clear_next_track(self, renderer_id: str) -> None: ...
+
+
+@dataclass
+class PairingStart:
+    """Result of starting a pairing: whether the user must read a PIN off the
+    device (``device_provides_pin``) or invent one and type it on the device."""
+
+    renderer_id: str
+    protocol: str
+    device_provides_pin: bool
+
+
+@runtime_checkable
+class SupportsPairing(Protocol):
+    """Devices that need pairing/passwords; credentials persist across restarts."""
+
+    async def begin_pairing(self, renderer_id: str) -> PairingStart: ...
+    async def finish_pairing(self, renderer_id: str, pin: str | None) -> bool: ...
+    async def set_password(self, renderer_id: str, password: str | None) -> None: ...
+    async def forget_credentials(self, renderer_id: str) -> None: ...
+
+
+def backend_supports(backend: Any) -> list[str]:
+    """Names of the optional contracts a backend implements (diagnostics)."""
+    optional = {
+        "status_events": SupportsStatusEvents,
+        "next_track_staging": SupportsNextTrackStaging,
+        "pairing": SupportsPairing,
+    }
+    return sorted(name for name, proto in optional.items() if isinstance(backend, proto))
 
 
 def make_renderer_id(kind: str, native_id: str) -> str:

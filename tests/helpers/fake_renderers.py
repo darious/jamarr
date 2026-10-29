@@ -34,6 +34,8 @@ class FakeUpnpManager:
         self.scan_msg = ""
         self.scan_progress = 0
         self.debug_log: list[str] = []
+        # UDNs whose RenderingControl offers SetMute.
+        self.mutable: set[str] = set()
 
     async def discover(self, refresh: bool = False) -> None:
         self.commands.append(FakeRendererCommand("discover", kwargs={"refresh": refresh}))
@@ -76,6 +78,12 @@ class FakeUpnpManager:
 
     async def set_volume(self, percent: int) -> None:
         self.commands.append(FakeRendererCommand("set_volume", (percent,)))
+
+    def can_mute(self, udn: str) -> bool:
+        return udn in self.mutable
+
+    async def set_mute(self, muted: bool) -> None:
+        self.commands.append(FakeRendererCommand("set_mute", (muted,)))
 
 
 def status_playing(renderer_id: str, position: float = 0) -> FakeRendererStatus:

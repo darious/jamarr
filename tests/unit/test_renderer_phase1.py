@@ -138,3 +138,95 @@ async def test_phase1_upnp_backend_prefers_context_stream_url_and_mime_type():
     metadata = fake.commands[1].args[2]
     assert metadata["stream_url"] == "http://127.0.0.1:8111/api/stream/904?token=normalized"
     assert metadata["mime"] == "audio/flac"
+
+
+@pytest.mark.asyncio
+async def test_upnp_mute_uses_set_mute_only_where_the_device_has_it():
+    fake = FakeUpnpManager()
+    fake.renderers = {
+        "uuid:mutes": {"udn": "uuid:mutes", "friendly_name": "Has SetMute"},
+        "uuid:plain": {"udn": "uuid:plain", "friendly_name": "No SetMute"},
+    }
+    fake.mutable = {"uuid:mutes"}
+    backend = UpnpRendererBackend(fake)
+
+    caps = {d.native_id: d.capabilities.can_mute for d in await backend.list_devices()}
+    assert caps == {"uuid:mutes": True, "uuid:plain": False}
+
+    status = await backend.mute("upnp:uuid:mutes", True)
+    assert status.volume_muted is True
+    assert [(c.name, c.args) for c in fake.commands if c.name != "get_renderers"] == [
+        ("set_renderer", ("uuid:mutes",)),
+        ("set_mute", (True,)),
+    ]
+
+    with pytest.raises(NotImplementedError):
+        await backend.mute("upnp:uuid:plain", True)
+    assert sum(c.name == "set_mute" for c in fake.commands) == 1
+
+
+class _FakeDmr:
+    def __init__(self, actions: set[str]) -> None:
+        self.actions = actions
+        self.muted: list[bool] = []
+
+    def _action(self, service: str, action: str):
+        return object() if service == "RC" and action in self.actions else None
+
+    async def async_mute_volume(self, mute: bool) -> None:
+        self.muted.append(mute)
+
+
+class _FakeControlManager:
+    def __init__(self, dmrs) -> None:
+        self.dmr_devices = dmrs
+        self.active_renderer = None
+
+    def log(self, message: str) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_upnp_control_checks_the_set_mute_action_and_calls_it():
+    from app.services.upnp.device import UPnPDeviceControl
+
+    dmr = _FakeDmr({"SetMute", "SetVolume"})
+    manager = _FakeControlManager({"uuid:a": dmr, "uuid:b": _FakeDmr({"SetVolume"})})
+    control = UPnPDeviceControl(manager)
+
+    assert control.can_mute("uuid:a") is True
+    assert control.can_mute("uuid:b") is False
+    assert control.can_mute("uuid:missing") is False
+
+    with pytest.raises(ValueError):
+        await control.set_mute(True)
+    manager.active_renderer = "uuid:a"
+    await control.set_mute(True)
+    await control.set_mute(False)
+    assert dmr.muted == [True, False]
+
+
+class _VolumeAction:
+    async def async_call(self, **kwargs):
+        assert kwargs == {"InstanceID": 0, "Channel": "Master"}
+        return {"CurrentVolume": 30}
+
+
+class _VolumeDmr:
+    def _action(self, service: str, action: str):
+        # async_upnp_client resolves services by abbreviation only.
+        return _VolumeAction() if (service, action) == ("RC", "GetVolume") else None
+
+    def _state_variable(self, service: str, name: str):
+        if (service, name) == ("RC", "Volume"):
+            return type("Var", (), {"max_value": 60})()
+        return None
+
+
+@pytest.mark.asyncio
+async def test_get_volume_reads_rendering_control_and_scales_to_its_range():
+    from app.services.upnp.device import UPnPDeviceControl
+
+    control = UPnPDeviceControl(_FakeControlManager({"uuid:a": _VolumeDmr()}))
+
+    assert await control.get_volume("uuid:a") == 50

@@ -6,6 +6,7 @@ import asyncpg
 
 from app.services.renderer.contracts import (
     RendererBackend,
+    RendererCapabilities,
     RendererDevice,
     is_local_renderer,
     make_renderer_id,
@@ -149,14 +150,7 @@ class RendererRegistry:
             "native_id": client_id,
             "name": "This Device (Web Browser)",
             "type": "local",
-            "capabilities": {
-                "can_play": True,
-                "can_pause": True,
-                "can_stop": True,
-                "can_seek": True,
-                "can_set_volume": True,
-                "reports_progress": True,
-            },
+            "capabilities": RendererCapabilities().as_dict(),
         }
 
 

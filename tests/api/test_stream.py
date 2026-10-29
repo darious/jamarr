@@ -107,6 +107,24 @@ async def test_stream_head_request(auth_client: AsyncClient, db, stream_data):
     assert response.headers["accept-ranges"] == "bytes"
 
 @pytest.mark.asyncio
+async def test_stream_serves_the_negotiated_alias_only_within_its_family(
+    client: AsyncClient, auth_client: AsyncClient, db, stream_data
+):
+    """A UPnP renderer told audio/mp3 in its DIDL gets audio/mp3 in Content-Type,
+    also through the stream token; a different format is never claimed."""
+    data = (await auth_client.get("/api/stream-url/999")).json()
+
+    response = await client.get(data["url"] + "&mime=audio/mp3")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mp3"
+
+    head = await client.head(data["url"] + "&mime=audio/x-mp3")
+    assert head.headers["content-type"] == "audio/x-mp3"
+
+    response = await client.get(data["url"] + "&mime=audio/flac")
+    assert response.headers["content-type"] == "audio/mpeg"
+
+@pytest.mark.asyncio
 async def test_stream_not_found(auth_client: AsyncClient, db):
     response = await auth_client.get("/api/stream/999999")
     assert response.status_code == 404

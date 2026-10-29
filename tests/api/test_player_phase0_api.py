@@ -81,6 +81,124 @@ async def test_phase0_remote_transport_controls_call_upnp_manager(
 
 
 @pytest.mark.asyncio
+async def test_mute_route_mutes_upnp_and_state_reports_it(
+    auth_client: AsyncClient,
+    db,
+    monkeypatch,
+    selected_remote_renderer,
+):
+    fake_upnp = FakeUpnpManager()
+    fake_upnp.mutable = {selected_remote_renderer}
+    import app.api.player as player_api
+    from app.services.player.globals import renderer_muted
+    from app.services.renderer.upnp_backend import UpnpRendererBackend
+
+    monkeypatch.setitem(
+        player_api.renderer_orchestrator.registry.backends,
+        "upnp",
+        UpnpRendererBackend(fake_upnp),
+    )
+    monkeypatch.setitem(renderer_muted, selected_remote_renderer, None)
+    headers = {"X-Jamarr-Client-Id": "phase0-client"}
+
+    bad = await auth_client.post("/api/player/mute", json={"muted": "yes"}, headers=headers)
+    assert bad.status_code == 400
+
+    muted = await auth_client.post("/api/player/mute", json={"muted": True}, headers=headers)
+    assert muted.status_code == 200, muted.text
+    assert muted.json() == {"status": "ok", "muted": True}
+    assert ("set_mute", (True,)) in [(c.name, c.args) for c in fake_upnp.commands]
+
+    state = await auth_client.get("/api/player/state", headers=headers)
+    assert state.json()["muted"] is True
+
+    unmuted = await auth_client.post("/api/player/mute", json={"muted": False}, headers=headers)
+    assert unmuted.status_code == 200, unmuted.text
+    state = await auth_client.get("/api/player/state", headers=headers)
+    assert state.json()["muted"] is False
+
+
+class _FakeMuteEvents:
+    """The slice of UpnpEventManager _upnp_muted reads: (muted, evented at),
+    or None once RenderingControl events are dropped or unhealthy."""
+
+    def __init__(self):
+        self.state = None
+
+    def muted_state(self, udn):
+        return self.state
+
+
+@pytest.mark.asyncio
+async def test_state_mute_is_the_latest_of_evented_and_jamarr_set(
+    auth_client: AsyncClient,
+    db,
+    monkeypatch,
+    selected_remote_renderer,
+):
+    """An older evented unmute must not hide the mute Jamarr just set, a newer
+    event wins over it, and a dropped subscription's mute is no longer shown."""
+    import time
+
+    import app.api.player as player_api
+    from app.services.player.globals import renderer_muted, renderer_muted_at
+    from app.services.renderer.upnp_backend import UpnpRendererBackend
+
+    fake_upnp = FakeUpnpManager()
+    fake_upnp.mutable = {selected_remote_renderer}
+    fake_upnp.events = _FakeMuteEvents()
+    monkeypatch.setitem(
+        player_api.renderer_orchestrator.registry.backends,
+        "upnp",
+        UpnpRendererBackend(fake_upnp),
+    )
+    monkeypatch.setitem(renderer_muted, selected_remote_renderer, None)
+    monkeypatch.setitem(renderer_muted_at, selected_remote_renderer, 0.0)
+    headers = {"X-Jamarr-Client-Id": "phase0-client"}
+
+    async def shown():
+        state = await auth_client.get("/api/player/state", headers=headers)
+        assert state.status_code == 200, state.text
+        return state.json()["muted"]
+
+    fake_upnp.events.state = (False, time.time() - 60)  # evented a minute ago
+    assert await shown() is False
+    muted = await auth_client.post("/api/player/mute", json={"muted": True}, headers=headers)
+    assert muted.status_code == 200, muted.text
+    assert await shown() is True  # Jamarr's mute is newer than the event
+
+    fake_upnp.events.state = (False, time.time() + 1)  # unmuted on the device since
+    assert await shown() is False
+
+    fake_upnp.events.state = None  # subscription dropped: back to what Jamarr set
+    assert await shown() is True
+
+
+@pytest.mark.asyncio
+async def test_mute_route_refuses_renderers_without_set_mute(
+    auth_client: AsyncClient,
+    db,
+    monkeypatch,
+    selected_remote_renderer,
+):
+    fake_upnp = FakeUpnpManager()
+    import app.api.player as player_api
+    from app.services.renderer.upnp_backend import UpnpRendererBackend
+
+    monkeypatch.setitem(
+        player_api.renderer_orchestrator.registry.backends,
+        "upnp",
+        UpnpRendererBackend(fake_upnp),
+    )
+    headers = {"X-Jamarr-Client-Id": "phase0-client"}
+
+    response = await auth_client.post("/api/player/mute", json={"muted": True}, headers=headers)
+    assert response.status_code == 400
+    assert "SetMute" in response.json()["detail"]
+    assert not any(c.name == "set_mute" for c in fake_upnp.commands)
+
+
+@pytest.mark.asyncio
 async def test_phase0_remote_play_route_sets_base_url_and_starts_monitor(
     auth_client: AsyncClient,
     db,

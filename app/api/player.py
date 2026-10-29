@@ -34,6 +34,9 @@ from app.services.player.globals import (
     playback_monitors,
     monitor_start_times,
     last_stop_reason,
+    output_plan_for,
+    renderer_muted,
+    renderer_muted_at,
     _monitor_restart_history,
 )
 from app.services.player.state import (
@@ -302,8 +305,49 @@ async def get_player_state(
         "renderer_kind": renderer_id.split(":", 1)[0] if ":" in renderer_id else "upnp",
         "transport_state": state.get("transport_state", "STOPPED"),
         "volume": state.get("volume"),
+        # UPnP: RenderingControl events; Cast: receiver status listener.
+        "muted": _upnp_muted(renderer_id, udn)
+        if renderer_id.startswith("upnp:")
+        else renderer_muted.get(udn),
         "stopped_reason": (last_stop_reason.get(udn) or {}).get("reason"),
+        "output_plan": _current_output_plan(udn, queue, state["current_index"]),
     }
+
+
+def _upnp_muted(renderer_id: str, udn: str) -> Optional[bool]:
+    """The most recent of: mute the UPnP renderer evented, mute Jamarr set.
+
+    Evented mute only counts while RenderingControl events are healthy
+    (``events.muted_state``); between the two, the later one wins, so a mute
+    set from Jamarr is not hidden by an older event (nor the reverse).
+    """
+    if not renderer_id.startswith("upnp:"):
+        return None
+    manager = getattr(renderer_orchestrator.registry.backends.get("upnp"), "manager", None)
+    events = getattr(manager, "events", None)
+    evented = None
+    if events is not None:
+        try:
+            evented = events.muted_state(udn)
+        except Exception:
+            evented = None
+    jamarr_set = renderer_muted.get(udn)
+    if evented is None:
+        return jamarr_set
+    evented_muted, evented_at = evented
+    set_at = renderer_muted_at.get(udn)
+    if jamarr_set is not None and set_at is not None and (evented_at is None or set_at > evented_at):
+        return jamarr_set
+    return evented_muted
+
+
+def _current_output_plan(state_key: str, queue: list, current_index) -> dict | None:
+    """The audio output plan for the track the renderer is on, if planned."""
+    if not isinstance(current_index, int) or not (0 <= current_index < len(queue or [])):
+        return None
+    item = queue[current_index]
+    track_id = item.get("id") if isinstance(item, dict) else getattr(item, "id", None)
+    return output_plan_for(state_key, track_id)
 
 
 @router.post(
@@ -759,6 +803,30 @@ async def set_volume(
 
 
 @router.post(
+    "/api/player/mute",
+    summary="Mute or unmute the active renderer",
+)
+async def set_mute(
+    data: dict, client_id: str = Depends(get_client_id),
+    db: asyncpg.Connection = Depends(get_db),
+):
+    """Body: ``{"muted": bool}``. 400 when the renderer can't mute
+    (``capabilities.can_mute`` is false), 409 for the browser player."""
+    muted = data.get("muted")
+    if not isinstance(muted, bool):
+        raise HTTPException(status_code=400, detail="Missing or non-boolean muted")
+    try:
+        result = await renderer_orchestrator.mute(db, client_id, muted)
+    except HTTPException:
+        raise
+    except NotImplementedError as e:
+        raise HTTPException(status_code=400, detail=str(e) or "This renderer can't mute")
+    except Exception as e:
+        raise _translate_renderer_error("mute", e)
+    return {"status": "ok", "muted": result}
+
+
+@router.post(
     "/api/player/seek",
 )
 async def seek_track(
@@ -844,7 +912,11 @@ async def upnp_diagnostics():
     Source/stream address and interface, SSDP listener status, search targets,
     per-target reply counts of the last scan, description fetch failures,
     cooldown/suspended locations, per-device last-seen and availability, and
-    recent availability transitions.
+    recent availability transitions. ``events`` covers UPnP event
+    subscriptions: the NOTIFY callback server (address, port, errors) and, per
+    renderer, whether events proved usable and each service's (AVTransport,
+    RenderingControl) subscription health: subscribed, SID, expiry/renewal,
+    event count, last event time, failures and unreliability.
     """
     upnp_backend = renderer_orchestrator.registry.backends.get("upnp")
     manager = getattr(upnp_backend, "manager", None)

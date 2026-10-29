@@ -211,6 +211,35 @@ async def update_playback_progress_db(
     )
 
 
+_STATUS_COLUMNS = ("position_seconds", "is_playing", "transport_state", "volume")
+
+
+async def update_renderer_status_db(
+    db: asyncpg.Connection, udn: str, **fields: Any
+) -> None:
+    """Write only the given status columns (``position_seconds``,
+    ``is_playing``, ``transport_state``, ``volume``).
+
+    For control handlers (pause/resume/seek/volume): a read-modify-write of
+    the whole row would put back a queue read before a concurrent edit landed.
+    """
+    columns = [c for c in _STATUS_COLUMNS if c in fields]
+    if not columns:
+        return
+    values = [bool(fields[c]) if c == "is_playing" else fields[c] for c in columns]
+    placeholders = ", ".join(f"${n + 2}" for n in range(len(columns)))
+    updates = ", ".join(f"{c} = excluded.{c}" for c in columns)
+    await db.execute(
+        f"""
+        INSERT INTO renderer_state (renderer_udn, {", ".join(columns)}, updated_at)
+        VALUES ($1, {placeholders}, NOW())
+        ON CONFLICT(renderer_udn) DO UPDATE SET {updates}, updated_at = NOW()
+        """,
+        udn,
+        *values,
+    )
+
+
 async def update_queue_logged_db(
     db: asyncpg.Connection, udn: str, state: Dict[str, Any]
 ):
