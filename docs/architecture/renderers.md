@@ -92,6 +92,62 @@ backend speaks in:
 The orchestrator does not care whether a `RendererStatus` came from polling
 (UPnP) or media-controller callbacks (Cast).
 
+## Queue identity and revisions
+
+The server-owned queue lives in `renderer_state.queue` (JSON) per renderer,
+with `current_index` beside it. Two things make edits to it safe
+([ADR-0012](decisions/0012-queue-entry-identity-and-revisions.md)):
+
+**Entry identity (#325).** Every queued item carries an `entry_id`, assigned
+by the server when the track enters a queue (`POST /api/player/queue`,
+`/queue/append`, `/play`) and kept across reorder, persistence and clients.
+It names the *occurrence*: `[A, B, A]` is three entries, and the one playing
+is tracked by its entry, never by the first matching track id. Client-sent
+ids are ignored where tracks are added, so one client cannot claim another
+entry's identity. Queues persisted before this get deterministic ids on read
+(`legacy-<index>-<track_id>`), which the next full write stores.
+`app/services/player/queue_model.py` holds the pure rules.
+
+`POST /api/player/queue/reorder` takes the queue in its new order and
+matches items by `entry_id`; items without one (older clients) match the
+first unused occurrence of their track id, which is only ambiguous for
+duplicates. Items left out are removed, unknown items are added as new
+entries, and the playing entry stays current wherever it moved; if it was
+removed the transport stops.
+
+**Revisions (#332).** `renderer_state.queue_revision` moves whenever the
+stored queue text changes (membership or order) and never on progress, index
+or volume writes, which go through status-only updates. The history `logged`
+flag is written to its one entry conditionally (`mark_entry_logged`), so a
+status callback never puts back a whole queue it read earlier. Every
+mutation and `GET /api/player/state` return `queue_revision`.
+
+| Endpoint | Takes `expected_revision` | On mismatch |
+|---|---|---|
+| `POST /api/player/queue` (replace) | optional | 409 |
+| `POST /api/player/queue/append` | optional | 409 |
+| `POST /api/player/queue/reorder` | optional | 409 |
+| `POST /api/player/queue/clear` | optional body | 409 |
+| `POST /api/player/index`, `/progress`, transport | not applicable | never (status only) |
+
+The check and the write are one SQL statement (`... WHERE queue_revision =
+$expected RETURNING queue_revision`), so two edits made from the same read
+cannot both land. A 409 body is:
+
+```json
+{"detail": {"code": "queue_conflict", "message": "...",
+            "queue_revision": 12, "state": {"queue": [...], "current_index": 1,
+            "queue_revision": 12, "position_seconds": 0, "is_playing": true,
+            "transport_state": "PLAYING", "renderer": "...", "volume": 40}}}
+```
+
+Clients recover by taking `state`, then replaying their operation against it
+by entry id (the web describes a drag as "move entry X before entry Y" and
+retries once; the TUI refreshes and shows the live order). Omitting
+`expected_revision` keeps the old last-writer-wins behaviour for clients
+that do not send it. Tests: `tests/api/test_queue_revisions.py`,
+`tests/unit/test_queue_model.py`, `web/src/lib/stores/queue-ops.test.ts`.
+
 ## Status & auto-advance
 
 - UPnP backend runs a **poll loop** (`app/services/player/monitor.py`) and emits

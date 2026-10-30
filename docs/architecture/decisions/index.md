@@ -18,5 +18,6 @@ editing history.
 | [0009](0009-dlna-server-and-bridge-roles.md) | DLNA server and renderer-bridge roles: arbitration first | Proposed |
 | [0010](0010-continuous-stream-mode.md) | Continuous-stream mode for seamless Cast album playback | Proposed |
 | [0011](0011-openhome-linn.md) | Native OpenHome/Linn backend: evaluated, not built | Accepted |
+| [0012](0012-queue-entry-identity-and-revisions.md) | Queue entry identity and optimistic revisions | Accepted |
 
 New ADRs use the next number and the [template](template.md).

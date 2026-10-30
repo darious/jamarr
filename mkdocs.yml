@@ -93,6 +93,7 @@ nav:
           - architecture/decisions/0009-dlna-server-and-bridge-roles.md
           - architecture/decisions/0010-continuous-stream-mode.md
           - architecture/decisions/0011-openhome-linn.md
+          - architecture/decisions/0012-queue-entry-identity-and-revisions.md
           - Template: architecture/decisions/template.md
   - Reference:
       - API: reference/api.md
