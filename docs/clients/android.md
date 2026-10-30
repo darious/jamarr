@@ -950,8 +950,14 @@ and returned `ERROR_NOT_SUPPORTED`. Only a real `MediaBrowser` could see that.
 
 One pass over the Android issues #320, #321, #323, #324, #326, #327, #328,
 #329, #330, #331 and #333. Each landed as its own commit; this section is the
-map. Everything below was exercised on the headless emulator against the LAN
-server unless a line says otherwise.
+map. The local playback and download items below were driven by hand on the
+headless emulator with the app signed in to the LAN server. The Android Auto
+items were tested two ways: the instrumented provider tests run against a
+fake server with canned JSON, and `SignedInLibraryWalkTest` walks the tree
+over a real `MediaBrowser` against the signed-in library (results under
+"Against the real library" below). **Nothing in this pass was run inside
+Android Auto itself**: no Desktop Head Unit, no car. How a host renders the
+tree, search, buttons, style hints or `content://` artwork is unseen.
 
 ### Local playback
 
@@ -1052,9 +1058,9 @@ server unless a line says otherwise.
   or CONTENT (cleartext server, and always for downloaded art). **Not
   verified on a head unit** (no DHU here); this is the UAMP reference
   approach.
-- **First-page latency (#321).** Measured with
+- **First-page latency (#321).** Before/after measured with
   `BrowseLatencyBenchmarkTest` (fake server, 40 ms per request, 2,000-row
-  nodes, 20-row pages):
+  nodes, 20-row pages); the real-library numbers are in the next section:
 
   | node | before | after |
   |---|---|---|
@@ -1071,6 +1077,51 @@ server unless a line says otherwise.
   tracks uses the longest listed prefix. API calls are cancellable (a browse
   the car moved on from stops using the network) and the browse cache is
   bounded to 256 LRU entries. Nodes without server paging remain one request.
+
+### Against the real library
+
+`SignedInLibraryWalkTest` connects a `MediaBrowser` to the service from the
+app's own process and walks the tree the way a host would: every root folder
+in full, a sample two deep (artist → albums → tracks), paging until a short
+page, the artwork behind the rows through the content resolver, `getItem`
+for sampled playables, and search with names taken from the tree itself. It
+skips unless the installed debug app holds a session, so it costs nothing on
+a clean device. Run it on its own: the shared instrumented suite clears the
+stored session before it gets there, so inside `android/test.sh` it always
+skips (reported as an assumption failure, not a red build). Sign the app in
+on the emulator first, then
+
+```
+./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.jamarr.android.playback.SignedInLibraryWalkTest
+adb logcat -d -s LibraryWalk
+```
+
+Run on 2026-10-30 against the LAN server (prod library, 50-row pages, cold
+process):
+
+| node | rows | first page |
+|---|---|---|
+| Playlists | 16 | 589 ms (one `/api/playlists` call) |
+| Charts | 100 over 2 pages | 74 ms, then 7 ms |
+| Recently Added | 300+ over 6 pages (capped) | 431 ms; each ladder step (100, 200, 500) ~420 ms, cached pages < 10 ms |
+| Recently Played › Albums / Artists | 50 | 75 ms / 74 ms |
+| Favourite Artists / Releases | 7 / 5 | 33 ms / 12 ms |
+| History › Albums / Artists | 10 / 10 | 2 ms / 36 ms |
+| Artist page (five groups) | 14 | 556 ms |
+| Album | 12–32 | 43–63 ms |
+
+Recently Added costs ~420 ms per request on the server whatever the limit,
+so the ladder's cost is in the number of steps, not the rows; the fake-server
+table above is the right read of the client change. All 14 sampled
+`content://` artwork URIs decoded (400×400, grid tiles 320×320), six of six
+`getItem` calls answered, and search came back grouped and in order:
+"Portraits of Tracy" → 1 artist, 2 tracks; "Portraits" → 1 artist, 4 albums,
+20 tracks; "the" → 20 artists, 1 playlist and nothing else, which is what
+`/api/search` itself returns for that query. Ten of fifty recently played
+artists had no artwork, a library gap rather than a client one. The test
+shares the app's uid, so the per-controller artwork grant is not exercised
+by it.
 
 ### Direct renderer queue recovery (#320)
 
@@ -1102,3 +1153,4 @@ unit-tested.
 | Content provider through the resolver (sources, refusals, concurrency) | `ArtworkContentProviderInstrumentedTest` |
 | Custom commands and search over a real `MediaBrowser` | `MediaBrowserHarnessTest` |
 | First-page latency baseline/after | `BrowseLatencyBenchmarkTest` |
+| Whole tree, paging, artwork, `getItem`, search over a real `MediaBrowser` against the signed-in library (skips when signed out) | `SignedInLibraryWalkTest` |

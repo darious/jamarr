@@ -179,7 +179,12 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   content-style hints live in the provider/service; library changes made on
   the phone go through `LibraryChanges` → `LibraryChangeRouter` (invalidate
   before notify, affected folders only). Home-backed folders page by prefix
-  ladder (`PREFIX_BATCHES`), measured by `BrowseLatencyBenchmarkTest`.
+  ladder (`PREFIX_BATCHES`), measured by `BrowseLatencyBenchmarkTest` (fake
+  server). `SignedInLibraryWalkTest` walks the whole tree over a real
+  `MediaBrowser` against whatever server the installed debug app is signed in
+  to (skips when signed out, and the shared suite signs the app out, so run it
+  alone with the `class=` filter; results in `adb logcat -s LibraryWalk`). Nothing
+  has been run inside Android Auto/DHU yet.
 - Cast items carry Jamarr identity in media `customData` (`jamarrTrackId`,
   `jamarrSource` server|android, `jamarrContentPath`); server re-adopts its own
   media after restart, Android rebuilds its queue from the receiver
