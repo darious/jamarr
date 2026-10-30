@@ -2024,8 +2024,8 @@
 </tr>
 <tr>
 <td><code>config.yaml</code></td>
-<td>Non-secret app config (MusicBrainz URL, logging, concurrency)</td>
-<td>Yes</td>
+<td>Non-secret app config (MusicBrainz URL, logging, concurrency, renderer overrides); bind-mounted from beside <code>docker-compose.yml</code></td>
+<td>Yes (the default; edit your copy)</td>
 </tr>
 </tbody>
 </table>
@@ -2033,12 +2033,13 @@
 <p>Copy <code>.env.example</code> → <code>.env</code> and fill in values. Every variable is documented in
 <a href="../../reference/env-vars/">Environment Variables</a>. The minimum required set is
 listed in <a href="../install/">Install</a>.</p>
-<p><code>HOST_IP</code> is auto-detected by <code>dev.sh</code> and <code>deploy.sh</code> via a route lookup; set it
-explicitly only if detection fails or you need to override it:</p>
-<div class="highlight"><pre><span></span><code><span class="nv">HOST_IP</span><span class="o">=</span><span class="m">192</span>.168.1.50<span class="w"> </span>./deploy.sh
-</code></pre></div>
+<p>Set <code>HOST_IP</code> to the server's LAN address: renderers fetch streams and artwork
+from it, and the compose default of <code>127.0.0.1</code> only works for the browser on
+the server itself. <code>dev.sh</code> fills it in from a route lookup for development.</p>
 <h2 id="configyaml"><code>config.yaml</code><a class="headerlink" href="#configyaml" title="Permanent link">&para;</a></h2>
-<p>Non-secret application config that ships in the repo. Typical contents:</p>
+<p>Non-secret application config. The repo copy is the default; an install keeps
+its own beside <code>docker-compose.yml</code>, which mounts it into the container at
+<code>/app/config.yaml</code>. Typical contents:</p>
 <ul>
 <li>MusicBrainz API root URL and rate limits</li>
 <li>Logging level / format</li>

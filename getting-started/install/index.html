@@ -590,10 +590,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-configure" class="md-nav__link">
+  <a href="#1-get-the-files" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Configure
+        1. Get the files
       
     </span>
   </a>
@@ -601,10 +601,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-deploy" class="md-nav__link">
+  <a href="#2-configure" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Deploy
+        2. Configure
       
     </span>
   </a>
@@ -612,10 +612,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-scan-your-library" class="md-nav__link">
+  <a href="#3-start" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Scan your library
+        3. Start
       
     </span>
   </a>
@@ -623,10 +623,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-open-the-ui" class="md-nav__link">
+  <a href="#4-scan-your-library" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Open the UI
+        4. Scan your library
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-open-the-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Open the UI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading
       
     </span>
   </a>
@@ -1971,10 +1993,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-configure" class="md-nav__link">
+  <a href="#1-get-the-files" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Configure
+        1. Get the files
       
     </span>
   </a>
@@ -1982,10 +2004,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-deploy" class="md-nav__link">
+  <a href="#2-configure" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Deploy
+        2. Configure
       
     </span>
   </a>
@@ -1993,10 +2015,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-scan-your-library" class="md-nav__link">
+  <a href="#3-start" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Scan your library
+        3. Start
       
     </span>
   </a>
@@ -2004,10 +2026,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-open-the-ui" class="md-nav__link">
+  <a href="#4-scan-your-library" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Open the UI
+        4. Scan your library
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-open-the-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Open the UI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upgrading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading
       
     </span>
   </a>
@@ -2051,11 +2095,20 @@
 
 
 <h1 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h1>
-<p>Jamarr runs as a Docker Compose stack. The container uses
-<code>network_mode: "host"</code> so UPnP and Chromecast device discovery work.</p>
-<h2 id="1-configure">1. Configure<a class="headerlink" href="#1-configure" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>cp<span class="w"> </span>.env.example<span class="w"> </span>.env
+<p>Jamarr ships as a Docker image, <code>ghcr.io/darious/jamarr</code>, published per
+<a href="https://github.com/darious/jamarr/releases">release</a>. A server needs three
+files and no repository checkout: <code>docker-compose.yml</code>, <code>.env</code> and
+<code>config.yaml</code>. All three are attached to every release and live at the top of
+the repo. The container uses <code>network_mode: "host"</code> so UPnP and Chromecast
+device discovery work.</p>
+<h2 id="1-get-the-files">1. Get the files<a class="headerlink" href="#1-get-the-files" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>mkdir<span class="w"> </span>jamarr<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>jamarr
+<span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>docker-compose.yml<span class="w"> </span>.env.example<span class="w"> </span>config.yaml<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>curl<span class="w"> </span>-fsSLO<span class="w"> </span><span class="s2">"https://raw.githubusercontent.com/darious/jamarr/main/</span><span class="nv">$f</span><span class="s2">"</span>
+<span class="k">done</span>
+cp<span class="w"> </span>.env.example<span class="w"> </span>.env
 </code></pre></div>
+<h2 id="2-configure">2. Configure<a class="headerlink" href="#2-configure" title="Permanent link">&para;</a></h2>
 <p>Edit <code>.env</code> and set the required values:</p>
 <table>
 <thead>
@@ -2067,7 +2120,7 @@
 <tbody>
 <tr>
 <td><code>HOST_IP</code></td>
-<td>Your server's LAN IP (auto-detected by <code>deploy.sh</code> if left unset)</td>
+<td>Your server's LAN IP; renderers fetch streams and artwork from it</td>
 </tr>
 <tr>
 <td><code>MUSIC_NFS_ADDR</code></td>
@@ -2076,6 +2129,10 @@
 <tr>
 <td><code>MUSIC_NFS_PATH</code></td>
 <td>NFS export path on the server</td>
+</tr>
+<tr>
+<td><code>DB_PASS</code></td>
+<td>PostgreSQL password; the stack refuses to start without one</td>
 </tr>
 <tr>
 <td><code>DB_DATA_PATH</code></td>
@@ -2100,24 +2157,38 @@
 </tbody>
 </table>
 <p>Optional metadata sources: <code>QOBUZ_*</code>, <code>TIDAL_*</code>, <code>FANARTTV_API_KEY</code>. Full list:
-<a href="../../reference/env-vars/">Environment Variables</a>.</p>
-<h2 id="2-deploy">2. Deploy<a class="headerlink" href="#2-deploy" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>./deploy.sh
+<a href="../../reference/env-vars/">Environment Variables</a>. Non-secret settings,
+including per-renderer overrides, are in <code>config.yaml</code>
+(<a href="../configuration/">Configuration</a>).</p>
+<h2 id="3-start">3. Start<a class="headerlink" href="#3-start" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>pull<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d
 </code></pre></div>
-<p>This pulls the latest image, backs up the database, runs migrations, then
-restarts the stack.</p>
-<h2 id="3-scan-your-library">3. Scan your library<a class="headerlink" href="#3-scan-your-library" title="Permanent link">&para;</a></h2>
+<p>Database migrations apply when the app starts, so this is also the upgrade
+command. To pin a version instead of <code>latest</code>, change the image tag in
+<code>docker-compose.yml</code> (for example <code>ghcr.io/darious/jamarr:1.14.0</code>).</p>
+<h2 id="4-scan-your-library">4. Scan your library<a class="headerlink" href="#4-scan-your-library" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>jamarr<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>app.scanner.cli<span class="w"> </span>scan
 docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>jamarr<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>app.scanner.cli<span class="w"> </span>metadata
 </code></pre></div>
 <p>Full command reference: <a href="../../reference/scanner-cli/">Scanner CLI</a> ·
 walkthrough: <a href="../../guides/scanning/">Scanning a Library</a>.</p>
-<h2 id="4-open-the-ui">4. Open the UI<a class="headerlink" href="#4-open-the-ui" title="Permanent link">&para;</a></h2>
+<h2 id="5-open-the-ui">5. Open the UI<a class="headerlink" href="#5-open-the-ui" title="Permanent link">&para;</a></h2>
 <p><code>http://your-server-ip:8111</code></p>
+<h2 id="upgrading">Upgrading<a class="headerlink" href="#upgrading" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>pull<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+<p>For a database dump before the upgrade, use <code>deploy.sh</code> from the release
+assets in the same directory. It prunes unused images first (a full disk
+otherwise makes the pull fail and leaves the old version running), pulls,
+dumps the database to <code>./backups</code> keeping the last five, applies migrations,
+and restarts. <code>BACKUP_DIR</code> and <code>BACKUP_KEEP</code> override the defaults.</p>
+<p>A new release may change <code>docker-compose.yml</code> or add keys to <code>config.yaml</code>;
+the release notes say so when it matters. Compare against the attached copies.</p>
 <h2 id="next-steps">Next steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Connect <a href="../../guides/lastfm/">Last.fm</a> for scrobble history</li>
-<li>Set up <a href="../dev-mode/">Dev Mode</a> for hot-reload development</li>
+<li>Set up <a href="../dev-mode/">Dev Mode</a> for hot-reload development (this is where
+  the repository checkout comes in)</li>
 <li>Review production <a href="../../architecture/auth/">cookie/HTTPS hardening</a></li>
 </ul>
 

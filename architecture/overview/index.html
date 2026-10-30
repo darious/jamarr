@@ -2426,25 +2426,25 @@
 ├── docker-compose.dev.yml # Development overrides
 ├── Dockerfile            # Production container build
 ├── dev.sh                # Development mode startup script
-├── deploy.sh             # Production deploy (backup → migrate → restart)
+├── deploy.sh             # Optional image-install upgrade helper (shipped with releases)
 └── config.yaml           # Application configuration
 ├── docker-compose.yml    # Production Docker Compose
 ├── docker-compose.dev.yml # Development overrides
 ├── Dockerfile            # Production container build
 ├── dev.sh                # Development mode startup script
-├── deploy.sh             # Production deploy (backup → migrate → restart)
+├── deploy.sh             # Optional image-install upgrade helper (shipped with releases)
 └── config.yaml           # Application configuration
 </code></pre></div>
 <h2 id="deployment-operations">Deployment &amp; Operations<a class="headerlink" href="#deployment-operations" title="Permanent link">&para;</a></h2>
 <h3 id="environments-and-compose">Environments and Compose<a class="headerlink" href="#environments-and-compose" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Production</strong>: <code>docker-compose.yml</code> with host networking. <code>HOST_IP</code> is provided via environment (defaults to 127.0.0.1 in Compose).</li>
+<li><strong>Production</strong>: <code>docker-compose.yml</code> with host networking, image-only (no <code>build:</code>; the image comes from GHCR per release). <code>HOST_IP</code> is set in <code>.env</code>.</li>
 <li><strong>Development</strong>: <code>docker-compose.yml</code> + <code>docker-compose.dev.yml</code> overrides; hot-reload for backend/frontend; local paths for cache/DB.</li>
 <li><strong>Testing</strong>: <code>docker-compose.test.yml</code> with isolated project name (<code>jamarr-test</code>) to avoid clashing with dev/prod.</li>
 </ul>
 <h3 id="scripts">Scripts<a class="headerlink" href="#scripts" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>deploy.sh</code>: Full prod deploy. Steps: pull latest image, ensure DB is up, create pre-migration backup, run DB migrations (<code>docker compose run --rm jamarr python migrations/apply_migrations.py</code>), restart the app container.</li>
+<li><code>deploy.sh</code>: Optional upgrade helper for an image install, run where <code>docker-compose.yml</code>, <code>.env</code> and <code>config.yaml</code> live (no checkout). Steps: prune unused images, pull, ensure DB is up, dump the DB to <code>./backups</code> (keeps 5), run migrations (<code>docker compose run --rm jamarr python migrations/apply_migrations.py</code>), restart the app. <code>docker compose pull &amp;&amp; docker compose up -d</code> alone is a complete upgrade, since migrations also apply at startup.</li>
 <li><code>dev.sh</code>: Starts dev stack with hot-reload; derives <code>HOST_IP</code> from an internal route if not provided.</li>
 <li><code>test.sh</code>: Runs the test suite in Docker; brings up the test DB, runs pytest inside <code>jamarr_test_runner</code>, tears down the stack on success (leaves DB running on failure for debugging).</li>
 <li><code>lint.sh [python|svelte|all]</code>: Runs Ruff and/or Svelte Check (Svelte via the dev Compose stack).</li>
