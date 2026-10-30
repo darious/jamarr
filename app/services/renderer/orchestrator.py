@@ -36,12 +36,14 @@ from app.services.player.monitor import (
     _mark_monitor_starting,
     start_monitor_task,
 )
+from app.services.player.queue_model import ENTRY_KEY, QueueConflict, fresh_entries, new_entry_id
 from app.services.player.state import (
     enrich_track_metadata,
     get_renderer_state_db,
     track_path_exists,
     update_playback_progress_db,
-    update_queue_logged_db,
+    entry_id_of,
+    mark_entry_logged,
     update_renderer_state_db,
     update_renderer_status_db,
 )
@@ -235,15 +237,19 @@ class RendererOrchestrator:
         start_index: int,
         user_id: int | None,
         request: Request,
+        expected_revision: int | None = None,
     ) -> None:
         renderer_id, state_key = await self.get_active(db, client_id)
         state = await get_renderer_state_db(db, state_key)
-        state["queue"] = queue
+        # Every item is a new occurrence, whatever ids the client echoed.
+        state["queue"] = fresh_entries(queue)
+        queue = state["queue"]
         state["current_index"] = max(0, min(start_index, len(queue) - 1 if queue else 0))
         state["position_seconds"] = 0
         state["is_playing"] = True
         state["transport_state"] = "PLAYING"
-        await update_renderer_state_db(db, state_key, state)
+        if await update_renderer_state_db(db, state_key, state, expected_revision) is None:
+            raise QueueConflict(expected_revision or 0, await get_renderer_state_db(db, state_key))
         reset_history_tracker(state_key if not is_local_renderer(state_key) else client_id)
 
         if not is_local_renderer(renderer_id) and state["queue"]:
@@ -354,7 +360,12 @@ class RendererOrchestrator:
                 monitor_start_times[state_key] = time.time()
 
     @_heals_stale_renderer
-    async def stop_or_clear(self, db: asyncpg.Connection, client_id: str) -> tuple[dict[str, Any], str]:
+    async def stop_or_clear(
+        self,
+        db: asyncpg.Connection,
+        client_id: str,
+        expected_revision: int | None = None,
+    ) -> tuple[dict[str, Any], str]:
         renderer_id, state_key = await self.get_active(db, client_id)
         state = await get_renderer_state_db(db, state_key)
         state["queue"] = []
@@ -362,7 +373,8 @@ class RendererOrchestrator:
         state["position_seconds"] = 0
         state["is_playing"] = False
         state["transport_state"] = "STOPPED"
-        await update_renderer_state_db(db, state_key, state)
+        if await update_renderer_state_db(db, state_key, state, expected_revision) is None:
+            raise QueueConflict(expected_revision or 0, await get_renderer_state_db(db, state_key))
         reset_history_tracker(client_id if is_local_renderer(state_key) else state_key)
         if not is_local_renderer(renderer_id):
             try:
@@ -702,7 +714,11 @@ class RendererOrchestrator:
             user_id=track.get("user_id"),
         )
         track["logged"] = True
-        await update_queue_logged_db(db, state_key, state)
+        entry_id = entry_id_of(track)
+        if entry_id:
+            # One entry, conditionally: never a full queue write from a
+            # status callback (it would undo a concurrent edit).
+            await mark_entry_logged(db, state_key, entry_id)
 
     @staticmethod
     async def _renderer_ip(
@@ -1179,11 +1195,16 @@ class RendererOrchestrator:
 
     @staticmethod
     def _replace_or_singleton_queue(state: dict[str, Any], track: dict[str, Any]) -> int:
+        """Play ``track`` in place of its first queued occurrence, keeping
+        that entry's identity, or as a new one-item queue."""
         existing_queue = state.get("queue") or []
+        track = dict(track)
         try:
             current_index = next(i for i, item in enumerate(existing_queue) if item.get("id") == track["id"])
+            track[ENTRY_KEY] = existing_queue[current_index].get(ENTRY_KEY) or new_entry_id()
             existing_queue[current_index] = track
         except StopIteration:
+            track[ENTRY_KEY] = new_entry_id()
             existing_queue = [track]
             current_index = 0
         state["queue"] = existing_queue

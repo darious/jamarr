@@ -26,9 +26,16 @@ from app.models.player import (
     PlayerState,
     QueueUpdate,
     AppendQueue,
+    ClearQueue,
     IndexUpdate,
     ProgressUpdate,
     LogPlayRequest,
+)
+from app.services.player.queue_model import (
+    QueueConflict,
+    fresh_entries,
+    reorder as reorder_entries,
+    state_payload,
 )
 from app.services.player.globals import (
     playback_monitors,
@@ -40,8 +47,11 @@ from app.services.player.globals import (
     _monitor_restart_history,
 )
 from app.services.player.state import (
+    entry_id_of,
     get_renderer_state_db,
+    mark_entry_logged,
     update_renderer_state_db,
+    update_renderer_status_db,
 )
 from app.services.player.history import (
     log_history,
@@ -91,6 +101,26 @@ def _translate_renderer_error(action: str, exc: Exception) -> HTTPException:
             detail="Active renderer is unavailable. Re-select a device.",
         )
     return HTTPException(status_code=502, detail=f"Renderer {action} failed")
+
+
+def _queue_conflict(exc: QueueConflict, renderer: str) -> HTTPException:
+    """409 for a queue edit made against a revision that has moved on.
+
+    The body carries the live revision and state so the client can refresh
+    and reapply its operation (by entry_id) instead of guessing.
+    """
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "queue_conflict",
+            "message": (
+                f"The queue changed since it was read (revision {exc.expected} is stale; "
+                f"it is now {exc.revision}). Refresh and reapply the edit."
+            ),
+            "queue_revision": exc.revision,
+            "state": state_payload(exc.state, renderer),
+        },
+    )
 
 
 def _load_error_detail(exc: RendererLoadError) -> str:
@@ -298,6 +328,7 @@ async def get_player_state(
     return {
         "queue": queue,
         "current_index": state["current_index"],
+        "queue_revision": state.get("queue_revision", 0),
         "position_seconds": state["position_seconds"],
         "is_playing": state["is_playing"],
         "renderer": udn,
@@ -378,16 +409,23 @@ async def set_queue(
         asyncio.create_task(
             update_now_playing_lastfm(user_id, current_track["id"])
         )
-    await renderer_orchestrator.set_queue(
-        db,
-        client_id,
-        enriched_queue,
-        update.start_index,
-        user_id,
-        request,
-    )
+    try:
+        await renderer_orchestrator.set_queue(
+            db,
+            client_id,
+            enriched_queue,
+            update.start_index,
+            user_id,
+            request,
+            expected_revision=update.expected_revision,
+        )
+    except QueueConflict as exc:
+        _, udn = await renderer_orchestrator.get_active(db, client_id)
+        raise _queue_conflict(exc, udn)
 
-    return {"status": "ok"}
+    _, udn = await renderer_orchestrator.get_active(db, client_id)
+    state = await get_renderer_state_db(db, udn)
+    return {"status": "ok", "state": state_payload(state, udn)}
 
 
 @router.post(
@@ -409,11 +447,15 @@ async def append_queue(
         track_dict = t.model_dump()
         track_dict["user_id"] = user_id
         new_tracks.append(track_dict)
-    state["queue"] = state["queue"] + new_tracks
+    state["queue"] = state["queue"] + fresh_entries(new_tracks)
 
-    await update_renderer_state_db(db, udn, state)
+    if await update_renderer_state_db(db, udn, state, update.expected_revision) is None:
+        raise _queue_conflict(
+            QueueConflict(update.expected_revision or 0, await get_renderer_state_db(db, udn)),
+            udn,
+        )
     reset_history_tracker(client_id if udn.startswith("local") else udn)
-    return {"status": "ok"}
+    return {"status": "ok", "state": state_payload(state, udn)}
 
 
 @router.post(
@@ -426,110 +468,68 @@ async def reorder_queue(
 ):
     """
     Reorder the queue without changing playback state.
-    Expects the same queue items in a new order.
+
+    Expects the current queue's items in their new order. Items are matched
+    by ``entry_id`` (so the same track queued twice stays two distinct
+    occurrences); items without one match the first unused occurrence of
+    their track id, as older clients expect. Items left out are removed and
+    unknown items are added as new occurrences. The entry that was playing
+    stays current wherever it moved to; if it was removed the transport
+    stops. With ``expected_revision`` set, a stale edit is refused with 409
+    and the live state.
     """
     _, udn = await renderer_orchestrator.get_active(db, client_id)
     state = await get_renderer_state_db(db, udn)
     existing_queue = state.get("queue") or []
-
-    # Preserve currently playing track (by id) to restore index
     current_idx = state.get("current_index", -1)
-    current_track = (
-        existing_queue[current_idx] if 0 <= current_idx < len(existing_queue) else None
-    )
+    had_current = 0 <= current_idx < len(existing_queue)
 
-    # Normalize incoming queue (pydantic models -> dict)
-    incoming_queue = [
-        t.model_dump() if hasattr(t, "model_dump") else dict(t)
-        if hasattr(t, "keys")
-        else t
-        for t in update.queue
-    ]
-
-    # Rebuild queue based on ids, fallback to incoming order if mismatch
-    id_to_tracks = {}
-    for i, t in enumerate(existing_queue):
-        id_to_tracks.setdefault(t.get("id"), []).append((i, t))
-
-    reordered = []
-    used = set()
-    for incoming in incoming_queue:
-        tid = incoming.get("id") if isinstance(incoming, dict) else None
-        if tid in id_to_tracks:
-            # pop first unused occurrence
-            candidates = id_to_tracks[tid]
-            chosen = None
-            for pos, track in candidates:
-                if pos in used:
-                    continue
-                chosen = (pos, track)
-                break
-            if chosen:
-                used.add(chosen[0])
-                reordered.append(chosen[1])
-                continue
-        # fallback to provided object
-        reordered.append(incoming)
+    incoming_queue = [t.model_dump(exclude_none=True) for t in update.queue]
+    reordered, new_idx = reorder_entries(existing_queue, incoming_queue, current_idx)
 
     state["queue"] = reordered
-
-    if current_track and current_track.get("id") is not None:
-        try:
-            new_idx = next(
-                i for i, t in enumerate(reordered) if t.get("id") == current_track["id"]
-            )
-            state["current_index"] = new_idx
-        except StopIteration:
-            state["current_index"] = -1
+    if had_current:
+        state["current_index"] = new_idx
+        if new_idx < 0:
             state["is_playing"] = False
             state["transport_state"] = "STOPPED"
 
-    await update_renderer_state_db(db, udn, state)
+    if await update_renderer_state_db(db, udn, state, update.expected_revision) is None:
+        raise _queue_conflict(
+            QueueConflict(update.expected_revision or 0, await get_renderer_state_db(db, udn)),
+            udn,
+        )
     reset_history_tracker(client_id if udn.startswith("local") else udn)
 
-    return {
-        "status": "ok",
-        "state": {
-            "queue": state["queue"],
-            "current_index": state.get("current_index", -1),
-            "position_seconds": state.get("position_seconds", 0),
-            "is_playing": state.get("is_playing", False),
-            "transport_state": state.get("transport_state", "STOPPED"),
-            "renderer": udn,
-            "volume": state.get("volume"),
-        },
-    }
+    return {"status": "ok", "state": state_payload(state, udn)}
 
 
 @router.post(
     "/api/player/queue/clear",
 )
 async def clear_queue(
+    update: Optional[ClearQueue] = None,
     client_id: str = Depends(get_client_id),
     db: asyncpg.Connection = Depends(get_db),
 ):
     """
     Empty the active renderer queue and stop playback.
+
+    Optional body ``{"expected_revision": n}`` refuses the clear with 409
+    when the queue has changed since it was read.
     """
+    expected = update.expected_revision if update else None
     try:
-        state, udn = await renderer_orchestrator.stop_or_clear(db, client_id)
+        state, udn = await renderer_orchestrator.stop_or_clear(db, client_id, expected)
+    except QueueConflict as exc:
+        _, udn = await renderer_orchestrator.get_active(db, client_id)
+        raise _queue_conflict(exc, udn)
     except HTTPException:
         raise
     except Exception as e:
         raise _translate_renderer_error("clear", e)
 
-    return {
-        "status": "ok",
-        "state": {
-            "queue": state["queue"],
-            "current_index": state["current_index"],
-            "position_seconds": state["position_seconds"],
-            "is_playing": state["is_playing"],
-            "transport_state": state.get("transport_state", "STOPPED"),
-            "renderer": udn,
-            "volume": state.get("volume"),
-        },
-    }
+    return {"status": "ok", "state": state_payload(state, udn)}
 
 
 @router.post(
@@ -546,18 +546,7 @@ async def set_index(
     except Exception as e:
         raise _translate_renderer_error("skip", e)
     # Return the state so the client can sync immediately
-    return {
-        "status": "ok",
-        "state": {
-            "queue": state.get("queue", []),
-            "current_index": state.get("current_index", -1),
-            "position_seconds": state.get("position_seconds", 0),
-            "is_playing": state.get("is_playing", False),
-            "transport_state": state.get("transport_state", "STOPPED"),
-            "renderer": udn,
-            "volume": state.get("volume"),
-        },
-    }
+    return {"status": "ok", "state": state_payload(state, udn)}
 
 
 @router.post("/api/player/log-play")
@@ -585,21 +574,28 @@ async def update_progress(
     user_id = user["id"]
     if udn.startswith("local:"):
         state = await get_renderer_state_db(db, udn)
-        state["position_seconds"] = update.position_seconds
-        state["is_playing"] = update.is_playing
+
+        # Progress touches status columns only: a full write here would put
+        # back the queue this request read, over an edit that landed since.
+        await update_renderer_status_db(
+            db,
+            udn,
+            position_seconds=update.position_seconds,
+            is_playing=update.is_playing,
+        )
 
         # Check for history logging
         if state["current_index"] is not None and state["current_index"] >= 0:
             queue = state.get("queue") or []
             if 0 <= state["current_index"] < len(queue):
                 track = queue[state["current_index"]]
-                    
+
                 # Only log if not already logged
                 if not track.get("logged", False):
                     duration = track.get("duration_seconds") or 0
                     # Check threshold (30s or 20%)
                     threshold = min(30, duration * 0.2) if duration > 0 else 30
-                        
+
                     if update.position_seconds >= threshold:
                         # Log it
                         effective_user_id = user_id or track.get("user_id")
@@ -613,17 +609,11 @@ async def update_progress(
                             )
                         except Exception as e:
                             logger.error(f"Failed to log history: {e}")
-                            
-                        # Mark as logged and persist
-                        track["logged"] = True
-                        # Queue is already ref in state, so just save state
-                        await update_renderer_state_db(db, udn, state)
-            
-        # Save state (position/playing updates)
-        await update_renderer_state_db(db, udn, state)
-    else:
-        # For remote renderers, skip logging here to avoid double-reporting with UPnP monitor
-        state = await get_renderer_state_db(db, udn)
+
+                        # Mark that one entry logged, conditionally.
+                        entry_id = entry_id_of(track)
+                        if entry_id:
+                            await mark_entry_logged(db, udn, entry_id)
     return {"status": "ok"}
 
 

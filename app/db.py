@@ -361,8 +361,10 @@ async def init_db():
                 is_playing BOOLEAN DEFAULT FALSE,
                 transport_state TEXT DEFAULT 'STOPPED',
                 volume INTEGER,
+                queue_revision BIGINT NOT NULL DEFAULT 0,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
+            ALTER TABLE renderer_state ADD COLUMN IF NOT EXISTS queue_revision BIGINT NOT NULL DEFAULT 0;
             
             -- Playback history
             CREATE TABLE IF NOT EXISTS playback_history (
