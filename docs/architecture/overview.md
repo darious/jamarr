@@ -138,25 +138,25 @@ The frontend provides a polished, app-like user experience:
 ├── docker-compose.dev.yml # Development overrides
 ├── Dockerfile            # Production container build
 ├── dev.sh                # Development mode startup script
-├── deploy.sh             # Production deploy (backup → migrate → restart)
+├── deploy.sh             # Optional image-install upgrade helper (shipped with releases)
 └── config.yaml           # Application configuration
 ├── docker-compose.yml    # Production Docker Compose
 ├── docker-compose.dev.yml # Development overrides
 ├── Dockerfile            # Production container build
 ├── dev.sh                # Development mode startup script
-├── deploy.sh             # Production deploy (backup → migrate → restart)
+├── deploy.sh             # Optional image-install upgrade helper (shipped with releases)
 └── config.yaml           # Application configuration
 ```
 
 ## Deployment & Operations
 
 ### Environments and Compose
-- **Production**: `docker-compose.yml` with host networking. `HOST_IP` is provided via environment (defaults to 127.0.0.1 in Compose).
+- **Production**: `docker-compose.yml` with host networking, image-only (no `build:`; the image comes from GHCR per release). `HOST_IP` is set in `.env`.
 - **Development**: `docker-compose.yml` + `docker-compose.dev.yml` overrides; hot-reload for backend/frontend; local paths for cache/DB.
 - **Testing**: `docker-compose.test.yml` with isolated project name (`jamarr-test`) to avoid clashing with dev/prod.
 
 ### Scripts
-- `deploy.sh`: Full prod deploy. Steps: pull latest image, ensure DB is up, create pre-migration backup, run DB migrations (`docker compose run --rm jamarr python migrations/apply_migrations.py`), restart the app container.
+- `deploy.sh`: Optional upgrade helper for an image install, run where `docker-compose.yml`, `.env` and `config.yaml` live (no checkout). Steps: prune unused images, pull, ensure DB is up, dump the DB to `./backups` (keeps 5), run migrations (`docker compose run --rm jamarr python migrations/apply_migrations.py`), restart the app. `docker compose pull && docker compose up -d` alone is a complete upgrade, since migrations also apply at startup.
 - `dev.sh`: Starts dev stack with hot-reload; derives `HOST_IP` from an internal route if not provided.
 - `test.sh`: Runs the test suite in Docker; brings up the test DB, runs pytest inside `jamarr_test_runner`, tears down the stack on success (leaves DB running on failure for debugging).
 - `lint.sh [python|svelte|all]`: Runs Ruff and/or Svelte Check (Svelte via the dev Compose stack).

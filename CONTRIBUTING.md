@@ -62,7 +62,7 @@ Backend dependencies are managed with `uv`. Frontend dependencies live in `web/`
 | Script | Description |
 |:---|:---|
 | `./dev.sh` | Start dev stack with hot-reload |
-| `./deploy.sh` | Full production deploy (backup → migrate → restart) |
+| `./deploy.sh` | Optional upgrade helper for an image install (prune → pull → dump → migrate → restart); shipped with releases, not needed for development |
 | `./test.sh` | Run backend tests in Docker test stack |
 | `./lint.sh [python\|svelte\|css\|all]` | Run Ruff and/or Svelte check |
 | `./scripts/test-build.sh` | Build frontend in CI-style test container |

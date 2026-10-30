@@ -5,7 +5,7 @@ Jamarr splits configuration into two places:
 | File | Holds | Committed? |
 |---|---|---|
 | `.env` | Secrets + per-deployment settings (DB creds, API keys, paths, JWT secret) | No — copy from `.env.example` |
-| `config.yaml` | Non-secret app config (MusicBrainz URL, logging, concurrency) | Yes |
+| `config.yaml` | Non-secret app config (MusicBrainz URL, logging, concurrency, renderer overrides); bind-mounted from beside `docker-compose.yml` | Yes (the default; edit your copy) |
 
 ## `.env`
 
@@ -13,16 +13,15 @@ Copy `.env.example` → `.env` and fill in values. Every variable is documented 
 [Environment Variables](../reference/env-vars.md). The minimum required set is
 listed in [Install](install.md).
 
-`HOST_IP` is auto-detected by `dev.sh` and `deploy.sh` via a route lookup; set it
-explicitly only if detection fails or you need to override it:
-
-```bash
-HOST_IP=192.168.1.50 ./deploy.sh
-```
+Set `HOST_IP` to the server's LAN address: renderers fetch streams and artwork
+from it, and the compose default of `127.0.0.1` only works for the browser on
+the server itself. `dev.sh` fills it in from a route lookup for development.
 
 ## `config.yaml`
 
-Non-secret application config that ships in the repo. Typical contents:
+Non-secret application config. The repo copy is the default; an install keeps
+its own beside `docker-compose.yml`, which mounts it into the container at
+`/app/config.yaml`. Typical contents:
 
 - MusicBrainz API root URL and rate limits
 - Logging level / format
