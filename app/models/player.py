@@ -29,11 +29,18 @@ class Track(BaseModel):
     loudness_normalized: bool = False
     logged: bool = False
     artists: Optional[List[Dict[str, Optional[str]]]] = None
+    # Identity of this occurrence in a queue, assigned by the server when the
+    # track enters one (#325). The same track id can appear twice; edits are
+    # matched on this, never on the track id. Ignored where tracks are added.
+    entry_id: Optional[str] = None
 
 
 class PlayerState(BaseModel):
     queue: List[Track]
     current_index: int
+    # Moves whenever the queue's membership or order changes (#332); send it
+    # back as expected_revision with an edit to have a stale edit refused.
+    queue_revision: int = 0
     position_seconds: float
     is_playing: bool
     renderer: str  # UDN
@@ -59,10 +66,19 @@ class PlayerState(BaseModel):
 class QueueUpdate(BaseModel):
     queue: List[Track]
     start_index: int = 0
+    # The queue_revision this edit was made against. When it is no longer the
+    # live revision the edit is refused with 409 and the current state.
+    # Omitted: the edit applies unconditionally (older clients).
+    expected_revision: Optional[int] = None
 
 
 class AppendQueue(BaseModel):
     tracks: List[Track]
+    expected_revision: Optional[int] = None
+
+
+class ClearQueue(BaseModel):
+    expected_revision: Optional[int] = None
 
 
 class IndexUpdate(BaseModel):

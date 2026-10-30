@@ -2,8 +2,12 @@ import os
 import json
 import mimetypes
 import asyncpg
-from typing import Dict, Any, List
+import logging
+from typing import Dict, Any, List, Optional
 from app.config import get_music_path
+from app.services.player.queue_model import ENTRY_KEY, ensure_entry_ids, find_entry
+
+logger = logging.getLogger(__name__)
 
 def track_path_exists(track: Dict[str, Any]) -> bool:
     path = track.get("path")
@@ -120,7 +124,8 @@ async def get_renderer_state_db(db: asyncpg.Connection, udn: str) -> Dict[str, A
     """Get state from DB for a renderer. Returns default if not found."""
     row = await db.fetchrow(
         """
-        SELECT queue, current_index, position_seconds, is_playing, transport_state, volume
+        SELECT queue, current_index, position_seconds, is_playing, transport_state, volume,
+               queue_revision
         FROM renderer_state
         WHERE renderer_udn = $1
         """,
@@ -134,39 +139,63 @@ async def get_renderer_state_db(db: asyncpg.Connection, udn: str) -> Dict[str, A
             "is_playing": False,
             "transport_state": "STOPPED",
             "volume": None,
+            "queue_revision": 0,
         }
 
+    queue = _decode_queue(row["queue"])
+
+    return {
+        "queue": queue,
+        "current_index": row["current_index"],
+        "position_seconds": row["position_seconds"],
+        "is_playing": bool(row["is_playing"]),
+        "transport_state": row["transport_state"] or "STOPPED",
+        "volume": row["volume"],
+        "queue_revision": int(row["queue_revision"] or 0),
+    }
+
+
+def _decode_queue(raw: Any) -> List[Dict[str, Any]]:
+    """Stored queue JSON -> list of items, each with an ``entry_id``.
+
+    Queues persisted before #325 carry none; they get deterministic ids here
+    (see ``queue_model.legacy_entry_id``) so every reader agrees until the
+    next full write stores them.
+    """
     try:
-        queue = json.loads(row[0])
+        queue = json.loads(raw) if isinstance(raw, str) else raw
         if not isinstance(queue, list):
             queue = []
     except Exception:
         queue = []
-
     for t in queue:
-        t.pop("art_id", None)
-        t.pop("artwork_id", None)
-
-    return {
-        "queue": queue,
-        "current_index": row[1],
-        "position_seconds": row[2],
-        "is_playing": bool(row[3]),
-        "transport_state": row[4] if len(row) > 4 else "STOPPED",
-        "volume": row[5] if len(row) > 5 else None,
-    }
+        if isinstance(t, dict):
+            t.pop("art_id", None)
+            t.pop("artwork_id", None)
+    return ensure_entry_ids(queue)
 
 
 async def update_renderer_state_db(
-    db: asyncpg.Connection, udn: str, state: Dict[str, Any]
-):
-    """Upsert renderer state (all fields)."""
-    queue_json = json.dumps(strip_art_ids(state.get("queue", [])))
+    db: asyncpg.Connection,
+    udn: str,
+    state: Dict[str, Any],
+    expected_revision: Optional[int] = None,
+) -> Optional[int]:
+    """Upsert renderer state (all fields) and return the queue revision.
+
+    The revision moves only when the stored queue text changes, so progress
+    and index writes through here leave it alone. With ``expected_revision``
+    the write is conditional: when the row has moved on, nothing is written
+    and ``None`` comes back (the caller raises ``QueueConflict``). The check
+    and the write are one statement, so two racing edits cannot both win.
+    """
+    queue_json = json.dumps(strip_art_ids(ensure_entry_ids(state.get("queue", []))))
     volume = state.get("volume")
-    await db.execute(
+    revision = await db.fetchval(
         """
-        INSERT INTO renderer_state (renderer_udn, queue, current_index, position_seconds, is_playing, transport_state, volume, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        INSERT INTO renderer_state (renderer_udn, queue, current_index, position_seconds,
+                                    is_playing, transport_state, volume, queue_revision, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 1, NOW())
         ON CONFLICT(renderer_udn) DO UPDATE SET
             queue = excluded.queue,
             current_index = excluded.current_index,
@@ -174,7 +203,14 @@ async def update_renderer_state_db(
             is_playing = excluded.is_playing,
             transport_state = excluded.transport_state,
             volume = excluded.volume,
+            queue_revision = CASE
+                WHEN renderer_state.queue IS DISTINCT FROM excluded.queue
+                THEN renderer_state.queue_revision + 1
+                ELSE renderer_state.queue_revision
+            END,
             updated_at = NOW()
+        WHERE $8::bigint IS NULL OR renderer_state.queue_revision = $8::bigint
+        RETURNING queue_revision
     """,
         udn,
         queue_json,
@@ -183,7 +219,12 @@ async def update_renderer_state_db(
         bool(state.get("is_playing")),
         state.get("transport_state", "STOPPED"),
         volume,
+        expected_revision,
     )
+    if revision is not None:
+        state["queue_revision"] = int(revision)
+        return int(revision)
+    return None
 
 
 async def update_playback_progress_db(
@@ -240,16 +281,50 @@ async def update_renderer_status_db(
     )
 
 
-async def update_queue_logged_db(
-    db: asyncpg.Connection, udn: str, state: Dict[str, Any]
-):
-    """Update only the queue column (used after setting track logged flag)."""
-    queue_json = json.dumps(strip_art_ids(state.get("queue", [])))
-    await db.execute(
-        """
-        UPDATE renderer_state SET queue = $2, updated_at = NOW()
-        WHERE renderer_udn = $1
-    """,
-        udn,
-        queue_json,
-    )
+async def mark_entry_logged(
+    db: asyncpg.Connection, udn: str, entry_id: str, attempts: int = 3
+) -> bool:
+    """Set ``logged`` on one queue entry without disturbing anything else.
+
+    Re-reads the stored queue, flips the flag on the entry with ``entry_id``
+    and writes the queue back only if it is still the text that was read, so
+    a queue edit that landed in between is never overwritten (it is retried
+    on the fresh queue instead). The revision does not move: the queue's
+    membership and order are unchanged. Returns False when the entry is gone
+    or the write kept losing the race.
+    """
+    for _ in range(attempts):
+        row = await db.fetchrow(
+            "SELECT queue FROM renderer_state WHERE renderer_udn = $1", udn
+        )
+        if not row:
+            return False
+        before = row["queue"]
+        queue = _decode_queue(before)
+        pos = find_entry(queue, entry_id)
+        if pos < 0:
+            return False
+        if queue[pos].get("logged"):
+            return True
+        queue[pos]["logged"] = True
+        result = await db.execute(
+            """
+            UPDATE renderer_state SET queue = $2, updated_at = NOW()
+            WHERE renderer_udn = $1 AND queue = $3
+            """,
+            udn,
+            json.dumps(strip_art_ids(queue)),
+            before,
+        )
+        if result.rsplit(" ", 1)[-1] == "1":
+            return True
+    logger.warning("Could not mark %s logged on %s: queue kept changing", entry_id, udn)
+    return False
+
+
+def entry_id_of(item: Any) -> Optional[str]:
+    """The entry id of a queue item, when it is one."""
+    if isinstance(item, dict):
+        value = item.get(ENTRY_KEY)
+        return value if isinstance(value, str) and value else None
+    return None

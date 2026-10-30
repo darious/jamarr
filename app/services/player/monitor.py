@@ -2,7 +2,6 @@ import asyncio
 import os
 import time
 import logging
-import json
 from app.db import db_conn
 from app.upnp import UPnPManager
 from app.services.player.globals import (
@@ -19,8 +18,9 @@ from app.services.player.globals import (
 )
 from app.services.player.state import (
     enrich_track_metadata,
+    entry_id_of,
     get_renderer_state_db,
-    strip_art_ids,
+    mark_entry_logged,
     track_path_exists,
 )
 from app.services.player.queue import play_next_track_internal
@@ -886,13 +886,13 @@ async def _monitor_loop(udn: str, upnp):
                                     user_id=track.get("user_id"),
                                 )
                                 
-                                # Mark logged and persist
+                                # Mark logged on that entry alone: a full
+                                # queue write here would put back a queue
+                                # read before a concurrent edit landed.
                                 track["logged"] = True
-                                await db.execute(
-                                    "UPDATE renderer_state SET queue = $1 WHERE renderer_udn = $2",
-                                    json.dumps(strip_art_ids(queue)),
-                                    udn,
-                                )
+                                entry_id = entry_id_of(track)
+                                if entry_id:
+                                    await mark_entry_logged(db, udn, entry_id)
 
             # Execute side effects outside DB context (avoids holding a transaction open)
             if replay_track is not None:
