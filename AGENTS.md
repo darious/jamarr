@@ -44,7 +44,7 @@ android/app/src/main/java/com/jamarr/android/
   data/ConnectivityMonitor.kt  offline state (network + /api/health probe +
                      manual switch); offline UI = Downloads screens
   history/           plays made offline (own Room db) -> POST /api/history/offline
-migrations/          NNN_*.sql  (raw SQL; auto-applied on app startup + by deploy.sh)
+migrations/          NNN_*.sql  (raw SQL; auto-applied on app startup)
 tests/               pytest: api/ auth/ integration/ scanner/ unit/ + top-level
 docs/                outline.md, DATABASE_SCHEMA.md, api.md, auth.md, scanner.md,
                      DEV_MODE.md, tui.md, android.md
@@ -61,7 +61,7 @@ Everything runs through `uv` (backend/tui) or Docker Compose. Do not `pip instal
 | Frontend tests/check/lint/build | `./test-web.sh [all\|unit\|check\|lint\|build]` |
 | Lint (all) | `./lint.sh` (ruff for Python, svelte-check + css for web) |
 | Dev (hot reload, all services) | `./dev.sh` |
-| Deploy (pull img, backup db, migrate, restart) | `./deploy.sh` |
+| Install/upgrade a server (image-only, no checkout) | `docker compose pull && docker compose up -d` in a dir holding `docker-compose.yml`, `.env`, `config.yaml`; `./deploy.sh` = same with a DB dump first |
 | Scan library | `docker compose run --rm jamarr uv run python -m app.scanner.cli scan` |
 | Enrich metadata | `... app.scanner.cli metadata` |
 | Android lint+tests+APK | `android/test.sh` (add `RUN_ANDROID_INSTRUMENTATION=1` to require device tests) |
@@ -93,8 +93,8 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   and the `0.1.0`s in `pyproject.toml`/`web/package.json` are inert. Cut with
   `release.sh <tag> "<Name>"` — see `docs/reference/release-names.md`.
 - CI builds on PRs and on release tags only; a merge to `main` builds nothing.
-  `deploy.sh` pulls `:latest`, which now moves on server tags rather than on
-  every merge, so deploys land released versions. `workflow_dispatch` on
+  Servers pull `:latest`, which moves on server tags rather than on every
+  merge, so deploys land released versions. `workflow_dispatch` on
   `publish_docker.yml` publishes an untagged `main` when you need it.
 - Ports (dev): API 8111, Vite 5173, Postgres 8110, CloudBeaver 8978.
 
@@ -199,7 +199,11 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   (`android/.../cast/CastQueueReconciler.kt`, pure + JVM-tested). Server receiver
   queue/preload is opt-in (`renderer.cast_queue`); per-track LOAD is the default;
   a queue edit that leaves no next track QUEUE_REMOVEs the staged item.
-- `HOST_IP` auto-derived in `dev.sh`/`deploy.sh` via route lookup; override by exporting it.
+- `HOST_IP` auto-derived in `dev.sh` via route lookup; deployments set it in `.env`.
+- Servers never build: `docker-compose.yml` is image-only (`build: .` lives in
+  `docker-compose.dev.yml`; `dev.sh` passes both files to `build`). Releases
+  attach compose/.env.example/config.yaml/deploy.sh. The user's own prod runs
+  its own four-line pull-and-recreate script, not `deploy.sh`.
 - Artwork resizes (`app/media/art.py`): one shared task per (sha1, bucket) per
   process, own thread pool (`artwork.resize_workers` / `ART_RESIZE_WORKERS`,
   default 2), staging file + `os.replace` so the cache never holds a partial

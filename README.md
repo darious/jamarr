@@ -30,19 +30,32 @@ Scan a local music library, enrich it with metadata from MusicBrainz and Spotify
 
 ## Quick Start
 
-### 1. Configure
+Jamarr ships as a Docker image (`ghcr.io/darious/jamarr`). A server needs
+three files, not the repository: `docker-compose.yml`, `.env` and
+`config.yaml`. All three are attached to every
+[release](https://github.com/darious/jamarr/releases) and live at the top of
+this repo.
+
+### 1. Get the files
 
 ```bash
+mkdir jamarr && cd jamarr
+for f in docker-compose.yml .env.example config.yaml; do
+  curl -fsSLO "https://raw.githubusercontent.com/darious/jamarr/main/$f"
+done
 cp .env.example .env
 ```
+
+### 2. Configure
 
 Edit `.env` and set the required values:
 
 | Variable | Description |
 |:---|:---|
-| `HOST_IP` | Your server's LAN IP (auto-detected by `deploy.sh` if left unset) |
+| `HOST_IP` | Your server's LAN IP (renderers fetch streams from it) |
 | `MUSIC_NFS_ADDR` | NFS server address hosting your music library |
 | `MUSIC_NFS_PATH` | NFS export path on the server |
+| `DB_PASS` | PostgreSQL password (the stack refuses to start without it) |
 | `DB_DATA_PATH` | Host directory for PostgreSQL data |
 | `CACHE_PATH` | Host directory for Jamarr cache |
 | `JWT_SECRET_KEY` | Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
@@ -51,17 +64,22 @@ Edit `.env` and set the required values:
 
 Optional API keys for additional metadata sources: `QOBUZ_*`, `TIDAL_*`, `FANARTTV_API_KEY`.
 
-Non-secret app config (MusicBrainz URL, logging, concurrency) lives in `config.yaml`.
+Non-secret app config (MusicBrainz URL, logging, concurrency, per-renderer overrides) lives in `config.yaml`.
 
-### 2. Deploy
+### 3. Start, and upgrade the same way
 
 ```bash
-./deploy.sh
+docker compose pull && docker compose up -d
 ```
 
-This pulls the latest image, backs up the database, runs migrations, and restarts the stack. The container uses `network_mode: "host"` for UPnP device discovery.
+Database migrations run when the app starts. The container uses
+`network_mode: "host"` for UPnP device discovery. To pin a version instead of
+`latest`, change the image tag in `docker-compose.yml` (for example `:1.14.0`).
 
-### 3. Scan your library
+Want a database dump before each upgrade? `deploy.sh` (also attached to each
+release) does prune → pull → dump → migrate → restart in that directory.
+
+### 4. Scan your library
 
 ```bash
 docker compose run --rm jamarr uv run python -m app.scanner.cli scan
@@ -70,7 +88,7 @@ docker compose run --rm jamarr uv run python -m app.scanner.cli metadata
 
 See [Scanner CLI](docs/scanner.md) for full command reference.
 
-### 4. Open the UI
+### 5. Open the UI
 
 `http://your-server-ip:8111`
 
