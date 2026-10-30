@@ -163,6 +163,14 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   both were evaluated and not built (ADR-0007, ADR-0011).
   Control handlers (pause/resume/seek/volume) write status columns only
   (`update_renderer_status_db`), never a read-modify-write of the queue row.
+- Server queue: items carry a server-assigned `entry_id` (occurrence, not
+  track id; `app/services/player/queue_model.py`) and the row a
+  `queue_revision` that moves on content changes only. Queue mutations take
+  an optional `expected_revision` and answer 409 `queue_conflict` with the
+  live state; `update_renderer_state_db(..., expected_revision)` is the one
+  conditional write. Never write the queue column from a status/progress
+  path; flag history with `mark_entry_logged`. Docs: renderers.md "Queue
+  identity and revisions", ADR-0012.
 - Android local playback: terminal errors go through `PlaybackErrorPolicy`
   (bounded retry/skip/give-up, diagnostics in `PlaybackTelemetry`, tokens
   redacted); per-network streaming caps in `StreamingQualityPolicy` (new queue
