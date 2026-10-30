@@ -2207,6 +2207,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#playback-downloads-and-android-auto-hardening-2026-10-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Playback, downloads and Android Auto hardening - 2026-10-29
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -3020,6 +3031,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#playback-downloads-and-android-auto-hardening-2026-10-29" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Playback, downloads and Android Auto hardening - 2026-10-29
+      
+    </span>
+  </a>
   
 </li>
       
@@ -3844,6 +3866,302 @@ down afterwards.</p>
 with Kotlin interface delegation (<code>by</code>), which does not generate overrides for
 Java default methods — so every browse call fell through to media3's defaults
 and returned <code>ERROR_NOT_SUPPORTED</code>. Only a real <code>MediaBrowser</code> could see that.</p>
+<h2 id="playback-downloads-and-android-auto-hardening-2026-10-29">Playback, downloads and Android Auto hardening - 2026-10-29<a class="headerlink" href="#playback-downloads-and-android-auto-hardening-2026-10-29" title="Permanent link">&para;</a></h2>
+<p>One pass over the Android issues #320, #321, #323, #324, #326, #327, #328,</p>
+<h1 id="329-330-331-and-333-each-landed-as-its-own-commit-this-section-is-the">329, #330, #331 and #333. Each landed as its own commit; this section is the<a class="headerlink" href="#329-330-331-and-333-each-landed-as-its-own-commit-this-section-is-the" title="Permanent link">&para;</a></h1>
+<p>map. The local playback and download items below were driven by hand on the
+headless emulator with the app signed in to the LAN server. The Android Auto
+items were tested two ways: the instrumented provider tests run against a
+fake server with canned JSON, and <code>SignedInLibraryWalkTest</code> walks the tree
+over a real <code>MediaBrowser</code> against the signed-in library (results under
+"Against the real library" below). <strong>Nothing in this pass was run inside
+Android Auto itself</strong>: no Desktop Head Unit, no car. How a host renders the
+tree, search, buttons, style hints or <code>content://</code> artwork is unseen.</p>
+<h3 id="local-playback">Local playback<a class="headerlink" href="#local-playback" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Audio focus, becoming-noisy, wake mode (#323).</strong> The ExoPlayer is built
+  with <code>USAGE_MEDIA</code>/<code>CONTENT_TYPE_MUSIC</code> attributes and ExoPlayer-managed
+  focus, pauses on <code>AUDIO_BECOMING_NOISY</code>, and holds <code>WAKE_MODE_NETWORK</code>
+  only while playing (<code>PlayerAudioConfig</code>, <code>WAKE_LOCK</code> permission). Verified
+  with a simulated incoming call on the emulator: focus loss paused, regain
+  resumed. Remote renderers are untouched: UPnP and Cast never go through
+  this player.</li>
+<li><strong>Terminal errors (#326).</strong> <code>onPlayerError</code> now runs <code>PlaybackErrorPolicy</code>:
+  classify from the error code plus the HTTP status behind it, then retry
+  with backoff (1 s / 3 s / 8 s, three per track per two minutes), with a
+  fresh stream token for 401/403, a cache purge and re-download for
+  unreadable bytes on disk, or a quality step-down for decoder trouble on an
+  original; skip missing/unsupported tracks (three in a row at most);
+  otherwise give up and leave the player in its error state. The queue,
+  index and position survive because the player is only re-prepared.
+  <code>PlaybackDiagnostics</code> keeps a 40-entry in-memory record with tokens and
+  signed URLs redacted; the phone shows the summary in the banner and a
+  Retry control in Now Playing, the car gets a readable <code>SessionError</code>.
+  Verified on the emulator by cutting all networks mid-queue: three retries,
+  gave up, Retry after the network came back resumed the same position.</li>
+<li><strong>Streaming quality ceilings (#328).</strong> One cap per network class
+  (<code>StreamingQualityPolicy</code>, settings "Streaming quality"), keyed on
+  <code>isActiveNetworkMetered</code> so a metered hotspot is metered. Boundary rules:
+  a new queue starts at the cap for its network; a lower cap applies at
+  once (reloading the current track at its position unless it is already
+  on the device, then only what follows changes); a higher cap applies from
+  the next queue so read-ahead on disk is not refetched. Defaults are
+  "original" on both, which is what playback did before. Verified on the
+  emulator: Wi-Fi off mid-album moved the next track to Opus 128.</li>
+<li><strong>Playback details (#333).</strong> Tap the quality badge in Now Playing (local
+  playback only) for source / decoder / output layers gathered from
+  <code>AnalyticsListener</code> (<code>onAudioInputFormatChanged</code>,
+  <code>onAudioDecoderInitialized</code>, <code>onAudioTrackInitialized</code>, <code>onAudioUnderrun</code>)
+  and an <code>AudioDeviceCallback</code> for the route. <code>PlaybackDetails.processing()</code>
+  infers only what the numbers support (server transcode, resample,
+  re-quantise, offload, mixer rate, underruns); unknown fields read "not
+  reported"; the pre-API-33 route is marked as a guess. The sheet also lists
+  the last diagnostics and offers "Copy diagnostics" as the only export.</li>
+</ul>
+<h3 id="downloads">Downloads<a class="headerlink" href="#downloads" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Failure reasons and a storage hold (#327).</strong> <code>DownloadFailures</code>
+  classifies Media3's <code>finalException</code> (sign-in expired, not on server,
+  network, server, no space left, storage error) and the reason is kept in
+  Room (schema v2, <code>downloaded_track.failureReason</code>) because Media3's index
+  only remembers "failed". <code>StorageReservePolicy</code> keeps the larger of 500 MB
+  and 5 % of the volume free, pausing the <code>DownloadManager</code> under the
+  reserve (through the download service, so the foreground service follows
+  the queue) and resuming 100 MB above it; Android's own low-storage signal
+  (the <em>smaller</em> of 5 % / 500 MB) is a second line via
+  <code>DEVICE_STORAGE_NOT_LOW</code>. Partial downloads stay resumable and nothing is
+  ever deleted to make room. <code>JamarrDownloads.hold</code> tells waiting apart from
+  failure; the Downloads screen shows the hold, each failed row says why,
+  its trailing control retries, and "Retry all / Retry failed" requeue the
+  retryable ones. Verified on the emulator by filling the data partition
+  mid-download: held at 227 MB free, resumed after the file was deleted,
+  all 31 tracks finished. During a hold the download notification is gone
+  (Media3 stops the service when no task runs); the in-app banner is the
+  signal.</li>
+</ul>
+<h3 id="android-auto">Android Auto<a class="headerlink" href="#android-auto" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Search (#324).</strong> <code>onSearch</code>/<code>onGetSearchResult</code> are implemented and
+  forwarded explicitly through the service callback; the root advertises
+  <code>SEARCH_SUPPORTED</code>. Results are one flat bounded list in group order
+  (artists, albums, playlists, tracks) with group-title hints, from
+  <code>/api/search</code> plus playlists matched by name. Track results name the
+  search as their parent (<code>search:&lt;urlencoded query&gt;</code>) so a tap queues the
+  other results. A query superseded by a newer one from the same browser
+  never announces its count. Voice play-from-search is still rejected.</li>
+<li><strong>Session buttons and style hints (#329).</strong> <code>MediaButtonPolicy</code> publishes
+  shuffle, repeat and a favourite-album button (tracks cannot be favourites
+  in Jamarr) as media button preferences, rebuilt from confirmed state on
+  every change. The commands are session commands authorised only for
+  controllers <code>onConnect</code> accepts and handled in <code>onCustomCommand</code>. Track
+  items carry their album id in extras. The root declares
+  <code>CONTENT_STYLE_SUPPORTED</code>; album/artist/playlist folders hint a grid,
+  track folders a list; the host still decides the layout.</li>
+<li><strong>Targeted invalidation (#330).</strong> <code>LibraryChanges</code> (on the application) is
+  the one channel for changes made on this phone: favourite toggles (screens
+  and the session button), plays that will land in history (same 30 s / 20 %
+  rule the server applies, device/server-renderer track changes, offline
+  upload), playlists. <code>LibraryChangeRouter</code> maps each change to the cache
+  keys to drop and the folders to re-notify; the provider batches a burst
+  for 300 ms, invalidates before notifying, and never re-notifies an
+  unaffected folder. Server-originated changes were evaluated and left on
+  the TTL: the server's event stream only carries scan events.</li>
+<li><strong>Artwork content provider (#331).</strong> Browse items no longer embed image
+  bytes. <code>ArtworkContentProvider</code> serves <code>content://&lt;pkg&gt;.artwork/art/&lt;sha1&gt;</code>
+  and <code>/grid/&lt;sha1,...&gt;</code>: offline store first, then its own cache
+  (<code>cacheDir/auto_art</code>, 48 MB, oldest out), then one bounded, single-flight
+  server fetch published by temp-file + rename. Only artwork hashes parse;
+  everything else is <code>FileNotFoundException</code>. The service grants a prefix
+  read grant to each accepted controller. <code>ArtworkPolicy</code> is now URI (HTTPS)
+  or CONTENT (cleartext server, and always for downloaded art). <strong>Not
+  verified on a head unit</strong> (no DHU here); this is the UAMP reference
+  approach.</li>
+<li><strong>First-page latency (#321).</strong> Before/after measured with
+  <code>BrowseLatencyBenchmarkTest</code> (fake server, 40 ms per request, 2,000-row
+  nodes, 20-row pages); the real-library numbers are in the next section:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>node</th>
+<th>before</th>
+<th>after</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Recently Played › Albums</td>
+<td>5 requests, ~418 ms, capped at 30 rows</td>
+<td>1 request, ~47 ms, no cap</td>
+</tr>
+<tr>
+<td>Recently Played › Artists</td>
+<td>5 requests, ~418 ms, capped at 30 rows</td>
+<td>1 request, ~52 ms, no cap</td>
+</tr>
+<tr>
+<td>Recently Added</td>
+<td>5 requests, ~414 ms, capped at 30 rows</td>
+<td>1 request, ~51 ms, no cap</td>
+</tr>
+<tr>
+<td>Recently Played › Tracks</td>
+<td>1 request, ~74 ms, capped at 50 rows</td>
+<td>1 request, ~76 ms, no cap</td>
+</tr>
+<tr>
+<td>Favourite Artists</td>
+<td>1 request, ~121 ms</td>
+<td>1 request, ~99 ms</td>
+</tr>
+</tbody>
+</table>
+<p>The home-backed folders now read their own endpoint with a <code>limit</code>,
+  climbing a prefix ladder (50, 100, 200, 500, 1000, 2000) as the browser
+  pages; every page slices one server-ordered prefix (2,000 rows in six
+  requests, no gaps or duplicates). Queue construction for Recently Played
+  tracks uses the longest listed prefix. API calls are cancellable (a browse
+  the car moved on from stops using the network) and the browse cache is
+  bounded to 256 LRU entries. Nodes without server paging remain one request.</p>
+<h3 id="against-the-real-library">Against the real library<a class="headerlink" href="#against-the-real-library" title="Permanent link">&para;</a></h3>
+<p><code>SignedInLibraryWalkTest</code> connects a <code>MediaBrowser</code> to the service from the
+app's own process and walks the tree the way a host would: every root folder
+in full, a sample two deep (artist → albums → tracks), paging until a short
+page, the artwork behind the rows through the content resolver, <code>getItem</code>
+for sampled playables, and search with names taken from the tree itself. It
+skips unless the installed debug app holds a session, so it costs nothing on
+a clean device. Run it on its own: the shared instrumented suite clears the
+stored session before it gets there, so inside <code>android/test.sh</code> it always
+skips (reported as an assumption failure, not a red build). Sign the app in
+on the emulator first, then</p>
+<div class="highlight"><pre><span></span><code>./gradlew :app:connectedDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.jamarr.android.playback.SignedInLibraryWalkTest
+adb logcat -d -s LibraryWalk
+</code></pre></div>
+<p>Run on 2026-10-30 against the LAN server (prod library, 50-row pages, cold
+process):</p>
+<table>
+<thead>
+<tr>
+<th>node</th>
+<th>rows</th>
+<th>first page</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Playlists</td>
+<td>16</td>
+<td>589 ms (one <code>/api/playlists</code> call)</td>
+</tr>
+<tr>
+<td>Charts</td>
+<td>100 over 2 pages</td>
+<td>74 ms, then 7 ms</td>
+</tr>
+<tr>
+<td>Recently Added</td>
+<td>300+ over 6 pages (capped)</td>
+<td>431 ms; each ladder step (100, 200, 500) ~420 ms, cached pages &lt; 10 ms</td>
+</tr>
+<tr>
+<td>Recently Played › Albums / Artists</td>
+<td>50</td>
+<td>75 ms / 74 ms</td>
+</tr>
+<tr>
+<td>Favourite Artists / Releases</td>
+<td>7 / 5</td>
+<td>33 ms / 12 ms</td>
+</tr>
+<tr>
+<td>History › Albums / Artists</td>
+<td>10 / 10</td>
+<td>2 ms / 36 ms</td>
+</tr>
+<tr>
+<td>Artist page (five groups)</td>
+<td>14</td>
+<td>556 ms</td>
+</tr>
+<tr>
+<td>Album</td>
+<td>12–32</td>
+<td>43–63 ms</td>
+</tr>
+</tbody>
+</table>
+<p>Recently Added costs ~420 ms per request on the server whatever the limit,
+so the ladder's cost is in the number of steps, not the rows; the fake-server
+table above is the right read of the client change. All 14 sampled
+<code>content://</code> artwork URIs decoded (400×400, grid tiles 320×320), six of six
+<code>getItem</code> calls answered, and search came back grouped and in order:
+"Portraits of Tracy" → 1 artist, 2 tracks; "Portraits" → 1 artist, 4 albums,
+20 tracks; "the" → 20 artists, 1 playlist and nothing else, which is what
+<code>/api/search</code> itself returns for that query. Ten of fifty recently played
+artists had no artwork, a library gap rather than a client one. The test
+shares the app's uid, so the per-controller artwork grant is not exercised
+by it.</p>
+<h3 id="direct-renderer-queue-recovery-320">Direct renderer queue recovery (#320)<a class="headerlink" href="#direct-renderer-queue-recovery-320" title="Permanent link">&para;</a></h3>
+<p><code>RendererResumeSnapshot</code> (DataStore <code>renderer_resume_v1</code>) records the UPnP
+queue the phone drives: renderer id, track ids and display metadata, index,
+position, server URL and the session's JWT subject; never a stream URL.
+Written debounced from the controller's state, cleared by Stop and logout.
+On start <code>RendererResumePolicy</code> validates it (same server and account, under
+12 h), waits for the renderer to be discovered, probes it without touching it,
+and asks: <strong>Take control</strong> when it is still on a track of our queue (adopts
+queue and index at the renderer's own position; no transport command),
+<strong>Resume</strong> when idle, <strong>Replace</strong> when it plays a foreign stream (the dialog
+says another controller may be using it). An unreachable renderer offers
+nothing and keeps the snapshot. Accepting re-checks the tracks against the
+server so deleted ones drop out. Cast was audited and left alone: the
+receiver owns that queue and the app already rebuilds it from the receiver's
+<code>customData</code>. <strong>The live probe/adopt path is not exercised against a real
+renderer in this pass</strong>; the policy and <code>UpnpTrackSequencer.adopt</code> are
+unit-tested.</p>
+<h3 id="testing-additions">Testing additions<a class="headerlink" href="#testing-additions" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Error policy, diagnostics redaction, streaming caps, playback details inference, media buttons, change router, artwork URI grammar, resume policy</td>
+<td><code>app/src/test/.../playback/</code>, <code>.../renderer/</code></td>
+</tr>
+<tr>
+<td>Download failure classification, storage reserve</td>
+<td><code>app/src/test/.../download/</code></td>
+</tr>
+<tr>
+<td>Room v1→v2 migration, failure-reason DAO</td>
+<td><code>app/src/androidTest/.../download/db/</code></td>
+</tr>
+<tr>
+<td>Search, style hints, album ids, invalidation ordering, content URIs</td>
+<td><code>JamarrLibraryProviderInstrumentedTest</code></td>
+</tr>
+<tr>
+<td>Content provider through the resolver (sources, refusals, concurrency)</td>
+<td><code>ArtworkContentProviderInstrumentedTest</code></td>
+</tr>
+<tr>
+<td>Custom commands and search over a real <code>MediaBrowser</code></td>
+<td><code>MediaBrowserHarnessTest</code></td>
+</tr>
+<tr>
+<td>First-page latency baseline/after</td>
+<td><code>BrowseLatencyBenchmarkTest</code></td>
+</tr>
+<tr>
+<td>Whole tree, paging, artwork, <code>getItem</code>, search over a real <code>MediaBrowser</code> against the signed-in library (skips when signed out)</td>
+<td><code>SignedInLibraryWalkTest</code></td>
+</tr>
+</tbody>
+</table>
 
 
 
