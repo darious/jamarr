@@ -66,9 +66,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
+      # The files an install needs, so a server never has to clone the repo:
+      # the compose file that matches this image, the env template, the
+      # default config and the optional upgrade helper.
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3.0.3
         with:
           name: ${{ github.ref_name }}
           generate_release_notes: true
+          files: |
+            docker-compose.yml
+            .env.example
+            config.yaml
+            deploy.sh
 

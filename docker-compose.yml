@@ -1,3 +1,14 @@
+# Jamarr production stack. Image-only: nothing is built on the server.
+#
+# Needs two files beside it, both shipped with every release and in the repo:
+#   .env         copy of .env.example with your values (DB_PASS, HOST_IP, paths)
+#   config.yaml  non-secret app config, bind-mounted into the container
+#
+#   docker compose pull && docker compose up -d       # install or upgrade
+#
+# Migrations apply when the app starts. deploy.sh (optional) adds a database
+# dump before the upgrade. Developers: dev.sh layers docker-compose.dev.yml,
+# which adds the build.
 services:
   jamarr_db:
     image: postgres:18.1-alpine
@@ -17,7 +28,6 @@ services:
 
 
   jamarr:
-    build: .
     image: ghcr.io/darious/jamarr:latest
     container_name: jamarr
     network_mode: "host"

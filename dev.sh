@@ -53,7 +53,7 @@ fi
 
 if [[ "$CURRENT_HASH" != "$STORED_HASH" ]]; then
   echo "📦 Dependencies changed (pyproject.toml/uv.lock), rebuilding Docker image..."
-  docker compose build jamarr
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml build jamarr
   echo "$CURRENT_HASH" > "$DEP_HASH_FILE"
   echo "✅ Build complete and hash updated."
 else
