@@ -112,6 +112,9 @@ export interface Album {
 
 export interface Track {
     id: number;
+    // Identity of this occurrence in a queue, assigned by the server when the
+    // track entered one (#325). Only set on tracks that came from the queue.
+    entry_id?: string;
     path: string;
     title: string;
     artist: string;

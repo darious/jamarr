@@ -41,14 +41,6 @@
   let dropIndex: number | null = null;
   let dragTrack: any = null;
 
-  const moveItem = (arr: any[], from: number, to: number) => {
-    const updated = [...arr];
-    const [item] = updated.splice(from, 1);
-    const target = to > from ? to - 1 : to;
-    updated.splice(target, 0, item);
-    return updated;
-  };
-
   // Scroll state
   let scrollContainer: HTMLElement;
   let autoScrollSpeed = 0;
@@ -151,8 +143,7 @@
       return;
     }
 
-    const newQueue = moveItem($playerState.queue, dragIndex, dropIndex);
-    await reorderQueue(newQueue);
+    await reorderQueue(dragIndex, dropIndex);
     resetDrag();
   };
 

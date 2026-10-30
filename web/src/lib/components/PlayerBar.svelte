@@ -891,9 +891,15 @@
                 changed = true;
               }
 
-              // Optional: Sync queue if needed (e.g. length changed)
-              if (s.queue.length !== state.queue.length) {
+              // Sync the queue when the server's revision moved (an edit
+              // from another client: reorder, append, remove), or on a
+              // length change for a server without revisions.
+              const revisionMoved =
+                state.queue_revision !== undefined &&
+                state.queue_revision !== s.queue_revision;
+              if (revisionMoved || s.queue.length !== state.queue.length) {
                 newState.queue = state.queue;
+                newState.queue_revision = state.queue_revision ?? s.queue_revision;
                 changed = true;
               }
 
