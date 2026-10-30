@@ -1519,6 +1519,12 @@
           "nullable": true
         },
         {
+          "name": "queue_revision",
+          "type": "bigint",
+          "nullable": false,
+          "default": "0"
+        },
+        {
           "name": "updated_at",
           "type": "timestamp with time zone",
           "nullable": true,
@@ -1536,6 +1542,16 @@
         }
       ],
       "constraints": [
+        {
+          "name": "renderer_state_queue_revision_not_null",
+          "type": "n",
+          "def": "NOT NULL queue_revision",
+          "table": "public.renderer_state",
+          "referenced_table": "",
+          "columns": [
+            "queue_revision"
+          ]
+        },
         {
           "name": "renderer_state_renderer_udn_not_null",
           "type": "n",

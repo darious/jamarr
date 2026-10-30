@@ -23,9 +23,9 @@
       }
     },
     "/art/file/{sha1}": {
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -68,9 +68,9 @@
           }
         }
       },
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -179,9 +179,9 @@
       }
     },
     "/api/art/file/{sha1}": {
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -224,9 +224,9 @@
           }
         }
       },
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
         "parameters": [
           {
             "name": "sha1",
@@ -1111,10 +1111,10 @@
       }
     },
     "/api/stream/{track_id}": {
-      "get": {
+      "head": {
         "summary": "Stream Track",
         "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.",
-        "operationId": "stream_track_api_stream__track_id__get",
+        "operationId": "stream_track_api_stream__track_id__head",
         "parameters": [
           {
             "name": "track_id",
@@ -1211,10 +1211,10 @@
           }
         }
       },
-      "head": {
+      "get": {
         "summary": "Stream Track",
         "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.",
-        "operationId": "stream_track_api_stream__track_id__get",
+        "operationId": "stream_track_api_stream__track_id__head",
         "parameters": [
           {
             "name": "track_id",
@@ -1561,7 +1561,7 @@
     "/api/player/queue/reorder": {
       "post": {
         "summary": "Reorder Queue",
-        "description": "Reorder the queue without changing playback state.\nExpects the same queue items in a new order.",
+        "description": "Reorder the queue without changing playback state.\n\nExpects the current queue's items in their new order. Items are matched\nby ``entry_id`` (so the same track queued twice stays two distinct\noccurrences); items without one match the first unused occurrence of\ntheir track id, as older clients expect. Items left out are removed and\nunknown items are added as new occurrences. The entry that was playing\nstays current wherever it moved to; if it was removed the transport\nstops. With ``expected_revision`` set, a stale edit is refused with 409\nand the live state.",
         "operationId": "reorder_queue_api_player_queue_reorder_post",
         "parameters": [
           {
@@ -1632,7 +1632,7 @@
     "/api/player/queue/clear": {
       "post": {
         "summary": "Clear Queue",
-        "description": "Empty the active renderer queue and stop playback.",
+        "description": "Empty the active renderer queue and stop playback.\n\nOptional body ``{\"expected_revision\": n}`` refuses the clear with 409\nwhen the queue has changed since it was read.",
         "operationId": "clear_queue_api_player_queue_clear_post",
         "parameters": [
           {
@@ -1668,6 +1668,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ClearQueue"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Update"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -6312,6 +6329,17 @@
             },
             "type": "array",
             "title": "Tracks"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
           }
         },
         "type": "object",
@@ -6537,6 +6565,23 @@
           "title"
         ],
         "title": "ChartOverrideKey"
+      },
+      "ClearQueue": {
+        "properties": {
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          }
+        },
+        "type": "object",
+        "title": "ClearQueue"
       },
       "CreateTaskRequest": {
         "properties": {
@@ -6875,6 +6920,11 @@
             "type": "integer",
             "title": "Current Index"
           },
+          "queue_revision": {
+            "type": "integer",
+            "title": "Queue Revision",
+            "default": 0
+          },
           "position_seconds": {
             "type": "number",
             "title": "Position Seconds"
@@ -7178,6 +7228,17 @@
             "type": "integer",
             "title": "Start Index",
             "default": 0
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
           }
         },
         "type": "object",
@@ -8083,6 +8144,17 @@
               }
             ],
             "title": "Artists"
+          },
+          "entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Id"
           }
         },
         "type": "object",

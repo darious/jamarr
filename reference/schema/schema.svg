@@ -485,35 +485,38 @@
 <!-- public.renderer_state -->
 <g id="node11" class="node">
 <title>public.renderer_state</title>
-<polygon fill="#efefef" stroke="none" points="6768.21,-2977.2 6768.21,-3012.8 7058.12,-3012.8 7058.12,-2977.2 6768.21,-2977.2"/>
-<polygon fill="none" stroke="black" points="6768.21,-2977.2 6768.21,-3012.8 7058.12,-3012.8 7058.12,-2977.2 6768.21,-2977.2"/>
-<text text-anchor="start" x="6775.21" y="-2990.6" font-family="Arial Bold" font-size="18.00">public.renderer_state</text>
-<text text-anchor="start" x="6926.63" y="-2990.6" font-family="Arial" font-size="14.00">    </text>
-<text text-anchor="start" x="6957.75" y="-2990.6" font-family="Arial" font-size="14.00" fill="#666666">[BASE TABLE]</text>
-<polygon fill="none" stroke="black" points="6768.21,-2946.4 6768.21,-2977.2 7058.12,-2977.2 7058.12,-2946.4 6768.21,-2946.4"/>
-<text text-anchor="start" x="6775.21" y="-2958.6" font-family="Arial" font-size="14.00">renderer_udn </text>
-<text text-anchor="start" x="6863.16" y="-2958.6" font-family="Arial" font-size="14.00" fill="#666666">[text]</text>
-<polygon fill="none" stroke="black" points="6768.21,-2915.6 6768.21,-2946.4 7058.12,-2946.4 7058.12,-2915.6 6768.21,-2915.6"/>
-<text text-anchor="start" x="6775.21" y="-2927.8" font-family="Arial" font-size="14.00">queue </text>
-<text text-anchor="start" x="6818.03" y="-2927.8" font-family="Arial" font-size="14.00" fill="#666666">[text]</text>
-<polygon fill="none" stroke="black" points="6768.21,-2884.8 6768.21,-2915.6 7058.12,-2915.6 7058.12,-2884.8 6768.21,-2884.8"/>
-<text text-anchor="start" x="6775.21" y="-2897" font-family="Arial" font-size="14.00">current_index </text>
-<text text-anchor="start" x="6863.92" y="-2897" font-family="Arial" font-size="14.00" fill="#666666">[integer]</text>
-<polygon fill="none" stroke="black" points="6768.21,-2854 6768.21,-2884.8 7058.12,-2884.8 7058.12,-2854 6768.21,-2854"/>
-<text text-anchor="start" x="6775.21" y="-2866.2" font-family="Arial" font-size="14.00">position_seconds </text>
-<text text-anchor="start" x="6887.28" y="-2866.2" font-family="Arial" font-size="14.00" fill="#666666">[double precision]</text>
-<polygon fill="none" stroke="black" points="6768.21,-2823.2 6768.21,-2854 7058.12,-2854 7058.12,-2823.2 6768.21,-2823.2"/>
-<text text-anchor="start" x="6775.21" y="-2835.4" font-family="Arial" font-size="14.00">is_playing </text>
-<text text-anchor="start" x="6841.36" y="-2835.4" font-family="Arial" font-size="14.00" fill="#666666">[boolean]</text>
-<polygon fill="none" stroke="black" points="6768.21,-2792.4 6768.21,-2823.2 7058.12,-2823.2 7058.12,-2792.4 6768.21,-2792.4"/>
-<text text-anchor="start" x="6775.21" y="-2804.6" font-family="Arial" font-size="14.00">transport_state </text>
-<text text-anchor="start" x="6872.48" y="-2804.6" font-family="Arial" font-size="14.00" fill="#666666">[text]</text>
-<polygon fill="none" stroke="black" points="6768.21,-2761.6 6768.21,-2792.4 7058.12,-2792.4 7058.12,-2761.6 6768.21,-2761.6"/>
-<text text-anchor="start" x="6775.21" y="-2773.8" font-family="Arial" font-size="14.00">volume </text>
-<text text-anchor="start" x="6824.23" y="-2773.8" font-family="Arial" font-size="14.00" fill="#666666">[integer]</text>
-<polygon fill="none" stroke="black" points="6768.21,-2730.8 6768.21,-2761.6 7058.12,-2761.6 7058.12,-2730.8 6768.21,-2730.8"/>
-<text text-anchor="start" x="6775.21" y="-2743" font-family="Arial" font-size="14.00">updated_at </text>
-<text text-anchor="start" x="6849.17" y="-2743" font-family="Arial" font-size="14.00" fill="#666666">[timestamp with time zone]</text>
+<polygon fill="#efefef" stroke="none" points="6768.21,-2992.6 6768.21,-3028.2 7058.12,-3028.2 7058.12,-2992.6 6768.21,-2992.6"/>
+<polygon fill="none" stroke="black" points="6768.21,-2992.6 6768.21,-3028.2 7058.12,-3028.2 7058.12,-2992.6 6768.21,-2992.6"/>
+<text text-anchor="start" x="6775.21" y="-3006" font-family="Arial Bold" font-size="18.00">public.renderer_state</text>
+<text text-anchor="start" x="6926.63" y="-3006" font-family="Arial" font-size="14.00">    </text>
+<text text-anchor="start" x="6957.75" y="-3006" font-family="Arial" font-size="14.00" fill="#666666">[BASE TABLE]</text>
+<polygon fill="none" stroke="black" points="6768.21,-2961.8 6768.21,-2992.6 7058.12,-2992.6 7058.12,-2961.8 6768.21,-2961.8"/>
+<text text-anchor="start" x="6775.21" y="-2974" font-family="Arial" font-size="14.00">renderer_udn </text>
+<text text-anchor="start" x="6863.16" y="-2974" font-family="Arial" font-size="14.00" fill="#666666">[text]</text>
+<polygon fill="none" stroke="black" points="6768.21,-2931 6768.21,-2961.8 7058.12,-2961.8 7058.12,-2931 6768.21,-2931"/>
+<text text-anchor="start" x="6775.21" y="-2943.2" font-family="Arial" font-size="14.00">queue </text>
+<text text-anchor="start" x="6818.03" y="-2943.2" font-family="Arial" font-size="14.00" fill="#666666">[text]</text>
+<polygon fill="none" stroke="black" points="6768.21,-2900.2 6768.21,-2931 7058.12,-2931 7058.12,-2900.2 6768.21,-2900.2"/>
+<text text-anchor="start" x="6775.21" y="-2912.4" font-family="Arial" font-size="14.00">current_index </text>
+<text text-anchor="start" x="6863.92" y="-2912.4" font-family="Arial" font-size="14.00" fill="#666666">[integer]</text>
+<polygon fill="none" stroke="black" points="6768.21,-2869.4 6768.21,-2900.2 7058.12,-2900.2 7058.12,-2869.4 6768.21,-2869.4"/>
+<text text-anchor="start" x="6775.21" y="-2881.6" font-family="Arial" font-size="14.00">position_seconds </text>
+<text text-anchor="start" x="6887.28" y="-2881.6" font-family="Arial" font-size="14.00" fill="#666666">[double precision]</text>
+<polygon fill="none" stroke="black" points="6768.21,-2838.6 6768.21,-2869.4 7058.12,-2869.4 7058.12,-2838.6 6768.21,-2838.6"/>
+<text text-anchor="start" x="6775.21" y="-2850.8" font-family="Arial" font-size="14.00">is_playing </text>
+<text text-anchor="start" x="6841.36" y="-2850.8" font-family="Arial" font-size="14.00" fill="#666666">[boolean]</text>
+<polygon fill="none" stroke="black" points="6768.21,-2807.8 6768.21,-2838.6 7058.12,-2838.6 7058.12,-2807.8 6768.21,-2807.8"/>
+<text text-anchor="start" x="6775.21" y="-2820" font-family="Arial" font-size="14.00">transport_state </text>
+<text text-anchor="start" x="6872.48" y="-2820" font-family="Arial" font-size="14.00" fill="#666666">[text]</text>
+<polygon fill="none" stroke="black" points="6768.21,-2777 6768.21,-2807.8 7058.12,-2807.8 7058.12,-2777 6768.21,-2777"/>
+<text text-anchor="start" x="6775.21" y="-2789.2" font-family="Arial" font-size="14.00">volume </text>
+<text text-anchor="start" x="6824.23" y="-2789.2" font-family="Arial" font-size="14.00" fill="#666666">[integer]</text>
+<polygon fill="none" stroke="black" points="6768.21,-2746.2 6768.21,-2777 7058.12,-2777 7058.12,-2746.2 6768.21,-2746.2"/>
+<text text-anchor="start" x="6775.21" y="-2758.4" font-family="Arial" font-size="14.00">queue_revision </text>
+<text text-anchor="start" x="6874.05" y="-2758.4" font-family="Arial" font-size="14.00" fill="#666666">[bigint]</text>
+<polygon fill="none" stroke="black" points="6768.21,-2715.4 6768.21,-2746.2 7058.12,-2746.2 7058.12,-2715.4 6768.21,-2715.4"/>
+<text text-anchor="start" x="6775.21" y="-2727.6" font-family="Arial" font-size="14.00">updated_at </text>
+<text text-anchor="start" x="6849.17" y="-2727.6" font-family="Arial" font-size="14.00" fill="#666666">[timestamp with time zone]</text>
 </g>
 <!-- public.playback_history -->
 <g id="node12" class="node">

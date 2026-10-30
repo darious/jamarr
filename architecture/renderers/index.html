@@ -836,6 +836,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#queue-identity-and-revisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue identity and revisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#status-auto-advance" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1098,6 +1109,8 @@
       
         
           
+        
+      
         
       
         
@@ -1476,6 +1489,34 @@
     
   
     ADR-0011: Native OpenHome/Linn backend — evaluated, not built
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../decisions/0012-queue-entry-identity-and-revisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0012: Queue entry identity and optimistic revisions
   
 
     
@@ -2142,6 +2183,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#queue-identity-and-revisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Queue identity and revisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#status-auto-advance" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2457,6 +2509,81 @@ backend speaks in:</p>
 </ul>
 <p>The orchestrator does not care whether a <code>RendererStatus</code> came from polling
 (UPnP) or media-controller callbacks (Cast).</p>
+<h2 id="queue-identity-and-revisions">Queue identity and revisions<a class="headerlink" href="#queue-identity-and-revisions" title="Permanent link">&para;</a></h2>
+<p>The server-owned queue lives in <code>renderer_state.queue</code> (JSON) per renderer,
+with <code>current_index</code> beside it. Two things make edits to it safe
+(<a href="../decisions/0012-queue-entry-identity-and-revisions/">ADR-0012</a>):</p>
+<p><strong>Entry identity (#325).</strong> Every queued item carries an <code>entry_id</code>, assigned
+by the server when the track enters a queue (<code>POST /api/player/queue</code>,
+<code>/queue/append</code>, <code>/play</code>) and kept across reorder, persistence and clients.
+It names the <em>occurrence</em>: <code>[A, B, A]</code> is three entries, and the one playing
+is tracked by its entry, never by the first matching track id. Client-sent
+ids are ignored where tracks are added, so one client cannot claim another
+entry's identity. Queues persisted before this get deterministic ids on read
+(<code>legacy-&lt;index&gt;-&lt;track_id&gt;</code>), which the next full write stores.
+<code>app/services/player/queue_model.py</code> holds the pure rules.</p>
+<p><code>POST /api/player/queue/reorder</code> takes the queue in its new order and
+matches items by <code>entry_id</code>; items without one (older clients) match the
+first unused occurrence of their track id, which is only ambiguous for
+duplicates. Items left out are removed, unknown items are added as new
+entries, and the playing entry stays current wherever it moved; if it was
+removed the transport stops.</p>
+<p><strong>Revisions (#332).</strong> <code>renderer_state.queue_revision</code> moves whenever the
+stored queue text changes (membership or order) and never on progress, index
+or volume writes, which go through status-only updates. The history <code>logged</code>
+flag is written to its one entry conditionally (<code>mark_entry_logged</code>), so a
+status callback never puts back a whole queue it read earlier. Every
+mutation and <code>GET /api/player/state</code> return <code>queue_revision</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Takes <code>expected_revision</code></th>
+<th>On mismatch</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/player/queue</code> (replace)</td>
+<td>optional</td>
+<td>409</td>
+</tr>
+<tr>
+<td><code>POST /api/player/queue/append</code></td>
+<td>optional</td>
+<td>409</td>
+</tr>
+<tr>
+<td><code>POST /api/player/queue/reorder</code></td>
+<td>optional</td>
+<td>409</td>
+</tr>
+<tr>
+<td><code>POST /api/player/queue/clear</code></td>
+<td>optional body</td>
+<td>409</td>
+</tr>
+<tr>
+<td><code>POST /api/player/index</code>, <code>/progress</code>, transport</td>
+<td>not applicable</td>
+<td>never (status only)</td>
+</tr>
+</tbody>
+</table>
+<p>The check and the write are one SQL statement (<code>... WHERE queue_revision =
+$expected RETURNING queue_revision</code>), so two edits made from the same read
+cannot both land. A 409 body is:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"detail"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"queue_conflict"</span><span class="p">,</span><span class="w"> </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">"queue_revision"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"state"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"queue"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span><span class="w"> </span><span class="nt">"current_index"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">"queue_revision"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"position_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"is_playing"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">"transport_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PLAYING"</span><span class="p">,</span><span class="w"> </span><span class="nt">"renderer"</span><span class="p">:</span><span class="w"> </span><span class="s2">"..."</span><span class="p">,</span><span class="w"> </span><span class="nt">"volume"</span><span class="p">:</span><span class="w"> </span><span class="mi">40</span><span class="p">}}}</span>
+</code></pre></div>
+<p>Clients recover by taking <code>state</code>, then replaying their operation against it
+by entry id (the web describes a drag as "move entry X before entry Y" and
+retries once; the TUI refreshes and shows the live order). Omitting
+<code>expected_revision</code> keeps the old last-writer-wins behaviour for clients
+that do not send it. Tests: <code>tests/api/test_queue_revisions.py</code>,
+<code>tests/unit/test_queue_model.py</code>, <code>web/src/lib/stores/queue-ops.test.ts</code>.</p>
 <h2 id="status-auto-advance">Status &amp; auto-advance<a class="headerlink" href="#status-auto-advance" title="Permanent link">&para;</a></h2>
 <ul>
 <li>UPnP backend runs a <strong>poll loop</strong> (<code>app/services/player/monitor.py</code>) and emits

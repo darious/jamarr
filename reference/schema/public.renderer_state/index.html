@@ -846,6 +846,8 @@
       
         
       
+        
+      
     
     
     
@@ -1195,6 +1197,34 @@
     
   
     ADR-0011: Native OpenHome/Linn backend — evaluated, not built
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../architecture/decisions/0012-queue-entry-identity-and-revisions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-0012: Queue entry identity and optimistic revisions
   
 
     
@@ -1975,6 +2005,15 @@
 <td></td>
 </tr>
 <tr>
+<td>queue_revision</td>
+<td>bigint</td>
+<td>0</td>
+<td>false</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
 <td>updated_at</td>
 <td>timestamp with time zone</td>
 <td>now()</td>
@@ -1995,6 +2034,11 @@
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>renderer_state_queue_revision_not_null</td>
+<td>n</td>
+<td>NOT NULL queue_revision</td>
+</tr>
 <tr>
 <td>renderer_state_renderer_udn_not_null</td>
 <td>n</td>
