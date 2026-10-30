@@ -1,59 +1,79 @@
 #!/usr/bin/env bash
+# Optional upgrade helper for an image install of Jamarr.
+#
+# Run it in the directory that holds docker-compose.yml, .env and config.yaml
+# (no repo checkout needed; it is attached to every release). It does what
+#
+#   docker compose pull && docker compose up -d
+#
+# does, with a database dump first and old images pruned before the pull so a
+# full disk cannot block the download. Migrations apply when the app starts;
+# the explicit run here only makes a failing one visible before the restart.
+#
+#   BACKUP_DIR   where dumps go        (default: ./backups)
+#   BACKUP_KEEP  dumps to keep         (default: 5; 0 keeps none)
 set -euo pipefail
 
 COMPOSE="docker compose"
+BACKUP_DIR="${BACKUP_DIR:-./backups}"
+BACKUP_KEEP="${BACKUP_KEEP:-5}"
 
-# Derive HOST_IP from the primary network interface (ignoring loopback)
-if [[ -z "${HOST_IP:-}" ]]; then
-  # Grab the first IP address that isn't 127.0.0.1
-  HOST_IP="$(hostname -I | awk '{print $1}')"
-fi
-echo "Using HOST_IP=${HOST_IP}"
+for f in docker-compose.yml .env config.yaml; do
+    if [[ ! -f "$f" ]]; then
+        echo "Missing $f in $(pwd). Run this where the stack's files live." >&2
+        exit 1
+    fi
+done
 
-echo "[1/7] Pulling latest application image..."
-# Pull before stopping. If this fails, the old version keeps running.
+# The database name and user the dump needs, as the stack sees them.
+set -a
+# shellcheck disable=SC1091
+. ./.env
+set +a
+DB_USER="${DB_USER:-jamarr}"
+DB_NAME="${DB_NAME:-jamarr}"
+
+echo "[1/6] Pruning unused images (so the pull has room)..."
+docker image prune -f >/dev/null
+
+echo "[2/6] Pulling the application image..."
+# Before anything stops: if this fails, the old version keeps running.
 ${COMPOSE} pull jamarr
 
-echo "[2/7] Ensuring database container is up..."
+echo "[3/6] Ensuring the database is up..."
 ${COMPOSE} up -d jamarr_db
-
-echo "[3/7] Waiting for database readiness..."
-DB_READY="false"
-for _ in {1..30}; do
-    if docker exec jamarr_db pg_isready -h 127.0.0.1 -p 8110 -U jamarr >/dev/null 2>&1; then
-        DB_READY="true"
+for _ in $(seq 1 30); do
+    if ${COMPOSE} exec -T jamarr_db pg_isready -U "${DB_USER}" -d "${DB_NAME}" >/dev/null 2>&1; then
+        DB_READY=true
         break
     fi
     sleep 1
 done
-
-if [[ "${DB_READY}" != "true" ]]; then
-    echo "Error: Database did not become ready; aborting." >&2
+if [[ "${DB_READY:-false}" != "true" ]]; then
+    echo "Database did not become ready; aborting." >&2
     exit 1
 fi
 
-echo "[4/7] Creating database backup (pre-migration)..."
-BACKUP_DIR="/mnt/config/q-jamarr/jamarr"
+echo "[4/6] Dumping the database to ${BACKUP_DIR}..."
 mkdir -p "${BACKUP_DIR}"
-BACKUP_PATH="${BACKUP_DIR}/jamarr_rescue_$(date +%F_%H%M%S).sql.gz"
-
-# Use -i (interactive) and NOT -t (tty) to ensure binary integrity of the compressed dump
-if docker exec -i jamarr_db pg_dump -h 127.0.0.1 -p 8110 -U jamarr -d jamarr --no-owner --no-privileges | gzip -c > "${BACKUP_PATH}"; then
-    echo "Backup created: ${BACKUP_PATH}"
+BACKUP_PATH="${BACKUP_DIR}/jamarr_$(date +%F_%H%M%S).sql.gz"
+# -T: no tty, so the compressed stream is not mangled.
+if ${COMPOSE} exec -T jamarr_db pg_dump -U "${DB_USER}" -d "${DB_NAME}" --no-owner --no-privileges | gzip -c > "${BACKUP_PATH}"; then
+    echo "Backup: ${BACKUP_PATH}"
 else
-    echo "Error: Database backup failed; aborting." >&2
+    rm -f "${BACKUP_PATH}"
+    echo "Database backup failed; aborting." >&2
     exit 1
 fi
+if [[ "${BACKUP_KEEP}" =~ ^[0-9]+$ ]]; then
+    # Newest first; drop everything past BACKUP_KEEP.
+    ls -1t "${BACKUP_DIR}"/jamarr_*.sql.gz 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" | xargs -r rm -f
+fi
 
-echo "[5/7] Applying database migrations..."
-# Run migrations using the new image we just built
-${COMPOSE} run --rm jamarr python migrations/apply_migrations.py
+echo "[5/6] Applying database migrations..."
+${COMPOSE} run --rm --no-deps jamarr python migrations/apply_migrations.py
 
-echo "[6/7] Restarting app container..."
-# 'up -d' recreates only the containers that have changed images or config
+echo "[6/6] Restarting the app..."
 ${COMPOSE} up -d jamarr
 
-echo "[7/7] Cleaning up old images..."
-docker image prune -f
-
-echo "✅ Deploy complete"
+echo "Done. $(${COMPOSE} ps --format '{{.Name}} {{.Status}}' jamarr 2>/dev/null || true)"

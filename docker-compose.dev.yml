@@ -1,5 +1,7 @@
 services:
   jamarr:
+    # The production compose file is image-only; the build lives here.
+    build: .
     network_mode: "host"
     ports: !reset []
     environment:
