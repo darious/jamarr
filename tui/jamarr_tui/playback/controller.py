@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from jamarr_tui.api.client import AuthError, JamarrClient
+from jamarr_tui.api.client import ApiError, AuthError, JamarrClient
 from jamarr_tui.playback.mpv import MpvController, PlaybackState
 
 log = logging.getLogger("jamarr_tui.controller")
@@ -43,6 +43,9 @@ class PlaybackController:
         self._local_index: int = -1
         self._remote_queue: list[dict[str, Any]] = []
         self._remote_index: int = -1
+        # queue_revision of the last server state seen; sent back with a
+        # reorder so a stale one is refused rather than applied (#332).
+        self._remote_revision: int | None = None
         self._remote_state = PlaybackState()
         self._active_renderer_id = f"local:{client.client_id}"
         self._active_renderer_kind = "local"
@@ -268,10 +271,8 @@ class PlaybackController:
             new_index = index
         self._set_active_queue(new_queue)
         self._set_active_index(new_index)
-        try:
-            await self._client.reorder_player_queue(new_queue)
-        except Exception:
-            log.exception("reorder_player_queue failed")
+        if not await self._push_reorder(new_queue):
+            return
         if was_current:
             await self.play_index(new_index)
 
@@ -285,24 +286,33 @@ class PlaybackController:
         new_queue = list(queue)
         item = new_queue.pop(src)
         new_queue.insert(dst, item)
-        # Track the currently-playing item so the index follows the move.
-        current_id = (
-            queue[self._active_index]["id"]
-            if 0 <= self._active_index < len(queue)
-            else None
-        )
+        # Track the currently-playing item so the index follows the move. The
+        # same track can be queued twice, so match the occurrence (entry_id)
+        # when the server has given us one.
+        current = queue[self._active_index] if 0 <= self._active_index < len(queue) else None
         self._set_active_queue(new_queue)
-        if current_id is not None:
-            for i, t in enumerate(new_queue):
-                if t.get("id") == current_id:
-                    self._set_active_index(i)
-                    break
-        try:
-            await self._client.reorder_player_queue(new_queue)
-        except Exception:
-            log.exception("reorder_player_queue failed")
+        if current is not None:
+            self._set_active_index(new_queue.index(current))
+        if not await self._push_reorder(new_queue):
+            return
         if not self.is_local_active:
             await self.sync_server_state(force=True)
+
+    async def _push_reorder(self, new_queue: list[dict[str, Any]]) -> bool:
+        """Send the new order; False when the server refused it as stale,
+        in which case the live state has been pulled back in."""
+        expected = None if self.is_local_active else self._remote_revision
+        try:
+            await self._client.reorder_player_queue(new_queue, expected_revision=expected)
+        except ApiError as exc:
+            if exc.status_code == 409:
+                log.info("queue changed elsewhere; refreshing instead of applying a stale edit")
+                await self.sync_server_state(force=True)
+                return False
+            log.exception("reorder_player_queue failed")
+        except Exception:
+            log.exception("reorder_player_queue failed")
+        return True
 
     async def clear(self) -> None:
         self._set_active_queue([])
@@ -384,6 +394,8 @@ class PlaybackController:
         ]
         current_index = data.get("current_index")
         self._remote_index = int(current_index) if current_index is not None else -1
+        revision = data.get("queue_revision")
+        self._remote_revision = int(revision) if revision is not None else None
         transport_state = str(data.get("transport_state") or "").upper()
         is_playing = bool(data.get("is_playing"))
         current = (

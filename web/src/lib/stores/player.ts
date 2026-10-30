@@ -2,6 +2,15 @@ import { writable, derived, get } from 'svelte/store';
 import type { Track } from '$api';
 import { fetchWithAuth } from '$lib/api';
 import {
+    describeMove,
+    describeOrder,
+    entryIdOf,
+    indexOfEntry,
+    moveItem,
+    replayOp,
+    type QueueOp,
+} from './queue-ops';
+import {
     activeRendererControls,
     findActiveRenderer,
     rendererCanMute,
@@ -33,6 +42,10 @@ export interface PlayerState {
     renderer_kind?: string;
     queue: Track[];
     current_index: number;
+    // Server-side version of the queue's membership and order (#332). Sent
+    // back as expected_revision with an edit; a stale one is refused (409)
+    // and replayed against the fresh queue by entry id.
+    queue_revision?: number;
     is_playing: boolean;
     position_seconds: number;
     volume: number | null;
@@ -269,6 +282,7 @@ export async function loadQueueFromServer() {
                 ...s,
                 queue: mergedQueue,
                 current_index: data.current_index,
+                queue_revision: data.queue_revision ?? s.queue_revision,
                 position_seconds: data.position_seconds,
                 is_playing: data.is_playing,
                 renderer: data.renderer_id || data.renderer || `local:${getClientId()}`,
@@ -333,7 +347,15 @@ export async function addToQueue(tracks: Track[]) {
         });
 
         if (res.ok) {
-            playerState.update(s => ({ ...s, queue: [...s.queue, ...tracks] }));
+            const data = await res.json().catch(() => ({}));
+            const state = data?.state;
+            playerState.update(s => ({
+                ...s,
+                // The server answers with the queue as stored, entry ids
+                // included; fall back to the local guess for an older server.
+                queue: state?.queue ? mergeQueueArt(s.queue, state.queue) : [...s.queue, ...tracks],
+                queue_revision: state?.queue_revision ?? s.queue_revision,
+            }));
             // If queue was empty, maybe start playing?
             const s = get(playerState);
             if (s.current_index === -1) {
@@ -349,57 +371,87 @@ export async function addToQueue(tracks: Track[]) {
 }
 
 export async function reorderQueue(arg1: Track[] | number, arg2?: number) {
-    let newQueue: Track[] = [];
+    const current = get(playerState);
+    let newQueue: Track[];
+    let op: QueueOp | null;
 
-    // Check if called with (newQueue: Track[])
     if (Array.isArray(arg1)) {
+        // A whole new order (shuffle).
         newQueue = arg1;
-    }
-    // Check if called with (fromIndex: number, toIndex: number)
-    else if (typeof arg1 === 'number' && typeof arg2 === 'number') {
-        const current = get(playerState);
-        const q = [...current.queue];
-        const [moved] = q.splice(arg1, 1);
-        // If dropping after the original position (arg2 > arg1), the index shifts by -1 due to splice
-        // But logic depends on where dropIndex is calculated.
-        // Assuming standard DnD logic: insert at arg2.
-        // However, if arg2 > arg1, we simply insert at arg2 (handled by splice logic: splice removes, indices shift).
-        // Let's standardise: splice insert.
-        // But wait, if arg2 > arg1, usually dropIndex is "index to insert before".
-
-        // Let's assume standard array move:
-        q.splice(arg2, 0, moved);
-        newQueue = q;
+        op = describeOrder(arg1);
+    } else if (typeof arg1 === 'number' && typeof arg2 === 'number') {
+        // A drag: item at arg1 dropped before index arg2.
+        newQueue = moveItem(current.queue, arg1, arg2);
+        op = describeMove(current.queue, arg1, arg2);
     } else {
         console.error('[reorderQueue] Invalid arguments');
         return;
     }
 
-    const current = get(playerState);
+    const currentEntry = entryIdOf(current.queue[current.current_index]);
     const currentTrackId = current.queue[current.current_index]?.id;
-    try {
-        const res = await fetchWithAuth('/api/player/queue/reorder', {
+
+    const apply = (state: Record<string, unknown>, fallbackQueue: Track[]) => {
+        const queue = (state.queue as Track[] | undefined) ?? fallbackQueue;
+        playerState.update((s) => ({
+            ...s,
+            queue: mergeQueueArt(s.queue, queue),
+            current_index:
+                (state.current_index as number | undefined) ??
+                (currentEntry
+                    ? indexOfEntry(queue, currentEntry)
+                    : currentTrackId
+                      ? queue.findIndex((t: Track) => t.id === currentTrackId)
+                      : -1),
+            queue_revision: (state.queue_revision as number | undefined) ?? s.queue_revision,
+            position_seconds: (state.position_seconds as number | undefined) ?? s.position_seconds,
+            is_playing: (state.is_playing as boolean | undefined) ?? s.is_playing,
+            transport_state: (state.transport_state as string | undefined) ?? s.transport_state,
+        }));
+    };
+
+    const send = async (queue: Track[], expected: number | undefined) => {
+        const body: Record<string, unknown> = { queue };
+        if (expected !== undefined) body.expected_revision = expected;
+        return fetchWithAuth('/api/player/queue/reorder', {
             method: 'POST',
             headers: getHeaders(),
-            body: JSON.stringify({ queue: newQueue })
+            body: JSON.stringify(body),
         });
+    };
+
+    try {
+        const res = await send(newQueue, current.queue_revision);
         if (res.ok) {
             const data = await res.json();
-            const state = data.state || {};
-            playerState.update((s) => ({
-                ...s,
-                queue: state.queue ? mergeQueueArt(s.queue, state.queue) : newQueue,
-                current_index:
-                    state.current_index ??
-                    (currentTrackId
-                        ? (state.queue || newQueue).findIndex((t: Track) => t.id === currentTrackId)
-                        : -1),
-                position_seconds: state.position_seconds ?? s.position_seconds,
-                is_playing: state.is_playing ?? s.is_playing,
-                transport_state: state.transport_state ?? s.transport_state,
-            }));
-        } else {
+            apply(data.state || {}, newQueue);
+            return;
+        }
+        if (res.status !== 409) {
             console.error('[reorderQueue] Failed, status:', res.status, await res.text());
+            return;
+        }
+        // The queue changed under us. Take the live state, then replay the
+        // same operation (by entry id) against it, once.
+        const detail = (await res.json().catch(() => ({})))?.detail ?? {};
+        const live = detail.state || {};
+        apply(live, current.queue);
+        const liveQueue: Track[] = live.queue ?? get(playerState).queue;
+        const replayed = op ? replayOp(liveQueue, op) : null;
+        if (!replayed) {
+            console.warn('[reorderQueue] Queue changed elsewhere; edit dropped');
+            return;
+        }
+        const retry = await send(replayed, live.queue_revision ?? detail.queue_revision);
+        if (retry.ok) {
+            const data = await retry.json();
+            apply(data.state || {}, replayed);
+        } else {
+            console.warn('[reorderQueue] Replay refused, status:', retry.status);
+            if (retry.status === 409) {
+                const again = (await retry.json().catch(() => ({})))?.detail?.state;
+                if (again) apply(again, liveQueue);
+            }
         }
     } catch (e) {
         console.error('[reorderQueue] Exception:', e);
@@ -415,10 +467,12 @@ export async function clearQueue(stopPlayback: boolean = true) {
         });
 
         if (res.ok) {
+            const data = await res.json().catch(() => ({}));
             playerState.update(s => ({
                 ...s,
                 queue: [],
                 current_index: -1,
+                queue_revision: data?.state?.queue_revision ?? s.queue_revision,
                 position_seconds: 0,
                 is_playing: false,
                 transport_state: 'STOPPED'
@@ -452,6 +506,7 @@ export async function playFromQueue(index: number) {
                 ...s,
                 queue: mergedQueue ?? s.queue,
                 current_index: newState.current_index ?? index,
+                queue_revision: newState.queue_revision ?? s.queue_revision,
                 is_playing: newState.is_playing ?? true,
                 position_seconds: newState.position_seconds ?? 0,
                 transport_state: newState.transport_state ?? s.transport_state,
@@ -503,6 +558,7 @@ export async function advanceIndexLocal(newIndex: number) {
                 ...s,
                 queue: mergedQueue ?? s.queue,
                 current_index: newState.current_index ?? newIndex,
+                queue_revision: newState.queue_revision ?? s.queue_revision,
                 is_playing: true,
                 position_seconds: 0,
                 transport_state: newState.transport_state ?? s.transport_state,

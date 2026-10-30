@@ -353,6 +353,9 @@ class JamarrClient:
             "bitrate",
             "plays",
             "artists",
+            # Occurrence identity the server assigned (#325): a reorder is
+            # matched on it, so the same track queued twice stays apart.
+            "entry_id",
         }
         out: dict[str, Any] = {}
         for k in allowed:
@@ -377,12 +380,21 @@ class JamarrClient:
     async def set_player_index(self, index: int) -> None:
         await self._request("POST", "/api/player/index", json={"index": index})
 
-    async def reorder_player_queue(self, tracks: list[dict[str, Any]]) -> None:
-        payload = {
+    async def reorder_player_queue(
+        self,
+        tracks: list[dict[str, Any]],
+        expected_revision: int | None = None,
+    ) -> Any:
+        """Send the queue in its new order. With ``expected_revision`` the
+        server refuses the edit (409, ``ApiError``) when the queue changed
+        since that revision was read (#332)."""
+        payload: dict[str, Any] = {
             "queue": [self._track_for_server(t) for t in tracks],
             "start_index": 0,
         }
-        await self._request("POST", "/api/player/queue/reorder", json=payload)
+        if expected_revision is not None:
+            payload["expected_revision"] = expected_revision
+        return await self._request("POST", "/api/player/queue/reorder", json=payload)
 
     async def clear_player_queue(self) -> None:
         await self._request("POST", "/api/player/queue/clear")
