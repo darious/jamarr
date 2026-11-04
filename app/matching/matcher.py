@@ -10,6 +10,7 @@ from rapidfuzz import fuzz
 
 from app.matching import (
     accept_match,
+    base_titles_compatible,
     classify_method,
     extract_featured_artist_raw_parts,
     normalize_artist,
@@ -481,8 +482,14 @@ def match_scrobble(
             best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
             continue
         
-        # Tie-breaking
+        # Tie-breaking: an exact title beats a fuzzy one before anything else
         if abs(score - best[1]) <= 0.01:
+            current_exact = "track_name" in reason
+            best_exact = "track_name" in best[3]
+            if current_exact != best_exact:
+                if current_exact:
+                    best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
+                continue
             method_rank = {
                 "mbid_track": 3,
                 "mbid_artist_release": 2,
@@ -513,6 +520,10 @@ def match_scrobble(
                         continue
                     similarity = int(fuzz.ratio(sc_title, tr_title))
                     if similarity < fuzzy_title_threshold:
+                        continue
+                    if not base_titles_compatible(
+                        scrobble["track_name"], candidate["title"]
+                    ):
                         continue
                     if not best_fuzzy or similarity > best_fuzzy[1]:
                         best_fuzzy = (candidate["id"], similarity)

@@ -243,6 +243,56 @@ def _title_variants(normalized_title: str) -> List[str]:
     return list(variants)
 
 
+# A fuzzy title match never scores as high as an exact one. Artist + album +
+# album artist + release type alone already reach the 1.0 cap, so without this
+# "Deep (2008 Mix)" ties with "Once (2008 Mix)" on the same album and the first
+# candidate wins.
+FUZZY_TITLE_SCORE_CAP = 0.95
+# The part of the title outside brackets must match this closely before a
+# fuzzy match counts. A long shared suffix ("(Taylor's Version)",
+# "(Live from Fenway Park)") otherwise carries different songs past the
+# whole-title ratio.
+BASE_TITLE_MIN_RATIO = 85
+
+_BRACKETED = re.compile(r"[\(\[][^\(\)\[\]]*[\)\]]")
+_UNCLOSED_BRACKET_TAIL = re.compile(r"\s*[\(\[][^\)\]]*$")
+
+
+@lru_cache(maxsize=200000)
+def base_title(value: Optional[str]) -> str:
+    """Normalized title with every bracketed part removed.
+
+    "Deep (2008 Brendan O'Brien Mix)" -> "deep". A truncated trailing bracket
+    ("1000 Mirrors (Feat. Sinead O'c") is dropped too. Empty if nothing is left
+    outside the brackets.
+    """
+    if not value:
+        return ""
+    stripped = value
+    while True:
+        reduced = _BRACKETED.sub(" ", stripped)
+        if reduced == stripped:
+            break
+        stripped = reduced
+    stripped = _UNCLOSED_BRACKET_TAIL.sub("", stripped)
+    if not stripped.strip():
+        return ""
+    return normalize_title(stripped)
+
+
+def base_titles_compatible(sc_raw: Optional[str], tr_raw: Optional[str]) -> bool:
+    """False when the titles' un-bracketed parts name different songs.
+
+    Passes when either side has nothing outside brackets, since there is then
+    nothing to compare.
+    """
+    sc_base = base_title(sc_raw)
+    tr_base = base_title(tr_raw)
+    if not sc_base or not tr_base:
+        return True
+    return fuzz.ratio(sc_base, tr_base) >= BASE_TITLE_MIN_RATIO
+
+
 def build_cache_key(scrobble: asyncpg.Record) -> Optional[str]:
     """Build cache key for scrobble to enable fast duplicate lookup."""
     if scrobble["track_mbid"]:
@@ -400,9 +450,15 @@ def score_candidate(
     # Fuzzy title check
     if not title_match and sc_title and tr_title:
         ratio = fuzz.token_set_ratio(sc_title, tr_title)
-        if ratio >= 80:
+        # A track MBID match already names the recording; the base-title gate
+        # only guards name-based matches.
+        if ratio >= 80 and (
+            "track_mbid" in reasons
+            or base_titles_compatible(scrobble["track_name"], candidate["title"])
+        ):
             title_match = True
             reasons.append(f"fuzzy_title_{ratio}")
+            score = min(score, FUZZY_TITLE_SCORE_CAP)
     
     # Penalize if title doesn't match
     if not title_match:
