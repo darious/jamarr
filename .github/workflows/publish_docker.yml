@@ -70,7 +70,7 @@ jobs:
       # the compose file that matches this image, the env template, the
       # default config and the optional upgrade helper.
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v3.0.3
+        uses: softprops/action-gh-release@v3.0.4
         with:
           name: ${{ github.ref_name }}
           generate_release_notes: true
