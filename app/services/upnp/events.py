@@ -495,6 +495,8 @@ class UpnpEventManager:
 
     def _apply(self, st: RendererEvents, key: str, dmr, state_variables) -> None:
         changed = False
+        track_changed = False
+        duration_evented = False
         for var in state_variables or ():
             name = getattr(var, "name", None)
             value = getattr(var, "value", None)
@@ -510,6 +512,7 @@ class UpnpEventManager:
                     if new != st.track_uri:
                         st.track_uri = new
                         changed = True
+                        track_changed = True
                 elif name == "AVTransportURI":
                     new = _clean(value)
                     if new != st.av_transport_uri:
@@ -517,6 +520,7 @@ class UpnpEventManager:
                         changed = changed or not st.track_uri
                 elif name == "CurrentTrackDuration":
                     st.track_duration = parse_upnp_duration(value)
+                    duration_evented = True
             elif key == "RC":
                 if name == "Volume" and value is not None:
                     percent = self._volume_percent(var, value)
@@ -535,6 +539,10 @@ class UpnpEventManager:
                         muted = bool(value)
                     st.muted = muted
                     st.muted_at = time.time()
+        if track_changed and not duration_evented:
+            # A new track without its duration: the old one's is wrong now
+            # (a renderer rolling into a staged track may not re-event it).
+            st.track_duration = None
         if changed:
             st.generation += 1
             st.wake.set()

@@ -434,6 +434,7 @@ class _DeviceReader:
         self.event_mode = False
         self.generation = -1
         self.position = None
+        self.duration = None
         self.position_at = 0.0
         self.transport_at = 0.0
         self.seek_generation = seek_generations.get(udn, 0)
@@ -448,10 +449,24 @@ class _DeviceReader:
     async def _poll_position(self):
         # Taken before the call: a seek landing during the poll forces another.
         self.seek_generation = seek_generations.get(self.udn, 0)
-        rel_time, _ = await self.upnp.get_position(self.udn)
+        rel_time, duration = await self.upnp.get_position(self.udn)
         self.position = rel_time
+        self.duration = duration or None
         self.position_at = time.monotonic()
         return rel_time
+
+    def _extrapolation_cap(self, snap) -> int | None:
+        """Ceiling for an extrapolated position.
+
+        The polled TrackDuration comes with the position it caps, so it wins;
+        the evented one can be the previous (or staged) track's, when a
+        renderer rolls into the next track without re-eventing the duration.
+        Never below the last polled position: the device said it got there.
+        """
+        duration = self.duration or (snap.track_duration if snap else None)
+        if not duration:
+            return None
+        return max(int(duration), int(self.position or 0))
 
     async def read(self):
         events = self.events
@@ -498,8 +513,9 @@ class _DeviceReader:
         rel_time = self.position or 0
         if transport_state == "PLAYING":
             rel_time = rel_time + int(now - self.position_at)
-            if snap.track_duration:
-                rel_time = min(rel_time, int(snap.track_duration))
+            cap = self._extrapolation_cap(snap)
+            if cap is not None:
+                rel_time = min(rel_time, cap)
         return rel_time, transport_state, track_uri
 
     async def idle(self, seconds: float) -> None:
