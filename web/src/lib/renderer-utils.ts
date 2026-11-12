@@ -119,3 +119,32 @@ export function activeRendererControls(
 ): RendererControls {
     return rendererControls(findActiveRenderer(renderers, active));
 }
+
+/** True when this browser plays the audio itself (`local:<client id>`). */
+export function isLocalRenderer(active: string | null | undefined): boolean {
+    return Boolean(active?.startsWith("local"));
+}
+
+/**
+ * Should an event from one of the browser's own audio elements drive the
+ * player? Only from the active element, and only while this browser is the
+ * renderer: after a switch to a remote renderer a still-running element would
+ * fight the device's position on the progress bar and, on `ended`, skip the
+ * remote track.
+ */
+export function localAudioEventApplies(
+    active: string | null | undefined,
+    source: unknown,
+    activeElement: unknown,
+): boolean {
+    return isLocalRenderer(active) && source === activeElement;
+}
+
+/** Pause every browser audio element still playing (renderer switched away). */
+export function silenceLocalAudio(
+    elements: Array<Pick<HTMLMediaElement, "paused" | "pause"> | null | undefined>,
+): void {
+    for (const el of elements) {
+        if (el && !el.paused) el.pause();
+    }
+}
