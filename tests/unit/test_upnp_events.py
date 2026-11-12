@@ -217,6 +217,27 @@ async def test_lastchange_parsing_channels_scaling_and_unknown_values():
     assert snap.generation == gen + 1
 
 
+async def test_track_change_without_a_duration_forgets_the_old_one():
+    """A renderer rolling into a staged track may event the new TrackURI
+    alone; keeping the previous track's duration capped the monitor's
+    position at it (seen live: a 13:09 track pinned at 3:52)."""
+    rig = Rig()
+    snap = await rig.healthy_rig()
+    assert snap.track_duration == 180
+
+    await rig.notify_avt(CurrentTrackURI=URI_B)
+    snap = rig.events.snapshot(UDN)
+    assert snap.track_uri == URI_B and snap.track_duration is None
+
+    # Duration in the same event as the URI (either order) is kept.
+    await rig.notify_avt(CurrentTrackDuration="0:13:09", CurrentTrackURI=URI_A)
+    assert rig.events.snapshot(UDN).track_duration == 789
+    # A duration-only event still updates it.
+    await rig.notify_avt(CurrentTrackDuration="0:03:52")
+    assert rig.events.snapshot(UDN).track_duration == 232
+    await rig.events.stop()
+
+
 def test_parse_upnp_duration():
     assert parse_upnp_duration("1:02:03") == 3723
     assert parse_upnp_duration("0:00:01.500") == 1.5
@@ -755,6 +776,7 @@ class EventedUpnp:
         self.base_url = "http://10.0.0.1:8111"
         self.renderer_base_url = "http://10.0.0.1:8112"
         self.position = 60
+        self.duration = 180
         self.transport = "PLAYING"
         self.track_uri = URI_A
         self.position_calls = 0
@@ -767,7 +789,7 @@ class EventedUpnp:
     async def get_position(self, udn):
         self.position_calls += 1
         self._polled_uri = self.track_uri
-        return self.position, 180
+        return self.position, self.duration
 
     async def get_transport_info(self, udn):
         self.transport_calls += 1
@@ -1071,4 +1093,41 @@ async def test_reader_repolls_position_after_a_seek_instead_of_extrapolating():
     # Then back to extrapolating, from the post-seek baseline.
     position, _, _ = await reader.read()
     assert upnp.position_calls == 2 and 10 <= position < 150
+    await rig.events.stop()
+
+
+async def test_reader_extrapolation_ignores_a_stale_evented_duration():
+    """Between watchdog polls the position is extrapolated and capped at the
+    track duration. The polled TrackDuration must win over a stale evented
+    one, and the cap may never pull the position below the polled one."""
+    rig = Rig()
+    await rig.healthy_rig()
+    await rig.notify_avt(CurrentTrackDuration="0:03:52")  # stale: 232 s
+    assert rig.events.snapshot(UDN).track_duration == 232
+    upnp = EventedUpnp(rig)
+    upnp.position, upnp.duration = 625, 789
+    reader = monitor_module._DeviceReader(upnp, UDN)
+
+    position, _, _ = await reader.read()
+    assert (position, upnp.position_calls) == (625, 1)
+    reader.position_at -= 2  # two seconds on, still before the next poll
+    position, _, _ = await reader.read()
+    assert (position, upnp.position_calls) == (627, 1)
+
+    # No polled duration: the evented one caps, but not below the device.
+    upnp.duration = 0
+    reader.position_at -= monitor_module.EVENT_POSITION_POLL_S
+    position, _, _ = await reader.read()
+    assert (position, upnp.position_calls) == (625, 2)
+    reader.position_at -= 3
+    position, _, _ = await reader.read()
+    assert (position, upnp.position_calls) == (625, 2)
+
+    # A sane evented duration still caps extrapolation at the track end.
+    upnp.position = 230
+    reader.position_at -= monitor_module.EVENT_POSITION_POLL_S
+    assert (await reader.read())[0] == 230
+    reader.position_at -= 4
+    assert (await reader.read())[0] == 232
+    assert upnp.position_calls == 3
     await rig.events.stop()
