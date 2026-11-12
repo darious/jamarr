@@ -42,7 +42,10 @@
   import {
     PLAY_BUTTON_LABELS,
     SEEK_DISABLED_LABEL,
+    isLocalRenderer,
+    localAudioEventApplies,
     playButtonAction,
+    silenceLocalAudio,
   } from "$lib/renderer-utils";
   import { onMount, onDestroy } from "svelte";
 
@@ -503,7 +506,7 @@
   // whichever element isn't currently the active `audio`.
   function handleTimeUpdate(ev: Event) {
     const el = ev.currentTarget as HTMLAudioElement;
-    if (el !== audio) return;
+    if (!localAudioEventApplies($playerState.renderer, el, audio)) return;
     if (isRestoringPosition) return;
 
     const oldProgress = progress;
@@ -568,8 +571,9 @@
   // shorter than swap window, duration unknown, fast-forward to end).
   function handleActiveEnded(ev: Event) {
     const endedEl = ev.currentTarget as HTMLAudioElement;
-    // Ignore stale listeners firing on the (now-standby) element.
-    if (endedEl !== audio) return;
+    // Ignore stale listeners firing on the (now-standby) element, and any
+    // element left running after a switch to a remote renderer.
+    if (!localAudioEventApplies($playerState.renderer, endedEl, audio)) return;
 
     if (!swapToArmedNext(true)) {
       // No pre-armed track or swap impossible — legacy path.
@@ -1043,6 +1047,12 @@
 
   async function clearAndStopQueue() {
     await clearQueue(true);
+  }
+
+  // A remote renderer plays the queue now: the browser must stop, or its
+  // own position and track end keep driving the player bar.
+  $: if (!isLocalRenderer($playerState.renderer)) {
+    silenceLocalAudio([audioA, audioB]);
   }
 
   $: if ($playerState.queue.length === 0 && audio) {
