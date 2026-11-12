@@ -102,7 +102,9 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 
 - Python 3.14 required.
 - Auth is Bearer-header only; no `access_token=` query fallback. SSE endpoints
-  (`/api/library/events`, `/api/lastfm/events`) auth via the refresh cookie.
+  (`/api/library/events`, `/api/lastfm/events`, `/api/history/events`) auth via
+  the refresh cookie. History writes refresh the matview through
+  `app/history_events.refresh_history`, which also notifies `/api/history/events`.
 - `DB_PASS` has no compose default — must be set in `.env`. Production startup
   fails fast if `JWT_SECRET_KEY` is unset or a placeholder.
 - DB connections: `Depends(get_db)` in FastAPI handlers, `async with db_conn()`

@@ -1,19 +1,57 @@
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, List
 
 import asyncpg
 from fastapi import APIRouter, Depends, Request, Response, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user_jwt
+from app.api.deps import get_current_user_jwt, get_current_user_jwt_or_cookie
 from app.db import get_db
+from app.history_events import HistoryEvents, refresh_history
 from app.api.library import sha1_to_hex
 from app.security import get_client_ip
+from app.sse import HEARTBEAT, HEARTBEAT_FRAME
 from app.services.player.history import play_threshold_seconds, scrobble_to_lastfm
 
 
 router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
+
+# EventSource cannot send an Authorization header, and get_current_user_jwt
+# holds a pooled connection for the life of the response, so the SSE endpoint
+# lives on its own router with the cookie-fallback auth (see deps.py).
+events_router = APIRouter()
+
+
+@events_router.get(
+    "/api/history/events",
+    summary="Stream history changes",
+    response_class=StreamingResponse,
+)
+async def history_events(
+    user: asyncpg.Record = Depends(get_current_user_jwt_or_cookie),
+):
+    """Server-sent events, one per change to the play history.
+
+    Each event is ``{"type": "history_changed", "mine": bool}``; ``mine`` says
+    whether the change was to the caller's own plays, so a page showing only
+    those can ignore everyone else's. Payloads carry no play details: clients
+    re-read ``/api/history/tracks`` and ``/api/history/stats``.
+    """
+    user_id = user["id"]
+
+    async def event_generator():
+        yield ": connected\n\n"
+        async for event in HistoryEvents.get_instance().subscribe():
+            if event is HEARTBEAT:
+                yield HEARTBEAT_FRAME
+                continue
+            payload = {"type": "history_changed", "mine": event["user_id"] == user_id}
+            yield f"data: {json.dumps(payload)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/api/history/tracks")
@@ -218,33 +256,11 @@ async def get_playback_history_stats(
     rows = await db.fetch(daily_query, *params)
     daily = [{"day": row[0], "plays": row[1]} for row in rows]
 
+    # Top-N lists break play-count ties by most recent play, then by a stable
+    # key, so equal counts keep a fixed order between refreshes.
     # Define artist_join for other queries (albums/tracks)
     artist_join = "JOIN track_artist ta ON ta.track_id = t.id" if artist_mbid else ""
-    artist_join_cond = "JOIN track_artist ta_filter ON ta_filter.track_id = t.id" if artist_mbid else ""
-        
-    artists_query = f"""
-        SELECT 
-            a.name as artist_name, 
-            a.mbid as artist_mbid, 
-            a.artwork_id, 
-            ar.sha1 as art_sha1, 
-            COUNT(*) as plays
-        FROM combined_playback_history_mat h
-        JOIN track t ON t.id = h.track_id
-        JOIN track_artist ta ON ta.track_id = t.id
-        JOIN artist a ON ta.artist_mbid = a.mbid
-        LEFT JOIN artwork ar ON a.artwork_id = ar.id
-        {artist_join_cond if 'ta.' not in locals().get('where_sql', '') else ''} 
-        -- Note: where_sql might reference tables not in this join if we aren't careful.
-        -- standard where_sql uses 'h', 't', 'ta' (if alias matches).
-        -- original code used 'ta' for filter alias.
-        -- I'll ensure filter alias compatibility below.
-        WHERE {where_sql}
-        GROUP BY a.name, a.mbid, a.artwork_id, ar.sha1
-        ORDER BY plays DESC
-        LIMIT 10
-    """
-        
+
     artists_query = f"""
         SELECT 
             a.name as artist_name, 
@@ -259,7 +275,7 @@ async def get_playback_history_stats(
         LEFT JOIN artwork w ON a.artwork_id = w.id
         WHERE {where_sql}
         GROUP BY a.name, a.mbid, a.artwork_id, w.sha1
-        ORDER BY plays DESC
+        ORDER BY plays DESC, MAX(h.played_at) DESC, a.mbid
         LIMIT 10
     """
     rows = await db.fetch(artists_query, *params)
@@ -288,7 +304,7 @@ async def get_playback_history_stats(
         LEFT JOIN artwork a ON t.artwork_id = a.id
         WHERE {where_sql}
         GROUP BY t.album, COALESCE(NULLIF(t.album_artist, ''), t.artist)
-        ORDER BY plays DESC
+        ORDER BY plays DESC, MAX(h.played_at) DESC, t.album, artist_name
         LIMIT 10
     """
     rows = await db.fetch(albums_query, *params)
@@ -312,7 +328,7 @@ async def get_playback_history_stats(
     LEFT JOIN artwork a ON t.artwork_id = a.id
     WHERE {where_sql}
         GROUP BY t.id, t.title, t.artist, t.album, t.release_mbid, t.artwork_id
-        ORDER BY plays DESC
+        ORDER BY plays DESC, MAX(h.played_at) DESC, t.id
         LIMIT 10
     """
     rows = await db.fetch(tracks_query, *params)
@@ -506,7 +522,7 @@ async def record_offline_plays(
             to_scrobble.append((play.track_id, int(played_at.timestamp())))
 
     if result.recorded:
-        await db.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
+        await refresh_history(db, user_id)
         for track_id, played_at_unix in to_scrobble:
             asyncio.create_task(scrobble_to_lastfm(user_id, track_id, played_at=played_at_unix))
 

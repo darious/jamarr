@@ -613,7 +613,61 @@
 
   onMount(() => {
     restoreFilters();
+    return watchHistoryChanges();
   });
+
+  // Reload when the server records plays (live, offline upload, Last.fm
+  // sync). Bursts collapse into one reload; a hidden tab reloads when shown.
+  function watchHistoryChanges() {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let stale = false;
+    let dropped = false;
+
+    const reload = () => {
+      timer = undefined;
+      if (document.hidden) {
+        stale = true;
+        return;
+      }
+      stale = false;
+      refreshAll();
+    };
+    const schedule = () => {
+      if (timer === undefined) timer = setTimeout(reload, 1000);
+    };
+    const onVisible = () => {
+      if (!document.hidden && stale) schedule();
+    };
+
+    // EventSource cannot send an Authorization header; the endpoint falls
+    // back to the refresh cookie.
+    const events = new EventSource("/api/history/events");
+    events.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type !== "history_changed") return;
+        if (data.scope === "mine" && !payload.mine) return;
+        schedule();
+      } catch {
+        // Ignore malformed frames.
+      }
+    };
+    // Plays recorded while the stream was down were never announced.
+    events.onerror = () => {
+      dropped = true;
+    };
+    events.onopen = () => {
+      if (dropped) schedule();
+      dropped = false;
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      events.close();
+      if (timer !== undefined) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }
 
   $: if ($currentUser && !restoredFilters) {
     restoreFilters();
