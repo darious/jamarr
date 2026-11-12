@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FastAPI",
-    "version": "v1.14.1"
+    "version": "v1.14.2"
   },
   "paths": {
     "/art/test": {
@@ -23,9 +23,9 @@
       }
     },
     "/art/file/{sha1}": {
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
         "parameters": [
           {
             "name": "sha1",
@@ -68,9 +68,9 @@
           }
         }
       },
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_art_file__sha1__head",
+        "operationId": "get_artwork_by_sha1_art_file__sha1__get",
         "parameters": [
           {
             "name": "sha1",
@@ -179,9 +179,9 @@
       }
     },
     "/api/art/file/{sha1}": {
-      "head": {
+      "get": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
         "parameters": [
           {
             "name": "sha1",
@@ -224,9 +224,9 @@
           }
         }
       },
-      "get": {
+      "head": {
         "summary": "Get Artwork By Sha1",
-        "operationId": "get_artwork_by_sha1_api_art_file__sha1__head",
+        "operationId": "get_artwork_by_sha1_api_art_file__sha1__get",
         "parameters": [
           {
             "name": "sha1",
@@ -1111,10 +1111,10 @@
       }
     },
     "/api/stream/{track_id}": {
-      "head": {
+      "get": {
         "summary": "Stream Track",
         "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.",
-        "operationId": "stream_track_api_stream__track_id__head",
+        "operationId": "stream_track_api_stream__track_id__get",
         "parameters": [
           {
             "name": "track_id",
@@ -1211,10 +1211,10 @@
           }
         }
       },
-      "get": {
+      "head": {
         "summary": "Stream Track",
         "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.",
-        "operationId": "stream_track_api_stream__track_id__head",
+        "operationId": "stream_track_api_stream__track_id__get",
         "parameters": [
           {
             "name": "track_id",
@@ -5139,6 +5139,46 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history/events": {
+      "get": {
+        "summary": "Stream history changes",
+        "description": "Server-sent events, one per change to the play history.\n\nEach event is ``{\"type\": \"history_changed\", \"mine\": bool}``; ``mine`` says\nwhether the change was to the caller's own plays, so a page showing only\nthose can ignore everyone else's. Payloads carry no play details: clients\nre-read ``/api/history/tracks`` and ``/api/history/stats``.",
+        "operationId": "history_events_api_history_events_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
