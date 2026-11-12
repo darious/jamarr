@@ -21,6 +21,7 @@ from app.api.deps import (
 )
 from app.db import get_db
 from app import lastfm
+from app.history_events import refresh_history
 from app.lastfm_sync_manager import LastfmSyncManager
 from app.sse import HEARTBEAT, HEARTBEAT_FRAME
 
@@ -650,7 +651,7 @@ async def sync_scrobbles_for_user(
     logger.info(log_msg)
 
     # Refresh materialized view
-    await db.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
+    await refresh_history(db, user.get("id"))
 
     return {
         "fetched": fetched,

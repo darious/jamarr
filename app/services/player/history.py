@@ -5,6 +5,7 @@ import asyncpg
 
 from app import lastfm
 from app.db import db_conn
+from app.history_events import refresh_history
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +211,7 @@ async def log_history(
                 )
 
             # Refresh materialized view to update stats immediately
-            await db.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
+            await refresh_history(db, user_id)
                 
         except Exception as e:
             logger.error(f"Failed to log history: {e}")
