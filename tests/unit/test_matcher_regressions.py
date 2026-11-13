@@ -10,7 +10,7 @@ from itertools import permutations
 
 import pytest
 
-from app.matching import normalize_artist, normalize_title
+from app.matching import build_cache_key, normalize_artist, normalize_title
 from app.matching.matcher import match_scrobble
 
 KNOWN_BUG = "issue #366"
@@ -112,7 +112,48 @@ def test_plain_scrobble_beats_a_lower_id_acoustic_bonus_track():
     assert match(sc, tracks) == 13226
 
 
-# --- known bugs ------------------------------------------------------------
+# --- cache key ------------------------------------------------------------
+
+
+def _keyed(track_name, album_name="", album_mbid=None, track_mbid=None, artist="Dermot Kennedy"):
+    sc = scrobble(track_name, artist, album_name, album_mbid)
+    sc["track_mbid"] = track_mbid
+    return build_cache_key(sc)
+
+
+def test_cache_key_separates_editions_with_one_track_mbid():
+    og = _keyed("Refuge", "The Weight of the Woods", "og", track_mbid="t")
+    ext = _keyed("Refuge", "The Weight of the Woods (Extended)", "ext", track_mbid="t")
+    assert og != ext
+
+
+def test_cache_key_falls_back_to_the_album_name():
+    assert _keyed("Refuge", "The Weight of the Woods", track_mbid="t") != _keyed(
+        "Refuge", "The Weight of the Woods (Extended)", track_mbid="t"
+    )
+
+
+def test_cache_key_keeps_version_labels():
+    album = "The Weight of the Woods (Extended)"
+    assert _keyed("Funeral", album) != _keyed("Funeral (Acoustic)", album)
+
+
+def test_cache_key_ignores_case_spacing_and_apostrophes():
+    assert _keyed("Don’t  Forget", "Sonder") == _keyed("don't forget", "SONDER")
+
+
+def test_cache_key_needs_an_mbid_or_artist_and_title():
+    assert _keyed("", "Sonder", artist="") is None
+    assert _keyed("Refuge", artist="") is None
+
+
+# --- artist names ------------------------------------------------------------
+
+
+def test_duo_credit_still_matches_each_artist():
+    # The full-name lookup must not stop a split credit finding its parts.
+    tracks = [track(1, "Under Pressure", "Queen", "Hot Space")]
+    assert match(scrobble("Under Pressure", "Queen & David Bowie"), tracks) == 1
 
 
 def test_single_name_artist_without_album_matches():
@@ -120,11 +161,15 @@ def test_single_name_artist_without_album_matches():
     assert match(scrobble("Home", "Phillip Phillips"), tracks) == 1
 
 
-@pytest.mark.xfail(strict=True, reason=f"{KNOWN_BUG}: 'and'/'&' band names are split and the full name is never tried")
-@pytest.mark.parametrize("artist", ["Of Monsters and Men", "Mumford & Sons", "Iron & Wine"])
+@pytest.mark.parametrize(
+    "artist", ["Of Monsters and Men", "Mumford & Sons", "Iron & Wine", "Christine and the Queens"]
+)
 def test_band_name_with_and_matches_without_album(artist):
     tracks = [track(1, "Little Talks", artist, "My Head Is an Animal")]
     assert match(scrobble("Little Talks", artist), tracks) == 1
+
+
+# --- known bugs ---
 
 
 @pytest.mark.xfail(strict=True, reason=f"{KNOWN_BUG}: '(Live)' is stripped, so the studio track wins")
