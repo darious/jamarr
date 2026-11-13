@@ -8,6 +8,7 @@ Subfolders have their own READMEs:
 - `scripts/scanner/README.md` — Scanner validation & debug
 - `scripts/sample/README.md` — Chart sampling tools
 - `scripts/playlist/README.md` — Playlist import/export
+- `scripts/match_eval/README.md` — Before/after harness for the Last.fm matcher
 
 Use `uv run python scripts/<script>.py ...` for consistent deps.
 
