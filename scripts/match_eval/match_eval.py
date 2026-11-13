@@ -82,6 +82,16 @@ EXPORT_COLUMNS = [
 # Regression metrics: each query returns the ids of suspect scrobbles, and the
 # metric is their count (lower is better). From the issue #366 investigation.
 _VERSION_WORDS = "live|acoustic|remix|mix|edit|version|session|demo|instrumental|unplugged"
+def _same_album(t: str) -> str:
+    """SQL: track alias t is on the album the scrobble s names (by release
+    MBID, or by name ignoring case and punctuation)."""
+    return (
+        f"({t}.release_mbid = s.album_mbid OR (s.album_name <> '' AND "
+        f"regexp_replace(lower({t}.album), '[^[:alnum:]]+', '', 'g') = "
+        f"regexp_replace(lower(s.album_name), '[^[:alnum:]]+', '', 'g')))"
+    )
+
+
 METRICS: Dict[str, Tuple[str, str]] = {
     "wrong_release": (
         "Scrobbles whose album_mbid names a library release holding a track of "
@@ -98,7 +108,8 @@ METRICS: Dict[str, Tuple[str, str]] = {
     "version_collapse": (
         "Scrobbles of a labelled version (live, acoustic, edit, mix, demo, ...) "
         "matched to a differently titled track although the library has the "
-        "exact title by that artist",
+        "exact title by that artist (unless only the other title is on the "
+        "album the scrobble names)",
         f"""
         SELECT s.id FROM lastfm_scrobble s
         JOIN lastfm_scrobble_match m ON m.scrobble_id = s.id
@@ -108,12 +119,16 @@ METRICS: Dict[str, Tuple[str, str]] = {
           AND EXISTS (SELECT 1 FROM track o
                       WHERE lower(replace(o.title, '’', '''')) = lower(replace(s.track_name, '’', ''''))
                         AND lower(o.artist) = lower(s.artist_name))
+          AND NOT ({_same_album('t')} AND NOT EXISTS (
+                SELECT 1 FROM track o
+                WHERE lower(replace(o.title, '’', '''')) = lower(replace(s.track_name, '’', ''''))
+                  AND lower(o.artist) = lower(s.artist_name) AND {_same_album('o')}))
         """,
     ),
     "version_drift": (
         "Scrobbles without a version label matched to a labelled version "
         "although the library has the exact title by that artist (the reverse "
-        "of version_collapse)",
+        "of version_collapse, with the same album exception)",
         f"""
         SELECT s.id FROM lastfm_scrobble s
         JOIN lastfm_scrobble_match m ON m.scrobble_id = s.id
@@ -124,6 +139,10 @@ METRICS: Dict[str, Tuple[str, str]] = {
           AND EXISTS (SELECT 1 FROM track o
                       WHERE lower(replace(o.title, '’', '''')) = lower(replace(s.track_name, '’', ''''))
                         AND lower(o.artist) = lower(s.artist_name))
+          AND NOT ({_same_album('t')} AND NOT EXISTS (
+                SELECT 1 FROM track o
+                WHERE lower(replace(o.title, '’', '''')) = lower(replace(s.track_name, '’', ''''))
+                  AND lower(o.artist) = lower(s.artist_name) AND {_same_album('o')}))
         """,
     ),
     "double_counted": (
@@ -513,6 +532,42 @@ def cmd_run(args: argparse.Namespace) -> None:
     asyncio.run(_run(args))
 
 
+async def _rescore(args: argparse.Namespace) -> None:
+    for label in args.labels:
+        meta, _metrics_old, rows = _load_run(args.workdir, label)
+        subset = _read_subset(args.workdir, str(meta["subset"]))["ids"] if meta.get("subset") else None
+        conn = await _connect()
+        try:
+            loaded = await _loaded_snapshot(conn)
+            if meta["snapshot"] != loaded:
+                raise SystemExit(f"Run {label} is from snapshot {meta['snapshot']}, scratch DB holds {loaded}")
+            records = [
+                (int(r["scrobble_id"]), int(r["track_id"]), float(r["match_score"] or 0),
+                 r["match_method"], r["match_reason"] or None)
+                for r in rows.values() if r["track_id"]
+            ]
+            async with conn.transaction():
+                await conn.execute("DELETE FROM lastfm_scrobble_match")
+                await conn.copy_records_to_table(
+                    "lastfm_scrobble_match", records=records,
+                    columns=["scrobble_id", "track_id", "match_score", "match_method", "match_reason"],
+                )
+            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
+            metrics = await _metrics(conn, subset)
+        finally:
+            await conn.close()
+        out = _run_dir(args.workdir, label)
+        (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
+        meta["rescored"] = dt.datetime.now().isoformat(timespec="seconds")
+        (out / "meta.json").write_text(json.dumps(meta, indent=2))
+        _log(f"Rescored {label}: " + ", ".join(f"{k} {metrics[k]}" for k in ("unmatched", *METRICS)))
+
+
+def cmd_rescore(args: argparse.Namespace) -> None:
+    _require_scratch()
+    asyncio.run(_rescore(args))
+
+
 # --------------------------------------------------------------------------
 # diff
 
@@ -655,6 +710,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_subset)
+
+    p = sub.add_parser("rescore", help="Recompute saved runs' metrics with the current metric definitions")
+    p.add_argument("labels", nargs="+")
+    p.set_defaults(func=cmd_rescore)
 
     p = sub.add_parser("diff", help="Compare two runs from the same snapshot")
     p.add_argument("a")

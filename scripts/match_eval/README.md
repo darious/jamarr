@@ -88,8 +88,17 @@ Heuristic counts from the issue #366 investigation; lower is better:
 - `double_counted`: a Last.fm history row coincides (same user, ±5 s) with a
   local play of a different track, so one play counts twice.
 
+The two version metrics skip a scrobble matched on the album it names when
+that album only has the other title (a single mix on a singles collection, a
+live album's tracks): that match is right.
+
 They flag suspects, not certain errors: read the diff's groups before trusting
-a number.
+a number. After changing a metric, recompute saved runs so their numbers stay
+comparable (it loads each run's matches back into the scratch DB):
+
+```bash
+uv run python $H rescore before after
+```
 
 ## Noise
 
