@@ -125,6 +125,37 @@ async def test_stream_serves_the_negotiated_alias_only_within_its_family(
     assert response.headers["content-type"] == "audio/mpeg"
 
 @pytest.mark.asyncio
+async def test_stream_hides_flac_track_number_only_when_asked(
+    auth_client: AsyncClient, db, tmp_path
+):
+    """Naim firmware 3.13 shows TRACKNUMBER as the title (app/media/flac_tags.py)."""
+    from tests.unit.test_flac_track_number import TAGS, _flac
+
+    path = tmp_path / "tagged.flac"
+    path.write_bytes(_flac(*TAGS))
+    await db.execute(
+        """
+        INSERT INTO track (id, title, artist, album, path, duration_seconds)
+        VALUES (998, 'The Visitor', 'Artist', 'Album', $1, 30)
+        """,
+        str(path),
+    )
+    original = path.read_bytes()
+
+    plain = await auth_client.get("/api/stream/998")
+    hidden = await auth_client.get("/api/stream/998?hide_tracknumber=1")
+    ranged = await auth_client.get(
+        "/api/stream/998?hide_tracknumber=1", headers={"Range": "bytes=0-"}
+    )
+
+    assert plain.content == original
+    assert hidden.content == original.replace(b"TRACKNUMBER=", b"XRACKNUMBER=")
+    assert hidden.headers["content-length"] == str(len(original))
+    assert ranged.status_code == 206
+    assert ranged.content == hidden.content
+
+
+@pytest.mark.asyncio
 async def test_stream_not_found(auth_client: AsyncClient, db):
     response = await auth_client.get("/api/stream/999999")
     assert response.status_code == 404

@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional, Set
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from async_upnp_client.exceptions import UpnpError
 from app.auth_tokens import create_stream_token
+from app.config import upnp_hide_track_number
 from app.services.renderer.contracts import RendererLoadError, make_renderer_id
 from app.services.upnp.protocol_info import (
     NegotiatedFormat,
@@ -101,12 +102,17 @@ def negotiate_mime(mime_type: str, supported_mimes: Set[str]) -> str:
     return negotiate_format(mime_type, (), supported_mimes).mime
 
 
+def with_query_param(url: str, key: str, value: str) -> str:
+    """url with ``key=value`` set, replacing any earlier value of key."""
+    parts = urlsplit(url)
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != key]
+    query.append((key, value))
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
 def with_mime_param(url: str, mime: str) -> str:
     """url plus ``mime=<label>``: /api/stream then serves the label the DIDL names."""
-    parts = urlsplit(url)
-    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "mime"]
-    query.append(("mime", mime))
-    return urlunsplit(parts._replace(query=urlencode(query)))
+    return with_query_param(url, "mime", mime)
 
 
 def build_didl_lite(
@@ -305,6 +311,10 @@ class UPnPDeviceControl:
             # A relabel within the alias family: the stream endpoint must send
             # the same name in Content-Type as the DIDL does.
             media_url = with_mime_param(media_url, mime_type)
+        if upnp_hide_track_number(udn):
+            # The renderer shows a FLAC's TRACKNUMBER as the title; the stream
+            # endpoint renames the tag in place (app/media/flac_tags.py).
+            media_url = with_query_param(media_url, "hide_tracknumber", "1")
 
         # Build art URL if available
         art_url = None
