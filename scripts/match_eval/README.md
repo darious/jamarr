@@ -37,6 +37,30 @@ uv run python $H diff before after [--top 100]
 uv run python $H down              # remove the container when done
 ```
 
+## Quick runs on a subset
+
+A full run re-matches every scrobble (about 7 minutes for 131k). For quick
+iteration, build a subset once, after a full run:
+
+```bash
+uv run python $H subset quick --runs before before-repeat   # flagged + moved + 5000 sampled
+uv run python $H run try-1 --subset quick                    # well under a minute
+uv run python $H run try-2 --subset quick
+uv run python $H diff try-1 try-2
+```
+
+The subset holds every scrobble a metric flags in the loaded full run,
+every scrobble whose match differs between the `--runs` given, and a seeded
+random sample (`--sample`, `--seed`). A subset run puts only those scrobbles
+through the same matching loop (`match_and_store`), so it can't show effects
+that depend on batches: cache copying between scrobbles, and order. Before
+merging, do a full run and a repeat full run. Diffs only compare runs over the
+same subset (or two full runs).
+
+Tests come first, in seconds: `tests/unit/test_matcher_regressions.py`
+(scorer cases from real misses) and
+`tests/integration/test_lastfm_match_and_store.py` (batches and the cache).
+
 ## Output
 
 Everything lives under `~/.cache/jamarr/match-eval/` (override with
@@ -59,6 +83,8 @@ Heuristic counts from the issue #366 investigation; lower is better:
 - `version_collapse`: a labelled version ("(Live)", "(Acoustic)",
   "(Radio Edit)", ...) is matched to a differently titled track although the
   library has the exact title by that artist.
+- `version_drift`: the reverse, a scrobble without a label matched to a
+  labelled version although the plain title exists.
 - `double_counted`: a Last.fm history row coincides (same user, ±5 s) with a
   local play of a different track, so one play counts twice.
 
@@ -67,11 +93,13 @@ a number.
 
 ## Noise
 
-The matcher as of 2026-11-13 is not deterministic: two runs of the same code
-on the same snapshot moved 430 scrobbles, and still 327 with a fixed
-`PYTHONHASHSEED`. The cache chooses between rows with equal `matched_at`, and
-candidate SQL has no `ORDER BY`. Until that's fixed, compare against a
-repeat run of the baseline to see the noise floor before reading a diff.
+Before `feat/matcher-determinism`, the matcher was not deterministic: two runs
+of the same code on the same snapshot moved 430 scrobbles, and still 327 with
+a fixed `PYTHONHASHSEED`. The winner depended on candidate order (SQL without
+`ORDER BY`, set iteration), and the cache chose between rows with equal
+`matched_at`. Now the winner is the maximum of a total sort key, and repeat
+runs diff to zero. If a change brings noise back, a repeat run shows it, so
+make "repeat full run diffs to zero" part of checking any matcher change.
 
 ## Notes
 

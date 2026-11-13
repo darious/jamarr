@@ -300,14 +300,7 @@ async def sync_scrobbles_for_user(
 ):
     """Fetch new scrobbles from Last.fm and match them to library tracks."""
     import os
-    from app.matching.matcher import (
-        preload_artist_lookup,
-        preload_skip_artists,
-        preload_tracks,
-        match_scrobble,
-        _build_artist_volume,
-    )
-    from app.matching import build_cache_key
+    from app.matching.matcher import match_and_store
 
     # Verify user has Last.fm username configured
     lastfm_username = user.get("lastfm_username")
@@ -508,7 +501,7 @@ async def sync_scrobbles_for_user(
                    artist_mbid, artist_name
             FROM lastfm_scrobble
             WHERE lastfm_username = $1
-            ORDER BY played_at DESC
+            ORDER BY played_at DESC, id DESC
             {limit_clause}
             """,
             user["lastfm_username"],
@@ -524,7 +517,7 @@ async def sync_scrobbles_for_user(
             LEFT JOIN lastfm_scrobble_match m ON m.scrobble_id = s.id
             WHERE s.lastfm_username = $1
               AND m.scrobble_id IS NULL
-            ORDER BY s.played_at DESC
+            ORDER BY s.played_at DESC, s.id DESC
             {limit_clause}
             """,
             user["lastfm_username"],
@@ -546,105 +539,13 @@ async def sync_scrobbles_for_user(
     add_log(log_msg)
     logger.info(log_msg)
 
-    # Preload data
-    artist_lookup = await preload_artist_lookup(db)
-    skip_artists = await preload_skip_artists(db)
-
-    # Process in batches
-    BATCH_SIZE = 1000
-    for i in range(0, len(scrobbles), BATCH_SIZE):
-        batch = scrobbles[i:i + BATCH_SIZE]
-        log_msg = f"Processing batch {i // BATCH_SIZE + 1} ({len(batch)} scrobbles)..."
-        add_log(log_msg)
-        logger.debug(log_msg)
-
-        # Preload tracks for this batch
-        indexes = await preload_tracks(db, batch, artist_lookup)
-        artist_volume = _build_artist_volume(batch)
-
-        # Check cache for existing matches
-        cache_keys = [build_cache_key(s) for s in batch]
-        cache_keys = [k for k in cache_keys if k]
-        cached_matches = {}
-        if cache_keys:
-            cache_rows = await db.fetch(
-                """
-                SELECT cache_key, track_id, match_score, match_method, match_reason
-                FROM lastfm_scrobble_match
-                WHERE cache_key = ANY($1::text[])
-                ORDER BY matched_at DESC
-                """,
-                cache_keys,
-            )
-            # Use most recent match for each cache key
-            for row in cache_rows:
-                if row["cache_key"] not in cached_matches:
-                    cached_matches[row["cache_key"]] = row
-
-        # Match each scrobble
-        match_rows = []
-        for scrobble in batch:
-            cache_key = build_cache_key(scrobble)
-
-            # Check cache first
-            if cache_key and cache_key in cached_matches:
-                cached = cached_matches[cache_key]
-                match_rows.append(
-                    (
-                        scrobble["id"],
-                        cached["track_id"],
-                        cached["match_score"],
-                        cached["match_method"],
-                        cached["match_reason"],
-                        cache_key,
-                    )
-                )
-                matched += 1
-                continue
-
-            # Try to match
-            result = match_scrobble(
-                scrobble,
-                indexes,
-                artist_lookup,
-                artist_volume,
-                skip_artists,
-                fuzzy=payload.fuzzy,
-                fuzzy_title_threshold=payload.fuzzy_title_threshold,
-            )
-
-            if result:
-                track_id, score, method, reason = result
-                match_rows.append(
-                    (
-                        scrobble["id"],
-                        track_id,
-                        score,
-                        method,
-                        reason,
-                        cache_key,
-                    )
-                )
-                matched += 1
-            else:
-                unmatched += 1
-
-        # Insert matches
-        if match_rows:
-            await db.executemany(
-                """
-                INSERT INTO lastfm_scrobble_match (scrobble_id, track_id, match_score, match_method, match_reason, cache_key)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (scrobble_id) DO UPDATE SET
-                    track_id = EXCLUDED.track_id,
-                    match_score = EXCLUDED.match_score,
-                    match_method = EXCLUDED.match_method,
-                    match_reason = EXCLUDED.match_reason,
-                    cache_key = EXCLUDED.cache_key,
-                    matched_at = NOW()
-                """,
-                match_rows,
-            )
+    matched, unmatched = await match_and_store(
+        db,
+        scrobbles,
+        fuzzy=payload.fuzzy,
+        fuzzy_title_threshold=payload.fuzzy_title_threshold,
+        log=add_log,
+    )
 
     log_msg = f"Matching complete: {matched} matched, {unmatched} unmatched"
     add_log(log_msg)

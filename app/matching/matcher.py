@@ -3,7 +3,7 @@ Last.fm scrobble matcher - orchestrates the matching process.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import asyncpg
 from rapidfuzz import fuzz
@@ -23,9 +23,29 @@ from app.matching import (
 )
 
 
+def _raw_title(value: Optional[str]) -> str:
+    """Title as written, ignoring only case, apostrophe style and spacing."""
+    if not value:
+        return ""
+    return " ".join(value.replace("’", "'").casefold().split())
+
+
+METHOD_RANK = {
+    "mbid_track": 3,
+    "mbid_artist_release": 2,
+    "name_artist_album": 1,
+    "name_artist_title": 0,
+    "name_partial": -1,
+}
+
+
 async def preload_artist_lookup(conn: asyncpg.Connection) -> Dict[str, str]:
-    """Preload artist name -> MBID lookup."""
-    rows = await conn.fetch("SELECT mbid, name FROM artist")
+    """Preload artist name -> MBID lookup.
+
+    Two artists can share a normalised name; ordering by MBID makes the one
+    that wins stable between runs (it is still an arbitrary pick).
+    """
+    rows = await conn.fetch("SELECT mbid, name FROM artist ORDER BY mbid")
     lookup: Dict[str, str] = {}
     for row in rows:
         from app.matching import normalize_artist
@@ -451,8 +471,12 @@ def match_scrobble(
                 if sc_artist == tr_artist or sc_artist == tr_album_artist:
                     non_various_title_match_exists = True
 
-    # Score candidates
-    best: Optional[Tuple[int, float, str, str, int, int]] = None
+    # Score candidates. The winner is the maximum of a total sort key, so the
+    # result never depends on the order candidates arrived in (SQL row order
+    # and set iteration both vary between runs).
+    best: Optional[Tuple[int, float, str, str]] = None
+    best_key: Optional[Tuple[float, int, int, int, int, int, int]] = None
+    sc_raw_title = _raw_title(scrobble["track_name"])
     for candidate in uniq_candidates:
         tr_album_artist = normalize_name(candidate["album_artist"])
         # Skip various artists if we have better matches
@@ -477,37 +501,25 @@ def match_scrobble(
         title_gate = 0.9 if artist_count >= 50 else 0.85
         if "fuzzy_title" in reason and score < title_gate:
             continue
-        
-        if best is None or score > best[1]:
-            best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
-            continue
-        
-        # Tie-breaking: an exact title beats a fuzzy one before anything else
-        if abs(score - best[1]) <= 0.01:
-            current_exact = "track_name" in reason
-            best_exact = "track_name" in best[3]
-            if current_exact != best_exact:
-                if current_exact:
-                    best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
-                continue
-            method_rank = {
-                "mbid_track": 3,
-                "mbid_artist_release": 2,
-                "name_artist_album": 1,
-                "name_artist_title": 0,
-                "name_partial": -1,
-            }
-            current_rank = method_rank.get(method, -1)
-            best_rank = method_rank.get(best[2], -1)
-            if current_rank > best_rank:
-                best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
-                continue
-            if current_rank == best_rank:
-                if aa_rank > best[4]:
-                    best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
-                    continue
-                if aa_rank == best[4] and rt_rank > best[5]:
-                    best = (candidate["id"], score, method, reason, aa_rank, rt_rank)
+
+        # Higher score first (rounded, so float noise doesn't decide), then an
+        # exact title over a fuzzy one, then method, album artist relation and
+        # release type. Of candidates still tied, one whose raw title equals
+        # the scrobble's wins (normalize_title drops "(Acoustic Version)", so
+        # "Goodbye My Lover" otherwise ties with its acoustic bonus track); the
+        # lowest track id settles the rest.
+        key = (
+            round(score, 2),
+            1 if "track_name" in reason else 0,
+            METHOD_RANK.get(method, -1),
+            aa_rank,
+            rt_rank,
+            1 if _raw_title(candidate["title"]) == sc_raw_title else 0,
+            -candidate["id"],
+        )
+        if best_key is None or key > best_key:
+            best_key = key
+            best = (candidate["id"], score, method, reason)
 
     if not best:
         if fuzzy:
@@ -525,7 +537,11 @@ def match_scrobble(
                         scrobble["track_name"], candidate["title"]
                     ):
                         continue
-                    if not best_fuzzy or similarity > best_fuzzy[1]:
+                    if (
+                        not best_fuzzy
+                        or similarity > best_fuzzy[1]
+                        or (similarity == best_fuzzy[1] and candidate["id"] < best_fuzzy[0])
+                    ):
                         best_fuzzy = (candidate["id"], similarity)
                 if best_fuzzy:
                     return (
@@ -536,4 +552,101 @@ def match_scrobble(
                     )
         return None
     
-    return (best[0], best[1], best[2], best[3])
+    return best
+
+
+MATCH_BATCH_SIZE = 1000
+
+
+async def match_and_store(
+    conn: asyncpg.Connection,
+    scrobbles: List[asyncpg.Record],
+    *,
+    fuzzy: bool = True,
+    fuzzy_title_threshold: int = 92,
+    log: Optional[Callable[[str], None]] = None,
+    batch_size: int = MATCH_BATCH_SIZE,
+) -> Tuple[int, int]:
+    """Match scrobbles in batches and upsert the results.
+
+    Scrobbles are processed in the order given (the sync passes newest
+    first). Each batch first reuses matches stored for the same cache key by
+    earlier batches or syncs, then matches the rest. Returns
+    (matched, unmatched).
+    """
+    from app.matching import build_cache_key
+
+    matched = 0
+    unmatched = 0
+    artist_lookup = await preload_artist_lookup(conn)
+    skip_artists = await preload_skip_artists(conn)
+
+    for i in range(0, len(scrobbles), batch_size):
+        batch = scrobbles[i:i + batch_size]
+        if log:
+            log(f"Processing batch {i // batch_size + 1} ({len(batch)} scrobbles)...")
+
+        indexes = await preload_tracks(conn, batch, artist_lookup)
+        artist_volume = _build_artist_volume(batch)
+
+        cache_keys = [k for k in (build_cache_key(s) for s in batch) if k]
+        cached_matches: Dict[str, asyncpg.Record] = {}
+        if cache_keys:
+            cache_rows = await conn.fetch(
+                """
+                SELECT cache_key, track_id, match_score, match_method, match_reason
+                FROM lastfm_scrobble_match
+                WHERE cache_key = ANY($1::text[])
+                ORDER BY matched_at DESC, id DESC
+                """,
+                cache_keys,
+            )
+            # Most recent match per cache key; id settles rows written together.
+            for row in cache_rows:
+                cached_matches.setdefault(row["cache_key"], row)
+
+        match_rows = []
+        for scrobble in batch:
+            cache_key = build_cache_key(scrobble)
+            cached = cached_matches.get(cache_key) if cache_key else None
+            if cached is not None:
+                match_rows.append((
+                    scrobble["id"], cached["track_id"], cached["match_score"],
+                    cached["match_method"], cached["match_reason"], cache_key,
+                ))
+                matched += 1
+                continue
+
+            result = match_scrobble(
+                scrobble,
+                indexes,
+                artist_lookup,
+                artist_volume,
+                skip_artists,
+                fuzzy=fuzzy,
+                fuzzy_title_threshold=fuzzy_title_threshold,
+            )
+            if result:
+                track_id, score, method, reason = result
+                match_rows.append((scrobble["id"], track_id, score, method, reason, cache_key))
+                matched += 1
+            else:
+                unmatched += 1
+
+        if match_rows:
+            await conn.executemany(
+                """
+                INSERT INTO lastfm_scrobble_match (scrobble_id, track_id, match_score, match_method, match_reason, cache_key)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (scrobble_id) DO UPDATE SET
+                    track_id = EXCLUDED.track_id,
+                    match_score = EXCLUDED.match_score,
+                    match_method = EXCLUDED.match_method,
+                    match_reason = EXCLUDED.match_reason,
+                    cache_key = EXCLUDED.cache_key,
+                    matched_at = NOW()
+                """,
+                match_rows,
+            )
+
+    return matched, unmatched
