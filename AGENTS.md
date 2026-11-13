@@ -64,6 +64,7 @@ Everything runs through `uv` (backend/tui) or Docker Compose. Do not `pip instal
 | Install/upgrade a server (image-only, no checkout) | `docker compose pull && docker compose up -d` in a dir holding `docker-compose.yml`, `.env`, `config.yaml`; `./deploy.sh` = same with a DB dump first |
 | Scan library | `docker compose run --rm jamarr uv run python -m app.scanner.cli scan` |
 | Enrich metadata | `... app.scanner.cli metadata` |
+| Matcher before/after (snapshot → scratch DB → re-match → diff) | `uv run python scripts/match_eval/match_eval.py snapshot\|up\|load\|run\|diff\|down` — see `scripts/match_eval/README.md` |
 | Android lint+tests+APK | `android/test.sh` (add `RUN_ANDROID_INSTRUMENTATION=1` to require device tests) |
 
 Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brings it up/down. Run a single test: `./test.sh tests/test_charts.py` (args forwarded to pytest).
