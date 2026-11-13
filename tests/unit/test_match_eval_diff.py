@@ -1,5 +1,5 @@
 """Diff classification in the matcher before/after harness."""
-from scripts.match_eval.match_eval import diff_runs, render_report
+from scripts.match_eval.match_eval import build_subset_ids, diff_runs, render_report
 
 
 def _row(sid, track_id, title="Refuge", album="The Weight of the Woods"):
@@ -58,3 +58,14 @@ def test_report_shows_metric_changes():
     )
     assert "| wrong_release | 5 | 2 | -3 |" in report
     assert "## Moved to another track (1 scrobbles, 1 distinct)" in report
+
+
+def test_subset_takes_flagged_moved_and_a_stable_sample():
+    run_a = {"1": _row("1", "10"), "2": _row("2", "10"), "3": _row("3", "")}
+    run_b = {"1": _row("1", "10"), "2": _row("2", "20"), "3": _row("3", "")}
+    all_ids = list(range(1, 101))
+    ids, stats = build_subset_ids([5, 7], [run_a, run_b], all_ids, sample=10, seed=1)
+    assert {2, 5, 7} <= set(ids)
+    assert stats == {"flagged": 2, "moved": 1, "sampled": 10, "total": 13}
+    again, _ = build_subset_ids([5, 7], [run_a, run_b], all_ids, sample=10, seed=1)
+    assert again == ids

@@ -8,7 +8,7 @@ exports every scrobble's match. Two runs can then be diffed: which scrobbles
 moved to another track, which became (un)matched, and how the regression
 metrics changed.
 
-Subcommands: snapshot, up, load, run, diff, down. See README.md.
+Subcommands: snapshot, up, load, run, subset, diff, down. See README.md.
 """
 from __future__ import annotations
 
@@ -79,15 +79,15 @@ EXPORT_COLUMNS = [
     "match_method", "match_reason",
 ]
 
-# Regression metrics. Each is a heuristic count where lower is better; they
-# come from the issue #366 investigation.
+# Regression metrics: each query returns the ids of suspect scrobbles, and the
+# metric is their count (lower is better). From the issue #366 investigation.
 _VERSION_WORDS = "live|acoustic|remix|mix|edit|version|session|demo|instrumental|unplugged"
 METRICS: Dict[str, Tuple[str, str]] = {
     "wrong_release": (
         "Scrobbles whose album_mbid names a library release holding a track of "
         "the same title, but which are matched to another release",
         """
-        SELECT count(*) FROM lastfm_scrobble s
+        SELECT s.id FROM lastfm_scrobble s
         JOIN lastfm_scrobble_match m ON m.scrobble_id = s.id
         JOIN track t ON t.id = m.track_id
         WHERE s.album_mbid <> '' AND t.release_mbid IS DISTINCT FROM s.album_mbid
@@ -100,7 +100,7 @@ METRICS: Dict[str, Tuple[str, str]] = {
         "matched to a differently titled track although the library has the "
         "exact title by that artist",
         f"""
-        SELECT count(*) FROM lastfm_scrobble s
+        SELECT s.id FROM lastfm_scrobble s
         JOIN lastfm_scrobble_match m ON m.scrobble_id = s.id
         JOIN track t ON t.id = m.track_id
         WHERE lower(replace(t.title, '’', '''')) <> lower(replace(s.track_name, '’', ''''))
@@ -110,11 +110,28 @@ METRICS: Dict[str, Tuple[str, str]] = {
                         AND lower(o.artist) = lower(s.artist_name))
         """,
     ),
+    "version_drift": (
+        "Scrobbles without a version label matched to a labelled version "
+        "although the library has the exact title by that artist (the reverse "
+        "of version_collapse)",
+        f"""
+        SELECT s.id FROM lastfm_scrobble s
+        JOIN lastfm_scrobble_match m ON m.scrobble_id = s.id
+        JOIN track t ON t.id = m.track_id
+        WHERE lower(replace(t.title, '’', '''')) <> lower(replace(s.track_name, '’', ''''))
+          AND t.title ~* '[\\(\\[-].*({_VERSION_WORDS})'
+          AND s.track_name !~* '[\\(\\[-].*({_VERSION_WORDS})'
+          AND EXISTS (SELECT 1 FROM track o
+                      WHERE lower(replace(o.title, '’', '''')) = lower(replace(s.track_name, '’', ''''))
+                        AND lower(o.artist) = lower(s.artist_name))
+        """,
+    ),
     "double_counted": (
         "History rows from Last.fm that coincide (same user, within 5 s) with a "
         "local play of a different track, so one play is counted twice",
         """
-        SELECT count(*) FROM combined_playback_history_mat h
+        SELECT m.scrobble_id FROM combined_playback_history_mat h
+        JOIN lastfm_scrobble_match m ON m.id = h.source_id
         WHERE h.source = 'lastfm' AND EXISTS (
             SELECT 1 FROM playback_history p
             WHERE p.user_id = h.user_id AND p.track_id <> h.track_id
@@ -306,13 +323,23 @@ async def _loaded_snapshot(conn) -> str:
     return await conn.fetchval(f"SELECT snapshot FROM {MARKER_TABLE} LIMIT 1")
 
 
-async def _metrics(conn) -> Dict[str, int]:
+async def _flagged(conn) -> Dict[str, List[int]]:
+    """Scrobble ids each metric flags in the scratch DB's current state."""
+    return {name: [r[0] for r in await conn.fetch(sql)] for name, (_desc, sql) in METRICS.items()}
+
+
+async def _metrics(conn, subset: Optional[List[int]] = None) -> Dict[str, int]:
     out: Dict[str, int] = {}
-    out["scrobbles"] = await conn.fetchval("SELECT count(*) FROM lastfm_scrobble")
+    if subset is None:
+        out["scrobbles"] = await conn.fetchval("SELECT count(*) FROM lastfm_scrobble")
+    else:
+        out["scrobbles"] = len(subset)
+    # A subset run leaves every other scrobble unmatched, so matches and
+    # flags only ever cover the subset.
     out["matched"] = await conn.fetchval("SELECT count(*) FROM lastfm_scrobble_match")
     out["unmatched"] = out["scrobbles"] - out["matched"]
-    for name, (_desc, sql) in METRICS.items():
-        out[name] = await conn.fetchval(sql)
+    for name, ids in (await _flagged(conn)).items():
+        out[name] = len(ids)
     for row in await conn.fetch(
         "SELECT match_method, count(*) AS n FROM lastfm_scrobble_match GROUP BY 1 ORDER BY 1"
     ):
@@ -320,7 +347,8 @@ async def _metrics(conn) -> Dict[str, int]:
     return out
 
 
-async def _export_run(workdir: Path, label: str, snapshot: str, meta: Dict[str, object]) -> None:
+async def _export_run(workdir: Path, label: str, snapshot: str, meta: Dict[str, object],
+                      subset: Optional[List[int]] = None) -> None:
     conn = await _connect()
     try:
         loaded = await _loaded_snapshot(conn)
@@ -328,13 +356,16 @@ async def _export_run(workdir: Path, label: str, snapshot: str, meta: Dict[str, 
             raise SystemExit(f"Scratch DB holds snapshot {loaded}, not {snapshot}")
         out = _run_dir(workdir, label)
         out.mkdir(parents=True, exist_ok=True)
-        rows = await conn.fetch(EXPORT_SQL)
+        if subset is None:
+            rows = await conn.fetch(EXPORT_SQL)
+        else:
+            rows = await conn.fetch(EXPORT_SQL.replace("ORDER BY s.id", "WHERE s.id = ANY($1::bigint[])\nORDER BY s.id"), subset)
         with gzip.open(out / "matches.csv.gz", "wt", newline="") as fh:
             writer = csv.writer(fh)
             writer.writerow(EXPORT_COLUMNS)
             for row in rows:
                 writer.writerow(["" if row[c] is None else row[c] for c in EXPORT_COLUMNS])
-        metrics = await _metrics(conn)
+        metrics = await _metrics(conn, subset)
     finally:
         await conn.close()
     meta = {"label": label, "snapshot": snapshot, "exported": dt.datetime.now().isoformat(timespec="seconds"), **meta}
@@ -345,12 +376,25 @@ async def _export_run(workdir: Path, label: str, snapshot: str, meta: Dict[str, 
         _log(f"  {key:18} {metrics[key]}")
 
 
+SCROBBLE_SQL = """
+SELECT id, lastfm_username, track_mbid, track_name, album_mbid, album_name,
+       artist_mbid, artist_name
+FROM lastfm_scrobble
+WHERE lastfm_username = $1 AND id = ANY($2::bigint[])
+ORDER BY played_at DESC, id DESC
+"""
+
+
 async def _run(args: argparse.Namespace) -> None:
     from app.api.lastfm import SyncRequest, sync_scrobbles_for_user
+    from app.matching.matcher import match_and_store
 
+    subset = _read_subset(args.workdir, args.subset) if args.subset else None
     conn = await _connect()
     try:
         snapshot = await _loaded_snapshot(conn)
+        if subset is not None and subset["snapshot"] != snapshot:
+            raise SystemExit(f"Subset {args.subset} was built from snapshot {subset['snapshot']}, not {snapshot}")
         users = await conn.fetch(
             'SELECT id, username, lastfm_username FROM "user" '
             "WHERE lastfm_username IS NOT NULL AND lastfm_username <> '' ORDER BY id"
@@ -361,10 +405,25 @@ async def _run(args: argparse.Namespace) -> None:
         )
         started = time.monotonic()
         results = []
-        for user in users:
-            _log(f"Re-matching scrobbles for user {user['id']} ...")
-            result = await sync_scrobbles_for_user(conn, dict(user), payload)
-            results.append({k: result[k] for k in ("matched", "unmatched")})
+        if subset is None:
+            # The real sync path: delete the user's matches, re-match all.
+            for user in users:
+                _log(f"Re-matching scrobbles for user {user['id']} ...")
+                result = await sync_scrobbles_for_user(conn, dict(user), payload)
+                results.append({k: result[k] for k in ("matched", "unmatched")})
+        else:
+            # Same matching loop on the subset only; every other scrobble is
+            # left unmatched until the next full run.
+            await conn.execute("DELETE FROM lastfm_scrobble_match")
+            for user in users:
+                scrobbles = await conn.fetch(SCROBBLE_SQL, user["lastfm_username"], subset["ids"])
+                _log(f"Re-matching {len(scrobbles)} subset scrobbles for user {user['id']} ...")
+                matched, unmatched = await match_and_store(
+                    conn, scrobbles, fuzzy=payload.fuzzy,
+                    fuzzy_title_threshold=payload.fuzzy_title_threshold,
+                )
+                results.append({"matched": matched, "unmatched": unmatched})
+            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
         elapsed = round(time.monotonic() - started, 1)
     finally:
         await conn.close()
@@ -372,7 +431,79 @@ async def _run(args: argparse.Namespace) -> None:
     await _export_run(args.workdir, args.label, snapshot, {
         "kind": "rematch", "git": _git_state(), "seconds": elapsed,
         "payload": payload.model_dump(), "per_user": results,
-    })
+        "subset": args.subset,
+    }, subset=subset["ids"] if subset else None)
+
+
+# --------------------------------------------------------------------------
+# subsets
+
+def _subset_path(workdir: Path, name: str) -> Path:
+    return workdir / "subsets" / f"{name}.json"
+
+
+def _read_subset(workdir: Path, name: str) -> Dict[str, Any]:
+    path = _subset_path(workdir, name)
+    if not path.exists():
+        raise SystemExit(f"No subset {name} at {path}")
+    return json.loads(path.read_text())
+
+
+def build_subset_ids(flagged: Iterable[int], runs: List[Dict[str, Dict[str, str]]],
+                     all_ids: List[int], sample: int, seed: int) -> Tuple[List[int], Dict[str, int]]:
+    """Flagged scrobbles + scrobbles whose match differs between any of the
+    runs + a seeded random sample of the rest."""
+    import random
+
+    flagged_set = {int(i) for i in flagged}
+    moved: set = set()
+    if len(runs) > 1:
+        for sid, row in runs[0].items():
+            targets = {r[sid]["track_id"] for r in runs if sid in r}
+            if len(targets) > 1:
+                moved.add(int(sid))
+    chosen = flagged_set | moved
+    rest = sorted(set(all_ids) - chosen)
+    sampled = random.Random(seed).sample(rest, min(sample, len(rest)))
+    ids = sorted(chosen | set(sampled))
+    return ids, {"flagged": len(flagged_set), "moved": len(moved), "sampled": len(sampled), "total": len(ids)}
+
+
+async def _subset(args: argparse.Namespace) -> None:
+    conn = await _connect()
+    try:
+        snapshot = await _loaded_snapshot(conn)
+        matched = await conn.fetchval("SELECT count(*) FROM lastfm_scrobble_match")
+        total = await conn.fetchval("SELECT count(*) FROM lastfm_scrobble")
+        if matched < total * 0.5:
+            raise SystemExit("Scratch DB doesn't hold a full run (a subset run was last?); do a full run first")
+        flagged_by = await _flagged(conn)
+        all_ids = [r[0] for r in await conn.fetch("SELECT id FROM lastfm_scrobble")]
+    finally:
+        await conn.close()
+    runs = []
+    for label in args.runs:
+        meta, _metrics_unused, rows = _load_run(args.workdir, label)
+        if meta["snapshot"] != snapshot or meta.get("subset"):
+            raise SystemExit(f"Run {label} is not a full run of snapshot {snapshot}")
+        runs.append(rows)
+    flagged = [i for ids in flagged_by.values() for i in ids]
+    ids, stats = build_subset_ids(flagged, runs, all_ids, args.sample, args.seed)
+    path = _subset_path(args.workdir, args.name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "name": args.name, "snapshot": snapshot, "runs": args.runs,
+        "sample": args.sample, "seed": args.seed, "stats": stats, "ids": ids,
+    }))
+    _log(f"Subset {args.name}: {stats['total']} scrobbles "
+         f"({stats['flagged']} flagged, {stats['moved']} moved between runs, {stats['sampled']} sampled)")
+
+
+def cmd_subset(args: argparse.Namespace) -> None:
+    _require_scratch()
+    if _subset_path(args.workdir, args.name).exists() and not args.force:
+        raise SystemExit(f"Subset {args.name} exists (use --force to overwrite)")
+    asyncio.run(_subset(args))
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -471,6 +602,8 @@ def cmd_diff(args: argparse.Namespace) -> None:
     meta_b, metrics_b, rows_b = _load_run(args.workdir, args.b)
     if meta_a["snapshot"] != meta_b["snapshot"]:
         raise SystemExit(f"Runs come from different snapshots ({meta_a['snapshot']} vs {meta_b['snapshot']})")
+    if meta_a.get("subset") != meta_b.get("subset"):
+        raise SystemExit(f"Runs cover different scrobbles (subset {meta_a.get('subset')} vs {meta_b.get('subset')})")
     result = diff_runs(rows_a, rows_b)
     report = render_report(args.a, args.b, metrics_a, metrics_b, result, args.top)
     out = args.out or (args.workdir / "runs" / f"diff-{args.a}--{args.b}.md")
@@ -512,7 +645,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true", help="Overwrite an existing run")
     p.add_argument("--no-fuzzy", action="store_true")
     p.add_argument("--fuzzy-title-threshold", type=int, default=92)
+    p.add_argument("--subset", help="Re-match only this subset (see: subset); fast, but batch and cache effects differ from a full run")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("subset", help="Build a scrobble subset for quick runs (needs a full run loaded)")
+    p.add_argument("name")
+    p.add_argument("--runs", nargs="*", default=[], help="Full runs whose disagreements to include")
+    p.add_argument("--sample", type=int, default=5000, help="Random scrobbles to add (default 5000)")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--force", action="store_true")
+    p.set_defaults(func=cmd_subset)
 
     p = sub.add_parser("diff", help="Compare two runs from the same snapshot")
     p.add_argument("a")
