@@ -223,6 +223,25 @@ def upnp_gapless_override(udn: str):
     return None
 
 
+def upnp_hide_track_number(udn: str) -> bool:
+    """Whether FLAC streams to this renderer hide their TRACKNUMBER tag.
+
+    ``renderer.upnp_hide_track_number``: a list of UDNs (``uuid:`` and
+    ``upnp:`` prefixes optional). For renderers that show the tag as the
+    title -- Naim firmware 3.13 does; see app/media/flac_tags.py.
+    """
+    try:
+        listed = (load_config().get("renderer") or {}).get("upnp_hide_track_number") or []
+    except (FileNotFoundError, AttributeError):
+        return False
+    if not isinstance(listed, list):
+        return False
+    def norm(value) -> str:
+        return _normalize_udn(str(value).strip().removeprefix("upnp:"))
+
+    return norm(udn) in {norm(u) for u in listed if u}
+
+
 CAST_QUEUE_DEFAULT_PRELOAD_SECONDS = 20
 
 

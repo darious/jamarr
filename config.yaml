@@ -45,6 +45,11 @@ renderer:
   #   enabled: true          # false = never stage, on any renderer
   #   disabled_udns: []      # never stage on these
   #   forced_udns: []        # stage even if not advertised
+  # Renderers that show a FLAC's TRACKNUMBER tag as the track title (Naim
+  # firmware 3.13). Listed UDNs get the tag renamed in the stream, one byte,
+  # so seeking and gapless are unaffected.
+  # upnp_hide_track_number:
+  #   - uuid:<renderer-udn>
   # UPnP event subscriptions (AVTransport/RenderingControl LastChange): the
   # renderer NOTIFYs a callback server bound to the source address above on
   # this port. Events off = 1 s polling. Env overrides: UPNP_EVENTS,

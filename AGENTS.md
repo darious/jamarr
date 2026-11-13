@@ -143,6 +143,11 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
   `app/services/upnp/protocol_info.py` / `transport_errors.py`. A relabelled stream
   URL carries `&mime=`, which `/api/stream` honours only within the alias family
   (DIDL and `Content-Type` must agree). Tests: `tests/unit/test_upnp_protocol_negotiation.py`.
+  Renderers in `renderer.upnp_hide_track_number` (Naim fw 3.13 shows FLAC
+  TRACKNUMBER as the title) get `&hide_tracknumber=1`; `/api/stream` renames the
+  key in place, one byte (`app/media/flac_tags.py`, `PatchedFileResponse` hooks
+  Starlette's private `_open_file` — re-check on Starlette upgrades).
+  Tests: `tests/unit/test_flac_track_number.py`.
 - UPnP events (`app/services/upnp/events.py`): the monitor acquires/releases
   AVTransport + RenderingControl GENA subscriptions; NOTIFY callback server on
   the UPnP source address, port `renderer.upnp_event_port` / `UPNP_EVENT_PORT`

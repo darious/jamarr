@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Optional
 
@@ -12,6 +13,7 @@ from app.audio_normalization import (
 )
 from app.auth_tokens import verify_stream_token
 from app.db import db_conn, get_db
+from app.media.flac_tags import PatchedFileResponse, track_number_patches
 from app.services.audio_streaming import build_stream_url
 from app.services.upnp.protocol_info import served_content_type
 from app.services.playback_plan import OutputSpec, source_mime_type
@@ -38,6 +40,22 @@ _ORIGINAL_NORMALIZED_ARGS = (
     "-compression_level",
     "5",
 )
+
+
+_TRUTHY = {"1", "true", "on", "yes"}
+
+
+async def _file_response(path: str, *, hide_track_number: bool = False, **kwargs) -> FileResponse:
+    """FileResponse, with a FLAC's TRACKNUMBER tag renamed when asked.
+
+    Same size and offsets either way, so Range requests are unaffected; a
+    file without the tag (or not FLAC) is served as is.
+    """
+    if hide_track_number:
+        patches = await asyncio.to_thread(track_number_patches, path)
+        if patches:
+            return PatchedFileResponse(path, patches=patches, **kwargs)
+    return FileResponse(path, **kwargs)
 
 
 def _guess_media_type(path: str) -> str:
@@ -130,6 +148,7 @@ async def stream_track(
     quality: Optional[str] = None,
     normalize: Optional[str] = None,
     mime: Optional[str] = None,
+    hide_tracknumber: Optional[str] = None,
 ):
     """Serve a track's audio.
 
@@ -137,6 +156,10 @@ async def stream_track(
     (``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias
     of what is actually served -- it relabels, it never claims another format
     -- so the renderer sees one MIME in its metadata and in Content-Type.
+
+    ``hide_tracknumber=1`` renames a FLAC's TRACKNUMBER tag in the bytes
+    served, for renderers that show it as the title (opt-in per renderer:
+    ``renderer.upnp_hide_track_number``).
     """
     # Deliberately no Depends(get_db): dependencies with yield are only torn
     # down after the response finishes, which would pin a pool connection for
@@ -177,6 +200,8 @@ async def stream_track(
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File not found on disk")
 
+    hide_track_number = (hide_tracknumber or "").strip().lower() in _TRUTHY
+
     normalization_requested = normalize is None or normalize.strip().lower() not in {
         "0",
         "false",
@@ -190,7 +215,13 @@ async def stream_track(
     planned = OutputSpec.from_claims(stream_claims) if not quality else None
     if planned is not None:
         return await _serve_planned_output(
-            path, dict(row), planned, stream_claims, normalization_requested, mime
+            path,
+            dict(row),
+            planned,
+            stream_claims,
+            normalization_requested,
+            mime,
+            hide_track_number=hide_track_number,
         )
 
     selected_quality = normalize_quality(
@@ -228,8 +259,9 @@ async def stream_track(
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=f"Transcode failed: {exc}") from exc
-        return FileResponse(
+        return await _file_response(
             cached_path,
+            hide_track_number=hide_track_number,
             media_type=served_content_type(profile.mime_type, mime),
             headers={
                 "X-Jamarr-Loudness-Normalized": "1",
@@ -250,8 +282,9 @@ async def stream_track(
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=f"Transcode failed: {exc}") from exc
-        return FileResponse(
+        return await _file_response(
             cached_path,
+            hide_track_number=hide_track_number,
             media_type=served_content_type(profile.mime_type, mime),
             headers={
                 "X-Jamarr-Stream-Quality": selected_quality,
@@ -259,8 +292,9 @@ async def stream_track(
             },
         )
 
-    return FileResponse(
+    return await _file_response(
         path,
+        hide_track_number=hide_track_number,
         media_type=served_content_type(_guess_media_type(path), mime),
         headers={
             "X-Jamarr-Stream-Quality": "original",
@@ -276,6 +310,8 @@ async def _serve_planned_output(
     claims: dict,
     normalization_requested: bool,
     mime: Optional[str] = None,
+    *,
+    hide_track_number: bool = False,
 ) -> FileResponse:
     """Serve a planned renderer output as a plain (cached) file.
 
@@ -285,8 +321,9 @@ async def _serve_planned_output(
     """
     headers = {"X-Jamarr-Output-Format": output.format}
     if output.is_original:
-        return FileResponse(
+        return await _file_response(
             path,
+            hide_track_number=hide_track_number,
             media_type=served_content_type(output.mime_type or source_mime_type(path), mime),
             headers={
                 **headers,
@@ -337,6 +374,8 @@ async def _serve_planned_output(
     headers["X-Jamarr-Stream-Quality"] = output.profile or output.format
     # Content-Type is the plan's MIME (audio/L16 keeps its rate and channel
     # parameters), relabelled only to the alias a UPnP renderer was told.
-    return FileResponse(
-        cached_path, media_type=served_content_type(output.mime_type, mime), headers=headers
+    return await _file_response(
+        cached_path,
+        hide_track_number=hide_track_number,
+        media_type=served_content_type(output.mime_type, mime), headers=headers
     )

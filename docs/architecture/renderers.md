@@ -326,6 +326,17 @@ into `load_failed` with the detail for the UI. The last error per renderer is
 in the diagnostics. `SetNextAVTransportURI` re-raises the device's own error
 so staging's fault/transient classification is unchanged.
 
+**Hiding TRACKNUMBER.** Naim streamers on firmware 3.13 show the TRACKNUMBER
+Vorbis comment of a pushed FLAC as the now-playing title (front panel and
+`:15081/nowplaying`), ahead of both the TITLE tag and `dc:title`; a
+`upnp:originalTrackNumber` in the DIDL does not help. For renderers listed in
+`renderer.upnp_hide_track_number` (UDNs), every stream URL — loaded or staged —
+carries `hide_tracknumber=1`, and `/api/stream` renames the key in the bytes
+it serves (`TRACKNUMBER=` → `XRACKNUMBER=`; `app/media/flac_tags.py`). One byte
+changes, so size, offsets and Range requests are as before; original and
+transcoded FLAC alike, other formats untouched. Opt-in per device: firmware
+can fix it.
+
 ## UPnP events and watchdog polling
 
 `app/services/upnp/events.py` subscribes (GENA) to a renderer's
