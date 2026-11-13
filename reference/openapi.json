@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FastAPI",
-    "version": "v1.14.2"
+    "version": "v1.15.0"
   },
   "paths": {
     "/art/test": {
@@ -1113,7 +1113,7 @@
     "/api/stream/{track_id}": {
       "get": {
         "summary": "Stream Track",
-        "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.",
+        "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.\n\n``hide_tracknumber=1`` renames a FLAC's TRACKNUMBER tag in the bytes\nserved, for renderers that show it as the title (opt-in per renderer:\n``renderer.upnp_hide_track_number``).",
         "operationId": "stream_track_api_stream__track_id__get",
         "parameters": [
           {
@@ -1187,6 +1187,22 @@
                 }
               ],
               "title": "Mime"
+            }
+          },
+          {
+            "name": "hide_tracknumber",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hide Tracknumber"
             }
           }
         ],
@@ -1213,7 +1229,7 @@
       },
       "head": {
         "summary": "Stream Track",
-        "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.",
+        "description": "Serve a track's audio.\n\n``mime`` names the alias a UPnP renderer was told in its DIDL\n(``audio/x-flac`` for FLAC, say). It is honoured only when it is an alias\nof what is actually served -- it relabels, it never claims another format\n-- so the renderer sees one MIME in its metadata and in Content-Type.\n\n``hide_tracknumber=1`` renames a FLAC's TRACKNUMBER tag in the bytes\nserved, for renderers that show it as the title (opt-in per renderer:\n``renderer.upnp_hide_track_number``).",
         "operationId": "stream_track_api_stream__track_id__get",
         "parameters": [
           {
@@ -1287,6 +1303,22 @@
                 }
               ],
               "title": "Mime"
+            }
+          },
+          {
+            "name": "hide_tracknumber",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hide Tracknumber"
             }
           }
         ],

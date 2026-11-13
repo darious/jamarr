@@ -2762,6 +2762,16 @@ the stream's MIME type (audio/flac; not in the formats it advertises)
 into <code>load_failed</code> with the detail for the UI. The last error per renderer is
 in the diagnostics. <code>SetNextAVTransportURI</code> re-raises the device's own error
 so staging's fault/transient classification is unchanged.</p>
+<p><strong>Hiding TRACKNUMBER.</strong> Naim streamers on firmware 3.13 show the TRACKNUMBER
+Vorbis comment of a pushed FLAC as the now-playing title (front panel and
+<code>:15081/nowplaying</code>), ahead of both the TITLE tag and <code>dc:title</code>; a
+<code>upnp:originalTrackNumber</code> in the DIDL does not help. For renderers listed in
+<code>renderer.upnp_hide_track_number</code> (UDNs), every stream URL — loaded or staged —
+carries <code>hide_tracknumber=1</code>, and <code>/api/stream</code> renames the key in the bytes
+it serves (<code>TRACKNUMBER=</code> → <code>XRACKNUMBER=</code>; <code>app/media/flac_tags.py</code>). One byte
+changes, so size, offsets and Range requests are as before; original and
+transcoded FLAC alike, other formats untouched. Opt-in per device: firmware
+can fix it.</p>
 <h2 id="upnp-events-and-watchdog-polling">UPnP events and watchdog polling<a class="headerlink" href="#upnp-events-and-watchdog-polling" title="Permanent link">&para;</a></h2>
 <p><code>app/services/upnp/events.py</code> subscribes (GENA) to a renderer's
 <strong>AVTransport</strong> and <strong>RenderingControl</strong> services while Jamarr plays to it, so

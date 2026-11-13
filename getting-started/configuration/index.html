@@ -2050,6 +2050,9 @@ its own beside <code>docker-compose.yml</code>, which mounts it into the contain
 <li>UPnP next-track staging overrides (<code>renderer.upnp_gapless</code>: <code>enabled</code>,
   <code>disabled_udns</code>, <code>forced_udns</code>) — see
   <a href="../../architecture/renderers/#upnp-next-track-staging">Renderers</a></li>
+<li>Renderers that show a FLAC's track number as its title
+  (<code>renderer.upnp_hide_track_number</code>, a list of UDNs; Naim firmware 3.13) —
+  see <a href="../../architecture/renderers/#upnp-protocol-negotiation">Renderers</a></li>
 <li>UPnP event subscriptions (<code>renderer.upnp_events</code>, default <code>true</code>;
   <code>renderer.upnp_event_port</code>, default 8113, the NOTIFY callback port bound on
   the UPnP source address) — see
