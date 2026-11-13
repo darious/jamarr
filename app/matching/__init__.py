@@ -293,17 +293,36 @@ def base_titles_compatible(sc_raw: Optional[str], tr_raw: Optional[str]) -> bool
     return fuzz.ratio(sc_base, tr_base) >= BASE_TITLE_MIN_RATIO
 
 
+def raw_title(value: Optional[str]) -> str:
+    """Title as written, ignoring only case, apostrophe style and spacing.
+
+    Unlike normalize_title it keeps version labels: "Funeral" and
+    "Funeral (Acoustic)" stay different.
+    """
+    if not value:
+        return ""
+    return " ".join(value.replace("’", "'").casefold().split())
+
+
+CACHE_KEY_VERSION = "v2"
+
+
 def build_cache_key(scrobble: asyncpg.Record) -> Optional[str]:
-    """Build cache key for scrobble to enable fast duplicate lookup."""
+    """Key under which a scrobble's match is reused for later scrobbles.
+
+    Two scrobbles share a key only when they name the same recording on the
+    same album, with the same title as written: Last.fm gives every edition
+    of an album the same track MBID, and normalize_title drops version
+    labels, so neither alone is enough (issue #366). Keys made before the
+    album and raw title were added lack the version prefix and never match.
+    """
+    title = raw_title(scrobble["track_name"])
+    album = scrobble["album_mbid"] or normalize_name(scrobble["album_name"])
     if scrobble["track_mbid"]:
-        return f"track_mbid:{scrobble['track_mbid']}"
+        return f"{CACHE_KEY_VERSION}|mbid:{scrobble['track_mbid']}|{album}|{title}"
     artist = normalize_name(scrobble["artist_name"])
-    title = normalize_title(scrobble["track_name"])
-    album = normalize_name(scrobble["album_name"])
     if artist and title:
-        if album:
-            return f"name:{artist}|{title}|{album}"
-        return f"name:{artist}|{title}"
+        return f"{CACHE_KEY_VERSION}|name:{artist}|{album}|{title}"
     return None
 
 

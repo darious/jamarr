@@ -20,14 +20,8 @@ from app.matching import (
     score_candidate,
     _title_variants,
     _regex_normalize,
+    raw_title,
 )
-
-
-def _raw_title(value: Optional[str]) -> str:
-    """Title as written, ignoring only case, apostrophe style and spacing."""
-    if not value:
-        return ""
-    return " ".join(value.replace("’", "'").casefold().split())
 
 
 METHOD_RANK = {
@@ -79,7 +73,7 @@ async def preload_tracks(
     for s in scrobbles:
         if s["artist_mbid"]:
             continue
-        for name in scrobble_artist_parts(s):
+        for name in _artist_keys(s):
             mbid = artist_lookup.get(normalize_artist(name))
             if mbid:
                 artist_mbids.add(mbid)
@@ -334,6 +328,15 @@ async def preload_tracks(
     return indexes
 
 
+def _artist_keys(scrobble: asyncpg.Record) -> List[str]:
+    """Artist names to look a scrobble up by: the full name first, then the
+    parts split_artist_names and featured credits give. The full name has to
+    stay: "Mumford & Sons" splits into "mumford" and "sons", neither of which
+    is an artist."""
+    keys = [normalize_artist(scrobble["artist_name"]), *scrobble_artist_parts(scrobble)]
+    return [k for k in dict.fromkeys(keys) if k]
+
+
 def _collect_candidates(
     scrobble: asyncpg.Record,
     indexes: Dict[str, Dict[Any, List[asyncpg.Record]]],
@@ -343,7 +346,8 @@ def _collect_candidates(
     from rapidfuzz import fuzz
     
     candidates: List[asyncpg.Record] = []
-    
+    artist_keys = _artist_keys(scrobble)
+
     # Try MBID matches first
     if scrobble["track_mbid"]:
         candidates.extend(indexes["track_mbid"].get(scrobble["track_mbid"], []))
@@ -353,12 +357,10 @@ def _collect_candidates(
         candidates.extend(indexes["release"].get(scrobble["album_mbid"], []))
     
     # Try artist-based matches
-    artist_parts = scrobble_artist_parts(scrobble)
-    if scrobble["artist_name"] or artist_parts:
-        for artist_key in artist_parts or [normalize_artist(scrobble["artist_name"])]:
-            artist_mbid = artist_lookup.get(artist_key)
-            if artist_mbid:
-                candidates.extend(indexes["artist_mbid"].get(artist_mbid, []))
+    for artist_key in artist_keys:
+        artist_mbid = artist_lookup.get(artist_key)
+        if artist_mbid:
+            candidates.extend(indexes["artist_mbid"].get(artist_mbid, []))
     
     # Try release + artist MBID
     if scrobble["album_mbid"] and scrobble["artist_mbid"]:
@@ -366,10 +368,10 @@ def _collect_candidates(
         candidates.extend(indexes["release_artist"].get(key, []))
     
     # Try artist + title
-    if (scrobble["artist_name"] or artist_parts) and scrobble["track_name"]:
+    if artist_keys and scrobble["track_name"]:
         title_key = normalize_title(scrobble["track_name"])
         for variant in _title_variants(title_key):
-            for artist_key in artist_parts or [normalize_artist(scrobble["artist_name"])]:
+            for artist_key in artist_keys:
                 key = (artist_key, variant)
                 candidates.extend(indexes["artist_title"].get(key, []))
                 candidates.extend(indexes["artist_any_title"].get(key, []))
@@ -386,10 +388,9 @@ def _collect_candidates(
         return candidates
     
     # Fallback: broader artist-only candidates
-    if scrobble["artist_name"] or artist_parts:
-        for artist_key in artist_parts or [normalize_artist(scrobble["artist_name"])]:
-            candidates.extend(indexes["artist"].get(artist_key, []))
-            candidates.extend(indexes["artist_any"].get(artist_key, []))
+    for artist_key in artist_keys:
+        candidates.extend(indexes["artist"].get(artist_key, []))
+        candidates.extend(indexes["artist_any"].get(artist_key, []))
     
     if not candidates:
         return candidates
@@ -476,7 +477,7 @@ def match_scrobble(
     # and set iteration both vary between runs).
     best: Optional[Tuple[int, float, str, str]] = None
     best_key: Optional[Tuple[float, int, int, int, int, int, int]] = None
-    sc_raw_title = _raw_title(scrobble["track_name"])
+    sc_raw_title = raw_title(scrobble["track_name"])
     for candidate in uniq_candidates:
         tr_album_artist = normalize_name(candidate["album_artist"])
         # Skip various artists if we have better matches
@@ -514,7 +515,7 @@ def match_scrobble(
             METHOD_RANK.get(method, -1),
             aa_rank,
             rt_rank,
-            1 if _raw_title(candidate["title"]) == sc_raw_title else 0,
+            1 if raw_title(candidate["title"]) == sc_raw_title else 0,
             -candidate["id"],
         )
         if best_key is None or key > best_key:
@@ -557,6 +558,18 @@ def match_scrobble(
 
 MATCH_BATCH_SIZE = 1000
 
+UPSERT_MATCH_SQL = """
+INSERT INTO lastfm_scrobble_match (scrobble_id, track_id, match_score, match_method, match_reason, cache_key)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (scrobble_id) DO UPDATE SET
+    track_id = EXCLUDED.track_id,
+    match_score = EXCLUDED.match_score,
+    match_method = EXCLUDED.match_method,
+    match_reason = EXCLUDED.match_reason,
+    cache_key = EXCLUDED.cache_key,
+    matched_at = NOW()
+"""
+
 
 async def match_and_store(
     conn: asyncpg.Connection,
@@ -571,7 +584,9 @@ async def match_and_store(
 
     Scrobbles are processed in the order given (the sync passes newest
     first). Each batch first reuses matches stored for the same cache key by
-    earlier batches or syncs, then matches the rest. Returns
+    earlier batches or syncs, then matches the rest. A last pass gives a
+    scrobble nothing matched a track that other scrobbles of the same Last.fm
+    track MBID were matched to (see _match_by_shared_track_mbid). Returns
     (matched, unmatched).
     """
     from app.matching import build_cache_key
@@ -580,6 +595,7 @@ async def match_and_store(
     unmatched = 0
     artist_lookup = await preload_artist_lookup(conn)
     skip_artists = await preload_skip_artists(conn)
+    no_match: List[asyncpg.Record] = []
 
     for i in range(0, len(scrobbles), batch_size):
         batch = scrobbles[i:i + batch_size]
@@ -632,21 +648,59 @@ async def match_and_store(
                 matched += 1
             else:
                 unmatched += 1
+                if scrobble["track_mbid"] and normalize_artist(scrobble["artist_name"]) not in skip_artists:
+                    no_match.append(scrobble)
 
         if match_rows:
             await conn.executemany(
-                """
-                INSERT INTO lastfm_scrobble_match (scrobble_id, track_id, match_score, match_method, match_reason, cache_key)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (scrobble_id) DO UPDATE SET
-                    track_id = EXCLUDED.track_id,
-                    match_score = EXCLUDED.match_score,
-                    match_method = EXCLUDED.match_method,
-                    match_reason = EXCLUDED.match_reason,
-                    cache_key = EXCLUDED.cache_key,
-                    matched_at = NOW()
-                """,
+                UPSERT_MATCH_SQL,
                 match_rows,
             )
 
-    return matched, unmatched
+    shared = await _match_by_shared_track_mbid(conn, no_match)
+    return matched + shared, unmatched - shared
+
+
+SHARED_MBID_METHOD = "track_mbid_shared"
+
+
+async def _match_by_shared_track_mbid(conn: asyncpg.Connection, scrobbles: List[asyncpg.Record]) -> int:
+    """Match scrobbles nothing else matched to the track that most other
+    scrobbles with the same Last.fm track MBID are matched to.
+
+    The MBID names one recording, so this catches artist spellings the
+    matcher can't link ("30 Seconds to Mars" vs "Thirty Seconds to Mars",
+    "Koяn"). It runs only after the matcher found nothing: Last.fm gives
+    every edition of an album the same track MBID, so it must never
+    override a match that the album could decide (issue #366). The rows get
+    no cache key, so they are never copied on, and their own method, so they
+    never serve as a source. Returns the number matched.
+    """
+    if not scrobbles:
+        return 0
+    rows = await conn.fetch(
+        """
+        SELECT s.track_mbid, m.track_id, count(*) AS n, max(m.match_score) AS score
+        FROM lastfm_scrobble_match m
+        JOIN lastfm_scrobble s ON s.id = m.scrobble_id
+        WHERE s.track_mbid = ANY($1::text[]) AND m.match_method <> $2
+        GROUP BY s.track_mbid, m.track_id
+        ORDER BY s.track_mbid, n DESC, m.track_id
+        """,
+        list({sc["track_mbid"] for sc in scrobbles}),
+        SHARED_MBID_METHOD,
+    )
+    best: Dict[str, asyncpg.Record] = {}
+    for row in rows:
+        best.setdefault(row["track_mbid"], row)
+    match_rows = [
+        (sc["id"], best[sc["track_mbid"]]["track_id"], best[sc["track_mbid"]]["score"],
+         SHARED_MBID_METHOD, SHARED_MBID_METHOD, None)
+        for sc in scrobbles if sc["track_mbid"] in best
+    ]
+    if match_rows:
+        await conn.executemany(
+            UPSERT_MATCH_SQL,
+            match_rows,
+        )
+    return len(match_rows)
