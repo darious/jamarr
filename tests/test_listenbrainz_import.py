@@ -69,6 +69,13 @@ def test_later_scrobble_kept_when_it_is_jamarrs_own():
     assert [(d["id"], k["id"]) for d, k in dropped] == [(1, 2)]
 
 
+def test_report_names_the_row_that_finally_stayed():
+    # #2 duplicates #1; then #3 (Jamarr's own) replaces #1.
+    kept, dropped = drop_duplicates([row(1, 0), row(2, 10), row(3, 20, jamarr=True)])
+    assert [r["id"] for r in kept] == [3]
+    assert sorted((d["id"], k["id"]) for d, k in dropped) == [(1, 3), (2, 3)]
+
+
 def test_different_tracks_never_collide():
     kept, dropped = drop_duplicates([row(1, 0, track_id=1), row(2, 5, track_id=2)])
     assert len(kept) == 2 and dropped == []
@@ -175,6 +182,17 @@ async def test_send_batches_resumes_and_isolates_refused_listen(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_batches_never_split_a_second(monkeypatch):
+    monkeypatch.setattr("app.listenbrainz_import.BATCH_SIZE", 2)
+    plan = Plan()
+    for i, ts in enumerate([1, 2, 2, 2, 3]):
+        plan.listens.append({"listened_at": ts, "track_metadata": {"artist_name": "A", "track_name": f"T{i}"}})
+    client = FakeClient()
+    await send(client, "tok", plan, sleep=_no_sleep, out=lambda *_: None)
+    assert [stamps for _, stamps in client.batches] == [[1, 2, 2, 2], [3]]
+
+
+@pytest.mark.asyncio
 async def test_send_retries_when_listenbrainz_is_down():
     calls = {"n": 0}
 
@@ -262,7 +280,7 @@ async def test_dry_run_reports_and_sends_nothing(db, tmp_path):
     assert "to send: 2" in text
     assert (tmp_path / "duplicates.csv").read_text().count("\n") == 2
     # A dry run never moves the cutover.
-    assert await db.fetchval("SELECT listenbrainz_since FROM \"user\" WHERE username = 'importer'") is None
+    assert await db.fetchval("SELECT listenbrainz_cutover FROM \"user\" WHERE username = 'importer'") is None
 
 
 @pytest.mark.asyncio
@@ -273,7 +291,11 @@ async def test_run_sets_cutover_and_sends_only_before_it(db):
     code = await run(_args(cutover=cutover.isoformat()), db, client, lambda *_: None)
     assert code == 0
     assert client.batches == [("import", [int(T0.timestamp()), int((T0 + timedelta(hours=1)).timestamp())])]
-    assert await db.fetchval("SELECT listenbrainz_since FROM \"user\" WHERE username = 'importer'") == cutover
+    row = await db.fetchrow(
+        "SELECT listenbrainz_cutover, listenbrainz_since FROM \"user\" WHERE username = 'importer'"
+    )
+    assert row["listenbrainz_cutover"] == cutover
+    assert row["listenbrainz_since"] == cutover
 
 
 @pytest.mark.asyncio
