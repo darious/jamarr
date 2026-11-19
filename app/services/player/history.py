@@ -1,6 +1,8 @@
 import time
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
+
 import asyncpg
 
 from app import lastfm
@@ -140,22 +142,42 @@ async def scrobble_to_lastfm(user_id: int, track_id: int, played_at: int | None 
         logger.error(f"Failed to scrobble to Last.fm: {e}")
 
 
+# A duplicate report of the same play lands within this many seconds of the
+# first one's start time (two reporters, or one reporting twice).
+DUPLICATE_WINDOW_SECONDS = 5
+
+
+def play_started_at(position_seconds: float | None, now: datetime | None = None) -> datetime:
+    """When the play started: the moment it is logged, minus how far into the track it is.
+
+    History, Last.fm and ListenBrainz all record a play at its start time;
+    logging only happens once the play threshold (30 s / 20 %) is reached.
+    """
+    now = now or datetime.now(timezone.utc)
+    if not position_seconds or position_seconds < 0:
+        return now
+    return now - timedelta(seconds=float(position_seconds))
+
+
 async def log_history(
     db: asyncpg.Connection,
     track_id: int,
     client_ip: str,
     client_id: str = None,
     user_id: int = None,
+    position_seconds: float | None = None,
 ):
     if track_id and track_id > 0:
         try:
-            # Guard against immediate duplicate inserts (e.g., dual reporters) within a short window.
+            started_at = play_started_at(position_seconds)
+            # Guard against duplicate inserts of the same play (e.g. dual reporters).
             existing = await db.fetchrow(
                 """
-                SELECT id, client_ip, user_id, client_id, timestamp 
-                FROM playback_history 
-                WHERE track_id = $1 
-                  AND timestamp > NOW() - INTERVAL '5 seconds'
+                SELECT id, client_ip, user_id, client_id, timestamp
+                FROM playback_history
+                WHERE track_id = $1
+                  AND timestamp BETWEEN $6::timestamptz - make_interval(secs => $7)
+                                    AND $6::timestamptz + make_interval(secs => $7)
                   AND (client_id = $2 OR ($3::text IS NULL AND client_id IS NULL))
                   AND (user_id = $4 OR ($5::integer IS NULL AND user_id IS NULL))
                 ORDER BY timestamp DESC
@@ -166,6 +188,8 @@ async def log_history(
                 client_id,
                 user_id,
                 user_id,
+                started_at,
+                float(DUPLICATE_WINDOW_SECONDS),
             )
             if existing:
                 (
@@ -200,17 +224,20 @@ async def log_history(
                 return
 
             await db.execute(
-                "INSERT INTO playback_history (track_id, client_ip, client_id, user_id) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO playback_history (track_id, timestamp, client_ip, client_id, user_id) VALUES ($1, $2, $3, $4, $5)",
                 track_id,
+                started_at,
                 client_ip,
                 client_id,
                 user_id,
             )
-            
+
             # Trigger Last.fm scrobble if user has it enabled
             if user_id:
                 asyncio.create_task(
-                    scrobble_to_lastfm(user_id, track_id)
+                    scrobble_to_lastfm(
+                        user_id, track_id, played_at=int(started_at.timestamp())
+                    )
                 )
                 kick_submissions()
 

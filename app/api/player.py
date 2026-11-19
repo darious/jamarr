@@ -610,6 +610,7 @@ async def update_progress(
                                 client_ip=client_ip,
                                 client_id=client_id,
                                 user_id=effective_user_id,
+                                position_seconds=update.position_seconds,
                             )
                         except Exception as e:
                             logger.error(f"Failed to log history: {e}")
