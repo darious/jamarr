@@ -55,6 +55,14 @@ def get_listenbrainz_api_root():
     ).rstrip("/")
 
 
+def get_listenbrainz_token():
+    """Server token for metadata lookups (top tracks, similar artists).
+
+    Optional: without it the scanner borrows a connected user's token.
+    """
+    return os.environ.get("LISTENBRAINZ_TOKEN") or None
+
+
 def get_musicbrainz_rate_limit():
     val = load_config().get("musicbrainz", {}).get("rate_limit", 1.0)
     if str(val).lower() == "none":

@@ -344,7 +344,7 @@ class TestTopTracksStage:
             {"name": "Let It Be", "rank": 2, "popularity": 95, "mbid": "track-2"},
         ]
         
-        with patch("app.scanner.services.lastfm.fetch_top_tracks", AsyncMock(return_value=mock_tracks)):
+        with patch("app.scanner.services.listenbrainz.fetch_top_tracks", AsyncMock(return_value=mock_tracks)):
             result = await stage.execute(basic_context)
         
         assert result.success
@@ -356,7 +356,7 @@ class TestTopTracksStage:
         """Last.fm knowing nothing about an artist is an empty answer, not a failure."""
         stage = TopTracksStage()
         
-        with patch("app.scanner.services.lastfm.fetch_top_tracks", AsyncMock(return_value=[])):
+        with patch("app.scanner.services.listenbrainz.fetch_top_tracks", AsyncMock(return_value=[])):
             result = await stage.execute(basic_context)
         
         assert not result.success
@@ -394,7 +394,7 @@ class TestSimilarArtistsStage:
             {"name": "The Who", "mbid": "artist-2"},
         ]
         
-        with patch("app.scanner.services.lastfm.fetch_similar_artists", AsyncMock(return_value=mock_similar)):
+        with patch("app.scanner.services.listenbrainz.fetch_similar_artists", AsyncMock(return_value=mock_similar)):
             result = await stage.execute(basic_context)
         
         assert result.success

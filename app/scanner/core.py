@@ -48,12 +48,17 @@ async def match_track_to_library(db, artist_mbid, track_name, album_name=None, e
         return None
 
     if external_mb_track_id:
-        for row in candidates:
-            # row is Record, access by index or name if using Record (asyncpg returns Record)
-            # unpacking:
-            cid, ctitle, calbum, cseconds, cmb_track_id, cmb_release_track_id, cdate, ctype = row
-            if (cmb_track_id == external_mb_track_id or cmb_release_track_id == external_mb_track_id):
-                return cid
+        # Columns by position: id, title, album, duration, track_mbid,
+        # release_track_mbid, release_date, release_type.
+        mbid_hits = [row for row in candidates if external_mb_track_id in (row[4], row[5])]
+        if mbid_hits:
+            # One recording can sit on several editions in the library; prefer
+            # the one on the named album.
+            wanted = (album_name or "").strip().casefold()
+            for row in mbid_hits:
+                if wanted and (row[2] or "").strip().casefold() == wanted:
+                    return row[0]
+            return mbid_hits[0][0]
 
     def normalize(s):
         if not s:

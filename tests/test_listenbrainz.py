@@ -567,3 +567,39 @@ async def test_disconnect_clears_account(auth_client, db, fake_lb):
 async def test_toggle_requires_connection(auth_client, fake_lb):
     response = await auth_client.post("/api/listenbrainz/toggle", json={"enabled": True})
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_popularity_labs_and_radio_requests():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.host, request.url.path, dict(request.url.params)))
+        if request.url.host == "labs.api.listenbrainz.org":
+            return httpx.Response(200, json=[{"artist_mbid": ARTIST_B, "name": "B", "score": 1}])
+        if "lb-radio" in request.url.path:
+            return httpx.Response(200, json={ARTIST_B: [{"similar_artist_name": "B"}]})
+        return httpx.Response(200, json=[{"recording_mbid": RECORDING, "recording_name": "T"}])
+
+    client = _client(handler)
+    assert (await client.top_recordings_for_artist(ARTIST_A))[0]["recording_name"] == "T"
+    assert (await client.similar_artists(ARTIST_A))[0]["name"] == "B"
+    assert ARTIST_B in await client.radio_similar_artists(ARTIST_A, 5)
+    top, labs, radio = seen
+    assert top[1] == f"/1/popularity/top-recordings-for-artist/{ARTIST_A}"
+    assert labs[0] == "labs.api.listenbrainz.org"
+    assert labs[2]["artist_mbids"] == ARTIST_A
+    assert labs[2]["algorithm"] == lb.SIMILAR_ARTISTS_ALGORITHM
+    assert radio[1] == f"/1/lb-radio/artist/{ARTIST_A}"
+    assert radio[2]["max_similar_artists"] == "5"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_unexpected_reply_shapes_are_unavailable():
+    client = _client(lambda r: httpx.Response(200, json={"not": "a list"}))
+    with pytest.raises(lb.ListenBrainzUnavailableError):
+        await client.top_recordings_for_artist(ARTIST_A)
+    with pytest.raises(lb.ListenBrainzUnavailableError):
+        await client.similar_artists(ARTIST_A)
+    await client.aclose()

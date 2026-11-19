@@ -1,11 +1,11 @@
 """
-Similar Artists Stage - Fetch similar artists from Last.fm.
+Similar Artists Stage - Fetch similar artists from ListenBrainz.
 """
 
 from typing import List
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult
-from app.scanner.services import lastfm
+from app.scanner.services import listenbrainz
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class SimilarArtistsStage(EnrichmentStage):
     """
-    Fetch similar artists from Last.fm.
+    Fetch similar artists from ListenBrainz.
     
     Uses MBID-based lookup for accuracy.
     """
@@ -34,12 +34,12 @@ class SimilarArtistsStage(EnrichmentStage):
         return False, ""
     
     async def execute(self, context: EnrichmentContext) -> StageResult:
-        """Fetch similar artists from Last.fm."""
+        """Fetch similar artists from ListenBrainz."""
         mbid = context.artist.mbid
         name = context.artist.name or mbid
         
-        # Fetch from Last.fm
-        similar = await lastfm.fetch_similar_artists(mbid, name, context.client)
+        # Fetch from ListenBrainz
+        similar = await listenbrainz.fetch_similar_artists(mbid, name, context.client)
         
         if not similar:
             return StageResult.no_data(

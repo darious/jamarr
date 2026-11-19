@@ -110,3 +110,18 @@ async def test_match_prefer_better_score_over_date():
     match_id = await match_track_to_library(mock_db, "artist-mbid", "Exact Title Match", album_name=None)
     assert match_id == 401
 
+
+
+@pytest.mark.asyncio
+async def test_match_by_recording_mbid_prefers_named_album():
+    """A recording on two editions: the MBID finds both, the album picks one."""
+    mock_db = AsyncMock()
+    mock_db.fetch.return_value = [
+        (201, "Karma Police", "OK Computer", 264, "rec-1", "rt-a", "1997-05-21", None),
+        (202, "Karma Police", "OK Computer OKNOTOK", 264, "rec-1", "rt-b", "2017-06-23", None),
+        (203, "Karma Police (live)", "Live", 270, "rec-live", "rt-c", "2001-01-01", None),
+    ]
+    assert await match_track_to_library(
+        mock_db, "artist-mbid", "Karma Police", "OK Computer OKNOTOK", "rec-1"
+    ) == 202
+    assert await match_track_to_library(mock_db, "artist-mbid", "Karma Police", None, "rec-1") == 201

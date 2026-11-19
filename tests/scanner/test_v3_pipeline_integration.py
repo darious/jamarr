@@ -54,8 +54,8 @@ class TestPipelineIntegration:
              patch("app.scanner.services.wikidata.fetch_external_links") as mock_wikidata, \
              patch("app.scanner.services.artwork.fetch_fanart_artist_images") as mock_fanart, \
              patch("app.scanner.services.wikipedia.fetch_bio") as mock_wiki_bio, \
-             patch("app.scanner.services.lastfm.fetch_top_tracks") as mock_top_tracks, \
-             patch("app.scanner.services.lastfm.fetch_similar_artists") as mock_similar, \
+             patch("app.scanner.services.listenbrainz.fetch_top_tracks") as mock_top_tracks, \
+             patch("app.scanner.services.listenbrainz.fetch_similar_artists") as mock_similar, \
              patch("app.scanner.services.musicbrainz.fetch_release_groups") as mock_singles:
             
             # Setup mock returns
@@ -265,8 +265,8 @@ class TestPipelineIntegration:
             await asyncio.sleep(0.1)
             return [{"title": "Single 1"}]
         
-        with patch("app.scanner.services.lastfm.fetch_top_tracks", side_effect=slow_top_tracks), \
-             patch("app.scanner.services.lastfm.fetch_similar_artists", side_effect=slow_similar), \
+        with patch("app.scanner.services.listenbrainz.fetch_top_tracks", side_effect=slow_top_tracks), \
+             patch("app.scanner.services.listenbrainz.fetch_similar_artists", side_effect=slow_similar), \
              patch("app.scanner.services.musicbrainz.fetch_release_groups", side_effect=slow_singles):
             
             context = EnrichmentContext(artist, options, mock_http_client)
@@ -314,8 +314,8 @@ class TestPipelineIntegration:
             return "Refreshed bio"
         
         with patch("app.scanner.services.wikipedia.fetch_bio", side_effect=fresh_bio), \
-             patch("app.scanner.services.lastfm.fetch_top_tracks", return_value=[]), \
-             patch("app.scanner.services.lastfm.fetch_similar_artists", return_value=[]), \
+             patch("app.scanner.services.listenbrainz.fetch_top_tracks", return_value=[]), \
+             patch("app.scanner.services.listenbrainz.fetch_similar_artists", return_value=[]), \
              patch("app.scanner.services.musicbrainz.fetch_release_groups", return_value=[]):
             
             context = EnrichmentContext(artist, options, mock_http_client)

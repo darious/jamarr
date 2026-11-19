@@ -405,7 +405,7 @@ class ScanManager:
     async def _rematch_tracks(self, db, mbids):
         from app.scanner.core import match_track_to_library
         
-        query = "SELECT id, external_name, external_album, artist_mbid FROM top_track WHERE track_id IS NULL"
+        query = "SELECT id, external_name, external_album, artist_mbid, external_mbid FROM top_track WHERE track_id IS NULL"
         params = []
         if mbids:
              query += " AND artist_mbid = ANY($1::text[])"
@@ -414,8 +414,9 @@ class ScanManager:
         rows = await db.fetch(query, *params)
         
         for row in rows:
-            tt_id, name, album, mbid = row
-            track_id = await match_track_to_library(db, mbid, name, album)
+            tt_id, name, album, mbid, recording_mbid = row
+            # Top tracks carry a recording MBID: match on it first, by name after.
+            track_id = await match_track_to_library(db, mbid, name, album, recording_mbid)
             if track_id:
                 await db.execute("UPDATE top_track SET track_id = $1, updated_at = NOW() WHERE id = $2", track_id, tt_id)
 

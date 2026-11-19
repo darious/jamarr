@@ -554,9 +554,9 @@ class PipelineAdapter:
                     await db.execute("DELETE FROM top_track WHERE artist_mbid = $1 AND type = 'top'", mbid)
                     for t in updates["top_tracks"]:
                         await db.execute("""
-                            INSERT INTO top_track (artist_mbid, type, external_name, rank, popularity, external_mbid)
-                            VALUES ($1, 'top', $2, $3, $4, $5)
-                        """, mbid, t["name"], int(t["rank"]), int(t["popularity"]), t["mbid"])
+                            INSERT INTO top_track (artist_mbid, type, external_name, rank, popularity, external_mbid, external_album)
+                            VALUES ($1, 'top', $2, $3, $4, $5, $6)
+                        """, mbid, t["name"], int(t["rank"]), int(t["popularity"]), t["mbid"], t.get("album"))
 
                 # 4. Singles (MusicBrainz singles go into top_track with type='single')
                 if "singles" in updates:
