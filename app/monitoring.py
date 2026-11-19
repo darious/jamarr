@@ -22,7 +22,6 @@ LOG_FILES = {
     "access": "access.log",
     "backend": "backend.log",
     "player": "player.log",
-    "lastfm": "lastfm.log",
     "scanner": "scanner.log",
     "upnp": "upnp.log",
     "frontend": "frontend.log",

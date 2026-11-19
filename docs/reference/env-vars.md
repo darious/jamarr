@@ -71,7 +71,6 @@ Non-secret app config (MusicBrainz URL, logging, concurrency) lives in
 | Variable | Description |
 |---|---|
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | Spotify metadata enrichment |
-| `LASTFM_API_KEY` / `LASTFM_SHARED_SECRET` | Last.fm scrobble sync |
 | `QOBUZ_APP_ID` / `QOBUZ_SECRET` / `QOBUZ_EMAIL` / `QOBUZ_PASSWORD` | Qobuz metadata (optional) |
 | `TIDAL_CLIENT_ID` / `TIDAL_CLIENT_SECRET` | Tidal metadata (optional) |
 | `FANARTTV_API_KEY` | Fanart.tv artwork (optional) |

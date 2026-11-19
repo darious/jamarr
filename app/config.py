@@ -92,20 +92,6 @@ def get_fanarttv_api_key():
     return _require_env("FANARTTV_API_KEY")
 
 
-def get_lastfm_credentials():
-    return _require_env("LASTFM_API_KEY"), _require_env("LASTFM_SHARED_SECRET")
-
-
-def get_lastfm_api_key():
-    """Return the Last.fm API key."""
-    return _require_env("LASTFM_API_KEY")
-
-
-def get_lastfm_shared_secret():
-    """Return the Last.fm shared secret."""
-    return _require_env("LASTFM_SHARED_SECRET")
-
-
 def get_max_workers():
     return load_config().get("max_workers", 4)
 

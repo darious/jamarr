@@ -151,7 +151,7 @@ async def get_scan_status():
     api_stats = tracker.get_stats()
     api_requests = {
         "musicbrainz": api_stats.get("musicbrainz", 0),
-        "lastfm": api_stats.get("lastfm", 0),
+        "listenbrainz": api_stats.get("listenbrainz", 0),
         "wikidata": api_stats.get("wikidata", 0),
         "fanart": api_stats.get("fanart", 0),
         "spotify": api_stats.get("spotify", 0),

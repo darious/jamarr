@@ -1,31 +1,10 @@
 # Last.fm scripts
 
-These scripts import scrobbles, match them to local tracks, and help debug misses.
+These scripts match the stored Last.fm scrobbles to local tracks and help debug misses.
+Jamarr no longer fetches from Last.fm (its API needs Pro from 2026-12-01), so
+the scrobbles already in the database are all there is.
 
 All commands assume `uv` and `.env` are configured (see `dev.sh`).
-
-## pull-lastfm.py
-
-Fetch scrobbles from Last.fm into the local database.
-
-Options:
-- `--user`: Last.fm username (default `<LASTFM_USERNAME>`)
-- `--limit`: Tracks per page (default `200`)
-- `--max-pages`: Stop after N pages (default `0` = no limit)
-- `--sleep`: Delay between pages, seconds (default `0.2`)
-- `--output`: Write fetched scrobbles to JSON file
-- `--max-retries`: Retries per page on rate limits/errors (default `6`)
-- `--backoff-base`: Base seconds for exponential backoff (default `1.0`)
-- `--backoff-max`: Max seconds between retries (default `30.0`)
-- `--older-than-db`: Only pull scrobbles older than oldest in DB
-- `--newer-than-db`: Only pull scrobbles newer than newest in DB
-
-Examples:
-```bash
-uv run python scripts/lastfm/pull-lastfm.py --user <LASTFM_USERNAME> --newer-than-db
-uv run python scripts/lastfm/pull-lastfm.py --older-than-db --max-pages 10
-uv run python scripts/lastfm/pull-lastfm.py --output /tmp/scrobbles.json
-```
 
 ## match-lastfm.py
 

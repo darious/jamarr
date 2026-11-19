@@ -114,14 +114,7 @@ def configure_logging():
     player_handler = _setup_file_handler("player", "player.log")
     player_logger.addHandler(player_handler)
 
-    # 5. Last.fm Logger
-    lastfm_logger = logging.getLogger("app.api.lastfm")
-    _remove_managed_handlers(lastfm_logger)
-    lastfm_handler = _setup_file_handler("lastfm", "lastfm.log")
-    lastfm_logger.addHandler(lastfm_handler)
-    lastfm_logger.setLevel(logging.DEBUG)
-
-    # 6. Uvicorn access logger. Query strings are stripped by RedactingFilter.
+    # 5. Uvicorn access logger. Query strings are stripped by RedactingFilter.
     access_logger = logging.getLogger("uvicorn.access")
     _remove_managed_handlers(access_logger)
     access_handler = _setup_file_handler("frontend", "frontend.log")
@@ -175,7 +168,6 @@ def configure_logging():
                 "app.upnp",
                 "async_upnp_client",
                 "app.api.player",
-                "app.api.lastfm",
                 "uvicorn.access",
                 "app.monitoring.access",
                 "app.security.audit",
@@ -189,7 +181,6 @@ def configure_logging():
     upnp_logger.propagate = True
     upnp_client_logger.propagate = True
     player_logger.propagate = True
-    lastfm_logger.propagate = True
     access_logger.propagate = True
     app_access_logger.propagate = True
     security_logger.propagate = True

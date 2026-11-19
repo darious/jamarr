@@ -344,17 +344,16 @@ async def run(args: argparse.Namespace, db: asyncpg.Connection, client=None, out
         out("No cutover: pass --cutover with the time ListenBrainz was wiped")
         return 2
 
-    last_sync = await db.fetchval(
-        """
-        SELECT MAX(r.started_at) FROM scheduled_task_run r
-        JOIN scheduled_task t ON t.id = r.task_id
-        WHERE t.job_key = 'lastfm_sync' AND r.status = 'success'
-        """
+    newest = await db.fetchval(
+        "SELECT MAX(played_at) FROM lastfm_scrobble WHERE lastfm_username = $1",
+        user["lastfm_username"],
     )
-    if last_sync is None or last_sync < cutover:
+    # Jamarr no longer fetches from Last.fm, so what is stored is all there is.
+    out(f"Newest stored Last.fm scrobble: {newest.isoformat() if newest else 'none'}")
+    if newest is not None and newest < cutover:
         out(
-            "Warning: no successful Last.fm sync since the cutover, so scrobbles from "
-            "just before it may be missing. Run a sync first if Last.fm still works."
+            "  (before the cutover: plays between it and the cutover reach "
+            "ListenBrainz only if they were scrobbled there directly)"
         )
 
     rows = await load_rows(db, user["lastfm_username"], cutover, user["id"])

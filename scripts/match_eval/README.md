@@ -1,7 +1,7 @@
 # Match evaluation harness
 
 Before/after comparison for the Last.fm scrobble matcher (`app/matching/`,
-run by `sync_scrobbles_for_user` in `app/api/lastfm.py`). Use it before
+run by `match_archive` in `app/lastfm_archive.py`). Use it before
 changing matching code: snapshot a real library once, then re-match it with
 the old and the new code and diff the results.
 

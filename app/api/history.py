@@ -1,4 +1,3 @@
-import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, List
@@ -14,7 +13,7 @@ from app.history_events import HistoryEvents, refresh_history
 from app.api.library import sha1_to_hex
 from app.security import get_client_ip
 from app.sse import HEARTBEAT, HEARTBEAT_FRAME
-from app.services.player.history import play_threshold_seconds, scrobble_to_lastfm
+from app.services.player.history import play_threshold_seconds
 from app.listenbrainz_submissions import kick_submissions
 
 
@@ -431,7 +430,6 @@ async def get_recently_played_artists(
 
 
 # Last.fm refuses scrobbles timestamped more than 14 days ago.
-LASTFM_MAX_SCROBBLE_AGE = timedelta(days=14)
 # Slack for a phone clock running slightly ahead of the server's.
 FUTURE_TOLERANCE = timedelta(minutes=5)
 
@@ -484,7 +482,6 @@ async def record_offline_plays(
     client_ip = get_client_ip(request)
     now = datetime.now(timezone.utc)
     result = OfflinePlayResult(recorded=0, duplicates=0, too_short=0, unknown_tracks=0, invalid=0)
-    to_scrobble: list[tuple[int, int]] = []
 
     for play in batch.plays:
         played_at = play.played_at
@@ -519,13 +516,9 @@ async def record_offline_plays(
             result.duplicates += 1
             continue
         result.recorded += 1
-        if now - played_at <= LASTFM_MAX_SCROBBLE_AGE:
-            to_scrobble.append((play.track_id, int(played_at.timestamp())))
 
     if result.recorded:
         await refresh_history(db, user_id)
-        for track_id, played_at_unix in to_scrobble:
-            asyncio.create_task(scrobble_to_lastfm(user_id, track_id, played_at=played_at_unix))
         # ListenBrainz takes plays of any age, so every recorded play is due.
         kick_submissions()
 

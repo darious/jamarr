@@ -56,7 +56,6 @@ from app.services.player.state import (
 from app.services.player.history import (
     log_history,
     reset_history_tracker,
-    update_now_playing_lastfm,
 )
 from app.listenbrainz_submissions import update_now_playing_listenbrainz
 from app.services.player.monitor import (
@@ -401,15 +400,12 @@ async def set_queue(
             track_dict["user_id"] = user_id
         enriched_queue.append(track_dict)
         
-    # Trigger Now Playing update for Last.fm
+    # Tell ListenBrainz what is playing now
     if enriched_queue:
         current_index = max(
             0, min(update.start_index, len(enriched_queue) - 1)
         )
         current_track = enriched_queue[current_index]
-        asyncio.create_task(
-            update_now_playing_lastfm(user_id, current_track["id"])
-        )
         asyncio.create_task(
             update_now_playing_listenbrainz(user_id, current_track["id"])
         )

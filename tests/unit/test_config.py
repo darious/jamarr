@@ -42,8 +42,6 @@ def test_required_env_values_returned(monkeypatch, tmp_path):
     monkeypatch.setenv("QOBUZ_PASSWORD", "pass")
     monkeypatch.setenv("TIDAL_CLIENT_ID", "tid")
     monkeypatch.setenv("TIDAL_CLIENT_SECRET", "tsecret")
-    monkeypatch.setenv("LASTFM_API_KEY", "lkey")
-    monkeypatch.setenv("LASTFM_SHARED_SECRET", "lsecret")
     monkeypatch.setenv("FANARTTV_API_KEY", "fkey")
     monkeypatch.setenv("PEARLARR_URL", "https://pear.example")
 
@@ -55,7 +53,6 @@ def test_required_env_values_returned(monkeypatch, tmp_path):
         "pass",
     )
     assert config.get_tidal_credentials() == ("tid", "tsecret")
-    assert config.get_lastfm_credentials() == ("lkey", "lsecret")
     assert config.get_fanarttv_api_key() == "fkey"
     assert config.get_pearlarr_url() == "https://pear.example"
 
@@ -71,8 +68,6 @@ def test_required_env_values_returned(monkeypatch, tmp_path):
         ("QOBUZ_PASSWORD", config.get_qobuz_credentials),
         ("TIDAL_CLIENT_ID", config.get_tidal_credentials),
         ("TIDAL_CLIENT_SECRET", config.get_tidal_credentials),
-        ("LASTFM_API_KEY", config.get_lastfm_credentials),
-        ("LASTFM_SHARED_SECRET", config.get_lastfm_credentials),
         ("FANARTTV_API_KEY", config.get_fanarttv_api_key),
         ("PEARLARR_URL", config.get_pearlarr_url),
     ],
@@ -90,8 +85,6 @@ def test_required_env_missing_raises(monkeypatch, tmp_path, env_var, getter):
         "QOBUZ_PASSWORD",
         "TIDAL_CLIENT_ID",
         "TIDAL_CLIENT_SECRET",
-        "LASTFM_API_KEY",
-        "LASTFM_SHARED_SECRET",
         "FANARTTV_API_KEY",
         "PEARLARR_URL",
     ]:

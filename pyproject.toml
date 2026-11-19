@@ -24,7 +24,6 @@ dependencies = [
     "aiodns>=4.0.0",
     "pycares>=5.0.0",
     "rapidfuzz",
-    "pylast>=7.0.1",
     "croniter",
     "pyjwt[crypto]",
     "slowapi",

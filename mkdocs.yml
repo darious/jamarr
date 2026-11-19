@@ -107,7 +107,7 @@ nav:
       - Android: clients/android.md
   - Guides:
       - Scanning a Library: guides/scanning.md
-      - Last.fm: guides/lastfm.md
+      - ListenBrainz: guides/listenbrainz.md
       - Playlists: guides/playlists.md
   - Roadmap: roadmap.md
   - Contributing: contributing.md

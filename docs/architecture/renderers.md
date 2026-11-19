@@ -31,7 +31,7 @@ RendererOrchestrator      ── canonical renderer identity, queue state,
 ```
 
 - **Orchestrator** (`orchestrator.py`, `RendererOrchestrator`) owns everything
-  protocol-neutral: queue, current index, progress, auto-advance, history/Last.fm,
+  protocol-neutral: queue, current index, progress, auto-advance, history/ListenBrainz,
   stream-token policy, and the normalised player state persisted to the DB.
 - **Backends** (`upnp_backend.py`, `cast_backend.py`) translate
   play/pause/resume/stop/seek/volume/status into protocol calls and emit a

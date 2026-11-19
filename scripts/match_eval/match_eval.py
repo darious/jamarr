@@ -3,7 +3,7 @@
 
 Takes a read-only snapshot of the tables the matcher reads, loads it into a
 throwaway Postgres container, runs the real re-match path
-(``sync_scrobbles_for_user`` with ``rematch_all``) against that copy, and
+(``app.lastfm_archive.match_archive`` with ``rematch_all``) against that copy, and
 exports every scrobble's match. Two runs can then be diffed: which scrobbles
 moved to another track, which became (un)matched, and how the regression
 metrics changed.
@@ -405,7 +405,7 @@ ORDER BY played_at DESC, id DESC
 
 
 async def _run(args: argparse.Namespace) -> None:
-    from app.api.lastfm import SyncRequest, sync_scrobbles_for_user
+    from app.lastfm_archive import match_archive
     from app.matching.matcher import match_and_store
 
     subset = _read_subset(args.workdir, args.subset) if args.subset else None
@@ -418,18 +418,23 @@ async def _run(args: argparse.Namespace) -> None:
             'SELECT id, username, lastfm_username FROM "user" '
             "WHERE lastfm_username IS NOT NULL AND lastfm_username <> '' ORDER BY id"
         )
-        payload = SyncRequest(
-            fetch_new=False, rematch_all=True,
-            fuzzy=not args.no_fuzzy, fuzzy_title_threshold=args.fuzzy_title_threshold,
-        )
+        # Same keys as the old Last.fm sync request, so saved runs compare.
+        payload = {
+            "fetch_new": False, "rematch_all": True, "limit": None,
+            "fuzzy": not args.no_fuzzy, "fuzzy_title_threshold": args.fuzzy_title_threshold,
+        }
         started = time.monotonic()
         results = []
         if subset is None:
             # The real sync path: delete the user's matches, re-match all.
             for user in users:
                 _log(f"Re-matching scrobbles for user {user['id']} ...")
-                result = await sync_scrobbles_for_user(conn, dict(user), payload)
-                results.append({k: result[k] for k in ("matched", "unmatched")})
+                matched, unmatched = await match_archive(
+                    conn, user["lastfm_username"], rematch_all=True,
+                    fuzzy=payload["fuzzy"], fuzzy_title_threshold=payload["fuzzy_title_threshold"],
+                )
+                results.append({"matched": matched, "unmatched": unmatched})
+            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
         else:
             # Same matching loop on the subset only; every other scrobble is
             # left unmatched until the next full run.
@@ -438,8 +443,8 @@ async def _run(args: argparse.Namespace) -> None:
                 scrobbles = await conn.fetch(SCROBBLE_SQL, user["lastfm_username"], subset["ids"])
                 _log(f"Re-matching {len(scrobbles)} subset scrobbles for user {user['id']} ...")
                 matched, unmatched = await match_and_store(
-                    conn, scrobbles, fuzzy=payload.fuzzy,
-                    fuzzy_title_threshold=payload.fuzzy_title_threshold,
+                    conn, scrobbles, fuzzy=payload["fuzzy"],
+                    fuzzy_title_threshold=payload["fuzzy_title_threshold"],
                 )
                 results.append({"matched": matched, "unmatched": unmatched})
             await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY combined_playback_history_mat")
@@ -449,7 +454,7 @@ async def _run(args: argparse.Namespace) -> None:
     _log(f"Re-match took {elapsed} s")
     await _export_run(args.workdir, args.label, snapshot, {
         "kind": "rematch", "git": _git_state(), "seconds": elapsed,
-        "payload": payload.model_dump(), "per_user": results,
+        "payload": payload, "per_user": results,
         "subset": args.subset,
     }, subset=subset["ids"] if subset else None)
 

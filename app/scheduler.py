@@ -12,7 +12,6 @@ from app.db import DB_POOL_ACQUIRE_TIMEOUT, db_conn, get_pool
 from app.scanner.audio_analysis import AudioAnalysisRunner
 from app.scanner.scan_manager import ScanManager
 from app.charts import refresh_chart_task
-from app.lastfm_jobs import sync_all_lastfm_scrobbles
 from app.listenbrainz_sync import sync_all_listenbrainz
 
 
@@ -85,10 +84,6 @@ async def _run_refresh_chart() -> None:
     await refresh_chart_task()
 
 
-async def _run_lastfm_sync() -> None:
-    await sync_all_lastfm_scrobbles()
-
-
 async def _run_listenbrainz_sync() -> None:
     await sync_all_listenbrainz()
 
@@ -154,18 +149,12 @@ JOB_DEFINITIONS: Dict[str, JobDefinition] = {
         ),
         runner=_run_audio_analysis,
     ),
-    "lastfm_sync": JobDefinition(
-        key="lastfm_sync",
-        name="Update Scrobbles + Match",
-        description="Fetch new Last.fm scrobbles and match them to your library.",
-        runner=_run_lastfm_sync,
-    ),
     "listenbrainz_sync": JobDefinition(
         key="listenbrainz_sync",
         name="Update ListenBrainz Listens + Match",
         description=(
-            "Fetch listens other scrobblers sent to ListenBrainz and match them "
-            "to your library."
+            "Fetch listens other scrobblers sent to ListenBrainz, and match them "
+            "and any unmatched stored Last.fm scrobbles to your library."
         ),
         runner=_run_listenbrainz_sync,
     ),

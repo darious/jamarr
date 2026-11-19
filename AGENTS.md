@@ -4,7 +4,7 @@ Orientation for AI agents working in this repo. Read this instead of re-scanning
 
 ## What Jamarr is
 
-Self-hosted, web-based music controller. Scans a local music library (NFS), enriches metadata (MusicBrainz/Spotify/Last.fm/Qobuz/Tidal/Fanart.tv), browse + play via web UI. Local playback + UPnP renderers (gapless via `SetNextAVTransportURI`) + Chromecast.
+Self-hosted, web-based music controller. Scans a local music library (NFS), enriches metadata (MusicBrainz/ListenBrainz/Spotify/Qobuz/Tidal/Fanart.tv), scrobbles to ListenBrainz, browse + play via web UI. Local playback + UPnP renderers (gapless via `SetNextAVTransportURI`) + Chromecast.
 
 ## Stack
 
@@ -21,16 +21,18 @@ app/                 backend (Python)
   main.py            FastAPI entrypoint / app factory
   api/               route modules: auth, library, search, player, stream,
                      history, favorites, charts, recommendation, scan,
-                     scheduler, lastfm, media_quality, deps (DI)
+                     scheduler, listenbrainz, media_quality, deps (DI)
   models/            data models
   scanner/           library scan + metadata pipeline; CLI: app.scanner.cli
     pipeline/ services/
   services/          domain services
     player/ renderer/ upnp/
-  matching/          fuzzy match (rapidfuzz) for charts/metadata
+  matching/          fuzzy match (rapidfuzz): charts, scrobble/listen → track
   media/             artwork / media handling
   auth.py auth_tokens.py security.py    JWT auth (pyjwt, argon2, slowapi)
-  db.py config.py logging_conf.py scheduler.py charts.py lastfm*.py playlist.py upnp.py
+  db.py config.py logging_conf.py scheduler.py charts.py playlist.py upnp.py
+  listenbrainz.py (client) listenbrainz_submissions.py (queue) listenbrainz_sync.py
+  listenbrainz_import.py (Last.fm reload CLI) lastfm_archive.py (archive matching CLI)
 web/src/             SvelteKit: routes/ (album,artist,charts,discovery,history,
                      login,playlists,queue,renderers,settings) + lib/
 tui/jamarr_tui/      api, art, playback, screens, widgets
@@ -65,6 +67,8 @@ Everything runs through `uv` (backend/tui) or Docker Compose. Do not `pip instal
 | Scan library | `docker compose run --rm jamarr uv run python -m app.scanner.cli scan` |
 | Enrich metadata | `... app.scanner.cli metadata` |
 | Matcher before/after (snapshot → scratch DB → re-match → diff) | `uv run python scripts/match_eval/match_eval.py snapshot\|up\|load\|run\|subset\|rescore\|diff\|down` — see `scripts/match_eval/README.md` |
+| Rematch the Last.fm archive | `... app.lastfm_archive --user NAME [--all]` |
+| Reload Last.fm history into ListenBrainz | `... app.listenbrainz_import --user NAME --cutover ISO [--dry-run --report DIR] [--after UTS]` — runbook in `docs/guides/listenbrainz.md` |
 | Android lint+tests+APK | `android/test.sh` (add `RUN_ANDROID_INSTRUMENTATION=1` to require device tests) |
 
 Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brings it up/down. Run a single test: `./test.sh tests/test_charts.py` (args forwarded to pytest).
@@ -103,9 +107,24 @@ Backend tests need the test DB stack (`docker-compose.test.yml`); `test.sh` brin
 
 - Python 3.14 required.
 - Auth is Bearer-header only; no `access_token=` query fallback. SSE endpoints
-  (`/api/library/events`, `/api/lastfm/events`, `/api/history/events`) auth via
+  (`/api/library/events`, `/api/history/events`) auth via
   the refresh cookie. History writes refresh the matview through
   `app/history_events.refresh_history`, which also notifies `/api/history/events`.
+- Scrobbling is ListenBrainz (Last.fm's API went Pro-only 2026-12-01 and was
+  removed; `lastfm_scrobble*` stay as a read-only archive, joined to users on
+  `lastfm_username` — never clear it). Per-user token, no
+  app key. Two clocks per user: `listenbrainz_since` = where the submission
+  queue starts (moves on connect/pause), `listenbrainz_cutover` = history
+  split, Last.fm rows before / ListenBrainz rows from (set once, survives
+  disconnect). The queue is derived from `playback_history` +
+  `listenbrainz_submission`, so any play path just calls `kick_submissions()`.
+  The sync skips listens with `submission_client == "Jamarr"` and matches only
+  on scrobbler-submitted MBIDs: ListenBrainz's `mbid_mapping` release is
+  canonical, not the edition played (#366). History view: an external row
+  within ±60 s of the same user's local play of the track is that play.
+  Popularity (top tracks) needs a token since 2026-11-19: `LISTENBRAINZ_TOKEN`
+  or a connected user's. Similar artists come from the unversioned Labs API
+  with an lb-radio fallback. Tests use fakes (`set_client`), never the real API.
 - `DB_PASS` has no compose default — must be set in `.env`. Production startup
   fails fast if `JWT_SECRET_KEY` is unset or a placeholder.
 - DB connections: `Depends(get_db)` in FastAPI handlers, `async with db_conn()`
