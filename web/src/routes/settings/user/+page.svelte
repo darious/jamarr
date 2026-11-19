@@ -11,6 +11,11 @@
     disconnectLastfm,
     toggleLastfm,
     type LastfmStatus,
+    getListenbrainzStatus,
+    connectListenbrainz,
+    disconnectListenbrainz,
+    toggleListenbrainz,
+    type ListenbrainzStatus,
   } from "$lib/api";
   import TabButton from "$lib/components/TabButton.svelte";
   import {
@@ -60,6 +65,13 @@
   let lastfmMessage = "";
   let lastfmError = "";
   let updatingLastfm = false;
+
+  // ListenBrainz state
+  let listenbrainzStatus: ListenbrainzStatus | null = null;
+  let listenbrainzToken = "";
+  let listenbrainzMessage = "";
+  let listenbrainzError = "";
+  let updatingListenbrainz = false;
 
   // Accent color state
   // selectedAccent uses reactive store above
@@ -117,6 +129,7 @@
     initializedProfile = true;
     // Load Last.fm status when user is loaded
     loadLastfmStatus();
+    loadListenbrainzStatus();
   }
 
   async function saveProfile() {
@@ -234,6 +247,68 @@
       lastfmError = e?.message || "Failed to disconnect Last.fm";
     } finally {
       updatingLastfm = false;
+    }
+  }
+
+  async function loadListenbrainzStatus() {
+    if (!user) return;
+    try {
+      listenbrainzStatus = await getListenbrainzStatus();
+    } catch (e) {
+      console.error("Failed to load ListenBrainz status", e);
+    }
+  }
+
+  async function connectListenbrainzAccount() {
+    if (!user || !listenbrainzToken.trim()) return;
+    updatingListenbrainz = true;
+    listenbrainzMessage = "";
+    listenbrainzError = "";
+    try {
+      const { username } = await connectListenbrainz(listenbrainzToken.trim());
+      listenbrainzToken = "";
+      listenbrainzMessage = `Connected as ${username}.`;
+      await loadListenbrainzStatus();
+    } catch (e: any) {
+      listenbrainzError = e?.message || "Failed to connect ListenBrainz";
+    } finally {
+      updatingListenbrainz = false;
+    }
+  }
+
+  async function disconnectListenbrainzAccount() {
+    if (!user) return;
+    updatingListenbrainz = true;
+    listenbrainzMessage = "";
+    listenbrainzError = "";
+    try {
+      await disconnectListenbrainz();
+      await loadListenbrainzStatus();
+      listenbrainzMessage = "ListenBrainz disconnected.";
+    } catch (e: any) {
+      listenbrainzError = e?.message || "Failed to disconnect ListenBrainz";
+    } finally {
+      updatingListenbrainz = false;
+    }
+  }
+
+  async function toggleListenbrainzSubmission() {
+    if (!user || !listenbrainzStatus) return;
+    updatingListenbrainz = true;
+    listenbrainzMessage = "";
+    listenbrainzError = "";
+    const newEnabled = !listenbrainzStatus.enabled;
+    try {
+      await toggleListenbrainz(newEnabled);
+      await loadListenbrainzStatus();
+      listenbrainzMessage = newEnabled
+        ? "Submitting plays to ListenBrainz."
+        : "Paused. Plays made while paused are not sent later.";
+      setTimeout(() => (listenbrainzMessage = ""), 4000);
+    } catch (e: any) {
+      listenbrainzError = e?.message || "Failed to toggle ListenBrainz";
+    } finally {
+      updatingListenbrainz = false;
     }
   }
 
@@ -702,6 +777,169 @@
             </div>
           {/if}
         </div>
+      </div>
+
+      <!-- ListenBrainz Integration -->
+      <div class="surface-glass-panel rounded-2xl p-6">
+        <div class="mb-4">
+          <h2 class="text-lg font-semibold">ListenBrainz</h2>
+          <p class="text-sm text-muted">
+            Send your plays to ListenBrainz. Plays queue up and are sent later
+            if ListenBrainz is unreachable.
+          </p>
+        </div>
+
+        {#if listenbrainzMessage}
+          <div
+            class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100 dark:text-emerald-100 text-emerald-700"
+          >
+            {listenbrainzMessage}
+          </div>
+        {/if}
+        {#if listenbrainzError}
+          <div
+            class="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100 dark:text-red-100 text-red-700"
+          >
+            {listenbrainzError}
+          </div>
+        {/if}
+
+        {#if listenbrainzStatus?.connected}
+          <div class="space-y-4">
+            <div>
+              <p class="text-sm text-muted">Connected as</p>
+              <p class="font-medium">{listenbrainzStatus.username}</p>
+              {#if listenbrainzStatus.since}
+                <p class="text-xs text-subtle">
+                  Sending plays from {new Date(
+                    listenbrainzStatus.since,
+                  ).toLocaleString()}
+                </p>
+              {/if}
+            </div>
+
+            {#if listenbrainzStatus.auth_error}
+              <div
+                class="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100 dark:text-red-100 text-red-700"
+              >
+                ListenBrainz rejected the token ({listenbrainzStatus.auth_error}).
+                Paste a new one below; queued plays are sent once it works.
+              </div>
+            {/if}
+
+            <dl class="grid grid-cols-3 gap-2 text-center">
+              <div class="rounded-lg bg-surface-elevated px-2 py-2">
+                <dt class="text-xs text-subtle">Sent</dt>
+                <dd class="font-medium">{listenbrainzStatus.submitted ?? 0}</dd>
+              </div>
+              <div class="rounded-lg bg-surface-elevated px-2 py-2">
+                <dt class="text-xs text-subtle">Waiting</dt>
+                <dd class="font-medium">{listenbrainzStatus.pending ?? 0}</dd>
+              </div>
+              <div class="rounded-lg bg-surface-elevated px-2 py-2">
+                <dt class="text-xs text-subtle">Refused</dt>
+                <dd class="font-medium">{listenbrainzStatus.rejected ?? 0}</dd>
+              </div>
+            </dl>
+            {#if listenbrainzStatus.last_error}
+              <p class="text-xs text-subtle">
+                Last problem: {listenbrainzStatus.last_error}
+              </p>
+            {/if}
+
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm text-muted">Submission</p>
+                <p class="text-xs text-subtle">
+                  {listenbrainzStatus.enabled ? "Enabled" : "Paused"}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={listenbrainzStatus.enabled}
+                aria-label="Toggle ListenBrainz submission"
+                class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {listenbrainzStatus.enabled
+                  ? 'bg-accent'
+                  : 'bg-surface-elevated'}"
+                on:click={toggleListenbrainzSubmission}
+                disabled={updatingListenbrainz}
+              >
+                <span
+                  class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {listenbrainzStatus.enabled
+                    ? 'translate-x-6'
+                    : 'translate-x-1'}"
+                ></span>
+              </button>
+            </div>
+
+            {#if listenbrainzStatus.auth_error}
+              <form
+                class="space-y-2"
+                on:submit|preventDefault={connectListenbrainzAccount}
+              >
+                <label class="block text-sm text-muted" for="lb_token_replace"
+                  >New user token</label
+                >
+                <input
+                  id="lb_token_replace"
+                  class="input w-full"
+                  type="password"
+                  autocomplete="off"
+                  bind:value={listenbrainzToken}
+                />
+                <TabButton
+                  type="submit"
+                  disabled={updatingListenbrainz || !listenbrainzToken.trim()}
+                  className="w-full"
+                >
+                  {#if updatingListenbrainz}Checking...{:else}Update token{/if}
+                </TabButton>
+              </form>
+            {/if}
+
+            <TabButton
+              type="button"
+              disabled={updatingListenbrainz}
+              className="w-full variant-ghost-error"
+              onClick={disconnectListenbrainzAccount}
+            >
+              Disconnect ListenBrainz
+            </TabButton>
+          </div>
+        {:else}
+          <form
+            class="space-y-3"
+            on:submit|preventDefault={connectListenbrainzAccount}
+          >
+            <p class="text-sm text-muted">
+              Copy your user token from
+              <a
+                class="underline"
+                href="https://listenbrainz.org/settings/"
+                target="_blank"
+                rel="noopener noreferrer">listenbrainz.org/settings</a
+              > and paste it here.
+            </p>
+            <label class="block text-sm text-muted" for="lb_token"
+              >User token</label
+            >
+            <input
+              id="lb_token"
+              class="input w-full"
+              type="password"
+              autocomplete="off"
+              bind:value={listenbrainzToken}
+            />
+            <TabButton
+              type="submit"
+              disabled={updatingListenbrainz || !listenbrainzToken.trim()}
+              className="w-full"
+            >
+              {#if updatingListenbrainz}Checking token...{:else}Connect ListenBrainz{/if}
+            </TabButton>
+          </form>
+        {/if}
       </div>
     </div>
   </div>

@@ -15,6 +15,7 @@ from app.api.library import sha1_to_hex
 from app.security import get_client_ip
 from app.sse import HEARTBEAT, HEARTBEAT_FRAME
 from app.services.player.history import play_threshold_seconds, scrobble_to_lastfm
+from app.listenbrainz_submissions import kick_submissions
 
 
 router = APIRouter(dependencies=[Depends(get_current_user_jwt)])
@@ -525,5 +526,7 @@ async def record_offline_plays(
         await refresh_history(db, user_id)
         for track_id, played_at_unix in to_scrobble:
             asyncio.create_task(scrobble_to_lastfm(user_id, track_id, played_at=played_at_unix))
+        # ListenBrainz takes plays of any age, so every recorded play is due.
+        kick_submissions()
 
     return result

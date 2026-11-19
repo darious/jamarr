@@ -49,7 +49,13 @@ async def lifespan(app: FastAPI):
     # ScanManager is lazy initialized but good to have it ready
     ScanManager.get_instance()
     await Scheduler.get_instance().start()
+    from app.listenbrainz import close_client as close_listenbrainz_client
+    from app.listenbrainz_submissions import ListenBrainzSubmitter
+
+    await ListenBrainzSubmitter.get_instance().start()
     yield
+    await ListenBrainzSubmitter.get_instance().stop()
+    await close_listenbrainz_client()
     await Scheduler.get_instance().stop()
     await get_stream_proxy().stop()
     await renderer_registry.stop_all()
@@ -94,7 +100,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from pathlib import Path  # noqa: E402
 from app.media import art  # noqa: E402
-from app.api import library, stream, player, search, scan, auth, media_quality, charts, lastfm, history, scheduler, recommendation, favorites  # noqa: E402
+from app.api import library, stream, player, search, scan, auth, media_quality, charts, lastfm, listenbrainz, history, scheduler, recommendation, favorites  # noqa: E402
 from app import monitoring  # noqa: E402
 from app.api.deps import get_current_user_jwt  # noqa: E402
 from app import playlist  # noqa: E402
@@ -113,6 +119,7 @@ app.include_router(media_quality.router)
 app.include_router(playlist.router)
 app.include_router(charts.router, prefix="/api")
 app.include_router(lastfm.router)
+app.include_router(listenbrainz.router)
 app.include_router(history.router)
 app.include_router(history.events_router)
 app.include_router(scheduler.router)

@@ -47,6 +47,14 @@ def get_musicbrainz_root_url():
     ).get("root_url", "https://musicbrainz.org")
 
 
+def get_listenbrainz_api_root():
+    return (
+        os.environ.get("LISTENBRAINZ_API_ROOT")
+        or load_config().get("listenbrainz", {}).get("api_root")
+        or "https://api.listenbrainz.org"
+    ).rstrip("/")
+
+
 def get_musicbrainz_rate_limit():
     val = load_config().get("musicbrainz", {}).get("rate_limit", 1.0)
     if str(val).lower() == "none":
