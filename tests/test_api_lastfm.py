@@ -121,7 +121,8 @@ async def test_lastfm_disconnect(auth_client: AsyncClient, db, auth_token):
         'SELECT lastfm_username, lastfm_session_key, lastfm_enabled FROM "user" WHERE username = $1',
         "testuser"
     )
-    assert user["lastfm_username"] is None
+    # The username stays: stored scrobbles are tied to it and must stay in history.
+    assert user["lastfm_username"] is not None
     assert user["lastfm_session_key"] is None
     assert user["lastfm_enabled"] is False
 

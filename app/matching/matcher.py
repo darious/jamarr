@@ -1,8 +1,10 @@
 """
-Last.fm scrobble matcher - orchestrates the matching process.
+Scrobble matcher - orchestrates matching Last.fm scrobbles and ListenBrainz
+listens to library tracks.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import asyncpg
@@ -558,10 +560,28 @@ def match_scrobble(
 
 MATCH_BATCH_SIZE = 1000
 
-UPSERT_MATCH_SQL = """
-INSERT INTO lastfm_scrobble_match (scrobble_id, track_id, match_score, match_method, match_reason, cache_key)
+
+@dataclass(frozen=True)
+class MatchTarget:
+    """Where a source's matches live.
+
+    Input rows always carry the matcher's field names (id, track_mbid,
+    track_name, album_mbid, album_name, artist_mbid, artist_name); a source
+    aliases its own columns to them.
+    """
+
+    match_table: str
+    id_column: str
+    # Last pass that borrows the match of other scrobbles with the same
+    # Last.fm track MBID (see _match_by_shared_track_mbid). Last.fm only.
+    shared_mbid_pass: bool
+
+    @property
+    def upsert_sql(self) -> str:
+        return f"""
+INSERT INTO {self.match_table} ({self.id_column}, track_id, match_score, match_method, match_reason, cache_key)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (scrobble_id) DO UPDATE SET
+ON CONFLICT ({self.id_column}) DO UPDATE SET
     track_id = EXCLUDED.track_id,
     match_score = EXCLUDED.match_score,
     match_method = EXCLUDED.match_method,
@@ -569,6 +589,44 @@ ON CONFLICT (scrobble_id) DO UPDATE SET
     cache_key = EXCLUDED.cache_key,
     matched_at = NOW()
 """
+
+
+LASTFM_TARGET = MatchTarget("lastfm_scrobble_match", "scrobble_id", shared_mbid_pass=True)
+LISTENBRAINZ_TARGET = MatchTarget("listenbrainz_listen_match", "listen_id", shared_mbid_pass=False)
+
+UPSERT_MATCH_SQL = LASTFM_TARGET.upsert_sql
+
+
+async def _cached_matches(
+    conn: asyncpg.Connection, target: MatchTarget, cache_keys: List[str]
+) -> Dict[str, asyncpg.Record]:
+    """Most recent stored match per cache key.
+
+    The target's own table wins; any source then falls back to Last.fm's,
+    which holds the long history. A key names one recording on one album
+    with one title, so a match is valid whichever service reported it.
+    """
+    found: Dict[str, asyncpg.Record] = {}
+    tables = [target.match_table]
+    if target.match_table != LASTFM_TARGET.match_table:
+        tables.append(LASTFM_TARGET.match_table)
+    for table in tables:
+        missing = [k for k in cache_keys if k not in found]
+        if not missing:
+            break
+        rows = await conn.fetch(
+            f"""
+            SELECT cache_key, track_id, match_score, match_method, match_reason
+            FROM {table}
+            WHERE cache_key = ANY($1::text[])
+            ORDER BY matched_at DESC, id DESC
+            """,
+            missing,
+        )
+        # Most recent match per cache key; id settles rows written together.
+        for row in rows:
+            found.setdefault(row["cache_key"], row)
+    return found
 
 
 async def match_and_store(
@@ -579,6 +637,7 @@ async def match_and_store(
     fuzzy_title_threshold: int = 92,
     log: Optional[Callable[[str], None]] = None,
     batch_size: int = MATCH_BATCH_SIZE,
+    target: MatchTarget = LASTFM_TARGET,
 ) -> Tuple[int, int]:
     """Match scrobbles in batches and upsert the results.
 
@@ -608,18 +667,7 @@ async def match_and_store(
         cache_keys = [k for k in (build_cache_key(s) for s in batch) if k]
         cached_matches: Dict[str, asyncpg.Record] = {}
         if cache_keys:
-            cache_rows = await conn.fetch(
-                """
-                SELECT cache_key, track_id, match_score, match_method, match_reason
-                FROM lastfm_scrobble_match
-                WHERE cache_key = ANY($1::text[])
-                ORDER BY matched_at DESC, id DESC
-                """,
-                cache_keys,
-            )
-            # Most recent match per cache key; id settles rows written together.
-            for row in cache_rows:
-                cached_matches.setdefault(row["cache_key"], row)
+            cached_matches = await _cached_matches(conn, target, cache_keys)
 
         match_rows = []
         for scrobble in batch:
@@ -653,10 +701,12 @@ async def match_and_store(
 
         if match_rows:
             await conn.executemany(
-                UPSERT_MATCH_SQL,
+                target.upsert_sql,
                 match_rows,
             )
 
+    if not target.shared_mbid_pass:
+        return matched, unmatched
     shared = await _match_by_shared_track_mbid(conn, no_match)
     return matched + shared, unmatched - shared
 

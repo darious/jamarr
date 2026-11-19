@@ -132,7 +132,6 @@ async def disconnect_lastfm(
         """
         UPDATE "user"
         SET lastfm_session_key = NULL,
-            lastfm_username = NULL,
             lastfm_enabled = FALSE,
             lastfm_connected_at = NULL
         WHERE id = $1

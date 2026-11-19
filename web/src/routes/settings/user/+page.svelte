@@ -15,6 +15,7 @@
     connectListenbrainz,
     disconnectListenbrainz,
     toggleListenbrainz,
+    syncListenbrainz,
     type ListenbrainzStatus,
   } from "$lib/api";
   import TabButton from "$lib/components/TabButton.svelte";
@@ -287,6 +288,22 @@
       listenbrainzMessage = "ListenBrainz disconnected.";
     } catch (e: any) {
       listenbrainzError = e?.message || "Failed to disconnect ListenBrainz";
+    } finally {
+      updatingListenbrainz = false;
+    }
+  }
+
+  async function syncListenbrainzNow() {
+    if (!user) return;
+    updatingListenbrainz = true;
+    listenbrainzMessage = "";
+    listenbrainzError = "";
+    try {
+      const result = await syncListenbrainz();
+      listenbrainzMessage = `Synced: ${result.new ?? 0} new listens, ${result.matched ?? 0} matched to your library.`;
+      await loadListenbrainzStatus();
+    } catch (e: any) {
+      listenbrainzError = e?.message || "Failed to sync ListenBrainz";
     } finally {
       updatingListenbrainz = false;
     }
@@ -846,6 +863,24 @@
                 Last problem: {listenbrainzStatus.last_error}
               </p>
             {/if}
+
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-sm text-muted">Listens from other apps</p>
+                <p class="text-xs text-subtle">
+                  {listenbrainzStatus.synced_at
+                    ? `Last synced ${new Date(listenbrainzStatus.synced_at).toLocaleString()}`
+                    : "Not synced yet"}
+                </p>
+              </div>
+              <TabButton
+                type="button"
+                disabled={updatingListenbrainz}
+                onClick={syncListenbrainzNow}
+              >
+                {#if updatingListenbrainz}Syncing...{:else}Sync now{/if}
+              </TabButton>
+            </div>
 
             <div class="flex items-center justify-between">
               <div>

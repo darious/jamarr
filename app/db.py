@@ -401,7 +401,10 @@ async def init_db():
                 listenbrainz_connected_at TIMESTAMPTZ,
                 listenbrainz_since TIMESTAMPTZ,
                 listenbrainz_paused_at TIMESTAMPTZ,
-                listenbrainz_auth_error TEXT
+                listenbrainz_auth_error TEXT,
+                listenbrainz_synced_at TIMESTAMPTZ,
+                listenbrainz_cutover TIMESTAMPTZ,
+                listenbrainz_synced_through BIGINT
             );
 
             CREATE TABLE IF NOT EXISTS favorite_artist (
@@ -751,6 +754,57 @@ async def init_db():
                 added_at TIMESTAMPTZ DEFAULT NOW()
             );
 
+            -- init_db runs before migrations, and the history view below reads
+            -- these columns, so existing installs get them here first (036/037).
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_username TEXT;
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_token TEXT;
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_enabled BOOLEAN DEFAULT TRUE;
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_connected_at TIMESTAMPTZ;
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_since TIMESTAMPTZ;
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_paused_at TIMESTAMPTZ;
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_auth_error TEXT;
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_synced_at TIMESTAMPTZ;
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_cutover TIMESTAMPTZ;
+            ALTER TABLE "user" ADD COLUMN IF NOT EXISTS listenbrainz_synced_through BIGINT;
+
+            -- 037: listens read back from ListenBrainz (from the user's cutover
+            -- on) and their matches to library tracks.
+            CREATE TABLE IF NOT EXISTS listenbrainz_listen (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+                listened_at TIMESTAMPTZ NOT NULL,
+                listened_at_uts BIGINT NOT NULL,
+                recording_msid TEXT,
+                artist_name TEXT NOT NULL,
+                track_name TEXT NOT NULL,
+                release_name TEXT,
+                recording_mbid TEXT,
+                release_mbid TEXT,
+                artist_mbids TEXT[],
+                mapped_recording_mbid TEXT,
+                submission_client TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (user_id, listened_at_uts, artist_name, track_name)
+            );
+            CREATE INDEX IF NOT EXISTS idx_listenbrainz_listen_user_listened
+                ON listenbrainz_listen(user_id, listened_at DESC);
+
+            CREATE TABLE IF NOT EXISTS listenbrainz_listen_match (
+                id BIGSERIAL PRIMARY KEY,
+                listen_id BIGINT NOT NULL UNIQUE
+                    REFERENCES listenbrainz_listen(id) ON DELETE CASCADE,
+                track_id BIGINT NOT NULL REFERENCES track(id) ON DELETE CASCADE,
+                match_score DOUBLE PRECISION NOT NULL,
+                match_method TEXT NOT NULL,
+                match_reason TEXT,
+                cache_key TEXT,
+                matched_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_listenbrainz_listen_match_cache_key
+                ON listenbrainz_listen_match(cache_key) WHERE cache_key IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_listenbrainz_listen_match_track
+                ON listenbrainz_listen_match(track_id);
+
             -- 036: ListenBrainz submission state for local plays. A play is due
             -- when its user has ListenBrainz connected, it is at or after
             -- user.listenbrainz_since, and it has no row here (or a retry row
@@ -820,6 +874,26 @@ async def init_db():
                 FROM lastfm_scrobble_match lsm
                 JOIN lastfm_scrobble ls ON ls.id = lsm.scrobble_id
                 JOIN "user" u on ls.lastfm_username = u.lastfm_username
+                -- Last.fm is the source up to the ListenBrainz cutover only.
+                WHERE u.listenbrainz_cutover IS NULL OR ls.played_at < u.listenbrainz_cutover
+            ),
+            listenbrainz_rows AS (
+                SELECT
+                    'listenbrainz'::text AS source,
+                    lbm.id AS source_id,
+                    lbm.track_id,
+                    l.listened_at AS played_at,
+                    l.user_id,
+                    NULL::text AS lastfm_username,
+                    NULL::text AS client_id,
+                    NULL::text AS hostname,
+                    NULL::text AS client_ip,
+                    lbm.match_score,
+                    lbm.match_method
+                FROM listenbrainz_listen_match lbm
+                JOIN listenbrainz_listen l ON l.id = lbm.listen_id
+                JOIN "user" u ON u.id = l.user_id
+                WHERE u.listenbrainz_cutover IS NOT NULL AND l.listened_at >= u.listenbrainz_cutover
             ),
             local_rows AS (
                 SELECT
@@ -836,20 +910,28 @@ async def init_db():
                     NULL::text AS match_method
                 FROM playback_history ph
             ),
-            lastfm_filtered AS (
-                SELECT lf.*
-                FROM lastfm_rows lf
+            -- An external row of a track Jamarr itself played within a minute
+            -- is that same play coming back (renderer plays drift several
+            -- seconds; nobody hears one track twice in a minute).
+            external_filtered AS (
+                SELECT ex.*
+                FROM (
+                    SELECT * FROM lastfm_rows
+                    UNION ALL
+                    SELECT * FROM listenbrainz_rows
+                ) ex
                 WHERE NOT EXISTS (
                     SELECT 1
                     FROM playback_history lo
-                    WHERE lo.track_id = lf.track_id
-                      AND lo."timestamp" BETWEEN lf.played_at - INTERVAL '5 seconds'
-                                              AND lf.played_at + INTERVAL '5 seconds'
+                    WHERE lo.track_id = ex.track_id
+                      AND (lo.user_id = ex.user_id OR lo.user_id IS NULL)
+                      AND lo."timestamp" BETWEEN ex.played_at - INTERVAL '60 seconds'
+                                              AND ex.played_at + INTERVAL '60 seconds'
                 )
             )
             SELECT * FROM local_rows
             UNION ALL
-            SELECT * FROM lastfm_filtered;
+            SELECT * FROM external_filtered;
             
             -- Materialized view definition (simplified for init_db, can match view for now)
             -- Note: Using correct definition with UNION ALL

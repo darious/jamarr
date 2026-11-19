@@ -17,6 +17,7 @@ import logging
 import time
 import uuid
 from typing import Any, Iterable, Mapping, Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -144,6 +145,7 @@ class ListenBrainzClient:
         *,
         token: Optional[str] = None,
         json_body: Any = None,
+        params: Optional[dict] = None,
     ) -> httpx.Response:
         headers = {}
         if token is not None:
@@ -152,7 +154,7 @@ class ListenBrainzClient:
             await self._wait_for_rate_limit()
             try:
                 response = await self._client().request(
-                    method, path, headers=headers, json=json_body
+                    method, path, headers=headers, json=json_body, params=params
                 )
             except httpx.HTTPError as exc:
                 raise ListenBrainzUnavailableError(
@@ -204,6 +206,33 @@ class ListenBrainzClient:
         if body.get("valid"):
             return body.get("user_name")
         return None
+
+    async def get_listens(
+        self,
+        username: str,
+        *,
+        max_ts: Optional[int] = None,
+        count: int = 1000,
+        token: Optional[str] = None,
+    ) -> list[dict]:
+        """Up to ``count`` listens before ``max_ts`` (newest first).
+
+        Public data; a token only buys a higher rate limit.
+        """
+        params: dict[str, Any] = {"count": min(count, MAX_LISTENS_PER_REQUEST)}
+        if max_ts is not None:
+            params["max_ts"] = int(max_ts)
+        response = await self._request(
+            "GET", f"/1/user/{quote(username, safe='')}/listens", token=token, params=params
+        )
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise ListenBrainzUnavailableError("ListenBrainz sent a non-JSON reply") from exc
+        listens = (body.get("payload") or {}).get("listens") if isinstance(body, dict) else None
+        if not isinstance(listens, list):
+            raise ListenBrainzUnavailableError("ListenBrainz sent an unexpected reply")
+        return listens
 
     async def submit_listens(
         self, token: str, listen_type: str, listens: list[dict]

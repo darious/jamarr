@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 from app import listenbrainz as lb
 from app.api.deps import get_current_user_jwt, get_current_user_jwt_released
 from app.db import db_conn, get_db
+from app.history_events import refresh_history
+from app.listenbrainz_sync import sync_user_locked
 from app.listenbrainz_submissions import (
     kick_submissions,
     skip_paused_plays,
@@ -51,6 +53,8 @@ async def get_listenbrainz_status(
         "connected_at": _iso(user.get("listenbrainz_connected_at")),
         "since": _iso(user.get("listenbrainz_since")),
         "auth_error": user.get("listenbrainz_auth_error"),
+        "synced_at": _iso(user.get("listenbrainz_synced_at")),
+        "cutover": _iso(user.get("listenbrainz_cutover")),
     }
     if connected:
         result.update(await submission_summary(db, user["id"]))
@@ -116,7 +120,10 @@ async def connect_listenbrainz(
                 listenbrainz_connected_at = $3,
                 listenbrainz_since = $4,
                 listenbrainz_paused_at = NULL,
-                listenbrainz_auth_error = NULL
+                listenbrainz_auth_error = NULL,
+                -- The history cutover is set once, on first connect (or by
+                -- the import); later connects never move it.
+                listenbrainz_cutover = COALESCE(listenbrainz_cutover, $4)
             WHERE id = $5
             """,
             token,
@@ -125,6 +132,8 @@ async def connect_listenbrainz(
             since,
             user["id"],
         )
+        if user.get("listenbrainz_cutover") is None:
+            await refresh_history(db, user["id"])
     logger.info("User %s connected ListenBrainz account %s", user["username"], username)
     kick_submissions()
     return {"ok": True, "username": username, "since": since.isoformat()}
@@ -135,7 +144,10 @@ async def disconnect_listenbrainz(
     db: asyncpg.Connection = Depends(get_db),
     user: asyncpg.Record = Depends(get_current_user_jwt),
 ):
-    """Forget the ListenBrainz token. Plays made while disconnected are never sent."""
+    """Forget the ListenBrainz token. Plays made while disconnected are never sent.
+
+    The history cutover stays, so listens already read stay in history.
+    """
     await db.execute(
         """
         UPDATE "user"
@@ -178,3 +190,24 @@ async def toggle_listenbrainz(
             user["id"],
         )
     return {"ok": True, "enabled": payload.enabled}
+
+
+@router.post("/api/listenbrainz/sync")
+async def sync_listenbrainz(
+    user: asyncpg.Record = Depends(get_current_user_jwt_released),
+):
+    """Fetch new listens from ListenBrainz now and match them to the library.
+
+    Only listens from the cutover on are read, and Jamarr's own are skipped.
+    """
+    if not user.get("listenbrainz_username") or not user.get("listenbrainz_cutover"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ListenBrainz account not connected")
+    try:
+        return await sync_user_locked(user["id"])
+    except (lb.ListenBrainzUnavailableError, lb.ListenBrainzRateLimitedError) as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "ListenBrainz is not responding. Try again later.",
+        ) from exc
+    except lb.ListenBrainzError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"ListenBrainz error: {exc}") from exc

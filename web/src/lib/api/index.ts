@@ -1044,6 +1044,7 @@ export interface ListenbrainzStatus {
     connected_at: string | null;
     since: string | null;
     auth_error: string | null;
+    synced_at: string | null;
     pending?: number;
     submitted?: number;
     rejected?: number;
@@ -1066,6 +1067,24 @@ export async function connectListenbrainz(token: string): Promise<{ username: st
     if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
         throw new Error(detail.detail || 'Failed to connect ListenBrainz');
+    }
+    return await res.json();
+}
+
+export interface ListenbrainzSyncResult {
+    fetched?: number;
+    new?: number;
+    own_skipped?: number;
+    matched?: number;
+    unmatched?: number;
+    skipped?: string;
+}
+
+export async function syncListenbrainz(): Promise<ListenbrainzSyncResult> {
+    const res = await fetchWithAuth('/api/listenbrainz/sync', { method: 'POST' });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to sync ListenBrainz');
     }
     return await res.json();
 }
