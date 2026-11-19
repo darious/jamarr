@@ -6,6 +6,7 @@ import asyncpg
 from app import lastfm
 from app.db import db_conn
 from app.history_events import refresh_history
+from app.listenbrainz_submissions import kick_submissions
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,8 @@ async def log_history(
                         user_id,
                         existing_id,
                     )
+                    if user_id:
+                        kick_submissions()
                     return
                 logger.info(
                     f"Skipping duplicate history log for track {track_id} (recent entry exists)"
@@ -209,6 +212,7 @@ async def log_history(
                 asyncio.create_task(
                     scrobble_to_lastfm(user_id, track_id)
                 )
+                kick_submissions()
 
             # Refresh materialized view to update stats immediately
             await refresh_history(db, user_id)

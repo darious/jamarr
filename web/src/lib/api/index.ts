@@ -1036,6 +1036,54 @@ export async function toggleLastfm(enabled: boolean): Promise<void> {
     if (!res.ok) throw new Error('Failed to toggle Last.fm scrobbling');
 }
 
+// ListenBrainz Integration
+export interface ListenbrainzStatus {
+    connected: boolean;
+    username: string | null;
+    enabled: boolean;
+    connected_at: string | null;
+    since: string | null;
+    auth_error: string | null;
+    pending?: number;
+    submitted?: number;
+    rejected?: number;
+    last_submitted_at?: string | null;
+    last_error?: string | null;
+}
+
+export async function getListenbrainzStatus(): Promise<ListenbrainzStatus> {
+    const res = await fetchWithAuth('/api/listenbrainz/status');
+    if (!res.ok) throw new Error('Failed to fetch ListenBrainz status');
+    return await res.json();
+}
+
+export async function connectListenbrainz(token: string): Promise<{ username: string; since: string }> {
+    const res = await fetchWithAuth('/api/listenbrainz/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+    });
+    if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail.detail || 'Failed to connect ListenBrainz');
+    }
+    return await res.json();
+}
+
+export async function disconnectListenbrainz(): Promise<void> {
+    const res = await fetchWithAuth('/api/listenbrainz/disconnect', { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to disconnect ListenBrainz');
+}
+
+export async function toggleListenbrainz(enabled: boolean): Promise<void> {
+    const res = await fetchWithAuth('/api/listenbrainz/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+    });
+    if (!res.ok) throw new Error('Failed to toggle ListenBrainz submission');
+}
+
 export interface SyncScrobblesResponse {
     fetched: number;
     matched: number;

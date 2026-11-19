@@ -394,7 +394,14 @@ async def init_db():
                 lastfm_username TEXT,
                 lastfm_session_key TEXT,
                 lastfm_enabled BOOLEAN DEFAULT TRUE,
-                lastfm_connected_at TIMESTAMPTZ
+                lastfm_connected_at TIMESTAMPTZ,
+                listenbrainz_username TEXT,
+                listenbrainz_token TEXT,
+                listenbrainz_enabled BOOLEAN DEFAULT TRUE,
+                listenbrainz_connected_at TIMESTAMPTZ,
+                listenbrainz_since TIMESTAMPTZ,
+                listenbrainz_paused_at TIMESTAMPTZ,
+                listenbrainz_auth_error TEXT
             );
 
             CREATE TABLE IF NOT EXISTS favorite_artist (
@@ -743,6 +750,24 @@ async def init_db():
                 reason TEXT,
                 added_at TIMESTAMPTZ DEFAULT NOW()
             );
+
+            -- 036: ListenBrainz submission state for local plays. A play is due
+            -- when its user has ListenBrainz connected, it is at or after
+            -- user.listenbrainz_since, and it has no row here (or a retry row
+            -- whose next_attempt_at has passed).
+            CREATE TABLE IF NOT EXISTS listenbrainz_submission (
+                playback_history_id BIGINT PRIMARY KEY
+                    REFERENCES playback_history(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+                status TEXT NOT NULL CHECK (status IN ('submitted', 'retry', 'rejected', 'skipped')),
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                next_attempt_at TIMESTAMPTZ,
+                submitted_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_listenbrainz_submission_retry
+                ON listenbrainz_submission(next_attempt_at) WHERE status = 'retry';
 
             -- 020: Combined Playback History View
             

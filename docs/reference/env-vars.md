@@ -82,6 +82,7 @@ Non-secret app config (MusicBrainz URL, logging, concurrency) lives in
 |---|---|---|
 | `PEARLARR_URL` | — | Pearlarr download integration |
 | `MUSICBRAINZ_ROOT_URL` | `https://musicbrainz.org` | MusicBrainz API root |
+| `LISTENBRAINZ_API_ROOT` | `https://api.listenbrainz.org` | ListenBrainz API root (each user connects with their own token in Settings; no app key) |
 
 ## JWT authentication
 

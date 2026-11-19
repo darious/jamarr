@@ -58,6 +58,7 @@ from app.services.player.history import (
     reset_history_tracker,
     update_now_playing_lastfm,
 )
+from app.listenbrainz_submissions import update_now_playing_listenbrainz
 from app.services.player.monitor import (
     start_monitor_task,
     _is_monitor_starting,
@@ -408,6 +409,9 @@ async def set_queue(
         current_track = enriched_queue[current_index]
         asyncio.create_task(
             update_now_playing_lastfm(user_id, current_track["id"])
+        )
+        asyncio.create_task(
+            update_now_playing_listenbrainz(user_id, current_track["id"])
         )
     try:
         await renderer_orchestrator.set_queue(
