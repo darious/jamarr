@@ -1,7 +1,7 @@
 """Reload a user's Last.fm history into ListenBrainz.
 
 One-off migration tool. It sends every stored Last.fm scrobble from before the
-user's ListenBrainz cutover (``user.listenbrainz_since``) as ``import`` listens.
+user's ListenBrainz cutover (``user.listenbrainz_cutover``) as ``import`` listens.
 Plays from the cutover on reach ListenBrainz through the submission queue
 (local plays) or straight from other scrobblers, so nothing is sent twice.
 
@@ -41,6 +41,7 @@ from typing import Any, Optional, Sequence
 import asyncpg
 
 from app import listenbrainz as lb
+from app.history_events import refresh_history
 from app.version import __version__
 
 logger = logging.getLogger("listenbrainz_import")
@@ -53,8 +54,9 @@ RECORDING_METHODS = {"mbid_track", "name_artist_album"}
 SCROBBLE_RULE_CAP_SECONDS = 240
 # Unmatched scrobbles have no known duration; treat repeats this close as one.
 UNMATCHED_DUPLICATE_SECONDS = 30
-# A Jamarr play this close to a scrobble of the same track is that scrobble.
-LOCAL_PLAY_WINDOW_SECONDS = 5
+# A Jamarr play this close to a scrobble of the same track is that scrobble
+# (the same window the history view uses).
+LOCAL_PLAY_WINDOW_SECONDS = 60
 
 ROWS_SQL = """
     SELECT ls.id, ls.played_at, ls.played_at_uts, ls.artist_name, ls.track_name,
@@ -65,6 +67,7 @@ ROWS_SQL = """
            (m.track_id IS NOT NULL AND EXISTS (
                SELECT 1 FROM playback_history ph
                WHERE ph.track_id = m.track_id
+                 AND (ph.user_id = $4 OR ph.user_id IS NULL)
                  AND ph."timestamp" BETWEEN ls.played_at - make_interval(secs => $3)
                                         AND ls.played_at + make_interval(secs => $3)
            )) AS jamarr_play
@@ -133,7 +136,15 @@ def drop_duplicates(rows: Sequence[dict]) -> tuple[list[dict], list[tuple[dict, 
             kept_ids.add(row["id"])
             last = row
     kept = [row for row in rows if row["id"] in kept_ids]
-    return kept, dropped
+    # A swap can drop a row that earlier duplicates named as kept; point
+    # those at the row that finally stayed.
+    replaced = {d["id"]: k for d, k in dropped}
+    resolved = []
+    for d, k in dropped:
+        while k["id"] not in kept_ids and k["id"] in replaced:
+            k = replaced[k["id"]]
+        resolved.append((d, k))
+    return kept, resolved
 
 
 def build_import_listen(row: dict) -> Optional[dict]:
@@ -201,8 +212,12 @@ def build_plan(rows: Sequence[dict]) -> Plan:
     return plan
 
 
-async def load_rows(db: asyncpg.Connection, lastfm_username: str, before: datetime) -> list[dict]:
-    rows = await db.fetch(ROWS_SQL, lastfm_username, before, float(LOCAL_PLAY_WINDOW_SECONDS))
+async def load_rows(
+    db: asyncpg.Connection, lastfm_username: str, before: datetime, user_id: int
+) -> list[dict]:
+    rows = await db.fetch(
+        ROWS_SQL, lastfm_username, before, float(LOCAL_PLAY_WINDOW_SECONDS), user_id
+    )
     return [dict(r) for r in rows]
 
 
@@ -267,8 +282,14 @@ async def send(
             await sleep(wait)
 
     total = len(pending)
-    for start in range(0, total, BATCH_SIZE):
-        batch = pending[start : start + BATCH_SIZE]
+    start = 0
+    while start < total:
+        end = min(start + BATCH_SIZE, total)
+        # Never split one second across batches, so "--after <last second>"
+        # resumes exactly.
+        while end < total and pending[end]["listened_at"] == pending[end - 1]["listened_at"]:
+            end += 1
+        batch = pending[start:end]
         try:
             await submit(batch)
         except Exception:
@@ -277,7 +298,8 @@ async def send(
             raise
         last = batch[-1]["listened_at"]
         when = datetime.fromtimestamp(last, timezone.utc).date().isoformat()
-        out(f"  {min(start + BATCH_SIZE, total)}/{total} up to {when} (--after {last})")
+        out(f"  {end}/{total} up to {when} (--after {last})")
+        start = end
     return sent, rejected
 
 
@@ -285,7 +307,7 @@ async def run(args: argparse.Namespace, db: asyncpg.Connection, client=None, out
     user = await db.fetchrow(
         """
         SELECT id, username, lastfm_username, listenbrainz_token, listenbrainz_username,
-               listenbrainz_since
+               listenbrainz_cutover
         FROM "user" WHERE username = $1
         """,
         args.user,
@@ -300,16 +322,24 @@ async def run(args: argparse.Namespace, db: asyncpg.Connection, client=None, out
         out("Connect ListenBrainz in Settings first")
         return 2
 
-    cutover = user["listenbrainz_since"]
+    cutover = user["listenbrainz_cutover"]
     if args.cutover:
         cutover = datetime.fromisoformat(args.cutover.replace("Z", "+00:00"))
         if cutover.tzinfo is None:
             cutover = cutover.replace(tzinfo=timezone.utc)
         if not args.dry_run:
+            # Both clocks start at the wipe: the history split, and the queue
+            # that sends Jamarr's own plays from then on.
             await db.execute(
-                'UPDATE "user" SET listenbrainz_since = $1 WHERE id = $2', cutover, user["id"]
+                """
+                UPDATE "user" SET listenbrainz_cutover = $1, listenbrainz_since = $1
+                WHERE id = $2
+                """,
+                cutover,
+                user["id"],
             )
-            out(f"Cutover set: local plays from {cutover.isoformat()} go through the queue")
+            await refresh_history(db, user["id"])
+            out(f"Cutover set to {cutover.isoformat()}: history and the submission queue switch there")
     if cutover is None:
         out("No cutover: pass --cutover with the time ListenBrainz was wiped")
         return 2
@@ -327,7 +357,7 @@ async def run(args: argparse.Namespace, db: asyncpg.Connection, client=None, out
             "just before it may be missing. Run a sync first if Last.fm still works."
         )
 
-    rows = await load_rows(db, user["lastfm_username"], cutover)
+    rows = await load_rows(db, user["lastfm_username"], cutover, user["id"])
     plan = build_plan(rows)
     first = plan.listens[0]["listened_at"] if plan.listens else None
     last = plan.listens[-1]["listened_at"] if plan.listens else None
