@@ -365,151 +365,34 @@ async def test_history_stats_mine_scope(auth_client: AsyncClient, db, player_dat
 
 
 @pytest.mark.asyncio
-async def test_scrobble_triggers_on_history_log(auth_client: AsyncClient, db, player_data, auth_token):
-    """Test that logging history triggers Last.fm scrobble for enabled users."""
-    from unittest.mock import patch, AsyncMock
-    
-    # Get user id
+async def test_history_log_hands_play_to_listenbrainz_at_its_start(auth_client: AsyncClient, db, player_data, auth_token):
+    """Logging a play kicks the ListenBrainz queue and stamps the play at its start."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import patch, MagicMock
+
     user = await db.fetchrow('SELECT id FROM "user" WHERE username = $1', "testuser")
-    user_id = user["id"]
-    
-    # Setup Last.fm credentials for user
-    await db.execute(
-        """
-        UPDATE "user"
-        SET lastfm_username = $1,
-            lastfm_session_key = $2,
-            lastfm_enabled = $3
-        WHERE id = $4
-        """,
-        "testuser_lastfm",
-        "test_session_key",
-        True,
-        user_id
-    )
-    
-    # Mock Last.fm scrobble function
-    with patch('app.lastfm.scrobble_track', new_callable=AsyncMock) as mock_scrobble:
-        # Setup queue and trigger progress to log history
-        headers = {"X-Jamarr-Client-Id": "test-client"}
-        
-        track1 = {
-            "id": 10,
-            "title": "Song A",
-            "artist": "Artist A",
-            "path": "/music/t1.flac",
-            "duration_seconds": 200,
-            "album": "Album A",
-            "user_id": user_id
-        }
-        
+    headers = {"X-Jamarr-Client-Id": "test-client"}
+    track1 = {
+        "id": 10,
+        "title": "Song A",
+        "artist": "Artist A",
+        "path": "/music/t1.flac",
+        "duration_seconds": 200,
+        "album": "Album A",
+        "user_id": user["id"],
+    }
+    with patch("app.services.player.history.kick_submissions", new_callable=MagicMock) as kick:
         await auth_client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
-        
-        # Send progress to trigger history log (and scrobble)
-        await auth_client.post("/api/player/progress", 
-            json={"position_seconds": 35, "is_playing": True},
-            headers=headers
+        before = datetime.now(timezone.utc)
+        await auth_client.post(
+            "/api/player/progress", json={"position_seconds": 35, "is_playing": True}, headers=headers
         )
-        
-        # Give async task time to execute
-        import asyncio
         await asyncio.sleep(0.1)
-        
-        # Verify scrobble was called
-        assert mock_scrobble.called
-        call_args = mock_scrobble.call_args
-        assert call_args[1]["session_key"] == "test_session_key"
-        assert call_args[1]["track_info"]["track"] == "Song A"
-        assert call_args[1]["track_info"]["artist"] == "Artist A"
 
-
-@pytest.mark.asyncio
-async def test_scrobble_skipped_when_disabled(auth_client: AsyncClient, db, player_data, auth_token):
-    """Test that scrobbling is skipped when Last.fm is disabled."""
-    from unittest.mock import patch, AsyncMock
-    
-    # Get user id
-    user = await db.fetchrow('SELECT id FROM "user" WHERE username = $1', "testuser")
-    user_id = user["id"]
-    
-    # Setup Last.fm credentials but disabled
-    await db.execute(
-        """
-        UPDATE "user"
-        SET lastfm_username = $1,
-            lastfm_session_key = $2,
-            lastfm_enabled = $3
-        WHERE id = $4
-        """,
-        "testuser_lastfm",
-        "test_session_key",
-        False,  # Disabled
-        user_id
-    )
-    
-    # Mock Last.fm scrobble function
-    with patch('app.lastfm.scrobble_track', new_callable=AsyncMock) as mock_scrobble:
-        headers = {"X-Jamarr-Client-Id": "test-client"}
-        
-        track1 = {
-            "id": 10,
-            "title": "Song A",
-            "artist": "Artist A",
-            "path": "/music/t1.flac",
-            "duration_seconds": 200,
-            "album": "Album A",
-            "user_id": user_id
-        }
-        
-        await auth_client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
-        await auth_client.post("/api/player/progress", 
-            json={"position_seconds": 35, "is_playing": True},
-            headers=headers
-        )
-        
-        import asyncio
-        await asyncio.sleep(0.1)
-        
-        # Verify scrobble was NOT called
-        assert not mock_scrobble.called
-
-
-@pytest.mark.asyncio
-async def test_scrobble_skipped_without_session_key(auth_client: AsyncClient, db, player_data, auth_token):
-    """Test that scrobbling is skipped when user has no session key."""
-    from unittest.mock import patch, AsyncMock
-    
-    # Get user id
-    user = await db.fetchrow('SELECT id FROM "user" WHERE username = $1', "testuser")
-    user_id = user["id"]
-    
-    # No Last.fm setup for user (default state)
-    
-    # Mock Last.fm scrobble function
-    with patch('app.lastfm.scrobble_track', new_callable=AsyncMock) as mock_scrobble:
-        headers = {"X-Jamarr-Client-Id": "test-client"}
-        
-        track1 = {
-            "id": 10,
-            "title": "Song A",
-            "artist": "Artist A",
-            "path": "/music/t1.flac",
-            "duration_seconds": 200,
-            "album": "Album A",
-            "user_id": user_id
-        }
-        
-        await auth_client.post("/api/player/queue", json={"queue": [track1], "start_index": 0}, headers=headers)
-        await auth_client.post("/api/player/progress", 
-            json={"position_seconds": 35, "is_playing": True},
-            headers=headers
-        )
-        
-        import asyncio
-        await asyncio.sleep(0.1)
-        
-        # Verify scrobble was NOT called
-        assert not mock_scrobble.called
+    assert kick.called
+    stamp = await db.fetchval("SELECT timestamp FROM playback_history WHERE track_id = 10")
+    assert stamp <= before - timedelta(seconds=34)
 
 
 async def test_end_of_queue_marks_the_transport_stopped(db):

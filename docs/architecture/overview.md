@@ -8,11 +8,11 @@ Jamarr is a web-based music controller focused on fast library browsing and reli
 ### 1. Backend (Python/FastAPI)
 The backend is the brain of the operation, responsible for:
 -   **Library Scanning**: Recursively scans the filesystem, extracts tags (mutagen), and caches metadata in PostgreSQL.
--   **Metadata Enrichment**: Uses a v3 pipeline architecture to fetch high-quality metadata (artist bios, images, album details, external links) from MusicBrainz, Wikidata, Last.fm, Fanart.tv, Spotify, and Qobuz. See [Scanner Pipeline](scanner-pipeline.md) for details.
+-   **Metadata Enrichment**: Uses a v3 pipeline architecture to fetch high-quality metadata (artist bios, images, album details, external links) from MusicBrainz, Wikidata, ListenBrainz, Fanart.tv, Spotify, and Qobuz. See [Scanner Pipeline](scanner-pipeline.md) for details.
 -   **Playback & Streaming**: Issues short-lived stream URLs via `/api/stream-url/{track_id}` and streams local files from `/api/stream/{track_id}?token=...` while managing playback state for both local and UPnP renderers.
 -   **UPnP Control**: Acts as a Control Point, managing playback state, volume, and queue for UPnP devices.
 -   **Queue Management**: Maintains the active play queue and playback state in the database (`renderer_state`) to ensure persistence and reliability even if the frontend disconnects.
--   **Last.fm Integration**: Syncs scrobbles, matches them to local tracks, and merges them into playback history.
+-   **ListenBrainz Integration**: Sends plays to ListenBrainz, reads back listens from other scrobblers, and matches them to local tracks. Scrobbles fetched from Last.fm before it went paid stay as a history archive. See [ListenBrainz](../guides/listenbrainz.md).
 -   **Recommendations**: Generates artist/album/track recommendations from listening history and similarity data.
 -   **Charts & Scheduling**: Stores chart data and runs scheduled jobs for background maintenance.
 -   **API**: Exposes REST and streaming endpoints for the frontend.
@@ -21,7 +21,7 @@ The backend is the brain of the operation, responsible for:
 A PostgreSQL database serves as the single source of truth for:
 -   **Library**: Tracks, Artists, Albums, and Artwork.
 -   **State**: Current queue, active renderer, and playback position per device.
--   **History**: Local playback history, Last.fm scrobbles, and a combined history view/materialized view.
+-   **History**: Local playback history, ListenBrainz listens, the Last.fm archive, and a combined history view/materialized view.
 -   **Search Index**: Full-text search and trigram indexes for fast browsing.
 -   **Auxiliary Data**: Similar artists, top tracks, charts, and scheduler tasks.
 
@@ -60,8 +60,8 @@ The frontend provides a polished, app-like user experience:
 
 ### History & Recommendations
 1.  **Local History**: Backend logs playback into `playback_history`.
-2.  **Last.fm Sync**: Scrobbles are pulled, matched to local tracks, and stored in `lastfm_scrobble_match`.
-3.  **Unified View**: `combined_playback_history_mat` materializes local + Last.fm history.
+2.  **ListenBrainz**: Local plays are sent to ListenBrainz; listens from other scrobblers are read back, matched to local tracks, and stored in `listenbrainz_listen_match`. Stored Last.fm scrobbles (`lastfm_scrobble_match`) cover the time before each user's cutover.
+3.  **Unified View**: `combined_playback_history_mat` materializes local + Last.fm archive + ListenBrainz history.
 4.  **Recommendations**: API reads the combined history view to produce seed and candidate recommendations.
 
 ## Directory Structure
@@ -88,13 +88,13 @@ The frontend provides a polished, app-like user experience:
 │   │   │   └── stages/      # Enrichment stages
 │   │   └── services/        # External API clients
 │   │       ├── musicbrainz.py
-│   │       ├── lastfm.py
+│   │       ├── listenbrainz.py
 │   │       ├── artwork.py
 │   │       └── wikidata.py
 │   ├── services/         # Playback, UPnP, and state services
 │   ├── media/            # Artwork helpers and image lookup
 │   ├── models/           # Pydantic models
-│   ├── matching/         # Last.fm scrobble matching
+│   ├── matching/         # Scrobble/listen → track matching
 │   ├── main.py           # App entrypoint (FastAPI)
 │   ├── db.py             # Database pool + init_db() schema seeder
 │   ├── auth.py           # Authentication & user management
@@ -105,7 +105,8 @@ The frontend provides a polished, app-like user experience:
 │   ├── scheduler.py      # Background task scheduler
 │   ├── upnp.py           # UPnP device discovery & control
 │   ├── charts.py         # Chart data ingestion
-│   └── lastfm.py         # Last.fm integration
+│   ├── listenbrainz*.py  # ListenBrainz client, submission queue, sync, Last.fm reload
+│   └── lastfm_archive.py # Matching for the stored Last.fm scrobbles
 ├── web/                  # SvelteKit Frontend
 │   ├── src/
 │   │   ├── routes/       # Pages (Home, Artist, Queue, etc.)
@@ -115,7 +116,7 @@ The frontend provides a polished, app-like user experience:
 ├── tests/                # Backend test suite (pytest)
 ├── scripts/              # Utility and helper scripts
 │   ├── artwork/          # Artwork tidying tools
-│   ├── lastfm/           # Last.fm pull & review tools
+│   ├── lastfm/           # Last.fm archive match/review tools
 │   ├── playlist/         # Playlist import/export
 │   ├── sample/           # Chart sampling tools
 │   ├── scanner/          # Scanner validation & debug
@@ -132,7 +133,7 @@ The frontend provides a polished, app-like user experience:
 │   ├── architecture/     # Overview, auth, renderers, scanner, artwork, ADRs
 │   ├── reference/        # API (generated), schema (generated), CLI, env vars
 │   ├── clients/          # Web, TUI, Android
-│   └── guides/           # Scanning, Last.fm, playlists
+│   └── guides/           # Scanning, ListenBrainz, playlists
 ├── mkdocs.yml            # Docs site config + navigation
 ├── docker-compose.yml    # Production Docker Compose
 ├── docker-compose.dev.yml # Development overrides

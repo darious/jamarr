@@ -510,7 +510,7 @@ so it can't carry our bearer token. v1 embeds bytes:
 
 If memory/IPC cost becomes a problem, revisit with a signed art URL endpoint.
 
-### History reporting and Last.fm scrobbling
+### History reporting and scrobbling
 
 These ship in v1 (not deferred). The phone already calls
 `POST /api/player/queue`, `POST /api/player/index`, and

@@ -1,12 +1,9 @@
 import time
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 
-from app import lastfm
-from app.db import db_conn
 from app.history_events import refresh_history
 from app.listenbrainz_submissions import kick_submissions
 
@@ -47,99 +44,6 @@ def should_log_history(
         _history_tracker[key] = {"track_id": track_id, "logged_at": time.time()}
         return True
     return False
-
-
-async def update_now_playing_lastfm(user_id: int, track_id: int):
-    """Background task to update Now Playing on Last.fm"""
-    try:
-        async with db_conn() as db:
-            # Check if user has Last.fm enabled
-            user_row = await db.fetchrow(
-                'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',
-                user_id
-            )
-            
-            if not user_row or not user_row['lastfm_enabled'] or not user_row['lastfm_session_key']:
-                return
-            
-            # Fetch track metadata
-            track_row = await db.fetchrow(
-                """
-                SELECT title, artist, album, duration_seconds, artist_mbid
-                FROM track
-                WHERE id = $1
-                """,
-                track_id
-            )
-            
-            if not track_row:
-                return
-            
-            # Update Now Playing on Last.fm
-            await lastfm.update_now_playing(
-                session_key=user_row['lastfm_session_key'],
-                track_info={
-                    'track': track_row['title'],
-                    'artist': track_row['artist'],
-                    'album': track_row['album'],
-                    'duration': int(track_row['duration_seconds']) if track_row['duration_seconds'] else None,
-                    'mbid': track_row['artist_mbid'],
-                }
-            )
-            
-            logger.info(f"Updated Now Playing on Last.fm for user {user_id}: {track_row['artist']} - {track_row['title']}")
-        
-    except Exception as e:
-        logger.error(f"Failed to update Now Playing on Last.fm: {e}")
-
-
-async def scrobble_to_lastfm(user_id: int, track_id: int, played_at: int | None = None):
-    """Background task to scrobble a track to Last.fm.
-
-    ``played_at`` is the Unix time the track started; it defaults to now, and
-    is only passed for plays reported after the fact (offline playback).
-    """
-    try:
-        async with db_conn() as db:
-            # Check if user has Last.fm enabled
-            user_row = await db.fetchrow(
-                'SELECT lastfm_session_key, lastfm_enabled FROM "user" WHERE id = $1',
-                user_id
-            )
-            
-            if not user_row or not user_row['lastfm_enabled'] or not user_row['lastfm_session_key']:
-                return
-            
-            # Fetch track metadata
-            track_row = await db.fetchrow(
-                """
-                SELECT title, artist, album, duration_seconds, artist_mbid
-                FROM track
-                WHERE id = $1
-                """,
-                track_id
-            )
-            
-            if not track_row:
-                return
-            
-            # Scrobble to Last.fm
-            await lastfm.scrobble_track(
-                session_key=user_row['lastfm_session_key'],
-                track_info={
-                    'track': track_row['title'],
-                    'artist': track_row['artist'],
-                    'album': track_row['album'],
-                    'duration': int(track_row['duration_seconds']) if track_row['duration_seconds'] else None,
-                    'mbid': track_row['artist_mbid'],
-                },
-                timestamp=played_at if played_at is not None else int(time.time())
-            )
-            
-            logger.info(f"Scrobbled track {track_id} to Last.fm for user {user_id}")
-        
-    except Exception as e:
-        logger.error(f"Failed to scrobble to Last.fm: {e}")
 
 
 # A duplicate report of the same play lands within this many seconds of the
@@ -232,13 +136,8 @@ async def log_history(
                 user_id,
             )
 
-            # Trigger Last.fm scrobble if user has it enabled
+            # Send it to ListenBrainz if the user has it connected.
             if user_id:
-                asyncio.create_task(
-                    scrobble_to_lastfm(
-                        user_id, track_id, played_at=int(started_at.timestamp())
-                    )
-                )
                 kick_submissions()
 
             # Refresh materialized view to update stats immediately

@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock, patch
 from httpx import AsyncClient
 
 from tests.unit.test_renderer_phase2_cast import FakeCast, make_backend
@@ -196,19 +196,6 @@ async def test_phase2_cast_progress_logs_history_and_scrobbles(
     _, cast, monitor_starts = fake_cast_backend
     headers = {"X-Jamarr-Client-Id": "phase2-client"}
     user = await db.fetchrow('SELECT id FROM "user" WHERE username = $1', "testuser")
-    await db.execute(
-        """
-        UPDATE "user"
-        SET lastfm_username = $1,
-            lastfm_session_key = $2,
-            lastfm_enabled = TRUE
-        WHERE id = $3
-        """,
-        "testuser_lastfm",
-        "test_session_key",
-        user["id"],
-    )
-
     play = await auth_client.post(
         "/api/player/play",
         json={"track_id": 901},
@@ -217,7 +204,7 @@ async def test_phase2_cast_progress_logs_history_and_scrobbles(
     cast.media_controller.status.adjusted_current_time = 35
     cast.media_controller.status.current_time = 35
 
-    with patch("app.lastfm.scrobble_track", new_callable=AsyncMock) as mock_scrobble:
+    with patch("app.services.player.history.kick_submissions", new_callable=MagicMock) as kick:
         state = await auth_client.get("/api/player/state", headers=headers)
         await asyncio.sleep(0.1)
 
@@ -228,9 +215,7 @@ async def test_phase2_cast_progress_logs_history_and_scrobbles(
     assert len(rows) == 1
     assert rows[0]["client_id"] == selected_cast_renderer
     assert rows[0]["user_id"] == user["id"]
-    assert mock_scrobble.called
-    assert mock_scrobble.call_args.kwargs["session_key"] == "test_session_key"
-    assert mock_scrobble.call_args.kwargs["track_info"]["track"] == "Cast Song"
+    assert kick.called  # the play goes to the ListenBrainz queue
     assert monitor_starts == []
 
 

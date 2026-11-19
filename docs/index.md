@@ -17,7 +17,7 @@ renderers (e.g. Naim Uniti Atom) with next-track staging, and Chromecast.
 - **Local + UPnP + Cast playback** — local streaming, UPnP control, and Chromecast
 - **Next-track staging** — UPnP renderers that support `SetNextAVTransportURI` are handed the next queue item ahead of time, so they can move on without a stop/reload (gapless where the renderer is; not yet measured on hardware)
 - **Instant search** — across artists, albums, and tracks
-- **History + Last.fm** — local playback history merged with matched Last.fm scrobbles
+- **History + ListenBrainz** — local plays sent to ListenBrainz, listens from other apps read back, and your old Last.fm scrobbles kept as an archive
 - **Recommendations** — artist/album/track recommendations from listening history
 - **Playlists** — create and manage ordered playlists
 - **Multiple clients** — SvelteKit web UI, terminal UI, and native Android (incl. Android Auto)

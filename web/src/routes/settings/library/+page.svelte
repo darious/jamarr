@@ -10,7 +10,7 @@
         fetchArtists,
         triggerMissingAlbumsScan,
         triggerOptimize,
-        syncLastfmScrobbles,
+        syncListenbrainz,
     } from "$lib/api";
     import { refreshAccessToken } from "$lib/stores/auth";
     import TabButton from "$lib/components/TabButton.svelte";
@@ -93,7 +93,6 @@
     let startTimestamp = 0;
 
     let eventSource: EventSource | undefined;
-    let lastfmEventSource: EventSource | undefined;
 
     onMount(async () => {
         await refreshAccessToken();
@@ -120,29 +119,6 @@
         eventSource.onerror = (err) => {
             // addLog("Connection lost. Retrying...");
             // EventSource auto-retries, but we might want to know.
-        };
-
-        // Connect to Last.fm SSE
-        lastfmEventSource = new EventSource(`/api/lastfm/events`);
-
-        lastfmEventSource.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.type === "log") {
-                    addLog(data.message);
-                } else if (data.type === "start") {
-                    addLog("Starting Last.fm sync...");
-                } else if (data.type === "complete") {
-                    addLog(
-                        `Last.fm sync finished: ${data.status}${
-                            data.error ? ` (${data.error})` : ""
-                        }`,
-                    );
-                }
-            } catch (e) {
-                if (event.data.includes("connected")) return;
-                console.error("Failed to parse Last.fm SSE event", e);
-            }
         };
 
         // Get initial status
@@ -460,24 +436,21 @@
         }
     }
 
-    async function startLastfmSync() {
+    async function startListenbrainzSync() {
         if (isRunning) return;
 
         try {
-            status = "Syncing Last.fm...";
+            status = "Syncing ListenBrainz...";
             isRunning = true;
-            addLog("Starting Last.fm scrobble sync and matching...");
+            addLog("Fetching new ListenBrainz listens and matching them...");
 
-            const result = await syncLastfmScrobbles({
-                fetch_new: true,
-                rematch_all: false,
-            });
+            const result = await syncListenbrainz();
 
             addLog(
-                `✅ Sync complete: ${result.fetched} fetched, ${result.matched} matched, ${result.unmatched} unmatched`,
+                `✅ Sync complete: ${result.new ?? 0} new listens, ${result.matched ?? 0} matched, ${result.unmatched ?? 0} unmatched`,
             );
         } catch (e) {
-            addLog(`Error syncing Last.fm: ${e}`);
+            addLog(`Error syncing ListenBrainz: ${e}`);
         } finally {
             isRunning = false;
             status = "Idle";
@@ -1051,7 +1024,7 @@
                     <div class="form-control">
                         <Checkbox
                             bind:checked={doTopTracks}
-                            label="Refresh top tracks (Last.fm)"
+                            label="Refresh top tracks (ListenBrainz)"
                             className="checkbox-primary"
                             on:click={updateScanAllState}
                         />
@@ -1067,7 +1040,7 @@
                     <div class="form-control">
                         <Checkbox
                             bind:checked={doSimilarArtists}
-                            label="Refresh similar artists (Last.fm)"
+                            label="Refresh similar artists (ListenBrainz)"
                             className="checkbox-primary"
                             on:click={updateScanAllState}
                         />
@@ -1106,8 +1079,8 @@
                     Optimize Database
                 </TabButton>
 
-                <TabButton onClick={startLastfmSync} disabled={isRunning}>
-                    Update Scrobbles & Match
+                <TabButton onClick={startListenbrainzSync} disabled={isRunning}>
+                    Update Listens & Match
                 </TabButton>
             </div>
         </div>

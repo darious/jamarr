@@ -1000,42 +1000,6 @@ export async function fetchMonitoringLog(
     return await res.json();
 }
 
-// Last.fm Integration
-export interface LastfmStatus {
-    connected: boolean;
-    username: string | null;
-    enabled: boolean;
-    connected_at: string | null;
-}
-
-export async function getLastfmStatus(): Promise<LastfmStatus> {
-    const res = await fetchWithAuth('/api/lastfm/status');
-    if (!res.ok) throw new Error('Failed to fetch Last.fm status');
-    return await res.json();
-}
-
-export async function startLastfmAuth(): Promise<{ auth_url: string }> {
-    const res = await fetchWithAuth('/api/lastfm/auth/start');
-    if (!res.ok) throw new Error('Failed to start Last.fm authentication');
-    return await res.json();
-}
-
-export async function disconnectLastfm(): Promise<void> {
-    const res = await fetchWithAuth('/api/lastfm/disconnect', {
-        method: 'POST',
-    });
-    if (!res.ok) throw new Error('Failed to disconnect Last.fm');
-}
-
-export async function toggleLastfm(enabled: boolean): Promise<void> {
-    const res = await fetchWithAuth('/api/lastfm/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled })
-    });
-    if (!res.ok) throw new Error('Failed to toggle Last.fm scrobbling');
-}
-
 // ListenBrainz Integration
 export interface ListenbrainzStatus {
     connected: boolean;
@@ -1101,35 +1065,6 @@ export async function toggleListenbrainz(enabled: boolean): Promise<void> {
         body: JSON.stringify({ enabled })
     });
     if (!res.ok) throw new Error('Failed to toggle ListenBrainz submission');
-}
-
-export interface SyncScrobblesResponse {
-    fetched: number;
-    matched: number;
-    skipped: number;
-    unmatched: number;
-    logs: string[];
-}
-
-export async function syncLastfmScrobbles(opts: {
-    fetch_new?: boolean;
-    rematch_all?: boolean;
-    limit?: number;
-} = {}): Promise<SyncScrobblesResponse> {
-    const res = await fetchWithAuth('/api/lastfm/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            fetch_new: opts.fetch_new !== false,
-            rematch_all: opts.rematch_all || false,
-            limit: opts.limit ?? null
-        })
-    });
-    if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        throw new Error(detail.detail || 'Failed to sync scrobbles');
-    }
-    return await res.json();
 }
 
 // Recommendations

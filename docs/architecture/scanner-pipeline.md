@@ -78,8 +78,8 @@ Each stage is a focused, independent unit that:
 2. **External Links** (`external_links.py`) - Wikidata + Qobuz search fallback
 3. **Artwork** (`artwork.py`) - Fanart.tv + Spotify fallback
 4. **Bio** (`bio.py`) - Wikipedia biography
-5. **Top Tracks** (`top_tracks.py`) - Last.fm popular tracks
-6. **Similar Artists** (`similar.py`) - Last.fm similar artists
+5. **Top Tracks** (`top_tracks.py`) - ListenBrainz most-listened recordings
+6. **Similar Artists** (`similar.py`) - ListenBrainz similar artists (Labs ranking, lb-radio fallback)
 7. **Singles** (`singles.py`) - MusicBrainz singles
 8. **Album Metadata** (`albums.py`) - MusicBrainz album descriptions
 
@@ -145,7 +145,7 @@ For each enrichment stage:
 
 Tracks requests to external services:
 - MusicBrainz
-- Last.fm
+- ListenBrainz
 - Wikidata
 - Fanart.tv
 - Spotify
@@ -243,14 +243,14 @@ app/scanner/
 │       ├── external_links.py # Wikidata + Qobuz search
 │       ├── artwork.py        # Fanart + Spotify
 │       ├── bio.py            # Wikipedia bio
-│       ├── top_tracks.py     # Last.fm top tracks
-│       ├── similar.py        # Last.fm similar artists
+│       ├── top_tracks.py     # ListenBrainz top tracks
+│       ├── similar.py        # ListenBrainz similar artists
 │       ├── singles.py        # MusicBrainz singles
 │       └── albums.py         # MusicBrainz album metadata
 ├── services/                  # External API clients
 │   ├── __init__.py
 │   ├── musicbrainz.py
-│   ├── lastfm.py
+│   ├── listenbrainz.py
 │   ├── artwork.py
 │   ├── wikidata.py
 │   ├── wikipedia.py

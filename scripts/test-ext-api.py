@@ -20,7 +20,6 @@ sys.path.insert(0, str(ROOT))
 
 from app.config import (  # type: ignore # noqa: E402
     get_fanarttv_api_key,
-    get_lastfm_credentials,
     get_musicbrainz_root_url,
     get_pearlarr_url,
     get_qobuz_credentials,
@@ -107,30 +106,20 @@ def check_fanart(client: httpx.Client) -> Tuple[bool, str]:
     return True, "data returned"
 
 
-def check_lastfm(client: httpx.Client) -> Tuple[bool, str]:
-    try:
-        api_key, _secret = get_lastfm_credentials()
-    except ValueError as exc:
-        return False, _missing_env_error(exc)
-
+def check_listenbrainz(client: httpx.Client) -> Tuple[bool, str]:
+    token = os.environ.get("LISTENBRAINZ_TOKEN")
+    if not token:
+        return False, "LISTENBRAINZ_TOKEN not set (top tracks need a token)"
     resp = client.get(
-        "https://ws.audioscrobbler.com/2.0/",
-        params={
-            "method": "artist.getinfo",
-            "mbid": TEST_MBID,
-            "api_key": api_key,
-            "format": "json",
-        },
+        f"https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/{TEST_MBID}",
+        headers={"Authorization": f"Token {token}"},
     )
     if resp.status_code != 200:
         return False, f"request failed ({resp.status_code})"
     data = resp.json()
-    if data.get("error"):
-        return False, f"api error: {data.get('message')}"
-    name = data.get("artist", {}).get("name")
-    if not name:
-        return False, "artist response missing name"
-    return True, f"artist={name}"
+    if not isinstance(data, list) or not data:
+        return False, "empty response"
+    return True, f"{len(data)} recordings"
 
 
 def check_musicbrainz(client: httpx.Client) -> Tuple[bool, str]:
@@ -305,7 +294,7 @@ def main() -> int:
     checks = [
         ("spotify", check_spotify),
         ("fanart", check_fanart),
-        ("lastfm", check_lastfm),
+        ("listenbrainz", check_listenbrainz),
         ("musicbrainz", check_musicbrainz),
         ("wikidata", check_wikidata),
         ("wikipedia", check_wikipedia),

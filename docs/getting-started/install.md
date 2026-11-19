@@ -31,7 +31,6 @@ Edit `.env` and set the required values:
 | `CACHE_PATH` | Host directory for Jamarr cache |
 | `JWT_SECRET_KEY` | Generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | Spotify API credentials (metadata enrichment) |
-| `LASTFM_API_KEY` / `LASTFM_SHARED_SECRET` | Last.fm API credentials (scrobbling) |
 
 Optional metadata sources: `QOBUZ_*`, `TIDAL_*`, `FANARTTV_API_KEY`. Full list:
 [Environment Variables](../reference/env-vars.md). Non-secret settings,
@@ -79,7 +78,7 @@ the release notes say so when it matters. Compare against the attached copies.
 
 ## Next steps
 
-- Connect [Last.fm](../guides/lastfm.md) for scrobble history
+- Connect [ListenBrainz](../guides/listenbrainz.md) for scrobbling and listen history
 - Set up [Dev Mode](dev-mode.md) for hot-reload development (this is where
   the repository checkout comes in)
 - Review production [cookie/HTTPS hardening](../architecture/auth.md)

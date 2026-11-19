@@ -18,7 +18,8 @@ logger = logging.getLogger("scanner.dns_resolver")
 KNOWN_HOSTS = [
     "musicbrainz.org",
     "coverartarchive.org",          # MB cover art CDN
-    "ws.audioscrobbler.com",        # Last.fm API
+    "api.listenbrainz.org",         # ListenBrainz API
+    "labs.api.listenbrainz.org",    # ListenBrainz Labs (similar artists)
     "webservice.fanart.tv",         # Fanart API
     "assets.fanart.tv",             # Fanart asset host
     "api.spotify.com",              # Spotify API

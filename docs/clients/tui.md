@@ -28,8 +28,8 @@ and behaviour.
 
 ### Non-goals (v1)
 
-- Charts, recommendations, scheduler, Last.fm admin, library scan, media
-  quality, missing-albums, settings, scrobble admin.
+- Charts, recommendations, scheduler, library scan, media quality,
+  missing-albums, settings.
 - Persistent auth (refresh token storage, OS keyring). v1 re-logs in each
   session.
 - Registering the TUI as a server-side "local" pseudo-renderer with state in

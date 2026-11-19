@@ -28,6 +28,7 @@ from typing import Any, Awaitable, Callable, Optional
 from app import listenbrainz as lb
 from app.db import db_conn
 from app.history_events import refresh_history
+from app.lastfm_archive import match_all_archives
 from app.matching.matcher import LISTENBRAINZ_TARGET, match_and_store
 
 logger = logging.getLogger(__name__)
@@ -240,7 +241,9 @@ async def sync_user_locked(user_id: int) -> dict[str, Any]:
 
 
 async def sync_all_listenbrainz() -> int:
-    """Scheduler job: sync every connected user. Returns how many were synced."""
+    """Scheduler job: sync every connected user, then match any unmatched stored
+    Last.fm scrobbles (library changes leave some unmatched). Returns how many
+    users were synced."""
     async with db_conn() as db:
         user_ids = [
             r["id"]
@@ -260,4 +263,9 @@ async def sync_all_listenbrainz() -> int:
                 synced += 1
             except lb.ListenBrainzError as exc:
                 logger.warning("ListenBrainz sync failed for user %s: %s", user_id, exc)
+        async with db_conn() as db:
+            matched, unmatched = await match_all_archives(db)
+            if matched:
+                await refresh_history(db, None)
+        logger.info("Last.fm archive upkeep: %s matched, %s still unmatched", matched, unmatched)
     return synced
