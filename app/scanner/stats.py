@@ -30,7 +30,7 @@ class ApiTracker:
         return cls._instance
 
     def increment(self, service: str):
-        """Increment API call counter for a service (musicbrainz, lastfm, wikidata, fanart, spotify, qobuz)."""
+        """Increment API call counter for a service (musicbrainz, listenbrainz, wikidata, fanart, spotify, qobuz)."""
         with self._stats_lock:
             self._stats[service] += 1
 

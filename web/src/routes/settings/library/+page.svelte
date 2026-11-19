@@ -739,19 +739,19 @@
                             >
                         </div>
 
-                        <!-- Last.fm -->
+                        <!-- ListenBrainz -->
                         <div
                             class="flex items-center gap-2 bg-surface-3 rounded-full px-3 py-1 border border-subtle cursor-help"
-                            title="Last.fm"
+                            title="ListenBrainz"
                         >
                             <img
-                                src="/assets/logo-lastfm.png"
-                                alt="Last.fm"
+                                src="/assets/logo-listenbrainz.svg"
+                                alt="ListenBrainz"
                                 class="w-5 h-5 opacity-90"
                             />
                             <span
                                 class="font-mono text-sm font-bold text-default"
-                                >{stats.api_stats?.lastfm || 0}</span
+                                >{stats.api_stats?.listenbrainz || 0}</span
                             >
                         </div>
 

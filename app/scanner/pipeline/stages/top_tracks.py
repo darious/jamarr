@@ -1,11 +1,11 @@
 """
-Top Tracks Stage - Fetch top tracks from Last.fm.
+Top Tracks Stage - Fetch top tracks from ListenBrainz.
 """
 
 from typing import List
 from app.scanner.pipeline.base import EnrichmentStage
 from app.scanner.pipeline.models import EnrichmentContext, StageResult
-from app.scanner.services import lastfm
+from app.scanner.services import listenbrainz
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class TopTracksStage(EnrichmentStage):
     """
-    Fetch artist's top tracks from Last.fm.
+    Fetch artist's top tracks from ListenBrainz.
     
     Uses MBID-based lookup for accuracy.
     """
@@ -34,12 +34,12 @@ class TopTracksStage(EnrichmentStage):
         return False, ""
     
     async def execute(self, context: EnrichmentContext) -> StageResult:
-        """Fetch top tracks from Last.fm."""
+        """Fetch top tracks from ListenBrainz."""
         mbid = context.artist.mbid
         name = context.artist.name or mbid
         
-        # Fetch from Last.fm
-        tracks = await lastfm.fetch_top_tracks(mbid, name, context.client)
+        # Fetch from ListenBrainz
+        tracks = await listenbrainz.fetch_top_tracks(mbid, name, context.client)
         
         if not tracks:
             return StageResult.no_data(

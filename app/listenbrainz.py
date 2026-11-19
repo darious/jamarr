@@ -32,6 +32,13 @@ REQUEST_TIMEOUT_SECONDS = 15.0
 # ListenBrainz accepts up to 1000 listens per request; stay well below the
 # 10 MB payload cap.
 MAX_LISTENS_PER_REQUEST = 1000
+# Ranked similar artists live on the Labs API: unversioned and outside the
+# documented API, so callers fall back to lb-radio when it fails. The
+# algorithm string is the one ListenBrainz's own site uses.
+LABS_API_ROOT = "https://labs.api.listenbrainz.org"
+SIMILAR_ARTISTS_ALGORITHM = (
+    "session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30"
+)
 # Wait out a rate-limit window inline only when it is short; otherwise hand
 # the wait back to the caller as RateLimitedError.
 MAX_INLINE_RATE_LIMIT_WAIT_SECONDS = 10.0
@@ -233,6 +240,59 @@ class ListenBrainzClient:
         if not isinstance(listens, list):
             raise ListenBrainzUnavailableError("ListenBrainz sent an unexpected reply")
         return listens
+
+    async def _json(
+        self, path: str, params: Optional[dict] = None, token: Optional[str] = None
+    ) -> Any:
+        response = await self._request("GET", path, params=params, token=token)
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ListenBrainzUnavailableError("ListenBrainz sent a non-JSON reply") from exc
+
+    async def top_recordings_for_artist(
+        self, artist_mbid: str, token: Optional[str] = None
+    ) -> list[dict]:
+        """An artist's recordings, most listened first (ListenBrainz-wide counts).
+
+        Needs a token since 2026-11-19 (ListenBrainz locked it against scrapers).
+        """
+        body = await self._json(
+            f"/1/popularity/top-recordings-for-artist/{quote(artist_mbid, safe='')}", token=token
+        )
+        if not isinstance(body, list):
+            raise ListenBrainzUnavailableError("ListenBrainz sent an unexpected reply")
+        return body
+
+    async def similar_artists(self, artist_mbid: str, token: Optional[str] = None) -> list[dict]:
+        """Ranked similar artists from the Labs API (``artist_mbid``, ``name``, ``score``)."""
+        body = await self._json(
+            f"{LABS_API_ROOT}/similar-artists/json",
+            params={"artist_mbids": artist_mbid, "algorithm": SIMILAR_ARTISTS_ALGORITHM},
+            token=token,
+        )
+        if not isinstance(body, list):
+            raise ListenBrainzUnavailableError("ListenBrainz Labs sent an unexpected reply")
+        return body
+
+    async def radio_similar_artists(
+        self, artist_mbid: str, count: int = 10, token: Optional[str] = None
+    ) -> dict:
+        """lb-radio's similar artists: {artist_mbid: [recordings]}, unordered, seed included."""
+        body = await self._json(
+            f"/1/lb-radio/artist/{quote(artist_mbid, safe='')}",
+            params={
+                "mode": "easy",
+                "max_similar_artists": count,
+                "max_recordings_per_artist": 1,
+                "pop_begin": 0,
+                "pop_end": 100,
+            },
+            token=token,
+        )
+        if not isinstance(body, dict):
+            raise ListenBrainzUnavailableError("ListenBrainz sent an unexpected reply")
+        return body
 
     async def submit_listens(
         self, token: str, listen_type: str, listens: list[dict]
