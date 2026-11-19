@@ -874,7 +874,9 @@
               ? "Local Only"
               : source === "lastfm"
                 ? "Last.fm Only"
-                : "All Sources"}
+                : source === "listenbrainz"
+                  ? "ListenBrainz Only"
+                  : "All Sources"}
           </span>
           <svg
             class="h-4 w-4 opacity-50"
@@ -961,6 +963,33 @@
               >
                 <span>Last.fm Only</span>
                 {#if source === "lastfm"}
+                  <svg
+                    class="h-4 w-4 text-primary-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                {/if}
+              </button>
+              <button
+                class="w-full px-3 py-2 text-left text-sm text-muted hover:text-default transition-all border-b border-transparent hover:border-accent flex items-center justify-between {source ===
+                'listenbrainz'
+                  ? 'text-default border-accent'
+                  : ''}"
+                on:click={() => {
+                  switchSource("listenbrainz");
+                  showSourceMenu = false;
+                }}
+              >
+                <span>ListenBrainz Only</span>
+                {#if source === "listenbrainz"}
                   <svg
                     class="h-4 w-4 text-primary-400"
                     fill="none"
@@ -1147,6 +1176,7 @@
           <option value="all">All Sources</option>
           <option value="local">Local Only</option>
           <option value="lastfm">Last.fm Only</option>
+          <option value="listenbrainz">ListenBrainz Only</option>
         </select>
       </label>
     </div>
@@ -1469,6 +1499,12 @@
                     alt="Last.fm"
                     class="h-4 w-4 opacity-90"
                   />
+                {:else if entry.source === "listenbrainz"}
+                  <img
+                    src="/assets/logo-listenbrainz.svg"
+                    alt="ListenBrainz"
+                    class="h-4 w-4 opacity-90"
+                  />
                 {/if}
                 <span>{formatTimestamp(entry.timestamp)}</span>
                 <span class="text-subtle">•</span>
@@ -1488,6 +1524,12 @@
                     <img
                       src="/assets/logo-lastfm.png"
                       alt="Last.fm"
+                      class="h-5 w-5 opacity-90"
+                    />
+                  {:else if entry.source === "listenbrainz"}
+                    <img
+                      src="/assets/logo-listenbrainz.svg"
+                      alt="ListenBrainz"
                       class="h-5 w-5 opacity-90"
                     />
                   {/if}

@@ -148,6 +148,8 @@ async def db() -> AsyncGenerator[asyncpg.Connection, None]:
             'lastfm_scrobble_match',
             'lastfm_skip_artist',
             'listenbrainz_submission',
+            'listenbrainz_listen',
+            'listenbrainz_listen_match',
             'track_artist',
             'artist_album',
             'favorite_artist',
