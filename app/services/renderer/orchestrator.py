@@ -712,6 +712,7 @@ class RendererOrchestrator:
             client_ip=renderer_ip or "unknown",
             client_id=state_key,
             user_id=track.get("user_id"),
+            position_seconds=state.get("position_seconds") or 0,
         )
         track["logged"] = True
         entry_id = entry_id_of(track)

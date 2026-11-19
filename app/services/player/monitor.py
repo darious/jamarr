@@ -900,6 +900,7 @@ async def _monitor_loop(udn: str, upnp):
                                     client_ip=renderer_ip or "unknown",
                                     client_id=udn,
                                     user_id=track.get("user_id"),
+                                    position_seconds=rel_time,
                                 )
                                 
                                 # Mark logged on that entry alone: a full
