@@ -183,13 +183,14 @@ async def test_send_batches_resumes_and_isolates_refused_listen(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_batches_never_split_a_second(monkeypatch):
-    monkeypatch.setattr("app.listenbrainz_import.BATCH_SIZE", 2)
+    monkeypatch.setattr("app.listenbrainz_import.BATCH_SIZE", 3)
     plan = Plan()
     for i, ts in enumerate([1, 2, 2, 2, 3]):
         plan.listens.append({"listened_at": ts, "track_metadata": {"artist_name": "A", "track_name": f"T{i}"}})
     client = FakeClient()
     await send(client, "tok", plan, sleep=_no_sleep, out=lambda *_: None)
-    assert [stamps for _, stamps in client.batches] == [[1, 2, 2, 2], [3]]
+    # The first batch is trimmed before second 2 instead of growing past the cap.
+    assert [stamps for _, stamps in client.batches] == [[1], [2, 2, 2], [3]]
 
 
 @pytest.mark.asyncio
@@ -309,3 +310,37 @@ async def test_run_refuses_without_cutover_or_connection(db):
     assert "Connect ListenBrainz" in out[-1]
     # A dry run needs no connection.
     assert await run(_args(cutover=T0.isoformat(), dry_run=True), db, FakeClient(), out.append) == 0
+
+
+@pytest.mark.asyncio
+async def test_batches_stay_within_the_listenbrainz_cap(monkeypatch):
+    """A second straddling a full batch must shrink it, never push it past the cap."""
+    monkeypatch.setattr("app.listenbrainz_import.BATCH_SIZE", 3)
+    plan = Plan()
+    for i, ts in enumerate([1, 2, 3, 3, 3, 4, 5]):
+        plan.listens.append({"listened_at": ts, "track_metadata": {"artist_name": "A", "track_name": f"T{i}"}})
+
+    class CappedClient(FakeClient):
+        async def submit_listens(self, token, listen_type, listens):
+            assert len(listens) <= 3, "batch over the cap"
+            await super().submit_listens(token, listen_type, listens)
+
+    client = CappedClient()
+    out = []
+    sent, _ = await send(client, "tok", plan, sleep=_no_sleep, out=out.append)
+    assert sent == 7
+    assert [stamps for _, stamps in client.batches] == [[1, 2], [3, 3, 3], [4, 5]]
+    # Every printed resume point is a whole-second boundary.
+    assert [line.rsplit("--after ", 1)[1].rstrip(")") for line in out] == ["2", "3", "5"]
+
+
+@pytest.mark.asyncio
+async def test_one_second_larger_than_a_batch_is_split_not_looped(monkeypatch):
+    monkeypatch.setattr("app.listenbrainz_import.BATCH_SIZE", 2)
+    plan = Plan()
+    for i in range(5):
+        plan.listens.append({"listened_at": 7, "track_metadata": {"artist_name": "A", "track_name": f"T{i}"}})
+    client = FakeClient()
+    sent, _ = await send(client, "tok", plan, sleep=_no_sleep, out=lambda *_: None)
+    assert sent == 5
+    assert all(len(stamps) <= 2 for _, stamps in client.batches)
