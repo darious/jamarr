@@ -2076,14 +2076,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/lastfm/" class="md-nav__link">
+      <a href="../../guides/listenbrainz/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Last.fm
+    ListenBrainz
   
 
     
@@ -2594,8 +2594,8 @@
 2. <strong>External Links</strong> (<code>external_links.py</code>) - Wikidata + Qobuz search fallback
 3. <strong>Artwork</strong> (<code>artwork.py</code>) - Fanart.tv + Spotify fallback
 4. <strong>Bio</strong> (<code>bio.py</code>) - Wikipedia biography
-5. <strong>Top Tracks</strong> (<code>top_tracks.py</code>) - Last.fm popular tracks
-6. <strong>Similar Artists</strong> (<code>similar.py</code>) - Last.fm similar artists
+5. <strong>Top Tracks</strong> (<code>top_tracks.py</code>) - ListenBrainz most-listened recordings
+6. <strong>Similar Artists</strong> (<code>similar.py</code>) - ListenBrainz similar artists (Labs ranking, lb-radio fallback)
 7. <strong>Singles</strong> (<code>singles.py</code>) - MusicBrainz singles
 8. <strong>Album Metadata</strong> (<code>albums.py</code>) - MusicBrainz album descriptions</p>
 <p><strong>Example Stage:</strong>
@@ -2646,7 +2646,7 @@
 <h3 id="api-counters">API Counters<a class="headerlink" href="#api-counters" title="Permanent link">&para;</a></h3>
 <p>Tracks requests to external services:
 - MusicBrainz
-- Last.fm
+- ListenBrainz
 - Wikidata
 - Fanart.tv
 - Spotify
@@ -2732,14 +2732,14 @@
 │       ├── external_links.py # Wikidata + Qobuz search
 │       ├── artwork.py        # Fanart + Spotify
 │       ├── bio.py            # Wikipedia bio
-│       ├── top_tracks.py     # Last.fm top tracks
-│       ├── similar.py        # Last.fm similar artists
+│       ├── top_tracks.py     # ListenBrainz top tracks
+│       ├── similar.py        # ListenBrainz similar artists
 │       ├── singles.py        # MusicBrainz singles
 │       └── albums.py         # MusicBrainz album metadata
 ├── services/                  # External API clients
 │   ├── __init__.py
 │   ├── musicbrainz.py
-│   ├── lastfm.py
+│   ├── listenbrainz.py
 │   ├── artwork.py
 │   ├── wikidata.py
 │   ├── wikipedia.py

@@ -25,7 +25,7 @@
     
     
       
-        <title>Last.fm - Jamarr</title>
+        <title>ListenBrainz - Jamarr</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#lastfm" class="md-skip">
+        <a href="#listenbrainz" class="md-skip">
           Skip to content
         </a>
       
@@ -111,7 +111,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Last.fm
+              ListenBrainz
             
           </span>
         </div>
@@ -1748,7 +1748,7 @@
   <span class="md-ellipsis">
     
   
-    Last.fm
+    ListenBrainz
   
 
     
@@ -1766,7 +1766,7 @@
   <span class="md-ellipsis">
     
   
-    Last.fm
+    ListenBrainz
   
 
     
@@ -1792,10 +1792,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
+  <a href="#connecting" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Setup
+        Connecting
       
     </span>
   </a>
@@ -1803,10 +1803,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#syncing" class="md-nav__link">
+  <a href="#sending-plays" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Syncing
+        Sending plays
       
     </span>
   </a>
@@ -1814,10 +1814,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#disconnecting" class="md-nav__link">
+  <a href="#listens-from-other-apps" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Disconnecting
+        Listens from other apps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#history-and-the-cutover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        History and the cutover
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#top-tracks-and-similar-artists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Top tracks and similar artists
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#moving-from-lastfm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Moving from Last.fm
       
     </span>
   </a>
@@ -1949,10 +1982,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#setup" class="md-nav__link">
+  <a href="#connecting" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Setup
+        Connecting
       
     </span>
   </a>
@@ -1960,10 +1993,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#syncing" class="md-nav__link">
+  <a href="#sending-plays" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Syncing
+        Sending plays
       
     </span>
   </a>
@@ -1971,10 +2004,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#disconnecting" class="md-nav__link">
+  <a href="#listens-from-other-apps" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Disconnecting
+        Listens from other apps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#history-and-the-cutover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        History and the cutover
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#top-tracks-and-similar-artists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Top tracks and similar artists
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#moving-from-lastfm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Moving from Last.fm
       
     </span>
   </a>
@@ -1998,7 +2064,7 @@
 
 
   
-    <a href="https://github.com/darious/jamarr/edit/main/docs/guides/lastfm.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/darious/jamarr/edit/main/docs/guides/listenbrainz.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -2006,49 +2072,97 @@
   
 
 
-<h1 id="lastfm">Last.fm<a class="headerlink" href="#lastfm" title="Permanent link">&para;</a></h1>
-<p>Jamarr can pull your Last.fm scrobbles, match them to local tracks, and merge
-them with local playback history into one timeline.</p>
+<h1 id="listenbrainz">ListenBrainz<a class="headerlink" href="#listenbrainz" title="Permanent link">&para;</a></h1>
+<p>Jamarr sends your plays to <a href="https://listenbrainz.org">ListenBrainz</a>, reads back
+listens other apps sent there, and uses ListenBrainz for artist top tracks and
+similar artists. It replaced Last.fm, whose API needs a paid subscription from
+1 December 2026. Scrobbles Jamarr already fetched from Last.fm stay in history
+as an archive.</p>
 <div class="admonition info">
 <p class="admonition-title">Code</p>
-<p><code>app/lastfm.py</code>, <code>app/lastfm_sync_manager.py</code>, <code>app/lastfm_jobs.py</code>,
-<code>app/matching/</code> (scrobble→track matching), API in <code>app/api/lastfm.py</code>.</p>
+<p>Client <code>app/listenbrainz.py</code>; sending plays <code>app/listenbrainz_submissions.py</code>;
+reading listens <code>app/listenbrainz_sync.py</code>; Last.fm reload
+<code>app/listenbrainz_import.py</code>; Last.fm archive <code>app/lastfm_archive.py</code>;
+top tracks and similar artists <code>app/scanner/services/listenbrainz.py</code>;
+API <code>app/api/listenbrainz.py</code>.</p>
 </div>
-<h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
+<h2 id="connecting">Connecting<a class="headerlink" href="#connecting" title="Permanent link">&para;</a></h2>
+<p>ListenBrainz has no application keys. Each user connects their own account:</p>
 <ol>
-<li>Get Last.fm API credentials from
-   <a href="https://www.last.fm/api/account/create">https://www.last.fm/api/account/create</a> and set in <code>.env</code>:</li>
+<li>Copy your user token from <a href="https://listenbrainz.org/settings/">https://listenbrainz.org/settings/</a>.</li>
+<li>In Jamarr, <strong>Settings → User → ListenBrainz</strong>, paste it and connect. Jamarr
+   checks it with ListenBrainz before saving it.</li>
 </ol>
-<div class="highlight"><pre><span></span><code>LASTFM_API_KEY=...
-LASTFM_SHARED_SECRET=...
+<p>The card shows how many plays were sent, are waiting, or were refused, and has
+a pause switch and a <strong>Sync now</strong> button.</p>
+<h2 id="sending-plays">Sending plays<a class="headerlink" href="#sending-plays" title="Permanent link">&para;</a></h2>
+<p>Every play Jamarr records (browser, renderers, Cast, Android offline uploads)
+is sent, stamped at the time it started. Plays queue in the database, so when
+ListenBrainz is unreachable they are retried with backoff (1 minute, doubling
+up to 6 hours) and nothing is lost. If ListenBrainz rejects the token, sending
+pauses until you paste a new one. Plays made while paused are never sent.</p>
+<p>Listens carry MusicBrainz recording, release and artist IDs from your tags.</p>
+<h2 id="listens-from-other-apps">Listens from other apps<a class="headerlink" href="#listens-from-other-apps" title="Permanent link">&para;</a></h2>
+<p>The <strong>Update ListenBrainz Listens + Match</strong> scheduled job (and <strong>Sync now</strong>)
+reads listens other scrobblers sent to ListenBrainz, such as a phone
+scrobbler, matches them to library tracks, and adds them to history. Listens
+Jamarr sent itself are skipped, since they are already local plays. Each sync
+looks back 14 days, so a phone that uploads late is still picked up. The same
+job also matches any stored Last.fm scrobbles that are still unmatched.</p>
+<h2 id="history-and-the-cutover">History and the cutover<a class="headerlink" href="#history-and-the-cutover" title="Permanent link">&para;</a></h2>
+<p>Each user has a <strong>cutover</strong> time. History shows stored Last.fm scrobbles
+before it and ListenBrainz listens from it on, so the two never overlap. An
+outside listen of a track Jamarr played within a minute counts as that same
+play. Disconnecting ListenBrainz never moves the cutover.</p>
+<h2 id="top-tracks-and-similar-artists">Top tracks and similar artists<a class="headerlink" href="#top-tracks-and-similar-artists" title="Permanent link">&para;</a></h2>
+<p>The scanner's top-tracks and similar-artists stages use ListenBrainz:
+top tracks from its listen counts (one recording per song), similar artists
+from its Labs ranking, falling back to lb-radio. ListenBrainz requires a token
+for top tracks: set <code>LISTENBRAINZ_TOKEN</code>, or connect a user, whose token is
+then used (admins first). An artist ListenBrainz knows nothing about keeps the
+data it already has.</p>
+<h2 id="moving-from-lastfm">Moving from Last.fm<a class="headerlink" href="#moving-from-lastfm" title="Permanent link">&para;</a></h2>
+<p>Last.fm history is copied into ListenBrainz once, from Jamarr's own copy, so
+it carries Jamarr's MusicBrainz matches. The steps that touch Last.fm have to
+happen <strong>before</strong> you deploy the release that removed it, and before
+1 December 2026.</p>
+<p><strong>On the old release:</strong></p>
+<ol>
+<li>Point any other scrobbler (for example a phone app) at ListenBrainz as
+   well as Last.fm.</li>
+<li>If your ListenBrainz account already has listens you want replaced, delete
+   them (ListenBrainz → Settings → Delete listens) and wait until its listen
+   count reaches 0. Note the time you deleted them: that is the <strong>cutover</strong>.</li>
+<li>Let one Last.fm sync run after the cutover (the daily job, or
+   <strong>Update Scrobbles &amp; Match</strong>), so the stored scrobbles reach it.</li>
+</ol>
+<p><strong>After deploying:</strong></p>
+<ol>
+<li>Connect ListenBrainz in Settings.</li>
+<li>
+<p>Rematch the archive with the current matcher:</p>
+<div class="highlight"><pre><span></span><code>docker compose exec jamarr uv run python -m app.lastfm_archive --user &lt;jamarr-user&gt; --all
 </code></pre></div>
-<ol>
-<li>
-<p>In the UI (or via the API), connect your account:
-   <code>GET /api/lastfm/auth/start</code> → authorize on Last.fm →
-   <code>GET /api/lastfm/callback</code>.</p>
 </li>
 <li>
-<p>Enable the integration: <code>POST /api/lastfm/toggle</code>.</p>
+<p>Dry run the reload and check the duplicates it will drop:</p>
+<div class="highlight"><pre><span></span><code>docker compose exec jamarr uv run python -m app.listenbrainz_import \
+    --user &lt;jamarr-user&gt; --cutover &lt;cutover, ISO 8601&gt; --dry-run --report cache/lb-import
+</code></pre></div>
+<p><code>duplicates.csv</code> lists each dropped scrobble next to the one kept. Two
+scrobbles of one track closer together than Last.fm's own rule allows
+(half the track, 4 minutes at most) count as one listen.</p>
+</li>
+<li>
+<p>Run it for real (same command without <code>--dry-run</code>). This sets the cutover,
+   so Jamarr starts sending its own plays from that moment. It prints a
+   <code>--after</code> resume point after every batch of 1,000; rerun with it if the
+   run stops. ListenBrainz files imports in the background, so its count
+   catches up over a while.</p>
 </li>
 </ol>
-<p>Check state any time with <code>GET /api/lastfm/status</code>.</p>
-<h2 id="syncing">Syncing<a class="headerlink" href="#syncing" title="Permanent link">&para;</a></h2>
-<p>Start a sync with <code>POST /api/lastfm/sync</code>; progress streams over SSE at
-<code>GET /api/lastfm/events</code>. Sync:</p>
-<ul>
-<li>pulls scrobbles from Last.fm,</li>
-<li>matches each to a local track (fuzzy match in <code>app/matching/</code>), storing results
-  in <code>lastfm_scrobble_match</code>,</li>
-<li>merges local history + matched scrobbles into the
-  <code>combined_playback_history_mat</code> materialized view that powers History and
-  Recommendations.</li>
-</ul>
-<p>Recurring syncs can be scheduled via the <a href="../../reference/api/">scheduler</a>
-(<code>/api/scheduler/*</code>).</p>
-<h2 id="disconnecting">Disconnecting<a class="headerlink" href="#disconnecting" title="Permanent link">&para;</a></h2>
-<p><code>POST /api/lastfm/disconnect</code> removes the link; <code>POST /api/lastfm/toggle</code> can
-disable syncing without disconnecting.</p>
+<p>A scheduled Last.fm sync becomes the ListenBrainz sync when the release is
+deployed (migration 038).</p>
 
 
 

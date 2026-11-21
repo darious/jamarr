@@ -1721,14 +1721,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/lastfm/" class="md-nav__link">
+      <a href="../../../guides/listenbrainz/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Last.fm
+    ListenBrainz
   
 
     
@@ -1947,6 +1947,23 @@
 <span class="w">           </span><span class="k">FROM</span><span class="w"> </span><span class="p">((</span><span class="n">lastfm_scrobble_match</span><span class="w"> </span><span class="n">lsm</span>
 <span class="w">             </span><span class="k">JOIN</span><span class="w"> </span><span class="n">lastfm_scrobble</span><span class="w"> </span><span class="n">ls</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="p">((</span><span class="n">ls</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">lsm</span><span class="p">.</span><span class="n">scrobble_id</span><span class="p">)))</span>
 <span class="w">             </span><span class="k">JOIN</span><span class="w"> </span><span class="ss">"user"</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="p">((</span><span class="n">ls</span><span class="p">.</span><span class="n">lastfm_username</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">lastfm_username</span><span class="p">)))</span>
+<span class="w">          </span><span class="k">WHERE</span><span class="w"> </span><span class="p">((</span><span class="n">u</span><span class="p">.</span><span class="n">listenbrainz_cutover</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NULL</span><span class="p">)</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="p">(</span><span class="n">ls</span><span class="p">.</span><span class="n">played_at</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">listenbrainz_cutover</span><span class="p">))</span>
+<span class="w">        </span><span class="p">),</span><span class="w"> </span><span class="n">listenbrainz_rows</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="p">(</span>
+<span class="w">         </span><span class="k">SELECT</span><span class="w"> </span><span class="s1">'listenbrainz'</span><span class="p">::</span><span class="nb">text</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="k">source</span><span class="p">,</span>
+<span class="w">            </span><span class="n">lbm</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">source_id</span><span class="p">,</span>
+<span class="w">            </span><span class="n">lbm</span><span class="p">.</span><span class="n">track_id</span><span class="p">,</span>
+<span class="w">            </span><span class="n">l</span><span class="p">.</span><span class="n">listened_at</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">played_at</span><span class="p">,</span>
+<span class="w">            </span><span class="n">l</span><span class="p">.</span><span class="n">user_id</span><span class="p">,</span>
+<span class="w">            </span><span class="k">NULL</span><span class="p">::</span><span class="nb">text</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">lastfm_username</span><span class="p">,</span>
+<span class="w">            </span><span class="k">NULL</span><span class="p">::</span><span class="nb">text</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">client_id</span><span class="p">,</span>
+<span class="w">            </span><span class="k">NULL</span><span class="p">::</span><span class="nb">text</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">hostname</span><span class="p">,</span>
+<span class="w">            </span><span class="k">NULL</span><span class="p">::</span><span class="nb">text</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">client_ip</span><span class="p">,</span>
+<span class="w">            </span><span class="n">lbm</span><span class="p">.</span><span class="n">match_score</span><span class="p">,</span>
+<span class="w">            </span><span class="n">lbm</span><span class="p">.</span><span class="n">match_method</span>
+<span class="w">           </span><span class="k">FROM</span><span class="w"> </span><span class="p">((</span><span class="n">listenbrainz_listen_match</span><span class="w"> </span><span class="n">lbm</span>
+<span class="w">             </span><span class="k">JOIN</span><span class="w"> </span><span class="n">listenbrainz_listen</span><span class="w"> </span><span class="n">l</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="p">((</span><span class="n">l</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">lbm</span><span class="p">.</span><span class="n">listen_id</span><span class="p">)))</span>
+<span class="w">             </span><span class="k">JOIN</span><span class="w"> </span><span class="ss">"user"</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="p">((</span><span class="n">u</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l</span><span class="p">.</span><span class="n">user_id</span><span class="p">)))</span>
+<span class="w">          </span><span class="k">WHERE</span><span class="w"> </span><span class="p">((</span><span class="n">u</span><span class="p">.</span><span class="n">listenbrainz_cutover</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">)</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="p">(</span><span class="n">l</span><span class="p">.</span><span class="n">listened_at</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">u</span><span class="p">.</span><span class="n">listenbrainz_cutover</span><span class="p">))</span>
 <span class="w">        </span><span class="p">),</span><span class="w"> </span><span class="n">local_rows</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="p">(</span>
 <span class="w">         </span><span class="k">SELECT</span><span class="w"> </span><span class="s1">'local'</span><span class="p">::</span><span class="nb">text</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="k">source</span><span class="p">,</span>
 <span class="w">            </span><span class="n">ph</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">source_id</span><span class="p">,</span>
@@ -1960,22 +1977,46 @@
 <span class="w">            </span><span class="k">NULL</span><span class="p">::</span><span class="n">double</span><span class="w"> </span><span class="k">precision</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">match_score</span><span class="p">,</span>
 <span class="w">            </span><span class="k">NULL</span><span class="p">::</span><span class="nb">text</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">match_method</span>
 <span class="w">           </span><span class="k">FROM</span><span class="w"> </span><span class="n">playback_history</span><span class="w"> </span><span class="n">ph</span>
-<span class="w">        </span><span class="p">),</span><span class="w"> </span><span class="n">lastfm_filtered</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="p">(</span>
-<span class="w">         </span><span class="k">SELECT</span><span class="w"> </span><span class="n">lf</span><span class="p">.</span><span class="k">source</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">source_id</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">track_id</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">played_at</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">user_id</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">lastfm_username</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">client_id</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">hostname</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">client_ip</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">match_score</span><span class="p">,</span>
-<span class="w">            </span><span class="n">lf</span><span class="p">.</span><span class="n">match_method</span>
-<span class="w">           </span><span class="k">FROM</span><span class="w"> </span><span class="n">lastfm_rows</span><span class="w"> </span><span class="n">lf</span>
+<span class="w">        </span><span class="p">),</span><span class="w"> </span><span class="n">external_filtered</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="p">(</span>
+<span class="w">         </span><span class="k">SELECT</span><span class="w"> </span><span class="n">ex</span><span class="p">.</span><span class="k">source</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">source_id</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">track_id</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">played_at</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">user_id</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">lastfm_username</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">client_id</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">hostname</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">client_ip</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">match_score</span><span class="p">,</span>
+<span class="w">            </span><span class="n">ex</span><span class="p">.</span><span class="n">match_method</span>
+<span class="w">           </span><span class="k">FROM</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="k">SELECT</span><span class="w"> </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="k">source</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">source_id</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">track_id</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">played_at</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">user_id</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">lastfm_username</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">client_id</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">hostname</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">client_ip</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">match_score</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">lastfm_rows</span><span class="p">.</span><span class="n">match_method</span>
+<span class="w">                   </span><span class="k">FROM</span><span class="w"> </span><span class="n">lastfm_rows</span>
+<span class="w">                </span><span class="k">UNION</span><span class="w"> </span><span class="k">ALL</span>
+<span class="w">                 </span><span class="k">SELECT</span><span class="w"> </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="k">source</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">source_id</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">track_id</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">played_at</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">user_id</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">lastfm_username</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">client_id</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">hostname</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">client_ip</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">match_score</span><span class="p">,</span>
+<span class="w">                    </span><span class="n">listenbrainz_rows</span><span class="p">.</span><span class="n">match_method</span>
+<span class="w">                   </span><span class="k">FROM</span><span class="w"> </span><span class="n">listenbrainz_rows</span><span class="p">)</span><span class="w"> </span><span class="n">ex</span>
 <span class="w">          </span><span class="k">WHERE</span><span class="w"> </span><span class="p">(</span><span class="k">NOT</span><span class="w"> </span><span class="p">(</span><span class="k">EXISTS</span><span class="w"> </span><span class="p">(</span><span class="w"> </span><span class="k">SELECT</span><span class="w"> </span><span class="mi">1</span>
 <span class="w">                   </span><span class="k">FROM</span><span class="w"> </span><span class="n">playback_history</span><span class="w"> </span><span class="n">lo</span>
-<span class="w">                  </span><span class="k">WHERE</span><span class="w"> </span><span class="p">((</span><span class="n">lo</span><span class="p">.</span><span class="n">track_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">lf</span><span class="p">.</span><span class="n">track_id</span><span class="p">)</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="p">((</span><span class="n">lo</span><span class="p">.</span><span class="ss">"timestamp"</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="p">(</span><span class="n">lf</span><span class="p">.</span><span class="n">played_at</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="s1">'00:00:05'</span><span class="p">::</span><span class="nb">interval</span><span class="p">))</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="p">(</span><span class="n">lo</span><span class="p">.</span><span class="ss">"timestamp"</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="p">(</span><span class="n">lf</span><span class="p">.</span><span class="n">played_at</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">'00:00:05'</span><span class="p">::</span><span class="nb">interval</span><span class="p">)))))))</span>
+<span class="w">                  </span><span class="k">WHERE</span><span class="w"> </span><span class="p">((</span><span class="n">lo</span><span class="p">.</span><span class="n">track_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ex</span><span class="p">.</span><span class="n">track_id</span><span class="p">)</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="p">((</span><span class="n">lo</span><span class="p">.</span><span class="n">user_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ex</span><span class="p">.</span><span class="n">user_id</span><span class="p">)</span><span class="w"> </span><span class="k">OR</span><span class="w"> </span><span class="p">(</span><span class="n">lo</span><span class="p">.</span><span class="n">user_id</span><span class="w"> </span><span class="k">IS</span><span class="w"> </span><span class="k">NULL</span><span class="p">))</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="p">((</span><span class="n">lo</span><span class="p">.</span><span class="ss">"timestamp"</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="p">(</span><span class="n">ex</span><span class="p">.</span><span class="n">played_at</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="s1">'00:01:00'</span><span class="p">::</span><span class="nb">interval</span><span class="p">))</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="p">(</span><span class="n">lo</span><span class="p">.</span><span class="ss">"timestamp"</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="p">(</span><span class="n">ex</span><span class="p">.</span><span class="n">played_at</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">'00:01:00'</span><span class="p">::</span><span class="nb">interval</span><span class="p">)))))))</span>
 <span class="w">        </span><span class="p">)</span>
 <span class="w"> </span><span class="k">SELECT</span><span class="w"> </span><span class="n">local_rows</span><span class="p">.</span><span class="k">source</span><span class="p">,</span>
 <span class="w">    </span><span class="n">local_rows</span><span class="p">.</span><span class="n">source_id</span><span class="p">,</span>
@@ -1990,18 +2031,18 @@
 <span class="w">    </span><span class="n">local_rows</span><span class="p">.</span><span class="n">match_method</span>
 <span class="w">   </span><span class="k">FROM</span><span class="w"> </span><span class="n">local_rows</span>
 <span class="k">UNION</span><span class="w"> </span><span class="k">ALL</span>
-<span class="w"> </span><span class="k">SELECT</span><span class="w"> </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="k">source</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">source_id</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">track_id</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">played_at</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">user_id</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">lastfm_username</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">client_id</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">hostname</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">client_ip</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">match_score</span><span class="p">,</span>
-<span class="w">    </span><span class="n">lastfm_filtered</span><span class="p">.</span><span class="n">match_method</span>
-<span class="w">   </span><span class="k">FROM</span><span class="w"> </span><span class="n">lastfm_filtered</span>
+<span class="w"> </span><span class="k">SELECT</span><span class="w"> </span><span class="n">external_filtered</span><span class="p">.</span><span class="k">source</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">source_id</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">track_id</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">played_at</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">user_id</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">lastfm_username</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">client_id</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">hostname</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">client_ip</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">match_score</span><span class="p">,</span>
+<span class="w">    </span><span class="n">external_filtered</span><span class="p">.</span><span class="n">match_method</span>
+<span class="w">   </span><span class="k">FROM</span><span class="w"> </span><span class="n">external_filtered</span>
 <span class="p">)</span>
 </code></pre></div>
 
@@ -2152,10 +2193,28 @@
 <td></td>
 </tr>
 <tr>
+<td><a href="../public.listenbrainz_listen_match/">public.listenbrainz_listen_match</a></td>
+<td>8</td>
+<td></td>
+<td>BASE TABLE</td>
+</tr>
+<tr>
+<td><a href="../public.listenbrainz_listen/">public.listenbrainz_listen</a></td>
+<td>14</td>
+<td></td>
+<td>BASE TABLE</td>
+</tr>
+<tr>
 <td><a href="../public.playback_history/">public.playback_history</a></td>
 <td>7</td>
 <td></td>
 <td>BASE TABLE</td>
+</tr>
+<tr>
+<td><a href="listenbrainz_rows.md">listenbrainz_rows</a></td>
+<td>0</td>
+<td></td>
+<td></td>
 </tr>
 <tr>
 <td><a href="local_rows.md">local_rows</a></td>
@@ -2164,7 +2223,7 @@
 <td></td>
 </tr>
 <tr>
-<td><a href="lastfm_filtered.md">lastfm_filtered</a></td>
+<td><a href="external_filtered.md">external_filtered</a></td>
 <td>0</td>
 <td></td>
 <td></td>

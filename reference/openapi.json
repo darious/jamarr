@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FastAPI",
-    "version": "v1.15.0"
+    "version": "v1.16.0"
   },
   "paths": {
     "/art/test": {
@@ -4385,11 +4385,14 @@
         }
       }
     },
-    "/api/lastfm/status": {
+    "/api/listenbrainz/status": {
       "get": {
-        "summary": "Get Lastfm Status",
-        "description": "Get Last.fm connection status for current user.",
-        "operationId": "get_lastfm_status_api_lastfm_status_get",
+        "tags": [
+          "listenbrainz"
+        ],
+        "summary": "Get Listenbrainz Status",
+        "description": "ListenBrainz connection and submission state for the current user. Never returns the token.",
+        "operationId": "get_listenbrainz_status_api_listenbrainz_status_get",
         "parameters": [
           {
             "name": "authorization",
@@ -4430,94 +4433,72 @@
         }
       }
     },
-    "/api/lastfm/auth/start": {
-      "get": {
-        "summary": "Start Lastfm Auth",
-        "description": "Initiate Last.fm authentication flow.",
-        "operationId": "start_lastfm_auth_api_lastfm_auth_start_get",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/lastfm/callback": {
-      "get": {
-        "summary": "Lastfm Callback",
-        "description": "Handle Last.fm OAuth callback.",
-        "operationId": "lastfm_callback_api_lastfm_callback_get",
-        "parameters": [
-          {
-            "name": "token",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/lastfm/disconnect": {
+    "/api/listenbrainz/connect": {
       "post": {
-        "summary": "Disconnect Lastfm",
-        "description": "Disconnect Last.fm account.",
-        "operationId": "disconnect_lastfm_api_lastfm_disconnect_post",
+        "tags": [
+          "listenbrainz"
+        ],
+        "summary": "Connect Listenbrainz",
+        "description": "Validate a ListenBrainz user token and store it.\n\nThe token is checked against ListenBrainz before it is saved, so a typo\nfails here rather than silently at the first submission.",
+        "operationId": "connect_listenbrainz_api_listenbrainz_connect_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/listenbrainz/disconnect": {
+      "post": {
+        "tags": [
+          "listenbrainz"
+        ],
+        "summary": "Disconnect Listenbrainz",
+        "description": "Forget the ListenBrainz token. Plays made while disconnected are never sent.\n\nThe history cutover stays, so listens already read stay in history.",
+        "operationId": "disconnect_listenbrainz_api_listenbrainz_disconnect_post",
         "parameters": [
           {
             "name": "authorization",
@@ -4558,11 +4539,14 @@
         }
       }
     },
-    "/api/lastfm/toggle": {
+    "/api/listenbrainz/toggle": {
       "post": {
-        "summary": "Toggle Lastfm",
-        "description": "Enable or disable Last.fm scrobbling.",
-        "operationId": "toggle_lastfm_api_lastfm_toggle_post",
+        "tags": [
+          "listenbrainz"
+        ],
+        "summary": "Toggle Listenbrainz",
+        "description": "Pause or resume submission. Plays made while paused are not sent later.",
+        "operationId": "toggle_listenbrainz_api_listenbrainz_toggle_post",
         "parameters": [
           {
             "name": "authorization",
@@ -4613,65 +4597,14 @@
         }
       }
     },
-    "/api/lastfm/sync": {
+    "/api/listenbrainz/sync": {
       "post": {
-        "summary": "Sync Scrobbles",
-        "description": "Fetch new scrobbles from Last.fm and match them to library tracks.",
-        "operationId": "sync_scrobbles_api_lastfm_sync_post",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
+        "tags": [
+          "listenbrainz"
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SyncRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/lastfm/events": {
-      "get": {
-        "summary": "Lastfm Events",
-        "operationId": "lastfm_events_api_lastfm_events_get",
+        "summary": "Sync Listenbrainz",
+        "description": "Fetch new listens from ListenBrainz now and match them to the library.\n\nOnly listens from the cutover on are read, and Jamarr's own are skipped.",
+        "operationId": "sync_listenbrainz_api_listenbrainz_sync_post",
         "parameters": [
           {
             "name": "authorization",
@@ -6655,6 +6588,33 @@
         "type": "object",
         "title": "ClearQueue"
       },
+      "ConnectRequest": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Token"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "ConnectRequest"
+      },
       "CreateTaskRequest": {
         "properties": {
           "job_key": {
@@ -7901,43 +7861,6 @@
           "password"
         ],
         "title": "SetupBody"
-      },
-      "SyncRequest": {
-        "properties": {
-          "fetch_new": {
-            "type": "boolean",
-            "title": "Fetch New",
-            "default": true
-          },
-          "rematch_all": {
-            "type": "boolean",
-            "title": "Rematch All",
-            "default": false
-          },
-          "limit": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Limit"
-          },
-          "fuzzy": {
-            "type": "boolean",
-            "title": "Fuzzy",
-            "default": true
-          },
-          "fuzzy_title_threshold": {
-            "type": "integer",
-            "title": "Fuzzy Title Threshold",
-            "default": 92
-          }
-        },
-        "type": "object",
-        "title": "SyncRequest"
       },
       "ToggleRequest": {
         "properties": {

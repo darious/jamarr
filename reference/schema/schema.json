@@ -1783,6 +1783,57 @@
           "name": "lastfm_connected_at",
           "type": "timestamp with time zone",
           "nullable": true
+        },
+        {
+          "name": "listenbrainz_username",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "listenbrainz_token",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "listenbrainz_enabled",
+          "type": "boolean",
+          "nullable": true,
+          "default": "true"
+        },
+        {
+          "name": "listenbrainz_connected_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "listenbrainz_since",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "listenbrainz_paused_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "listenbrainz_auth_error",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "listenbrainz_synced_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "listenbrainz_cutover",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "listenbrainz_synced_through",
+          "type": "bigint",
+          "nullable": true
         }
       ],
       "indexes": [
@@ -4010,6 +4061,546 @@
       ]
     },
     {
+      "name": "public.listenbrainz_listen",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('listenbrainz_listen_id_seq'::regclass)"
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "listened_at",
+          "type": "timestamp with time zone",
+          "nullable": false
+        },
+        {
+          "name": "listened_at_uts",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "recording_msid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "artist_name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "track_name",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "release_name",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "recording_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "release_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "artist_mbids",
+          "type": "text[]",
+          "nullable": true
+        },
+        {
+          "name": "mapped_recording_mbid",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "submission_client",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "listenbrainz_listen_pkey",
+          "def": "CREATE UNIQUE INDEX listenbrainz_listen_pkey ON public.listenbrainz_listen USING btree (id)",
+          "table": "public.listenbrainz_listen",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_user_id_listened_at_uts_artist_name_tra_key",
+          "def": "CREATE UNIQUE INDEX listenbrainz_listen_user_id_listened_at_uts_artist_name_tra_key ON public.listenbrainz_listen USING btree (user_id, listened_at_uts, artist_name, track_name)",
+          "table": "public.listenbrainz_listen",
+          "columns": [
+            "user_id",
+            "listened_at_uts",
+            "artist_name",
+            "track_name"
+          ]
+        },
+        {
+          "name": "idx_listenbrainz_listen_user_listened",
+          "def": "CREATE INDEX idx_listenbrainz_listen_user_listened ON public.listenbrainz_listen USING btree (user_id, listened_at DESC)",
+          "table": "public.listenbrainz_listen",
+          "columns": [
+            "user_id",
+            "listened_at"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "listenbrainz_listen_artist_name_not_null",
+          "type": "n",
+          "def": "NOT NULL artist_name",
+          "table": "public.listenbrainz_listen",
+          "referenced_table": "",
+          "columns": [
+            "artist_name"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.listenbrainz_listen",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_listened_at_not_null",
+          "type": "n",
+          "def": "NOT NULL listened_at",
+          "table": "public.listenbrainz_listen",
+          "referenced_table": "",
+          "columns": [
+            "listened_at"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_listened_at_uts_not_null",
+          "type": "n",
+          "def": "NOT NULL listened_at_uts",
+          "table": "public.listenbrainz_listen",
+          "referenced_table": "",
+          "columns": [
+            "listened_at_uts"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_track_name_not_null",
+          "type": "n",
+          "def": "NOT NULL track_name",
+          "table": "public.listenbrainz_listen",
+          "referenced_table": "",
+          "columns": [
+            "track_name"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_user_id_not_null",
+          "type": "n",
+          "def": "NOT NULL user_id",
+          "table": "public.listenbrainz_listen",
+          "referenced_table": "",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_user_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE",
+          "table": "public.listenbrainz_listen",
+          "referenced_table": "public.user",
+          "columns": [
+            "user_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.listenbrainz_listen",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_user_id_listened_at_uts_artist_name_tra_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (user_id, listened_at_uts, artist_name, track_name)",
+          "table": "public.listenbrainz_listen",
+          "referenced_table": "",
+          "columns": [
+            "user_id",
+            "listened_at_uts",
+            "artist_name",
+            "track_name"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.listenbrainz_listen_match",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": false,
+          "default": "nextval('listenbrainz_listen_match_id_seq'::regclass)"
+        },
+        {
+          "name": "listen_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "track_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "match_score",
+          "type": "double precision",
+          "nullable": false
+        },
+        {
+          "name": "match_method",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "match_reason",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "cache_key",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "matched_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "listenbrainz_listen_match_pkey",
+          "def": "CREATE UNIQUE INDEX listenbrainz_listen_match_pkey ON public.listenbrainz_listen_match USING btree (id)",
+          "table": "public.listenbrainz_listen_match",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_match_listen_id_key",
+          "def": "CREATE UNIQUE INDEX listenbrainz_listen_match_listen_id_key ON public.listenbrainz_listen_match USING btree (listen_id)",
+          "table": "public.listenbrainz_listen_match",
+          "columns": [
+            "listen_id"
+          ]
+        },
+        {
+          "name": "idx_listenbrainz_listen_match_cache_key",
+          "def": "CREATE INDEX idx_listenbrainz_listen_match_cache_key ON public.listenbrainz_listen_match USING btree (cache_key) WHERE (cache_key IS NOT NULL)",
+          "table": "public.listenbrainz_listen_match",
+          "columns": [
+            "cache_key"
+          ]
+        },
+        {
+          "name": "idx_listenbrainz_listen_match_track",
+          "def": "CREATE INDEX idx_listenbrainz_listen_match_track ON public.listenbrainz_listen_match USING btree (track_id)",
+          "table": "public.listenbrainz_listen_match",
+          "columns": [
+            "track_id"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "listenbrainz_listen_match_id_not_null",
+          "type": "n",
+          "def": "NOT NULL id",
+          "table": "public.listenbrainz_listen_match",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_match_listen_id_not_null",
+          "type": "n",
+          "def": "NOT NULL listen_id",
+          "table": "public.listenbrainz_listen_match",
+          "referenced_table": "",
+          "columns": [
+            "listen_id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_match_match_method_not_null",
+          "type": "n",
+          "def": "NOT NULL match_method",
+          "table": "public.listenbrainz_listen_match",
+          "referenced_table": "",
+          "columns": [
+            "match_method"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_match_match_score_not_null",
+          "type": "n",
+          "def": "NOT NULL match_score",
+          "table": "public.listenbrainz_listen_match",
+          "referenced_table": "",
+          "columns": [
+            "match_score"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_match_track_id_not_null",
+          "type": "n",
+          "def": "NOT NULL track_id",
+          "table": "public.listenbrainz_listen_match",
+          "referenced_table": "",
+          "columns": [
+            "track_id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_match_track_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE",
+          "table": "public.listenbrainz_listen_match",
+          "referenced_table": "public.track",
+          "columns": [
+            "track_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_match_listen_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (listen_id) REFERENCES listenbrainz_listen(id) ON DELETE CASCADE",
+          "table": "public.listenbrainz_listen_match",
+          "referenced_table": "public.listenbrainz_listen",
+          "columns": [
+            "listen_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_match_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (id)",
+          "table": "public.listenbrainz_listen_match",
+          "referenced_table": "",
+          "columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_listen_match_listen_id_key",
+          "type": "UNIQUE",
+          "def": "UNIQUE (listen_id)",
+          "table": "public.listenbrainz_listen_match",
+          "referenced_table": "",
+          "columns": [
+            "listen_id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.listenbrainz_submission",
+      "type": "BASE TABLE",
+      "columns": [
+        {
+          "name": "playback_history_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "user_id",
+          "type": "bigint",
+          "nullable": false
+        },
+        {
+          "name": "status",
+          "type": "text",
+          "nullable": false
+        },
+        {
+          "name": "attempts",
+          "type": "integer",
+          "nullable": false,
+          "default": "0"
+        },
+        {
+          "name": "last_error",
+          "type": "text",
+          "nullable": true
+        },
+        {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "submitted_at",
+          "type": "timestamp with time zone",
+          "nullable": true
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "nullable": true,
+          "default": "now()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "listenbrainz_submission_pkey",
+          "def": "CREATE UNIQUE INDEX listenbrainz_submission_pkey ON public.listenbrainz_submission USING btree (playback_history_id)",
+          "table": "public.listenbrainz_submission",
+          "columns": [
+            "playback_history_id"
+          ]
+        },
+        {
+          "name": "idx_listenbrainz_submission_retry",
+          "def": "CREATE INDEX idx_listenbrainz_submission_retry ON public.listenbrainz_submission USING btree (next_attempt_at) WHERE (status = 'retry'::text)",
+          "table": "public.listenbrainz_submission",
+          "columns": [
+            "next_attempt_at"
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "name": "listenbrainz_submission_attempts_not_null",
+          "type": "n",
+          "def": "NOT NULL attempts",
+          "table": "public.listenbrainz_submission",
+          "referenced_table": "",
+          "columns": [
+            "attempts"
+          ]
+        },
+        {
+          "name": "listenbrainz_submission_playback_history_id_not_null",
+          "type": "n",
+          "def": "NOT NULL playback_history_id",
+          "table": "public.listenbrainz_submission",
+          "referenced_table": "",
+          "columns": [
+            "playback_history_id"
+          ]
+        },
+        {
+          "name": "listenbrainz_submission_status_check",
+          "type": "CHECK",
+          "def": "CHECK ((status = ANY (ARRAY['submitted'::text, 'retry'::text, 'rejected'::text, 'skipped'::text])))",
+          "table": "public.listenbrainz_submission",
+          "referenced_table": "",
+          "columns": [
+            "status"
+          ]
+        },
+        {
+          "name": "listenbrainz_submission_status_not_null",
+          "type": "n",
+          "def": "NOT NULL status",
+          "table": "public.listenbrainz_submission",
+          "referenced_table": "",
+          "columns": [
+            "status"
+          ]
+        },
+        {
+          "name": "listenbrainz_submission_user_id_not_null",
+          "type": "n",
+          "def": "NOT NULL user_id",
+          "table": "public.listenbrainz_submission",
+          "referenced_table": "",
+          "columns": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "listenbrainz_submission_playback_history_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (playback_history_id) REFERENCES playback_history(id) ON DELETE CASCADE",
+          "table": "public.listenbrainz_submission",
+          "referenced_table": "public.playback_history",
+          "columns": [
+            "playback_history_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_submission_user_id_fkey",
+          "type": "FOREIGN KEY",
+          "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE",
+          "table": "public.listenbrainz_submission",
+          "referenced_table": "public.user",
+          "columns": [
+            "user_id"
+          ],
+          "referenced_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "listenbrainz_submission_pkey",
+          "type": "PRIMARY KEY",
+          "def": "PRIMARY KEY (playback_history_id)",
+          "table": "public.listenbrainz_submission",
+          "referenced_table": "",
+          "columns": [
+            "playback_history_id"
+          ]
+        }
+      ]
+    },
+    {
       "name": "public.scheduled_task",
       "type": "BASE TABLE",
       "columns": [
@@ -4332,14 +4923,17 @@
           "nullable": true
         }
       ],
-      "def": "CREATE VIEW combined_playback_history AS (\n WITH lastfm_rows AS (\n         SELECT 'lastfm'::text AS source,\n            lsm.id AS source_id,\n            lsm.track_id,\n            ls.played_at,\n            u.id AS user_id,\n            ls.lastfm_username,\n            NULL::text AS client_id,\n            NULL::text AS hostname,\n            NULL::text AS client_ip,\n            lsm.match_score,\n            lsm.match_method\n           FROM ((lastfm_scrobble_match lsm\n             JOIN lastfm_scrobble ls ON ((ls.id = lsm.scrobble_id)))\n             JOIN \"user\" u ON ((ls.lastfm_username = u.lastfm_username)))\n        ), local_rows AS (\n         SELECT 'local'::text AS source,\n            ph.id AS source_id,\n            ph.track_id,\n            ph.\"timestamp\" AS played_at,\n            ph.user_id,\n            NULL::text AS lastfm_username,\n            ph.client_id,\n            ph.hostname,\n            ph.client_ip,\n            NULL::double precision AS match_score,\n            NULL::text AS match_method\n           FROM playback_history ph\n        ), lastfm_filtered AS (\n         SELECT lf.source,\n            lf.source_id,\n            lf.track_id,\n            lf.played_at,\n            lf.user_id,\n            lf.lastfm_username,\n            lf.client_id,\n            lf.hostname,\n            lf.client_ip,\n            lf.match_score,\n            lf.match_method\n           FROM lastfm_rows lf\n          WHERE (NOT (EXISTS ( SELECT 1\n                   FROM playback_history lo\n                  WHERE ((lo.track_id = lf.track_id) AND ((lo.\"timestamp\" \u003e= (lf.played_at - '00:00:05'::interval)) AND (lo.\"timestamp\" \u003c= (lf.played_at + '00:00:05'::interval)))))))\n        )\n SELECT local_rows.source,\n    local_rows.source_id,\n    local_rows.track_id,\n    local_rows.played_at,\n    local_rows.user_id,\n    local_rows.lastfm_username,\n    local_rows.client_id,\n    local_rows.hostname,\n    local_rows.client_ip,\n    local_rows.match_score,\n    local_rows.match_method\n   FROM local_rows\nUNION ALL\n SELECT lastfm_filtered.source,\n    lastfm_filtered.source_id,\n    lastfm_filtered.track_id,\n    lastfm_filtered.played_at,\n    lastfm_filtered.user_id,\n    lastfm_filtered.lastfm_username,\n    lastfm_filtered.client_id,\n    lastfm_filtered.hostname,\n    lastfm_filtered.client_ip,\n    lastfm_filtered.match_score,\n    lastfm_filtered.match_method\n   FROM lastfm_filtered\n)",
+      "def": "CREATE VIEW combined_playback_history AS (\n WITH lastfm_rows AS (\n         SELECT 'lastfm'::text AS source,\n            lsm.id AS source_id,\n            lsm.track_id,\n            ls.played_at,\n            u.id AS user_id,\n            ls.lastfm_username,\n            NULL::text AS client_id,\n            NULL::text AS hostname,\n            NULL::text AS client_ip,\n            lsm.match_score,\n            lsm.match_method\n           FROM ((lastfm_scrobble_match lsm\n             JOIN lastfm_scrobble ls ON ((ls.id = lsm.scrobble_id)))\n             JOIN \"user\" u ON ((ls.lastfm_username = u.lastfm_username)))\n          WHERE ((u.listenbrainz_cutover IS NULL) OR (ls.played_at \u003c u.listenbrainz_cutover))\n        ), listenbrainz_rows AS (\n         SELECT 'listenbrainz'::text AS source,\n            lbm.id AS source_id,\n            lbm.track_id,\n            l.listened_at AS played_at,\n            l.user_id,\n            NULL::text AS lastfm_username,\n            NULL::text AS client_id,\n            NULL::text AS hostname,\n            NULL::text AS client_ip,\n            lbm.match_score,\n            lbm.match_method\n           FROM ((listenbrainz_listen_match lbm\n             JOIN listenbrainz_listen l ON ((l.id = lbm.listen_id)))\n             JOIN \"user\" u ON ((u.id = l.user_id)))\n          WHERE ((u.listenbrainz_cutover IS NOT NULL) AND (l.listened_at \u003e= u.listenbrainz_cutover))\n        ), local_rows AS (\n         SELECT 'local'::text AS source,\n            ph.id AS source_id,\n            ph.track_id,\n            ph.\"timestamp\" AS played_at,\n            ph.user_id,\n            NULL::text AS lastfm_username,\n            ph.client_id,\n            ph.hostname,\n            ph.client_ip,\n            NULL::double precision AS match_score,\n            NULL::text AS match_method\n           FROM playback_history ph\n        ), external_filtered AS (\n         SELECT ex.source,\n            ex.source_id,\n            ex.track_id,\n            ex.played_at,\n            ex.user_id,\n            ex.lastfm_username,\n            ex.client_id,\n            ex.hostname,\n            ex.client_ip,\n            ex.match_score,\n            ex.match_method\n           FROM ( SELECT lastfm_rows.source,\n                    lastfm_rows.source_id,\n                    lastfm_rows.track_id,\n                    lastfm_rows.played_at,\n                    lastfm_rows.user_id,\n                    lastfm_rows.lastfm_username,\n                    lastfm_rows.client_id,\n                    lastfm_rows.hostname,\n                    lastfm_rows.client_ip,\n                    lastfm_rows.match_score,\n                    lastfm_rows.match_method\n                   FROM lastfm_rows\n                UNION ALL\n                 SELECT listenbrainz_rows.source,\n                    listenbrainz_rows.source_id,\n                    listenbrainz_rows.track_id,\n                    listenbrainz_rows.played_at,\n                    listenbrainz_rows.user_id,\n                    listenbrainz_rows.lastfm_username,\n                    listenbrainz_rows.client_id,\n                    listenbrainz_rows.hostname,\n                    listenbrainz_rows.client_ip,\n                    listenbrainz_rows.match_score,\n                    listenbrainz_rows.match_method\n                   FROM listenbrainz_rows) ex\n          WHERE (NOT (EXISTS ( SELECT 1\n                   FROM playback_history lo\n                  WHERE ((lo.track_id = ex.track_id) AND ((lo.user_id = ex.user_id) OR (lo.user_id IS NULL)) AND ((lo.\"timestamp\" \u003e= (ex.played_at - '00:01:00'::interval)) AND (lo.\"timestamp\" \u003c= (ex.played_at + '00:01:00'::interval)))))))\n        )\n SELECT local_rows.source,\n    local_rows.source_id,\n    local_rows.track_id,\n    local_rows.played_at,\n    local_rows.user_id,\n    local_rows.lastfm_username,\n    local_rows.client_id,\n    local_rows.hostname,\n    local_rows.client_ip,\n    local_rows.match_score,\n    local_rows.match_method\n   FROM local_rows\nUNION ALL\n SELECT external_filtered.source,\n    external_filtered.source_id,\n    external_filtered.track_id,\n    external_filtered.played_at,\n    external_filtered.user_id,\n    external_filtered.lastfm_username,\n    external_filtered.client_id,\n    external_filtered.hostname,\n    external_filtered.client_ip,\n    external_filtered.match_score,\n    external_filtered.match_method\n   FROM external_filtered\n)",
       "referenced_tables": [
         "public.lastfm_scrobble_match",
         "public.lastfm_scrobble",
         "\"user\"",
+        "public.listenbrainz_listen_match",
+        "public.listenbrainz_listen",
         "public.playback_history",
+        "listenbrainz_rows",
         "local_rows",
-        "lastfm_filtered"
+        "external_filtered"
       ]
     },
     {
@@ -4936,6 +5530,71 @@
       ],
       "parent_cardinality": "exactly_one",
       "def": "FOREIGN KEY (scrobble_id) REFERENCES lastfm_scrobble(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.listenbrainz_listen",
+      "columns": [
+        "user_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.user",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.listenbrainz_listen_match",
+      "columns": [
+        "track_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.track",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (track_id) REFERENCES track(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.listenbrainz_listen_match",
+      "columns": [
+        "listen_id"
+      ],
+      "cardinality": "zero_or_one",
+      "parent_table": "public.listenbrainz_listen",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (listen_id) REFERENCES listenbrainz_listen(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.listenbrainz_submission",
+      "columns": [
+        "playback_history_id"
+      ],
+      "cardinality": "zero_or_one",
+      "parent_table": "public.playback_history",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (playback_history_id) REFERENCES playback_history(id) ON DELETE CASCADE"
+    },
+    {
+      "table": "public.listenbrainz_submission",
+      "columns": [
+        "user_id"
+      ],
+      "cardinality": "zero_or_more",
+      "parent_table": "public.user",
+      "parent_columns": [
+        "id"
+      ],
+      "parent_cardinality": "exactly_one",
+      "def": "FOREIGN KEY (user_id) REFERENCES \"user\"(id) ON DELETE CASCADE"
     },
     {
       "table": "public.scheduled_task_run",

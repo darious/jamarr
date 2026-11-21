@@ -1721,14 +1721,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/lastfm/" class="md-nav__link">
+      <a href="../../../guides/listenbrainz/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Last.fm
+    ListenBrainz
   
 
     
@@ -1946,7 +1946,7 @@
 <td>bigint</td>
 <td>nextval('user_id_seq'::regclass)</td>
 <td>false</td>
-<td><a href="../public.favorite_artist/">public.favorite_artist</a> <a href="../public.favorite_release/">public.favorite_release</a> <a href="../public.session/">public.session</a> <a href="../public.playlist/">public.playlist</a> <a href="../public.auth_refresh_session/">public.auth_refresh_session</a></td>
+<td><a href="../public.favorite_artist/">public.favorite_artist</a> <a href="../public.favorite_release/">public.favorite_release</a> <a href="../public.session/">public.session</a> <a href="../public.playlist/">public.playlist</a> <a href="../public.listenbrainz_listen/">public.listenbrainz_listen</a> <a href="../public.listenbrainz_submission/">public.listenbrainz_submission</a> <a href="../public.auth_refresh_session/">public.auth_refresh_session</a></td>
 <td></td>
 <td></td>
 </tr>
@@ -2070,6 +2070,96 @@
 <tr>
 <td>lastfm_connected_at</td>
 <td>timestamp with time zone</td>
+<td></td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_username</td>
+<td>text</td>
+<td></td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_token</td>
+<td>text</td>
+<td></td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_enabled</td>
+<td>boolean</td>
+<td>true</td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_connected_at</td>
+<td>timestamp with time zone</td>
+<td></td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_since</td>
+<td>timestamp with time zone</td>
+<td></td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_paused_at</td>
+<td>timestamp with time zone</td>
+<td></td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_auth_error</td>
+<td>text</td>
+<td></td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_synced_at</td>
+<td>timestamp with time zone</td>
+<td></td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_cutover</td>
+<td>timestamp with time zone</td>
+<td></td>
+<td>true</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>listenbrainz_synced_through</td>
+<td>bigint</td>
 <td></td>
 <td>true</td>
 <td></td>

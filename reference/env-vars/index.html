@@ -1889,14 +1889,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/lastfm/" class="md-nav__link">
+      <a href="../../guides/listenbrainz/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Last.fm
+    ListenBrainz
   
 
     
@@ -2384,10 +2384,6 @@ too — or point readers at <code>.env.example</code> as the source of truth.</p
 <td>Spotify metadata enrichment</td>
 </tr>
 <tr>
-<td><code>LASTFM_API_KEY</code> / <code>LASTFM_SHARED_SECRET</code></td>
-<td>Last.fm scrobble sync</td>
-</tr>
-<tr>
 <td><code>QOBUZ_APP_ID</code> / <code>QOBUZ_SECRET</code> / <code>QOBUZ_EMAIL</code> / <code>QOBUZ_PASSWORD</code></td>
 <td>Qobuz metadata (optional)</td>
 </tr>
@@ -2420,6 +2416,16 @@ too — or point readers at <code>.env.example</code> as the source of truth.</p
 <td><code>MUSICBRAINZ_ROOT_URL</code></td>
 <td><code>https://musicbrainz.org</code></td>
 <td>MusicBrainz API root</td>
+</tr>
+<tr>
+<td><code>LISTENBRAINZ_API_ROOT</code></td>
+<td><code>https://api.listenbrainz.org</code></td>
+<td>ListenBrainz API root (each user connects with their own token in Settings; no app key)</td>
+</tr>
+<tr>
+<td><code>LISTENBRAINZ_TOKEN</code></td>
+<td>—</td>
+<td>Token for top-track and similar-artist lookups (ListenBrainz requires one for top tracks). Optional: without it a connected user's token is used, admins first</td>
 </tr>
 </tbody>
 </table>
