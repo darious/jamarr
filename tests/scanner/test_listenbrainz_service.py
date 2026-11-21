@@ -132,7 +132,7 @@ async def test_lookups_send_the_server_token(use):
 @pytest.mark.asyncio
 async def test_token_falls_back_to_a_connected_admin(db, monkeypatch):
     monkeypatch.delenv("LISTENBRAINZ_TOKEN", raising=False)
-    monkeypatch.setattr(service, "_token_cache", (0.0, None))
+    monkeypatch.setattr(service, "_token_cache", None)
     await db.execute(
         """
         INSERT INTO "user" (username, email, password_hash, is_admin, listenbrainz_token)
@@ -142,4 +142,17 @@ async def test_token_falls_back_to_a_connected_admin(db, monkeypatch):
         """
     )
     await db.execute("""UPDATE "user" SET listenbrainz_auth_error = 'rejected' WHERE username = 'broken'""")
+    assert await service.metadata_token() == "admin-token"
+
+
+@pytest.mark.asyncio
+async def test_empty_cache_is_not_fresh_right_after_boot(db, monkeypatch):
+    """time.monotonic() starts near 0 at boot; an unfilled cache must still look up."""
+    monkeypatch.delenv("LISTENBRAINZ_TOKEN", raising=False)
+    monkeypatch.setattr(service, "_token_cache", None)
+    monkeypatch.setattr(service.time, "monotonic", lambda: 12.0)
+    await db.execute(
+        """INSERT INTO "user" (username, email, password_hash, is_admin, listenbrainz_token)
+           VALUES ('boss', 'b@example.com', 'x', TRUE, 'admin-token')"""
+    )
     assert await service.metadata_token() == "admin-token"

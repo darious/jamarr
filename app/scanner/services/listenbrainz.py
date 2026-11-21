@@ -23,7 +23,10 @@ TOP_TRACKS = 10
 SIMILAR_ARTISTS = 10
 TOKEN_CACHE_SECONDS = 300
 
-_token_cache: tuple[float, Optional[str]] = (0.0, None)
+# (fetched at, token); None until the first lookup. Not a 0.0 timestamp:
+# time.monotonic() counts from boot, so shortly after a reboot 0.0 would
+# look fresh and the token would never be fetched.
+_token_cache: Optional[tuple[float, Optional[str]]] = None
 
 
 async def metadata_token() -> Optional[str]:
@@ -35,9 +38,10 @@ async def metadata_token() -> Optional[str]:
     configured = get_listenbrainz_token()
     if configured:
         return configured
-    fetched_at, token = _token_cache
-    if time.monotonic() - fetched_at < TOKEN_CACHE_SECONDS:
-        return token
+    if _token_cache is not None:
+        fetched_at, token = _token_cache
+        if time.monotonic() - fetched_at < TOKEN_CACHE_SECONDS:
+            return token
     token = None
     try:
         from app.db import db_conn
