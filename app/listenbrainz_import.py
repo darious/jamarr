@@ -286,9 +286,16 @@ async def send(
     while start < total:
         end = min(start + BATCH_SIZE, total)
         # Never split one second across batches, so "--after <last second>"
-        # resumes exactly.
-        while end < total and pending[end]["listened_at"] == pending[end - 1]["listened_at"]:
-            end += 1
+        # resumes exactly. Trim back to the last change of second rather than
+        # growing the batch: BATCH_SIZE is already ListenBrainz's maximum.
+        if end < total:
+            cut = end
+            while cut > start + 1 and pending[cut]["listened_at"] == pending[cut - 1]["listened_at"]:
+                cut -= 1
+            if pending[cut]["listened_at"] != pending[cut - 1]["listened_at"]:
+                end = cut
+            # else: one second fills the whole batch; split it (cannot happen
+            # with real listens, but never loop or exceed the cap).
         batch = pending[start:end]
         try:
             await submit(batch)
@@ -415,4 +422,6 @@ async def _main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    # One "HTTP Request: POST ..." line per batch drowns the progress lines.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     sys.exit(asyncio.run(_main()))
